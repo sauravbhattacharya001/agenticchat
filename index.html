@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Agentic Chat</title>
+<style>
+  body            { font-family: system-ui, sans-serif; background:#111; color:#eee; margin:0; }
+  h2              { text-align:center; padding:1rem 0; }
+  .toolbar        { max-width:700px; margin:0 auto 1rem; display:flex; gap:.5rem; }
+  #api-key        { flex:1; padding:.5rem; border-radius:5px; border:1px solid #444; }
+  #chat-input     { flex:1; padding:.5rem; border-radius:5px; border:1px solid #444; }
+  button          { padding:.5rem 1rem; border:none; border-radius:5px; background:#38bdf8; color:#000; cursor:pointer; }
+  button:hover    { background:#0ea5e9; }
+  /* --- black‑box --- */
+  #blackbox       { max-width:700px; margin:0 auto 2rem; background:#0d0d0d; border:2px solid #333; border-radius:8px;
+                    padding:1rem; box-shadow:0 0 10px #000; }
+  #chat-output    { margin-bottom:1rem; white-space:pre-wrap; }
+  #console-output { background:#222; padding:.75rem; border-radius:6px; font-family:monospace; min-height:2.5rem; }
+  pre             { background:#1a1a1a; padding:.75rem; border-radius:6px; overflow:auto; }
+  /* modal */
+  #apikey-modal   { position:fixed; inset:0; background:#0008; display:none; align-items:center; justify-content:center; }
+  #apikey-modal-content { background:#fff; color:#000; padding:2rem; border-radius:8px; width:90%; max-width:400px; text-align:center; }
+  #user-api-key   { width:100%; padding:.5rem; margin-top:.5rem; }
+</style>
+</head>
+<body>
+<h2>Agentic Chat</h2>
+
+<div class="toolbar">
+  <input id="api-key" type="password" placeholder="OpenAI API Key">
+</div>
+
+<div class="toolbar">
+  <input id="chat-input" placeholder="Ask anything…">
+  <button onclick="sendChat()">Send</button>
+</div>
+
+<div id="blackbox">
+  <div id="chat-output"></div>
+  <div id="console-output">(results appear here)</div>
+</div>
+
+<!-- API‑key prompt for third‑party services -->
+<div id="apikey-modal">
+  <div id="apikey-modal-content">
+    <p>API key needed for<br><strong id="api-service-name"></strong></p>
+    <input id="user-api-key" type="password" placeholder="Paste key">
+    <br><br><button onclick="submitUserApiKey()">OK</button>
+  </div>
+</div>
+
+<script>
+/* ---------- in‑memory cache ---------- */
+const serviceKeys = {};  // { domain: key }
+let pendingCode=null, pendingDomain=null;
+
+/* ---------- system prompt ---------- */
+const systemPrompt = `
+You are an autonomous agent in a browser.  Only reply with JavaScript in a single code block.
+If an external service needs a key use the placeholder "YOUR_API_KEY".
+Always \`return\` the final value.
+`;
+
+/* ---------- helpers ---------- */
+function extractDomain(code){
+  const m=code.match(/https?:\/\/([^/'"]+)/); return m?m[1]:"Unknown Service";
+}
+function runCode(code){
+  const out=document.getElementById('console-output');
+  (async()=>{
+    try{ const res=await eval('(async()=>{'+code+'})()'); out.textContent=String(res); }
+    catch(e){ out.textContent='Error: '+e; }
+  })();
+}
+
+/* ---------- modal ---------- */
+function askKey(domain,code){
+  pendingCode=code; pendingDomain=domain;
+  document.getElementById('api-service-name').textContent=domain;
+  document.getElementById('apikey-modal').style.display='flex';
+  document.getElementById('user-api-key').focus();
+}
+function submitUserApiKey(){
+  const k=document.getElementById('user-api-key').value.trim();
+  if(!k) return;
+  serviceKeys[pendingDomain]=k;
+  document.getElementById('apikey-modal').style.display='none';
+  runCode(pendingCode.replace(/YOUR_API_KEY/g,k));
+  pendingCode=pendingDomain=null;
+  document.getElementById('user-api-key').value='';
+}
+
+/* ---------- core ---------- */
+async function sendChat(){
+  const openai=document.getElementById('api-key');
+  const key=openai.value.trim();
+  const prompt=document.getElementById('chat-input').value.trim();
+  if(!key||!prompt){ alert('Enter both your OpenAI key and a question.'); return; }
+
+  // hide OpenAI key field after first valid submission
+  if(!openai.dataset.hidden){ openai.style.display='none'; openai.dataset.hidden='1'; }
+
+  const chatOut=document.getElementById('chat-output');
+  chatOut.textContent='Thinking…'; document.getElementById('console-output').textContent='(processing)';
+
+  const rsp=await fetch('https://api.openai.com/v1/chat/completions',{
+    method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${key}`},
+    body:JSON.stringify({model:'gpt-3.5-turbo',messages:[
+      {role:'system',content:systemPrompt},{role:'user',content:prompt}
+    ]})
+  });
+  if(!rsp.ok){ chatOut.textContent='OpenAI error '+rsp.status; return; }
+  const data=await rsp.json();
+  const reply=data.choices?.[0]?.message?.content||'No response';
+
+  const codeMatch=reply.match(/```(?:js|javascript)?\n([\s\S]*?)```/i);
+  if(codeMatch){
+    const code=codeMatch[1]; chatOut.innerHTML='<pre>'+code+'</pre>';
+    if(/YOUR_API_KEY/.test(code)){
+      const domain=extractDomain(code);
+      if(serviceKeys[domain])      runCode(code.replace(/YOUR_API_KEY/g,serviceKeys[domain]));
+      else                         askKey(domain,code);
+    }else runCode(code);
+  }else{
+    chatOut.textContent=reply;
+    document.getElementById('console-output').textContent='(no code to run)';
+  }
+
+  document.getElementById('chat-input').value='';
+}
+</script>
+</body>
+</html>
