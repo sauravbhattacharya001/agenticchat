@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="A lightweight browser-based chat interface that turns natural language prompts into executable JavaScript, powered by OpenAI GPT-4o.">
   <title>Agentic Chat</title>
   <style>
     body { font-family: system-ui, sans-serif; background:#111; color:#eee; margin:0; }
@@ -45,17 +46,23 @@
       max-width:700px; margin:0 auto 1rem; padding:.5rem;
       color:#aaa; font-style:italic; text-align:center;
     }
+    .sr-only {
+      position:absolute; width:1px; height:1px; padding:0; margin:-1px;
+      overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0;
+    }
   </style>
 </head>
 <body>
   <h2>Agentic Chat</h2>
 
-  <div class="toolbar">
-    <input id="api-key" type="password" placeholder="OpenAI API Key">
+  <div class="toolbar" role="form" aria-label="API key entry">
+    <label for="api-key" class="sr-only">OpenAI API Key</label>
+    <input id="api-key" type="password" placeholder="OpenAI API Key" autocomplete="off">
   </div>
 
-  <div class="toolbar">
-    <input id="chat-input" placeholder="Ask anything…">
+  <div class="toolbar" role="form" aria-label="Chat input">
+    <label for="chat-input" class="sr-only">Your message</label>
+    <input id="chat-input" placeholder="Ask anything…" autocomplete="off">
     <button onclick="sendChat()">Send</button>
     <button onclick="clearHistory()" style="background:#555;color:#eee;" title="Clear conversation history">Clear</button>
   </div>
@@ -68,10 +75,11 @@
   </div>
 
   <!-- API Key Modal -->
-  <div id="apikey-modal">
+  <div id="apikey-modal" role="dialog" aria-modal="true" aria-labelledby="api-modal-title">
     <div id="apikey-modal-content">
-      <p>API key needed for<br><strong id="api-service-name"></strong></p>
-      <input id="user-api-key" type="password" placeholder="Paste key">
+      <p id="api-modal-title">API key needed for<br><strong id="api-service-name"></strong></p>
+      <label for="user-api-key" class="sr-only">Service API key</label>
+      <input id="user-api-key" type="password" placeholder="Paste key" autocomplete="off">
       <br><br><button onclick="submitUserApiKey()">OK</button>
     </div>
   </div>
