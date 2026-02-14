@@ -22,6 +22,7 @@
     <button id="send-btn">Send</button>
     <button id="cancel-btn" class="btn-danger" style="display:none;" title="Cancel running sandbox execution">Cancel</button>
     <button id="clear-btn" class="btn-secondary" title="Clear conversation history">Clear</button>
+    <button id="templates-btn" class="btn-secondary" title="Browse prompt templates">Templates</button>
     <button id="history-btn" class="btn-secondary" title="Toggle conversation history panel">History</button>
   </div>
 
@@ -36,6 +37,21 @@
 
   <!-- Conversation History Overlay -->
   <div id="history-overlay"></div>
+
+  <!-- Templates Panel -->
+  <div id="templates-overlay"></div>
+  <div id="templates-panel" aria-label="Prompt templates">
+    <div id="templates-header">
+      <span>Prompt Templates</span>
+      <div id="templates-actions">
+        <button id="templates-close-btn" class="btn-sm" title="Close panel">✕</button>
+      </div>
+    </div>
+    <div id="templates-search-wrap">
+      <input id="templates-search" type="text" placeholder="Search templates…" autocomplete="off">
+    </div>
+    <div id="templates-list"></div>
+  </div>
 
   <!-- Conversation History Panel -->
   <div id="history-panel" aria-label="Conversation history">

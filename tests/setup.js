@@ -17,6 +17,7 @@ function setupDOM() {
       <button id="send-btn">Send</button>
       <button id="cancel-btn" class="btn-danger" style="display:none;">Cancel</button>
       <button id="clear-btn" class="btn-secondary">Clear</button>
+      <button id="templates-btn" class="btn-secondary">Templates</button>
       <button id="history-btn" class="btn-secondary">History</button>
     </div>
     <div id="char-count"></div>
@@ -27,6 +28,19 @@ function setupDOM() {
       <div id="token-usage"></div>
     </div>
     <div id="history-overlay"></div>
+    <div id="templates-overlay"></div>
+    <div id="templates-panel" aria-label="Prompt templates">
+      <div id="templates-header">
+        <span>Prompt Templates</span>
+        <div id="templates-actions">
+          <button id="templates-close-btn" class="btn-sm">✕</button>
+        </div>
+      </div>
+      <div id="templates-search-wrap">
+        <input id="templates-search" type="text" placeholder="Search templates…" autocomplete="off">
+      </div>
+      <div id="templates-list"></div>
+    </div>
     <div id="history-panel" aria-label="Conversation history">
       <div id="history-header">
         <span>Conversation History</span>
@@ -72,6 +86,7 @@ function loadApp() {
     'SandboxRunner',
     'ApiKeyManager',
     'UIController',
+    'PromptTemplates',
     'ChatController',
     'HistoryPanel'
   ];

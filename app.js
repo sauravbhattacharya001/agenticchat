@@ -527,6 +527,230 @@ const ChatController = (() => {
   return { send, clearHistory, submitServiceKey };
 })();
 
+/* ---------- Prompt Templates ---------- */
+const PromptTemplates = (() => {
+  let isOpen = false;
+
+  const templates = [
+    {
+      category: '📊 Data & Charts',
+      items: [
+        {
+          name: 'Bar Chart',
+          description: 'Generate a bar chart from sample data',
+          prompt: 'Create a bar chart using a canvas element showing monthly sales data for 6 months. Use random realistic values between 10k-50k. Add axis labels, a title, and use a pleasant color palette.'
+        },
+        {
+          name: 'Pie Chart',
+          description: 'Create an interactive pie chart',
+          prompt: 'Create a pie chart on a canvas showing market share of 5 tech companies. Add labels with percentages, a legend, and hover tooltips that show the exact value.'
+        },
+        {
+          name: 'Data Table',
+          description: 'Generate a sortable HTML table',
+          prompt: 'Create a styled HTML table with 10 rows of sample employee data (name, department, salary, start date). Make columns sortable by clicking headers. Add zebra striping and hover effects.'
+        },
+        {
+          name: 'Line Graph',
+          description: 'Plot a time-series line graph',
+          prompt: 'Draw a line graph on a canvas showing temperature data over 24 hours. Use smooth curves, grid lines, axis labels with hours, and mark the min/max points with dots.'
+        }
+      ]
+    },
+    {
+      category: '🌐 Web & APIs',
+      items: [
+        {
+          name: 'Fetch JSON',
+          description: 'Fetch and display JSON from an API',
+          prompt: 'Fetch data from https://jsonplaceholder.typicode.com/posts?_limit=5 and display it as styled cards with title, body preview, and post ID. Add a loading spinner while fetching.'
+        },
+        {
+          name: 'Weather Widget',
+          description: 'Build a weather display widget',
+          prompt: 'Create a weather widget that fetches current weather from https://wttr.in/?format=j1 and displays temperature, condition, humidity, and wind speed with appropriate weather emoji and clean styling.'
+        },
+        {
+          name: 'REST Client',
+          description: 'Mini REST API testing tool',
+          prompt: 'Build a mini REST client UI with method selector (GET/POST/PUT/DELETE), URL input, request body textarea, and a Send button. Display the response status, headers, and formatted JSON body.'
+        }
+      ]
+    },
+    {
+      category: '🔧 Utilities',
+      items: [
+        {
+          name: 'Color Palette',
+          description: 'Generate and display a color palette',
+          prompt: 'Generate a random harmonious color palette of 8 colors. Show each color as a large swatch with its HEX, RGB, and HSL values. Add a click-to-copy feature for the HEX code.'
+        },
+        {
+          name: 'Password Generator',
+          description: 'Secure password generator with options',
+          prompt: 'Create a password generator with options for length (8-64), uppercase, lowercase, numbers, and symbols. Show the generated password with a strength meter (weak/medium/strong/very strong) and a copy button.'
+        },
+        {
+          name: 'Markdown Preview',
+          description: 'Live markdown to HTML converter',
+          prompt: 'Build a split-pane markdown editor: textarea on the left, live HTML preview on the right. Support headers, bold, italic, links, code blocks, and lists. Pre-fill with sample markdown content.'
+        },
+        {
+          name: 'Unit Converter',
+          description: 'Multi-unit conversion tool',
+          prompt: 'Create a unit converter supporting length (m/ft/in/cm), weight (kg/lb/oz), and temperature (°C/°F/K). Auto-convert as the user types. Clean UI with category tabs.'
+        }
+      ]
+    },
+    {
+      category: '🎨 Fun & Creative',
+      items: [
+        {
+          name: 'Digital Clock',
+          description: 'Animated digital clock with themes',
+          prompt: 'Create a large digital clock display that updates every second. Show hours, minutes, seconds, and date. Add a dark/light theme toggle. Use a monospace font and smooth transitions.'
+        },
+        {
+          name: 'Drawing Canvas',
+          description: 'Simple drawing/sketch pad',
+          prompt: 'Build a simple drawing pad with a canvas element. Support mouse drawing, color picker, brush size slider (1-20px), eraser mode, and a clear button. Add an undo feature that remembers the last 10 strokes.'
+        },
+        {
+          name: 'Typing Speed Test',
+          description: 'Test your typing speed',
+          prompt: 'Create a typing speed test. Show a paragraph of text the user must type. Track WPM, accuracy, and time. Highlight correct characters in green and errors in red. Show results when done.'
+        },
+        {
+          name: 'Particle Effect',
+          description: 'Animated particle system',
+          prompt: 'Create a canvas-based particle system with 200 colorful particles that follow the mouse cursor. Particles should have gravity, fade out over time, and trail behind the cursor movement.'
+        }
+      ]
+    }
+  ];
+
+  function getTemplates() {
+    return templates;
+  }
+
+  function search(query) {
+    if (!query) return templates;
+    const q = query.toLowerCase();
+    const results = [];
+    for (const cat of templates) {
+      const matched = cat.items.filter(
+        t => t.name.toLowerCase().includes(q) ||
+             t.description.toLowerCase().includes(q) ||
+             t.prompt.toLowerCase().includes(q)
+      );
+      if (matched.length > 0) {
+        results.push({ category: cat.category, items: matched });
+      }
+    }
+    return results;
+  }
+
+  function toggle() {
+    isOpen = !isOpen;
+    const panel = document.getElementById('templates-panel');
+    const overlay = document.getElementById('templates-overlay');
+    if (isOpen) {
+      panel.classList.add('open');
+      overlay.classList.add('visible');
+      render(templates);
+      const searchInput = document.getElementById('templates-search');
+      if (searchInput) {
+        searchInput.value = '';
+        searchInput.focus();
+      }
+    } else {
+      panel.classList.remove('open');
+      overlay.classList.remove('visible');
+    }
+  }
+
+  function close() {
+    isOpen = false;
+    const panel = document.getElementById('templates-panel');
+    const overlay = document.getElementById('templates-overlay');
+    if (panel) panel.classList.remove('open');
+    if (overlay) overlay.classList.remove('visible');
+  }
+
+  function render(data) {
+    const container = document.getElementById('templates-list');
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (data.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'templates-empty';
+      empty.textContent = 'No templates match your search.';
+      container.appendChild(empty);
+      return;
+    }
+
+    data.forEach(cat => {
+      const catEl = document.createElement('div');
+      catEl.className = 'template-category';
+
+      const catTitle = document.createElement('div');
+      catTitle.className = 'template-category-title';
+      catTitle.textContent = cat.category;
+      catEl.appendChild(catTitle);
+
+      cat.items.forEach(item => {
+        const card = document.createElement('div');
+        card.className = 'template-card';
+        card.setAttribute('role', 'button');
+        card.setAttribute('tabindex', '0');
+
+        const name = document.createElement('div');
+        name.className = 'template-name';
+        name.textContent = item.name;
+        card.appendChild(name);
+
+        const desc = document.createElement('div');
+        desc.className = 'template-desc';
+        desc.textContent = item.description;
+        card.appendChild(desc);
+
+        card.addEventListener('click', () => selectTemplate(item));
+        card.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            selectTemplate(item);
+          }
+        });
+
+        catEl.appendChild(card);
+      });
+
+      container.appendChild(catEl);
+    });
+  }
+
+  function selectTemplate(item) {
+    const input = document.getElementById('chat-input');
+    if (input) {
+      input.value = item.prompt;
+      input.focus();
+      UIController.updateCharCount(item.prompt.length);
+    }
+    close();
+  }
+
+  function handleSearch() {
+    const searchInput = document.getElementById('templates-search');
+    if (!searchInput) return;
+    const query = searchInput.value.trim();
+    const results = search(query);
+    render(results);
+  }
+
+  return { getTemplates, search, toggle, close, render, handleSearch, selectTemplate };
+})();
+
 /* ---------- History Panel ---------- */
 const HistoryPanel = (() => {
   let isOpen = false;
@@ -693,8 +917,17 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('export-md-btn').addEventListener('click', HistoryPanel.exportAsMarkdown);
   document.getElementById('export-json-btn').addEventListener('click', HistoryPanel.exportAsJSON);
 
+  // Templates panel
+  document.getElementById('templates-btn').addEventListener('click', PromptTemplates.toggle);
+  document.getElementById('templates-close-btn').addEventListener('click', PromptTemplates.close);
+  document.getElementById('templates-overlay').addEventListener('click', PromptTemplates.close);
+  document.getElementById('templates-search').addEventListener('input', PromptTemplates.handleSearch);
+
   // Keyboard shortcut: Escape closes history panel
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') HistoryPanel.close();
+    if (e.key === 'Escape') {
+      HistoryPanel.close();
+      PromptTemplates.close();
+    }
   });
 });

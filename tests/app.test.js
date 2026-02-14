@@ -399,6 +399,136 @@ describe('Token cost calculation', () => {
 });
 
 /* ================================================================
+ * PromptTemplates
+ * ================================================================ */
+describe('PromptTemplates', () => {
+  test('getTemplates returns all categories', () => {
+    const templates = PromptTemplates.getTemplates();
+    expect(templates.length).toBe(4);
+    expect(templates[0].category).toContain('Data');
+    expect(templates[1].category).toContain('Web');
+    expect(templates[2].category).toContain('Utilities');
+    expect(templates[3].category).toContain('Fun');
+  });
+
+  test('each template has name, description, and prompt', () => {
+    const templates = PromptTemplates.getTemplates();
+    templates.forEach(cat => {
+      expect(cat.items.length).toBeGreaterThan(0);
+      cat.items.forEach(item => {
+        expect(typeof item.name).toBe('string');
+        expect(item.name.length).toBeGreaterThan(0);
+        expect(typeof item.description).toBe('string');
+        expect(item.description.length).toBeGreaterThan(0);
+        expect(typeof item.prompt).toBe('string');
+        expect(item.prompt.length).toBeGreaterThan(10);
+      });
+    });
+  });
+
+  test('search filters templates by name', () => {
+    const results = PromptTemplates.search('bar chart');
+    expect(results.length).toBeGreaterThan(0);
+    const items = results.flatMap(c => c.items);
+    expect(items.some(i => i.name === 'Bar Chart')).toBe(true);
+  });
+
+  test('search filters templates by description', () => {
+    const results = PromptTemplates.search('password');
+    const items = results.flatMap(c => c.items);
+    expect(items.some(i => i.name === 'Password Generator')).toBe(true);
+  });
+
+  test('search returns empty array for no matches', () => {
+    const results = PromptTemplates.search('xyznonexistent123');
+    expect(results).toHaveLength(0);
+  });
+
+  test('search with empty string returns all templates', () => {
+    const results = PromptTemplates.search('');
+    expect(results.length).toBe(4);
+  });
+
+  test('toggle opens and closes the panel', () => {
+    const panel = document.getElementById('templates-panel');
+    const overlay = document.getElementById('templates-overlay');
+
+    expect(panel.classList.contains('open')).toBe(false);
+
+    PromptTemplates.toggle();
+    expect(panel.classList.contains('open')).toBe(true);
+    expect(overlay.classList.contains('visible')).toBe(true);
+
+    PromptTemplates.toggle();
+    expect(panel.classList.contains('open')).toBe(false);
+    expect(overlay.classList.contains('visible')).toBe(false);
+  });
+
+  test('close always closes the panel', () => {
+    PromptTemplates.toggle(); // open
+    PromptTemplates.close();
+
+    const panel = document.getElementById('templates-panel');
+    expect(panel.classList.contains('open')).toBe(false);
+  });
+
+  test('render populates the templates list', () => {
+    const data = PromptTemplates.getTemplates();
+    PromptTemplates.render(data);
+
+    const container = document.getElementById('templates-list');
+    const categories = container.querySelectorAll('.template-category');
+    expect(categories.length).toBe(4);
+
+    const cards = container.querySelectorAll('.template-card');
+    const totalItems = data.reduce((sum, c) => sum + c.items.length, 0);
+    expect(cards.length).toBe(totalItems);
+  });
+
+  test('render shows empty state for no results', () => {
+    PromptTemplates.render([]);
+    const container = document.getElementById('templates-list');
+    expect(container.querySelector('.templates-empty')).not.toBeNull();
+    expect(container.textContent).toContain('No templates match');
+  });
+
+  test('selectTemplate inserts prompt into chat input and closes panel', () => {
+    PromptTemplates.toggle(); // open
+
+    const item = { name: 'Test', description: 'desc', prompt: 'Hello from template' };
+    PromptTemplates.selectTemplate(item);
+
+    const input = document.getElementById('chat-input');
+    expect(input.value).toBe('Hello from template');
+
+    const panel = document.getElementById('templates-panel');
+    expect(panel.classList.contains('open')).toBe(false);
+  });
+
+  test('handleSearch filters rendered templates', () => {
+    PromptTemplates.toggle(); // open and render
+
+    const searchInput = document.getElementById('templates-search');
+    searchInput.value = 'clock';
+    PromptTemplates.handleSearch();
+
+    const container = document.getElementById('templates-list');
+    const cards = container.querySelectorAll('.template-card');
+    expect(cards.length).toBe(1);
+    expect(cards[0].querySelector('.template-name').textContent).toBe('Digital Clock');
+  });
+
+  test('template cards have correct accessibility attributes', () => {
+    PromptTemplates.render(PromptTemplates.getTemplates());
+    const cards = document.querySelectorAll('.template-card');
+    cards.forEach(card => {
+      expect(card.getAttribute('role')).toBe('button');
+      expect(card.getAttribute('tabindex')).toBe('0');
+    });
+  });
+});
+
+/* ================================================================
  * HistoryPanel
  * ================================================================ */
 describe('HistoryPanel', () => {
