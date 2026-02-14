@@ -26,12 +26,22 @@ No build tools, no dependencies — just a single HTML file.
 
 - **System prompt** instructs GPT-4o to respond only with JavaScript in a code block
 - **Code extraction** uses regex to pull JS from the markdown response
-- **Sandboxed execution** runs the code via `eval()` inside an async wrapper
-- **API key management** detects `YOUR_API_KEY` placeholders and prompts for credentials per domain
+- **Sandboxed execution** runs code in a disposable `<iframe sandbox="allow-scripts">` — the sandbox has no access to the parent page's DOM, cookies, localStorage, or JS variables
+- **Content Security Policy** — the sandbox iframe includes a strict CSP (`default-src 'none'`) that blocks all network requests (fetch, XHR, WebSocket), preventing data exfiltration
+- **Nonce validation** — each execution gets a `crypto.randomUUID()` nonce to tie results to the correct invocation, preventing stale or replayed postMessage events
+- **Conversation history** — maintains a sliding window of up to 20 message pairs with automatic trimming and token-count warnings
+- **API key management** detects `YOUR_API_KEY` placeholders and prompts for credentials per domain; the OpenAI key is stored only in a JS variable and the input element is removed from the DOM after first use
 
-## Security Note
+## Security
 
-⚠️ This app executes AI-generated code directly in your browser using `eval()`. Use it in a trusted environment and be cautious with the prompts you send — the generated code has full access to browser APIs.
+The app executes AI-generated code in a **sandboxed iframe** that is isolated from the parent page:
+
+- ✅ No access to parent DOM, cookies, or localStorage
+- ✅ Network requests blocked by CSP
+- ✅ Origin-checked postMessage communication
+- ✅ API keys never exposed to generated code (replaced inline only within the sandbox)
+
+As with any tool that runs AI-generated code, exercise caution with the prompts you send.
 
 ## License
 
