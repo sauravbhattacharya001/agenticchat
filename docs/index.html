@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Documentation for Agentic Chat — a lightweight browser-based chat interface that turns natural language into executable JavaScript.">
+  <title>Agentic Chat — Documentation</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --bg-card: #161b22;
+      --bg-code: #1c2128;
+      --text: #e6edf3;
+      --text-muted: #8b949e;
+      --accent: #58a6ff;
+      --accent-hover: #79c0ff;
+      --border: #30363d;
+      --success: #3fb950;
+      --warning: #d29922;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { color: var(--accent-hover); text-decoration: underline; }
+
+    /* Layout */
+    .container { max-width: 960px; margin: 0 auto; padding: 2rem 1.5rem; }
+    nav {
+      position: sticky; top: 0; z-index: 10;
+      background: var(--bg-card);
+      border-bottom: 1px solid var(--border);
+      padding: 0.75rem 1.5rem;
+      display: flex; align-items: center; gap: 2rem;
+    }
+    nav .logo { font-weight: 700; font-size: 1.1rem; color: var(--accent); }
+    nav .links { display: flex; gap: 1.5rem; }
+    nav .links a { color: var(--text-muted); font-size: 0.9rem; }
+    nav .links a:hover { color: var(--text); text-decoration: none; }
+
+    /* Hero */
+    .hero { text-align: center; padding: 4rem 0 3rem; }
+    .hero h1 { font-size: 2.5rem; margin-bottom: 0.75rem; }
+    .hero p { color: var(--text-muted); font-size: 1.15rem; max-width: 600px; margin: 0 auto; }
+    .hero .badges { margin-top: 1.5rem; display: flex; justify-content: center; gap: 0.5rem; flex-wrap: wrap; }
+    .hero .badges img { height: 20px; }
+
+    /* Sections */
+    section { margin-bottom: 3rem; }
+    h2 { font-size: 1.5rem; margin-bottom: 1rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border); }
+    h3 { font-size: 1.15rem; margin: 1.5rem 0 0.75rem; color: var(--accent); }
+    p, ul, ol { margin-bottom: 1rem; }
+    ul, ol { padding-left: 1.5rem; }
+    li { margin-bottom: 0.35rem; }
+
+    /* Code */
+    code {
+      background: var(--bg-code);
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      font-size: 0.9em;
+      font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    }
+    pre {
+      background: var(--bg-code);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      overflow-x: auto;
+      margin-bottom: 1.5rem;
+    }
+    pre code { background: none; padding: 0; }
+
+    /* Cards */
+    .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; }
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1.25rem;
+    }
+    .card h3 { margin-top: 0; color: var(--text); font-size: 1.05rem; }
+    .card p { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 0; }
+
+    /* Table */
+    table { width: 100%; border-collapse: collapse; margin-bottom: 1.5rem; }
+    th, td { text-align: left; padding: 0.65rem 1rem; border-bottom: 1px solid var(--border); }
+    th { color: var(--text-muted); font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; }
+    td code { font-size: 0.85em; }
+
+    /* Footer */
+    footer { text-align: center; padding: 2rem 0; color: var(--text-muted); font-size: 0.85rem; border-top: 1px solid var(--border); }
+
+    /* TOC sidebar for wider screens */
+    @media (min-width: 1200px) {
+      .toc {
+        position: fixed; right: 2rem; top: 5rem;
+        width: 200px; font-size: 0.85rem;
+      }
+      .toc a { display: block; color: var(--text-muted); padding: 0.25rem 0; }
+      .toc a:hover { color: var(--accent); }
+    }
+    @media (max-width: 1199px) {
+      .toc { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <nav>
+    <span class="logo">🤖 Agentic Chat</span>
+    <div class="links">
+      <a href="#overview">Overview</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#api">API Reference</a>
+      <a href="#security">Security</a>
+      <a href="https://github.com/sauravbhattacharya001/agenticchat">GitHub</a>
+    </div>
+  </nav>
+
+  <div class="toc">
+    <strong>On this page</strong>
+    <a href="#overview">Overview</a>
+    <a href="#quickstart">Quick Start</a>
+    <a href="#architecture">Architecture</a>
+    <a href="#api">API Reference</a>
+    <a href="#configuration">Configuration</a>
+    <a href="#security">Security Model</a>
+    <a href="#testing">Testing</a>
+    <a href="#contributing">Contributing</a>
+  </div>
+
+  <div class="container">
+    <div class="hero">
+      <h1>Agentic Chat</h1>
+      <p>A lightweight, zero-dependency browser chat interface that converts natural language prompts into executable JavaScript via OpenAI GPT-4o.</p>
+      <div class="badges">
+        <img src="https://img.shields.io/github/license/sauravbhattacharya001/agenticchat?style=flat-square" alt="License">
+        <img src="https://img.shields.io/github/actions/workflow/status/sauravbhattacharya001/agenticchat/ci.yml?style=flat-square&label=CI" alt="CI">
+        <img src="https://img.shields.io/badge/model-GPT--4o-green?style=flat-square" alt="Model">
+        <img src="https://img.shields.io/badge/dependencies-0-blue?style=flat-square" alt="Zero dependencies">
+      </div>
+    </div>
+
+    <!-- Overview -->
+    <section id="overview">
+      <h2>Overview</h2>
+      <p>Agentic Chat is a <strong>single-page application</strong> that runs entirely in the browser. You describe what you want in plain English, and the AI agent writes and executes JavaScript code to accomplish it — all within a secure sandboxed iframe.</p>
+
+      <div class="card-grid">
+        <div class="card">
+          <h3>🧠 AI-Powered Code Generation</h3>
+          <p>Uses OpenAI GPT-4o to translate natural language into working JavaScript code, then runs it automatically.</p>
+        </div>
+        <div class="card">
+          <h3>🔒 Sandboxed Execution</h3>
+          <p>All generated code runs in an isolated iframe with strict CSP. Your page and data remain safe.</p>
+        </div>
+        <div class="card">
+          <h3>🔑 Per-Service API Keys</h3>
+          <p>When generated code needs external API keys, the app prompts you and caches keys per domain.</p>
+        </div>
+        <div class="card">
+          <h3>📊 Token Tracking</h3>
+          <p>Real-time token usage and cost estimation displayed after every interaction.</p>
+        </div>
+        <div class="card">
+          <h3>📦 Zero Dependencies</h3>
+          <p>Pure HTML, CSS, and vanilla JavaScript. No build step, no bundler, no framework.</p>
+        </div>
+        <div class="card">
+          <h3>⚡ Conversation Memory</h3>
+          <p>Maintains conversation context with automatic trimming to stay within token limits.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Quick Start -->
+    <section id="quickstart">
+      <h2>Quick Start</h2>
+      <p>No installation needed. Just open the HTML file or visit the deployed GitHub Pages site.</p>
+
+      <h3>Option 1: GitHub Pages</h3>
+      <p>Visit <a href="https://sauravbhattacharya001.github.io/agenticchat/">sauravbhattacharya001.github.io/agenticchat</a></p>
+
+      <h3>Option 2: Local</h3>
+<pre><code>git clone https://github.com/sauravbhattacharya001/agenticchat.git
+cd agenticchat
+# Open index.html in your browser — that's it!
+open index.html</code></pre>
+
+      <h3>Usage</h3>
+      <ol>
+        <li>Enter your <strong>OpenAI API key</strong> in the key field</li>
+        <li>Type a natural language prompt (e.g., <code>fetch the current Bitcoin price</code>)</li>
+        <li>The agent generates JavaScript, which runs in a sandbox</li>
+        <li>Results appear in the console output area</li>
+      </ol>
+    </section>
+
+    <!-- Architecture -->
+    <section id="architecture">
+      <h2>Architecture</h2>
+      <p>The application is organized into six clearly separated modules, each implemented as an IIFE (Immediately Invoked Function Expression) exposing a clean public API:</p>
+
+      <table>
+        <thead>
+          <tr><th>Module</th><th>Responsibility</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>ChatConfig</code></td>
+            <td>Frozen configuration constants (model, limits, timeouts, system prompt)</td>
+          </tr>
+          <tr>
+            <td><code>ConversationManager</code></td>
+            <td>Conversation history management — add, trim, clear, token estimation</td>
+          </tr>
+          <tr>
+            <td><code>SandboxRunner</code></td>
+            <td>Iframe sandbox creation, code execution, timeout handling, cancellation</td>
+          </tr>
+          <tr>
+            <td><code>ApiKeyManager</code></td>
+            <td>OpenAI key storage, per-service key prompting and caching</td>
+          </tr>
+          <tr>
+            <td><code>UIController</code></td>
+            <td>All DOM manipulation — button states, output display, modal management</td>
+          </tr>
+          <tr>
+            <td><code>ChatController</code></td>
+            <td>Orchestration — sends messages, processes responses, coordinates other modules</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Data Flow</h3>
+<pre><code>User Input → ChatController.send()
+  → ConversationManager.addMessage('user', prompt)
+  → ChatController.callOpenAI(key, messages)
+  → Parse response for code blocks
+  → ApiKeyManager.substituteServiceKey(code)
+  → SandboxRunner.run(code)
+  → UIController.setConsoleOutput(result)</code></pre>
+    </section>
+
+    <!-- API Reference -->
+    <section id="api">
+      <h2>API Reference</h2>
+
+      <h3>ChatConfig</h3>
+      <p>Immutable configuration object (<code>Object.freeze</code>).</p>
+      <table>
+        <thead><tr><th>Property</th><th>Type</th><th>Value</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>MODEL</code></td><td>string</td><td><code>"gpt-4o"</code></td><td>OpenAI model identifier</td></tr>
+          <tr><td><code>MAX_TOKENS_RESPONSE</code></td><td>number</td><td><code>4096</code></td><td>Max completion tokens</td></tr>
+          <tr><td><code>MAX_HISTORY_PAIRS</code></td><td>number</td><td><code>20</code></td><td>Max user+assistant pairs kept</td></tr>
+          <tr><td><code>MAX_INPUT_CHARS</code></td><td>number</td><td><code>50000</code></td><td>Input character limit</td></tr>
+          <tr><td><code>MAX_TOTAL_TOKENS</code></td><td>number</td><td><code>100000</code></td><td>Warning threshold for total tokens</td></tr>
+          <tr><td><code>SANDBOX_TIMEOUT_MS</code></td><td>number</td><td><code>30000</code></td><td>Sandbox execution timeout</td></tr>
+          <tr><td><code>SYSTEM_PROMPT</code></td><td>string</td><td>—</td><td>Instructions for the AI agent</td></tr>
+        </tbody>
+      </table>
+
+      <h3>ConversationManager</h3>
+      <table>
+        <thead><tr><th>Method</th><th>Returns</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>getHistory()</code></td><td>Array</td><td>Direct reference to message array</td></tr>
+          <tr><td><code>getMessages()</code></td><td>Array</td><td>Shallow copy of message array</td></tr>
+          <tr><td><code>addMessage(role, content)</code></td><td>void</td><td>Append a message</td></tr>
+          <tr><td><code>popLast()</code></td><td>void</td><td>Remove last message (protects system prompt)</td></tr>
+          <tr><td><code>trim()</code></td><td>void</td><td>Keep only the most recent MAX_HISTORY_PAIRS exchanges</td></tr>
+          <tr><td><code>clear()</code></td><td>void</td><td>Reset to system prompt only</td></tr>
+          <tr><td><code>estimateTokens()</code></td><td>number</td><td>Rough token count (chars / 4)</td></tr>
+        </tbody>
+      </table>
+
+      <h3>SandboxRunner</h3>
+      <table>
+        <thead><tr><th>Method</th><th>Returns</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>run(code)</code></td><td>Promise&lt;{ok, value}&gt;</td><td>Execute code in sandboxed iframe</td></tr>
+          <tr><td><code>cancel()</code></td><td>void</td><td>Cancel running execution</td></tr>
+          <tr><td><code>isRunning()</code></td><td>boolean</td><td>Whether code is currently executing</td></tr>
+        </tbody>
+      </table>
+
+      <h3>ApiKeyManager</h3>
+      <table>
+        <thead><tr><th>Method</th><th>Returns</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>getOpenAIKey()</code></td><td>string|null</td><td>Current OpenAI API key</td></tr>
+          <tr><td><code>setOpenAIKey(key)</code></td><td>void</td><td>Store the OpenAI key</td></tr>
+          <tr><td><code>clearOpenAIKey()</code></td><td>void</td><td>Reset key to null</td></tr>
+          <tr><td><code>substituteServiceKey(code)</code></td><td>string|null</td><td>Replace YOUR_API_KEY placeholders; returns null if user input needed</td></tr>
+          <tr><td><code>submitServiceKey(key)</code></td><td>string|null</td><td>Complete pending key substitution</td></tr>
+          <tr><td><code>extractDomain(code)</code></td><td>string</td><td>Extract domain from first URL in code</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- Configuration -->
+    <section id="configuration">
+      <h2>Configuration</h2>
+      <p>All configuration lives in the <code>ChatConfig</code> frozen object at the top of <code>app.js</code>. To modify defaults:</p>
+<pre><code>const ChatConfig = Object.freeze({
+  MODEL: 'gpt-4o',           // Change model here
+  MAX_TOKENS_RESPONSE: 4096, // Max response length
+  MAX_HISTORY_PAIRS: 20,     // Conversation depth
+  MAX_INPUT_CHARS: 50000,    // Input limit
+  SANDBOX_TIMEOUT_MS: 30000, // 30-second sandbox timeout
+  SYSTEM_PROMPT: `...`       // Agent instructions
+});</code></pre>
+      <p><strong>Note:</strong> Since the config is frozen, you must modify the source and reload — this is by design to prevent runtime tampering.</p>
+    </section>
+
+    <!-- Security -->
+    <section id="security">
+      <h2>Security Model</h2>
+      <p>Agentic Chat takes a defense-in-depth approach to executing AI-generated code:</p>
+
+      <h3>Sandbox Isolation</h3>
+      <ul>
+        <li><strong>Iframe sandbox:</strong> Code runs in an <code>&lt;iframe sandbox="allow-scripts"&gt;</code> — no access to parent DOM, cookies, or localStorage</li>
+        <li><strong>CSP policy:</strong> <code>default-src 'none'; script-src 'unsafe-inline'; connect-src https:</code></li>
+        <li><strong>Origin isolation:</strong> Sandbox iframe has <code>null</code> origin, preventing same-origin attacks</li>
+        <li><strong>Timeout:</strong> 30-second hard timeout prevents infinite loops</li>
+      </ul>
+
+      <h3>Communication</h3>
+      <ul>
+        <li><strong>Nonce-based:</strong> Each execution uses <code>crypto.randomUUID()</code> to tag messages, preventing replay</li>
+        <li><strong>Origin check:</strong> Only accepts <code>postMessage</code> from <code>null</code> origin (sandboxed iframes)</li>
+        <li><strong>One-shot:</strong> Message handler removes itself after receiving the result</li>
+      </ul>
+
+      <h3>API Keys</h3>
+      <ul>
+        <li>Keys are stored in-memory only (never persisted to localStorage or disk)</li>
+        <li>Service keys are cached per-domain within the session</li>
+        <li>CI pipeline includes secret-scanning to prevent accidental commits</li>
+      </ul>
+    </section>
+
+    <!-- Testing -->
+    <section id="testing">
+      <h2>Testing</h2>
+      <p>The project uses <a href="https://jestjs.io">Jest</a> with <code>jsdom</code> for unit testing.</p>
+
+<pre><code># Install dependencies
+npm install
+
+# Run all tests
+npm test
+
+# Run with coverage
+npx jest --coverage</code></pre>
+
+      <p>The test suite includes <strong>42 tests</strong> covering all modules:</p>
+      <ul>
+        <li><code>ChatConfig</code> — immutability, configuration values, system prompt content</li>
+        <li><code>ConversationManager</code> — CRUD operations, history trimming, token estimation</li>
+        <li><code>ApiKeyManager</code> — key lifecycle, service key substitution and caching</li>
+        <li><code>UIController</code> — DOM state management, modal handling, character counting</li>
+        <li><code>SandboxRunner</code> — initialization state, safe cancellation</li>
+        <li>Integration tests for token estimation accuracy and cost calculation</li>
+      </ul>
+    </section>
+
+    <!-- Contributing -->
+    <section id="contributing">
+      <h2>Contributing</h2>
+      <p>Contributions are welcome! Here's how to get started:</p>
+      <ol>
+        <li>Fork the repository</li>
+        <li>Create a feature branch: <code>git checkout -b feat/my-feature</code></li>
+        <li>Make your changes and add tests</li>
+        <li>Run <code>npm test</code> to ensure all tests pass</li>
+        <li>Submit a pull request</li>
+      </ol>
+
+      <h3>Code Style</h3>
+      <ul>
+        <li>Use <code>'use strict'</code> in all JavaScript</li>
+        <li>Follow the IIFE module pattern for new components</li>
+        <li>Keep DOM manipulation in <code>UIController</code></li>
+        <li>No external runtime dependencies — the app must run from a single HTML file + CSS + JS</li>
+      </ul>
+    </section>
+  </div>
+
+  <footer>
+    <p>Agentic Chat — Built by <a href="https://github.com/sauravbhattacharya001">Saurav Bhattacharya</a> · <a href="https://github.com/sauravbhattacharya001/agenticchat">GitHub</a> · MIT License</p>
+  </footer>
+</body>
+</html>
