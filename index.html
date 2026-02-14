@@ -152,6 +152,11 @@ Always \`return\` the final value.
      * Execute LLM-generated code inside a sandboxed iframe so it cannot
      * access the parent page's DOM, API keys, cookies, or localStorage.
      * The iframe communicates results back via postMessage.
+     *
+     * Code is delivered to the iframe via postMessage (not template-literal
+     * interpolation) to prevent script-tag injection — if the LLM generates
+     * code containing `<\/script>`, embedding it directly in srcdoc would
+     * break out of the script context. (fixes #10)
      */
     function runCode(code) {
       const out = document.getElementById('console-output');
@@ -161,20 +166,24 @@ Always \`return\` the final value.
       // preventing stale or replayed postMessage events. (fixes #4, #5)
       const nonce = crypto.randomUUID();
 
-      // Build a self-contained HTML document that runs the code and posts the result back.
-      // The CSP allows outbound HTTPS requests (connect-src) so LLM-generated code can
-      // call external APIs — the core use case of the app. Other dangerous capabilities
-      // (DOM access, navigation, iframes, forms) remain blocked. The sandbox attribute
-      // on the iframe already prevents same-origin access. (updated from #7)
+      // The iframe now waits for a 'sandbox-exec' postMessage containing the
+      // code and nonce, instead of having them embedded in the HTML. This
+      // eliminates the injection vector entirely. (fixes #10)
       const iframeHTML = `<!DOCTYPE html><html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; connect-src https:;"></head><body><script>
-        (async () => {
+        window.addEventListener('message', async function handler(evt) {
+          if (!evt.data || evt.data.type !== 'sandbox-exec') return;
+          window.removeEventListener('message', handler);
+          var code = evt.data.code;
+          var nonce = evt.data.nonce;
           try {
-            const __result = await (async () => { ${code} })();
-            parent.postMessage({ type: 'sandbox-result', nonce: '${nonce}', ok: true, value: String(__result) }, '*');
+            var fn = new Function('return (async () => {' + code + '})()');
+            var __result = await fn();
+            parent.postMessage({ type: 'sandbox-result', nonce: nonce, ok: true, value: String(__result) }, '*');
           } catch (e) {
-            parent.postMessage({ type: 'sandbox-result', nonce: '${nonce}', ok: false, value: 'Error: ' + e.message }, '*');
+            parent.postMessage({ type: 'sandbox-result', nonce: nonce, ok: false, value: 'Error: ' + e.message }, '*');
           }
-        })();
+        });
+        parent.postMessage({ type: 'sandbox-ready' }, '*');
       <\/script></body></html>`;
 
       // Remove any previous sandbox iframe
@@ -207,6 +216,18 @@ Always \`return\` the final value.
         // send messages with origin 'null'. Reject all other origins
         // to prevent cross-origin result injection. (fixes #4, #5)
         if (e.origin !== 'null') return;
+
+        if (e.data && e.data.type === 'sandbox-ready') {
+          // Iframe is ready — send the code via postMessage instead of
+          // embedding it in srcdoc. This is safe because postMessage
+          // data is never parsed as HTML/script. (fixes #10)
+          iframe.contentWindow.postMessage({
+            type: 'sandbox-exec',
+            code: code,
+            nonce: nonce
+          }, '*');
+          return;
+        }
 
         // Validate nonce to ensure this result belongs to the current
         // runCode() invocation, not a stale or replayed message.
