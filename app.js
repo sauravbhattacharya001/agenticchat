@@ -176,7 +176,13 @@ const ApiKeyManager = (() => {
   let pendingDomain = null;
 
   function getOpenAIKey()       { return openaiKey; }
-  function setOpenAIKey(key)    { openaiKey = key; }
+  function setOpenAIKey(key)    {
+    // Validate key format: OpenAI keys start with "sk-" followed by alphanumerics
+    if (!/^sk-[A-Za-z0-9_-]{6,}$/.test(key)) {
+      throw new Error('Invalid API key format. OpenAI keys start with "sk-".');
+    }
+    openaiKey = key;
+  }
   function clearOpenAIKey()     { openaiKey = null; }
 
   function extractDomain(code) {
@@ -194,7 +200,7 @@ const ApiKeyManager = (() => {
 
     const domain = extractDomain(code);
     if (serviceKeys[domain]) {
-      return code.replace(/YOUR_API_KEY/g, serviceKeys[domain]);
+      return code.replace(/YOUR_API_KEY/g, sanitizeKeyForCodeInjection(serviceKeys[domain]));
     }
 
     // Show modal — store pending state
@@ -203,11 +209,26 @@ const ApiKeyManager = (() => {
     return null; // caller should not run yet
   }
 
+  /**
+   * Escape a key value so it is safe to substitute into JS code strings.
+   * Prevents breakout via quotes, backslashes, backticks, or newlines.
+   */
+  function sanitizeKeyForCodeInjection(key) {
+    return key
+      .replace(/\\/g, '\\\\')
+      .replace(/'/g, "\\'")
+      .replace(/"/g, '\\"')
+      .replace(/`/g, '\\`')
+      .replace(/\$/g, '\\$')
+      .replace(/\n/g, '\\n')
+      .replace(/\r/g, '\\r');
+  }
+
   /** Called when the user submits a key in the modal. */
   function submitServiceKey(key) {
     if (!key || !pendingDomain) return null;
     serviceKeys[pendingDomain] = key;
-    const code = pendingCode.replace(/YOUR_API_KEY/g, key);
+    const code = pendingCode.replace(/YOUR_API_KEY/g, sanitizeKeyForCodeInjection(key));
     pendingCode = pendingDomain = null;
     return code;
   }
@@ -226,7 +247,16 @@ const UIController = (() => {
   const el = (id) => document.getElementById(id);
 
   function setChatOutput(text)    { el('chat-output').textContent = text; }
-  function setChatOutputHTML(html) { el('chat-output').innerHTML = html; }
+  /** @deprecated Avoid innerHTML — use setChatOutput or displayCode instead */
+  function setChatOutputHTML(html) {
+    // Sanitise: strip <script>, on* attributes, and javascript: URLs
+    // to prevent XSS when rendering AI-generated content.
+    const sanitised = html
+      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+      .replace(/\bon\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+      .replace(/href\s*=\s*["']?\s*javascript:/gi, 'href="');
+    el('chat-output').innerHTML = sanitised;
+  }
   function setConsoleOutput(text, color) {
     const out = el('console-output');
     out.textContent = text;
@@ -395,7 +425,12 @@ const ChatController = (() => {
         alert('Enter both your OpenAI key and a question.');
         return;
       }
-      ApiKeyManager.setOpenAIKey(keyVal);
+      try {
+        ApiKeyManager.setOpenAIKey(keyVal);
+      } catch (e) {
+        alert(e.message);
+        return;
+      }
       UIController.removeApiKeyInput();
     } else if (!prompt) {
       alert('Enter a question.');
