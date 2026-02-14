@@ -57,6 +57,7 @@
   <div class="toolbar">
     <input id="chat-input" placeholder="Ask anything…">
     <button onclick="sendChat()">Send</button>
+    <button onclick="clearHistory()" style="background:#555;color:#eee;" title="Clear conversation history">Clear</button>
   </div>
 
   <div id="last-prompt">(no input yet)</div>
@@ -85,6 +86,17 @@ Always \`return\` the final value.
 
     const serviceKeys = {};
     let pendingCode = null, pendingDomain = null;
+
+    // Conversation history — maintains context across messages (fixes #2)
+    const history = [{ role: 'system', content: systemPrompt }];
+
+    function clearHistory() {
+      history.length = 0;
+      history.push({ role: 'system', content: systemPrompt });
+      document.getElementById('chat-output').textContent = '';
+      document.getElementById('console-output').textContent = '(results appear here)';
+      document.getElementById('last-prompt').textContent = '(history cleared)';
+    }
 
     function extractDomain(code) {
       const m = code.match(/https?:\/\/([^/'"]+)/);
@@ -199,6 +211,9 @@ Always \`return\` the final value.
       document.getElementById('console-output').textContent = '(processing)';
 
       try {
+        // Append user message to conversation history
+        history.push({ role: 'user', content: prompt });
+
         const rsp = await fetch('https://api.openai.com/v1/chat/completions', {
           method: 'POST',
           headers: {
@@ -207,14 +222,13 @@ Always \`return\` the final value.
           },
           body: JSON.stringify({
             model: 'gpt-4o',
-            messages: [
-              { role: 'system', content: systemPrompt },
-              { role: 'user', content: prompt }
-            ]
+            messages: history
           })
         });
 
         if (!rsp.ok) {
+          // Remove the user message we just added since the request failed
+          history.pop();
           chatOut.textContent = 'OpenAI error ' + rsp.status;
           document.getElementById('console-output').textContent = '(request failed)';
           return;
@@ -222,6 +236,10 @@ Always \`return\` the final value.
 
         const data = await rsp.json();
         const reply = data.choices?.[0]?.message?.content || 'No response';
+
+        // Append assistant reply to conversation history
+        history.push({ role: 'assistant', content: reply });
+
         const codeMatch = reply.match(/```(?:js|javascript)?\n([\s\S]*?)```/i);
 
         if (codeMatch) {
@@ -242,6 +260,10 @@ Always \`return\` the final value.
           document.getElementById('console-output').textContent = '(no code to run)';
         }
       } catch (err) {
+        // Remove the user message we just added since the request failed
+        if (history.length > 1 && history[history.length - 1].role === 'user') {
+          history.pop();
+        }
         chatOut.textContent = 'Network error: ' + err.message;
         document.getElementById('console-output').textContent = '(request failed)';
       } finally {
