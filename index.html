@@ -280,7 +280,8 @@ Always \`return\` the final value.
         // Validate nonce to ensure this result belongs to the current
         // runCode() invocation, not a stale or replayed message.
         if (e.data && e.data.type === 'sandbox-result' && e.data.nonce === nonce) {
-          out.textContent = e.data.ok ? e.data.value : e.data.value;
+          out.textContent = e.data.value;
+          out.style.color = e.data.ok ? '#4ade80' : '#f87171';
           cleanup();
         }
       }
