@@ -145,14 +145,18 @@ Always \`return\` the final value.
       const out = document.getElementById('console-output');
       out.textContent = '(running in sandbox…)';
 
+      // Generate a unique nonce to tie this execution to its result,
+      // preventing stale or replayed postMessage events. (fixes #4, #5)
+      const nonce = crypto.randomUUID();
+
       // Build a self-contained HTML document that runs the code and posts the result back
       const iframeHTML = `<!DOCTYPE html><html><body><script>
         (async () => {
           try {
             const __result = await (async () => { ${code} })();
-            parent.postMessage({ type: 'sandbox-result', ok: true, value: String(__result) }, '*');
+            parent.postMessage({ type: 'sandbox-result', nonce: '${nonce}', ok: true, value: String(__result) }, '*');
           } catch (e) {
-            parent.postMessage({ type: 'sandbox-result', ok: false, value: 'Error: ' + e.message }, '*');
+            parent.postMessage({ type: 'sandbox-result', nonce: '${nonce}', ok: false, value: 'Error: ' + e.message }, '*');
           }
         })();
       <\/script></body></html>`;
@@ -183,7 +187,14 @@ Always \`return\` the final value.
       }
 
       function onMessage(e) {
-        if (e.data && e.data.type === 'sandbox-result') {
+        // Validate origin: sandboxed iframes without allow-same-origin
+        // send messages with origin 'null'. Reject all other origins
+        // to prevent cross-origin result injection. (fixes #4, #5)
+        if (e.origin !== 'null') return;
+
+        // Validate nonce to ensure this result belongs to the current
+        // runCode() invocation, not a stale or replayed message.
+        if (e.data && e.data.type === 'sandbox-result' && e.data.nonce === nonce) {
           out.textContent = e.data.ok ? e.data.value : e.data.value;
           cleanup();
         }
