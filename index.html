@@ -153,9 +153,11 @@ Always \`return\` the final value.
       const nonce = crypto.randomUUID();
 
       // Build a self-contained HTML document that runs the code and posts the result back.
-      // The CSP meta tag blocks all network requests (fetch, XHR, WebSocket, etc.)
-      // from the sandboxed code, preventing data exfiltration. (fixes #7)
-      const iframeHTML = `<!DOCTYPE html><html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline';"></head><body><script>
+      // The CSP allows outbound HTTPS requests (connect-src) so LLM-generated code can
+      // call external APIs — the core use case of the app. Other dangerous capabilities
+      // (DOM access, navigation, iframes, forms) remain blocked. The sandbox attribute
+      // on the iframe already prevents same-origin access. (updated from #7)
+      const iframeHTML = `<!DOCTYPE html><html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; connect-src https:;"></head><body><script>
         (async () => {
           try {
             const __result = await (async () => { ${code} })();
@@ -287,7 +289,19 @@ Always \`return\` the final value.
         if (!rsp.ok) {
           // Remove the user message we just added since the request failed
           history.pop();
-          chatOut.textContent = 'OpenAI error ' + rsp.status;
+          let errMsg = `OpenAI error ${rsp.status}`;
+          try {
+            const errBody = await rsp.json();
+            const detail = errBody?.error?.message;
+            if (detail) errMsg += `: ${detail}`;
+          } catch (_) { /* response wasn't JSON, use status code only */ }
+
+          // Provide actionable hints for common error codes
+          if (rsp.status === 401) errMsg += ' — check your API key';
+          else if (rsp.status === 429) errMsg += ' — rate limited, try again shortly';
+          else if (rsp.status === 503) errMsg += ' — service temporarily unavailable';
+
+          chatOut.textContent = errMsg;
           document.getElementById('console-output').textContent = '(request failed)';
           return;
         }
