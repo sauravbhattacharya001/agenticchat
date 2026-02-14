@@ -72,6 +72,7 @@
   <div id="blackbox">
     <div id="chat-output"></div>
     <div id="console-output">(results appear here)</div>
+    <div id="token-usage" style="color:#888; font-size:0.8rem; margin-top:0.5rem; text-align:right;"></div>
   </div>
 
   <!-- API Key Modal -->
@@ -290,7 +291,8 @@ Always \`return\` the final value.
           },
           body: JSON.stringify({
             model: 'gpt-4o',
-            messages: history
+            messages: history,
+            max_tokens: 4096
           })
         });
 
@@ -322,6 +324,18 @@ Always \`return\` the final value.
 
         // Trim history to sliding window to prevent unbounded growth (fixes #3)
         trimHistory();
+
+        // Display token usage from the API response (fixes #9)
+        const usage = data.usage;
+        if (usage) {
+          const promptTokens = usage.prompt_tokens || 0;
+          const completionTokens = usage.completion_tokens || 0;
+          const totalTokens = usage.total_tokens || (promptTokens + completionTokens);
+          // GPT-4o pricing: ~$2.50/1M input, ~$10/1M output
+          const estCost = (promptTokens * 2.5 + completionTokens * 10) / 1_000_000;
+          document.getElementById('token-usage').textContent =
+            `Tokens: ${promptTokens} in / ${completionTokens} out (${totalTokens} total) · ~$${estCost.toFixed(4)}`;
+        }
 
         // Warn if estimated token count is getting high
         const estTokens = estimateTokens();
