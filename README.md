@@ -27,7 +27,7 @@ No build tools, no dependencies — just a single HTML file.
 - **System prompt** instructs GPT-4o to respond only with JavaScript in a code block
 - **Code extraction** uses regex to pull JS from the markdown response
 - **Sandboxed execution** runs code in a disposable `<iframe sandbox="allow-scripts">` — the sandbox has no access to the parent page's DOM, cookies, localStorage, or JS variables
-- **Content Security Policy** — the sandbox iframe includes a strict CSP (`default-src 'none'`) that blocks all network requests (fetch, XHR, WebSocket), preventing data exfiltration
+- **Content Security Policy** — the sandbox iframe includes a CSP with `default-src 'none'` and `connect-src https:`. Outbound HTTPS requests (fetch, XHR) are allowed so LLM-generated code can call external APIs; all other resource types are blocked
 - **Nonce validation** — each execution gets a `crypto.randomUUID()` nonce to tie results to the correct invocation, preventing stale or replayed postMessage events
 - **Conversation history** — maintains a sliding window of up to 20 message pairs with automatic trimming and token-count warnings
 - **API key management** detects `YOUR_API_KEY` placeholders and prompts for credentials per domain; the OpenAI key is stored only in a JS variable and the input element is removed from the DOM after first use
@@ -37,9 +37,13 @@ No build tools, no dependencies — just a single HTML file.
 The app executes AI-generated code in a **sandboxed iframe** that is isolated from the parent page:
 
 - ✅ No access to parent DOM, cookies, or localStorage
-- ✅ Network requests blocked by CSP
 - ✅ Origin-checked postMessage communication
-- ✅ API keys never exposed to generated code (replaced inline only within the sandbox)
+- ✅ OpenAI API key never exposed to generated code (stored in parent page only)
+- ⚠️ **Outbound HTTPS requests are allowed** — the sandbox CSP includes `connect-src https:` so that LLM-generated code can call external APIs (weather, data services, etc.). This is required for the core use case but means code running in the sandbox can make network requests.
+
+### Service API Key Caveat
+
+When you provide an external service API key (e.g., for a weather API), it is injected directly into the sandbox code. Because the sandbox allows outbound HTTPS, a prompt injection attack could theoretically trick the model into generating code that exfiltrates that key. Your **OpenAI** key is safe (it stays in the parent page), but exercise caution with other service keys you provide.
 
 As with any tool that runs AI-generated code, exercise caution with the prompts you send.
 
