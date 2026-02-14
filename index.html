@@ -87,6 +87,9 @@ Always \`return\` the final value.
     const serviceKeys = {};
     let pendingCode = null, pendingDomain = null;
 
+    // Store API key in a JS variable only — never persist in DOM (fixes #6)
+    let _openaiKey = null;
+
     // Maximum number of user+assistant message pairs to keep (excluding system prompt).
     // 20 pairs ≈ 40 messages — keeps context well under GPT-4o's 128K limit
     // while preserving enough conversational context. (fixes #3)
@@ -231,13 +234,26 @@ Always \`return\` the final value.
     async function sendChat() {
       if (isSending) return;
 
-      const openai = document.getElementById('api-key');
-      const key = openai.value.trim();
       const prompt = document.getElementById('chat-input').value.trim();
-      if (!key || !prompt) {
-        alert('Enter both your OpenAI key and a question.');
+
+      // On first send, read the key from the input, store in JS variable,
+      // then clear and remove the input from the DOM entirely (fixes #6)
+      if (!_openaiKey) {
+        const openai = document.getElementById('api-key');
+        const keyVal = openai ? openai.value.trim() : '';
+        if (!keyVal || !prompt) {
+          alert('Enter both your OpenAI key and a question.');
+          return;
+        }
+        _openaiKey = keyVal;
+        openai.value = '';            // clear the DOM value
+        openai.remove();              // remove element entirely
+      } else if (!prompt) {
+        alert('Enter a question.');
         return;
       }
+
+      const key = _openaiKey;
 
       const sendBtn = document.querySelector('.toolbar button');
       isSending = true;
@@ -245,10 +261,6 @@ Always \`return\` the final value.
       sendBtn.textContent = 'Sending…';
 
       updateLastPrompt(prompt);
-      if (!openai.dataset.hidden) {
-        openai.style.display = 'none';
-        openai.dataset.hidden = '1';
-      }
 
       const chatOut = document.getElementById('chat-output');
       chatOut.textContent = 'Thinking…';
