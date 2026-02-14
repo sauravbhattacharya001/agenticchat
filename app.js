@@ -171,7 +171,6 @@ const SandboxRunner = (() => {
 const ApiKeyManager = (() => {
   let openaiKey = null;
   const serviceKeys = {};
-  let pendingResolve = null;
   let pendingCode = null;
   let pendingDomain = null;
 
@@ -247,16 +246,6 @@ const UIController = (() => {
   const el = (id) => document.getElementById(id);
 
   function setChatOutput(text)    { el('chat-output').textContent = text; }
-  /** @deprecated Avoid innerHTML — use setChatOutput or displayCode instead */
-  function setChatOutputHTML(html) {
-    // Sanitise: strip <script>, on* attributes, and javascript: URLs
-    // to prevent XSS when rendering AI-generated content.
-    const sanitised = html
-      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-      .replace(/\bon\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
-      .replace(/href\s*=\s*["']?\s*javascript:/gi, 'href="');
-    el('chat-output').innerHTML = sanitised;
-  }
   function setConsoleOutput(text, color) {
     const out = el('console-output');
     out.textContent = text;
@@ -331,10 +320,11 @@ const UIController = (() => {
   function getServiceKeyInput() { return el('user-api-key').value.trim(); }
 
   function displayCode(code) {
+    const container = el('chat-output');
+    container.textContent = '';
     const pre = document.createElement('pre');
     pre.textContent = code;
-    setChatOutputHTML('');
-    el('chat-output').appendChild(pre);
+    container.appendChild(pre);
   }
 
   function updateCharCount(len) {
@@ -348,7 +338,7 @@ const UIController = (() => {
   }
 
   return {
-    setChatOutput, setChatOutputHTML, setConsoleOutput, setLastPrompt,
+    setChatOutput, setConsoleOutput, setLastPrompt,
     setSendingState, setSandboxRunning, resetSandboxUI,
     showTokenUsage, showApiKeyInput, removeApiKeyInput,
     showServiceKeyModal, hideServiceKeyModal,

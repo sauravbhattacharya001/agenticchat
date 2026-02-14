@@ -216,11 +216,6 @@ describe('UIController', () => {
     expect(document.getElementById('chat-output').textContent).toBe('Hello World');
   });
 
-  test('setChatOutputHTML sets innerHTML', () => {
-    UIController.setChatOutputHTML('<strong>Bold</strong>');
-    expect(document.getElementById('chat-output').innerHTML).toBe('<strong>Bold</strong>');
-  });
-
   test('setConsoleOutput updates text and optional color', () => {
     UIController.setConsoleOutput('Running...', '#4ade80');
     const el = document.getElementById('console-output');
