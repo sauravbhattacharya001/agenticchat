@@ -91,16 +91,61 @@ Always \`return\` the final value.
       return m ? m[1] : "Unknown Service";
     }
 
+    /**
+     * Execute LLM-generated code inside a sandboxed iframe so it cannot
+     * access the parent page's DOM, API keys, cookies, or localStorage.
+     * The iframe communicates results back via postMessage.
+     */
     function runCode(code) {
       const out = document.getElementById('console-output');
-      (async () => {
-        try {
-          const res = await eval('(async()=>{' + code + '})()');
-          out.textContent = String(res);
-        } catch (e) {
-          out.textContent = 'Error: ' + e;
+      out.textContent = '(running in sandbox…)';
+
+      // Build a self-contained HTML document that runs the code and posts the result back
+      const iframeHTML = `<!DOCTYPE html><html><body><script>
+        (async () => {
+          try {
+            const __result = await (async () => { ${code} })();
+            parent.postMessage({ type: 'sandbox-result', ok: true, value: String(__result) }, '*');
+          } catch (e) {
+            parent.postMessage({ type: 'sandbox-result', ok: false, value: 'Error: ' + e.message }, '*');
+          }
+        })();
+      <\/script></body></html>`;
+
+      // Remove any previous sandbox iframe
+      const prev = document.getElementById('sandbox-frame');
+      if (prev) prev.remove();
+
+      const iframe = document.createElement('iframe');
+      iframe.id = 'sandbox-frame';
+      // sandbox="allow-scripts" — NO allow-same-origin, so the iframe
+      // cannot access the parent's DOM, cookies, localStorage, or JS variables
+      iframe.sandbox = 'allow-scripts';
+      iframe.style.display = 'none';
+      document.body.appendChild(iframe);
+
+      // Listen for the result
+      const timeout = setTimeout(() => {
+        out.textContent = '(sandbox timed out after 30s)';
+        cleanup();
+      }, 30000);
+
+      function cleanup() {
+        clearTimeout(timeout);
+        window.removeEventListener('message', onMessage);
+        const f = document.getElementById('sandbox-frame');
+        if (f) f.remove();
+      }
+
+      function onMessage(e) {
+        if (e.data && e.data.type === 'sandbox-result') {
+          out.textContent = e.data.ok ? e.data.value : e.data.value;
+          cleanup();
         }
-      })();
+      }
+
+      window.addEventListener('message', onMessage);
+      iframe.srcdoc = iframeHTML;
     }
 
     function askKey(domain, code) {
