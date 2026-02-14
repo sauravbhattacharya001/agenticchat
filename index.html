@@ -69,6 +69,7 @@
     <button onclick="clearHistory()" style="background:#555;color:#eee;" title="Clear conversation history">Clear</button>
   </div>
 
+  <div id="char-count" style="max-width:700px;margin:0 auto;padding:0 .5rem;color:#666;font-size:0.75rem;text-align:right;"></div>
   <div id="last-prompt">(no input yet)</div>
 
   <div id="blackbox">
@@ -105,6 +106,15 @@ Always \`return\` the final value.
     // 20 pairs ≈ 40 messages — keeps context well under GPT-4o's 128K limit
     // while preserving enough conversational context. (fixes #3)
     const MAX_HISTORY_PAIRS = 20;
+
+    // Maximum allowed input length in characters (~12,500 tokens).
+    // Prevents oversized API requests that waste tokens or fail. (fixes #14)
+    const MAX_INPUT_CHARS = 50000;
+
+    // Maximum estimated total tokens (history + new input) before the
+    // request is blocked. GPT-4o supports 128K but we leave headroom
+    // for the response and system prompt overhead. (fixes #14)
+    const MAX_TOTAL_TOKENS = 100000;
 
     // Rough token estimate: ~4 characters per token (conservative)
     const CHARS_PER_TOKEN = 4;
@@ -338,6 +348,27 @@ Always \`return\` the final value.
 
       const key = _openaiKey;
 
+      // Validate input length to prevent oversized API requests (fixes #14)
+      if (prompt.length > MAX_INPUT_CHARS) {
+        alert(
+          `Message too long (${prompt.length.toLocaleString()} chars). ` +
+          `Please keep input under ${MAX_INPUT_CHARS.toLocaleString()} characters ` +
+          `(~${Math.floor(MAX_INPUT_CHARS / CHARS_PER_TOKEN).toLocaleString()} tokens).`
+        );
+        return;
+      }
+
+      // Check if adding this message would push total tokens past the safe limit (fixes #14)
+      const projectedTokens = estimateTokens() + Math.ceil(prompt.length / CHARS_PER_TOKEN);
+      if (projectedTokens > MAX_TOTAL_TOKENS) {
+        const proceed = confirm(
+          `Estimated total tokens (~${projectedTokens.toLocaleString()}) exceeds the safe limit ` +
+          `of ${MAX_TOTAL_TOKENS.toLocaleString()}. This may cause the API request to fail or be very expensive.\n\n` +
+          `Click "Clear" to reset history, or press OK to send anyway.`
+        );
+        if (!proceed) return;
+      }
+
       const sendBtn = document.getElementById('send-btn');
       const chatInput = document.getElementById('chat-input');
       isSending = true;
@@ -466,6 +497,18 @@ Always \`return\` the final value.
         chatInput.focus();
       }
     }
+
+    // Live character count feedback as user types (fixes #14)
+    document.getElementById('chat-input').addEventListener('input', function () {
+      const len = this.value.length;
+      const counter = document.getElementById('char-count');
+      if (len > MAX_INPUT_CHARS * 0.8) {
+        counter.textContent = `${len.toLocaleString()} / ${MAX_INPUT_CHARS.toLocaleString()} chars`;
+        counter.style.color = len > MAX_INPUT_CHARS ? '#ef4444' : '#f59e0b';
+      } else {
+        counter.textContent = '';
+      }
+    });
 
     // Pressing Enter submits the chat
     document.getElementById('chat-input').addEventListener('keydown', function (e) {
