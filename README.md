@@ -1,60 +1,150 @@
-# Agentic Chat
+<div align="center">
+
+# 🤖 Agentic Chat
+
+**Turn natural language into executable code — right in your browser.**
 
 [![Azure Static Web Apps CI/CD](https://github.com/sauravbhattacharya001/agenticchat/actions/workflows/azure-static-web-apps-gray-forest-0f6217910.yml/badge.svg)](https://github.com/sauravbhattacharya001/agenticchat/actions/workflows/azure-static-web-apps-gray-forest-0f6217910.yml)
+[![CodeQL](https://github.com/sauravbhattacharya001/agenticchat/actions/workflows/codeql.yml/badge.svg)](https://github.com/sauravbhattacharya001/agenticchat/actions/workflows/codeql.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/sauravbhattacharya001/agenticchat/blob/main/LICENSE)
-[![HTML5](https://img.shields.io/badge/HTML5-E34F26?logo=html5&logoColor=white)](https://developer.mozilla.org/en-US/docs/Web/HTML)
-[![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?logo=javascript&logoColor=black)](https://developer.mozilla.org/en-US/docs/Web/JavaScript)
+[![HTML5](https://img.shields.io/badge/HTML5-E34F26?logo=html5&logoColor=white)](#tech-stack)
+[![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?logo=javascript&logoColor=black)](#tech-stack)
 [![OpenAI](https://img.shields.io/badge/Powered%20by-GPT--4o-412991?logo=openai&logoColor=white)](https://platform.openai.com/)
 [![GitHub repo size](https://img.shields.io/github/repo-size/sauravbhattacharya001/agenticchat)](https://github.com/sauravbhattacharya001/agenticchat)
 [![GitHub last commit](https://img.shields.io/github/last-commit/sauravbhattacharya001/agenticchat)](https://github.com/sauravbhattacharya001/agenticchat/commits/main)
 
-A lightweight browser-based chat interface that turns natural language prompts into executable JavaScript — powered by OpenAI's GPT-4o.
+A lightweight, zero-dependency chat interface that sends your prompts to GPT-4o, extracts the JavaScript it writes, and executes it in a sandboxed iframe — all from a single HTML file.
 
-## What It Does
+[**Live Demo**](https://gray-forest-0f6217910.4.azurestaticapps.net) · [**Report Bug**](https://github.com/sauravbhattacharya001/agenticchat/issues) · [**Request Feature**](https://github.com/sauravbhattacharya001/agenticchat/issues)
 
-Type a question or task in plain English, and the app:
+</div>
 
-1. Sends your prompt to GPT-4o with a system prompt instructing it to reply with JavaScript code
-2. Extracts the code block from the response
-3. Executes it directly in your browser
-4. Displays the result
+---
 
-If the generated code needs an external API key (e.g., for a weather service), the app detects the `YOUR_API_KEY` placeholder and prompts you to enter it. Keys are cached per domain for the session.
+## ✨ Features
 
-## Getting Started
+- **Natural Language → Code** — Ask a question or describe a task in plain English; GPT-4o returns JavaScript that gets executed automatically
+- **Sandboxed Execution** — Generated code runs in an `<iframe sandbox="allow-scripts">` with no access to the parent page's DOM, cookies, localStorage, or variables
+- **Content Security Policy** — The sandbox iframe enforces `default-src 'none'; connect-src https:` so code can call external APIs but nothing else
+- **Nonce Validation** — Each execution gets a `crypto.randomUUID()` nonce to prevent stale or replayed postMessage events
+- **Conversation History** — Maintains a sliding window of up to 20 message pairs with automatic trimming and token-count warnings
+- **API Key Management** — Detects `YOUR_API_KEY` placeholders in generated code and prompts for credentials per domain; keys are cached per session
+- **Input Guardrails** — Character limit (50K chars), total token estimate warnings (~80K threshold), and real-time character counter
+- **Cancel Execution** — Stop long-running sandbox code with a single click
+- **Zero Dependencies** — Single HTML file. No build tools, no npm, no bundler. Just open and go.
 
-1. Open `index.html` in any modern browser
-2. Paste your **OpenAI API key** into the key field
-3. Type a question or task and press **Enter** (or click **Send**)
-4. Watch the generated code and its output appear in the console area
+## 🚀 Getting Started
 
-No build tools, no dependencies — just a single HTML file.
+### Prerequisites
 
-## How It Works
+- A modern web browser (Chrome, Firefox, Safari, Edge)
+- An [OpenAI API key](https://platform.openai.com/api-keys) with GPT-4o access
 
-- **System prompt** instructs GPT-4o to respond only with JavaScript in a code block
-- **Code extraction** uses regex to pull JS from the markdown response
-- **Sandboxed execution** runs code in a disposable `<iframe sandbox="allow-scripts">` — the sandbox has no access to the parent page's DOM, cookies, localStorage, or JS variables
-- **Content Security Policy** — the sandbox iframe includes a CSP with `default-src 'none'` and `connect-src https:`. Outbound HTTPS requests (fetch, XHR) are allowed so LLM-generated code can call external APIs; all other resource types are blocked
-- **Nonce validation** — each execution gets a `crypto.randomUUID()` nonce to tie results to the correct invocation, preventing stale or replayed postMessage events
-- **Conversation history** — maintains a sliding window of up to 20 message pairs with automatic trimming and token-count warnings
-- **API key management** detects `YOUR_API_KEY` placeholders and prompts for credentials per domain; the OpenAI key is stored only in a JS variable and the input element is removed from the DOM after first use
+### Usage
 
-## Security
+1. **Open** `index.html` in your browser — or visit the [live demo](https://gray-forest-0f6217910.4.azurestaticapps.net)
+2. **Paste** your OpenAI API key into the key field (stored in memory only, never persisted)
+3. **Type** a question or task and press **Enter**
+4. **Watch** the generated code and its output appear in the console area
 
-The app executes AI-generated code in a **sandboxed iframe** that is isolated from the parent page:
+```text
+> "What's the current UTC time?"
+→ GPT-4o generates: return new Date().toUTCString();
+→ Output: Fri, 14 Feb 2026 10:00:00 GMT
 
-- ✅ No access to parent DOM, cookies, or localStorage
-- ✅ Origin-checked postMessage communication
-- ✅ OpenAI API key never exposed to generated code (stored in parent page only)
-- ⚠️ **Outbound HTTPS requests are allowed** — the sandbox CSP includes `connect-src https:` so that LLM-generated code can call external APIs (weather, data services, etc.). This is required for the core use case but means code running in the sandbox can make network requests.
+> "Fetch the top Hacker News story"
+→ GPT-4o generates fetch() code targeting the HN API
+→ Output: { title: "...", url: "..." }
+```
 
-### Service API Key Caveat
+## 🏗️ How It Works
 
-When you provide an external service API key (e.g., for a weather API), it is injected directly into the sandbox code. Because the sandbox allows outbound HTTPS, a prompt injection attack could theoretically trick the model into generating code that exfiltrates that key. Your **OpenAI** key is safe (it stays in the parent page), but exercise caution with other service keys you provide.
+```
+User Prompt  →  GPT-4o (system prompt: reply with JS only)
+                    ↓
+             Markdown response with ```js code block
+                    ↓
+             Regex extraction of JavaScript
+                    ↓
+             Sandboxed iframe execution
+                    ↓
+             postMessage with nonce-validated result
+                    ↓
+             Display output in console area
+```
 
-As with any tool that runs AI-generated code, exercise caution with the prompts you send.
+1. A **system prompt** instructs GPT-4o to respond exclusively with JavaScript in a fenced code block
+2. The app **extracts** the code using regex and delivers it to a sandboxed iframe via `postMessage` (not template interpolation — preventing script-tag injection)
+3. The iframe **executes** the code with `new Function()` inside an async wrapper
+4. Results are **returned** via `postMessage` with origin validation (`'null'` for sandboxed iframes) and nonce matching
 
-## License
+## 🔒 Security Model
 
-MIT
+The app executes AI-generated code, so security is a first-class concern:
+
+| Layer | Protection |
+|-------|-----------|
+| **Iframe Sandbox** | `sandbox="allow-scripts"` — no DOM access, no cookies, no localStorage, no same-origin |
+| **CSP** | `default-src 'none'; connect-src https:` — only outbound HTTPS allowed |
+| **Origin Check** | postMessage validated against `'null'` origin (sandboxed iframe) |
+| **Nonce** | `crypto.randomUUID()` ties each execution to its result, preventing replay |
+| **Code Delivery** | Code sent via postMessage, not embedded in HTML (prevents `</script>` injection) |
+| **API Key Isolation** | OpenAI key stored in parent JS variable only — never exposed to sandbox |
+
+### ⚠️ Known Limitations
+
+- **Outbound HTTPS is allowed** — The sandbox CSP includes `connect-src https:` so LLM-generated code can call external APIs. This is required for the core use case but means sandbox code can make network requests.
+- **Service API keys are injectable** — When you provide a third-party API key (e.g., weather API), it's injected into sandbox code. A prompt injection attack could theoretically exfiltrate it. Your OpenAI key is safe (parent page only).
+
+## 🛠️ Tech Stack
+
+| Component | Technology |
+|-----------|-----------|
+| **Frontend** | Vanilla HTML5 + CSS + JavaScript (single file) |
+| **AI Model** | OpenAI GPT-4o via REST API |
+| **Sandbox** | HTML5 iframe sandbox with CSP |
+| **Hosting** | Azure Static Web Apps |
+| **CI/CD** | GitHub Actions |
+| **Security** | CodeQL analysis |
+
+## 📁 Project Structure
+
+```
+agenticchat/
+├── index.html          # The entire application (HTML + CSS + JS)
+├── LICENSE             # MIT License
+├── README.md           # This file
+├── .gitignore
+└── .github/
+    └── workflows/
+        ├── azure-static-web-apps-*.yml   # Azure deployment
+        └── codeql.yml                     # Security scanning
+```
+
+## 🤝 Contributing
+
+Contributions are welcome! Here's how:
+
+1. **Fork** the repository
+2. **Create** a feature branch (`git checkout -b feature/amazing-feature`)
+3. **Commit** your changes (`git commit -m 'feat: add amazing feature'`)
+4. **Push** to your branch (`git push origin feature/amazing-feature`)
+5. **Open** a Pull Request
+
+### Guidelines
+
+- This is a **single-file app** — keep it that way unless there's a compelling reason to split
+- Security is paramount — any change that touches the sandbox must be reviewed carefully
+- Test with various prompt types before submitting (simple questions, API calls, error cases)
+
+## 📄 License
+
+Distributed under the MIT License. See [`LICENSE`](LICENSE) for details.
+
+---
+
+<div align="center">
+
+**Built by [Saurav Bhattacharya](https://github.com/sauravbhattacharya001)**
+
+</div>
