@@ -1,5 +1,13 @@
 # Agentic Chat
 
+[![Azure Static Web Apps CI/CD](https://github.com/sauravbhattacharya001/agenticchat/actions/workflows/azure-static-web-apps-gray-forest-0f6217910.yml/badge.svg)](https://github.com/sauravbhattacharya001/agenticchat/actions/workflows/azure-static-web-apps-gray-forest-0f6217910.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/sauravbhattacharya001/agenticchat/blob/main/LICENSE)
+[![HTML5](https://img.shields.io/badge/HTML5-E34F26?logo=html5&logoColor=white)](https://developer.mozilla.org/en-US/docs/Web/HTML)
+[![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?logo=javascript&logoColor=black)](https://developer.mozilla.org/en-US/docs/Web/JavaScript)
+[![OpenAI](https://img.shields.io/badge/Powered%20by-GPT--4o-412991?logo=openai&logoColor=white)](https://platform.openai.com/)
+[![GitHub repo size](https://img.shields.io/github/repo-size/sauravbhattacharya001/agenticchat)](https://github.com/sauravbhattacharya001/agenticchat)
+[![GitHub last commit](https://img.shields.io/github/last-commit/sauravbhattacharya001/agenticchat)](https://github.com/sauravbhattacharya001/agenticchat/commits/main)
+
 A lightweight browser-based chat interface that turns natural language prompts into executable JavaScript — powered by OpenAI's GPT-4o.
 
 ## What It Does
