@@ -1,0 +1,27 @@
+# Dependencies & build artifacts
+node_modules/
+npm-debug.log*
+
+# Test artifacts
+coverage/
+.jest/
+
+# IDE & OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Git & CI
+.git/
+.github/
+.gitignore
+
+# Docs (not needed at runtime)
+docs/
+tests/
+*.md
+LICENSE
+jest.config.js
