@@ -17,6 +17,7 @@ function setupDOM() {
       <button id="send-btn">Send</button>
       <button id="cancel-btn" class="btn-danger" style="display:none;">Cancel</button>
       <button id="clear-btn" class="btn-secondary">Clear</button>
+      <button id="history-btn" class="btn-secondary">History</button>
     </div>
     <div id="char-count"></div>
     <div id="last-prompt">(no input yet)</div>
@@ -24,6 +25,18 @@ function setupDOM() {
       <div id="chat-output"></div>
       <div id="console-output" aria-live="polite">(results appear here)</div>
       <div id="token-usage"></div>
+    </div>
+    <div id="history-overlay"></div>
+    <div id="history-panel" aria-label="Conversation history">
+      <div id="history-header">
+        <span>Conversation History</span>
+        <div id="history-actions">
+          <button id="export-md-btn" class="btn-sm">MD</button>
+          <button id="export-json-btn" class="btn-sm">JSON</button>
+          <button id="history-close-btn" class="btn-sm">✕</button>
+        </div>
+      </div>
+      <div id="history-messages"></div>
     </div>
     <div id="apikey-modal" role="dialog" aria-modal="true" style="display:none;">
       <div id="apikey-modal-content">
@@ -59,7 +72,8 @@ function loadApp() {
     'SandboxRunner',
     'ApiKeyManager',
     'UIController',
-    'ChatController'
+    'ChatController',
+    'HistoryPanel'
   ];
 
   for (const mod of modules) {

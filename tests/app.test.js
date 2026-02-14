@@ -402,3 +402,77 @@ describe('Token cost calculation', () => {
     expect(text).toContain('$0.0075');
   });
 });
+
+/* ================================================================
+ * HistoryPanel
+ * ================================================================ */
+describe('HistoryPanel', () => {
+  test('toggle opens and closes the panel', () => {
+    const panel = document.getElementById('history-panel');
+    const overlay = document.getElementById('history-overlay');
+
+    expect(panel.classList.contains('open')).toBe(false);
+
+    HistoryPanel.toggle();
+    expect(panel.classList.contains('open')).toBe(true);
+    expect(overlay.classList.contains('visible')).toBe(true);
+
+    HistoryPanel.toggle();
+    expect(panel.classList.contains('open')).toBe(false);
+    expect(overlay.classList.contains('visible')).toBe(false);
+  });
+
+  test('close always closes the panel', () => {
+    HistoryPanel.toggle(); // open
+    HistoryPanel.close();
+
+    const panel = document.getElementById('history-panel');
+    expect(panel.classList.contains('open')).toBe(false);
+  });
+
+  test('refresh shows empty state with no messages', () => {
+    HistoryPanel.refresh();
+    const container = document.getElementById('history-messages');
+    expect(container.querySelector('.history-empty')).not.toBeNull();
+    expect(container.textContent).toContain('No messages yet');
+  });
+
+  test('refresh renders user and assistant messages', () => {
+    ConversationManager.addMessage('user', 'Hello world');
+    ConversationManager.addMessage('assistant', 'Hi there');
+    HistoryPanel.refresh();
+
+    const container = document.getElementById('history-messages');
+    const msgs = container.querySelectorAll('.history-msg');
+    expect(msgs).toHaveLength(2);
+    expect(msgs[0].classList.contains('user')).toBe(true);
+    expect(msgs[1].classList.contains('assistant')).toBe(true);
+    expect(msgs[0].textContent).toContain('Hello world');
+    expect(msgs[1].textContent).toContain('Hi there');
+  });
+
+  test('refresh renders code blocks in assistant messages', () => {
+    ConversationManager.addMessage('user', 'Write code');
+    ConversationManager.addMessage('assistant', '```js\nconsole.log("test")\n```');
+    HistoryPanel.refresh();
+
+    const container = document.getElementById('history-messages');
+    const pre = container.querySelector('.history-msg.assistant pre');
+    expect(pre).not.toBeNull();
+    expect(pre.textContent).toBe('console.log("test")\n');
+  });
+
+  test('exportAsMarkdown alerts when no messages', () => {
+    const alertSpy = jest.spyOn(window, 'alert').mockImplementation(() => {});
+    HistoryPanel.exportAsMarkdown();
+    expect(alertSpy).toHaveBeenCalledWith('No conversation to export.');
+    alertSpy.mockRestore();
+  });
+
+  test('exportAsJSON alerts when no messages', () => {
+    const alertSpy = jest.spyOn(window, 'alert').mockImplementation(() => {});
+    HistoryPanel.exportAsJSON();
+    expect(alertSpy).toHaveBeenCalledWith('No conversation to export.');
+    alertSpy.mockRestore();
+  });
+});

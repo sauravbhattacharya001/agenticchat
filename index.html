@@ -22,6 +22,7 @@
     <button id="send-btn">Send</button>
     <button id="cancel-btn" class="btn-danger" style="display:none;" title="Cancel running sandbox execution">Cancel</button>
     <button id="clear-btn" class="btn-secondary" title="Clear conversation history">Clear</button>
+    <button id="history-btn" class="btn-secondary" title="Toggle conversation history panel">History</button>
   </div>
 
   <div id="char-count"></div>
@@ -31,6 +32,22 @@
     <div id="chat-output"></div>
     <div id="console-output" aria-live="polite">(results appear here)</div>
     <div id="token-usage"></div>
+  </div>
+
+  <!-- Conversation History Overlay -->
+  <div id="history-overlay"></div>
+
+  <!-- Conversation History Panel -->
+  <div id="history-panel" aria-label="Conversation history">
+    <div id="history-header">
+      <span>Conversation History</span>
+      <div id="history-actions">
+        <button id="export-md-btn" class="btn-sm" title="Export as Markdown">📄 MD</button>
+        <button id="export-json-btn" class="btn-sm" title="Export as JSON">📋 JSON</button>
+        <button id="history-close-btn" class="btn-sm" title="Close panel">✕</button>
+      </div>
+    </div>
+    <div id="history-messages"></div>
   </div>
 
   <!-- API Key Modal -->

@@ -501,6 +501,9 @@ const ChatController = (() => {
         UIController.setChatOutput(reply);
         UIController.setConsoleOutput('(no code to run)');
       }
+
+      // Update history panel if open
+      HistoryPanel.refresh();
     } catch (err) {
       if (ConversationManager.getHistory().length > 1 &&
           ConversationManager.getHistory().at(-1).role === 'user') {
@@ -520,6 +523,7 @@ const ChatController = (() => {
     UIController.setChatOutput('');
     UIController.setConsoleOutput('(results appear here)');
     UIController.setLastPrompt('(history cleared)');
+    HistoryPanel.refresh();
   }
 
   /** Handle service-key modal submission. */
@@ -531,6 +535,144 @@ const ChatController = (() => {
   }
 
   return { send, clearHistory, submitServiceKey };
+})();
+
+/* ---------- History Panel ---------- */
+const HistoryPanel = (() => {
+  let isOpen = false;
+
+  function toggle() {
+    isOpen = !isOpen;
+    const panel = document.getElementById('history-panel');
+    const overlay = document.getElementById('history-overlay');
+    if (isOpen) {
+      panel.classList.add('open');
+      overlay.classList.add('visible');
+      refresh();
+    } else {
+      panel.classList.remove('open');
+      overlay.classList.remove('visible');
+    }
+  }
+
+  function close() {
+    isOpen = false;
+    document.getElementById('history-panel').classList.remove('open');
+    document.getElementById('history-overlay').classList.remove('visible');
+  }
+
+  function refresh() {
+    const container = document.getElementById('history-messages');
+    const messages = ConversationManager.getMessages().filter(m => m.role !== 'system');
+
+    if (messages.length === 0) {
+      container.innerHTML = '<div class="history-empty">No messages yet.<br>Start a conversation to see history here.</div>';
+      return;
+    }
+
+    container.innerHTML = '';
+    messages.forEach((msg) => {
+      const div = document.createElement('div');
+      div.className = `history-msg ${msg.role}`;
+
+      const roleLabel = document.createElement('div');
+      roleLabel.className = 'msg-role';
+      roleLabel.textContent = msg.role === 'user' ? '👤 You' : '🤖 Assistant';
+      div.appendChild(roleLabel);
+
+      // For assistant messages, check for code blocks
+      if (msg.role === 'assistant') {
+        const codeMatch = msg.content.match(/```(?:js|javascript)?\n([\s\S]*?)```/i);
+        if (codeMatch) {
+          // Show text before code block if any
+          const beforeCode = msg.content.substring(0, msg.content.indexOf('```')).trim();
+          if (beforeCode) {
+            const textEl = document.createElement('div');
+            textEl.className = 'msg-text';
+            textEl.textContent = beforeCode;
+            div.appendChild(textEl);
+          }
+          const pre = document.createElement('pre');
+          pre.textContent = codeMatch[1];
+          div.appendChild(pre);
+          // Show text after code block if any
+          const afterIdx = msg.content.indexOf('```', msg.content.indexOf('```') + 3);
+          const afterCode = afterIdx >= 0 ? msg.content.substring(afterIdx + 3).trim() : '';
+          if (afterCode) {
+            const textEl = document.createElement('div');
+            textEl.className = 'msg-text';
+            textEl.textContent = afterCode;
+            div.appendChild(textEl);
+          }
+        } else {
+          const textEl = document.createElement('div');
+          textEl.className = 'msg-text';
+          textEl.textContent = msg.content;
+          div.appendChild(textEl);
+        }
+      } else {
+        const textEl = document.createElement('div');
+        textEl.className = 'msg-text';
+        textEl.textContent = msg.content;
+        div.appendChild(textEl);
+      }
+
+      container.appendChild(div);
+    });
+
+    // Auto-scroll to bottom
+    container.scrollTop = container.scrollHeight;
+  }
+
+  function exportAsMarkdown() {
+    const messages = ConversationManager.getMessages().filter(m => m.role !== 'system');
+    if (messages.length === 0) {
+      alert('No conversation to export.');
+      return;
+    }
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    let md = `# Agentic Chat Export\n\n**Exported:** ${new Date().toLocaleString()}\n\n---\n\n`;
+
+    messages.forEach((msg) => {
+      const role = msg.role === 'user' ? '👤 **You**' : '🤖 **Assistant**';
+      md += `### ${role}\n\n${msg.content}\n\n---\n\n`;
+    });
+
+    downloadFile(`agenticchat-${timestamp}.md`, md, 'text/markdown');
+  }
+
+  function exportAsJSON() {
+    const messages = ConversationManager.getMessages().filter(m => m.role !== 'system');
+    if (messages.length === 0) {
+      alert('No conversation to export.');
+      return;
+    }
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const data = {
+      exported: new Date().toISOString(),
+      model: ChatConfig.MODEL,
+      messageCount: messages.length,
+      messages: messages.map(m => ({ role: m.role, content: m.content }))
+    };
+
+    downloadFile(`agenticchat-${timestamp}.json`, JSON.stringify(data, null, 2), 'application/json');
+  }
+
+  function downloadFile(filename, content, mimeType) {
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  return { toggle, close, refresh, exportAsMarkdown, exportAsJSON };
 })();
 
 /* ---------- Event Bindings ---------- */
@@ -553,4 +695,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('apikey-submit-btn').addEventListener('click',
     ChatController.submitServiceKey);
+
+  // History panel
+  document.getElementById('history-btn').addEventListener('click', HistoryPanel.toggle);
+  document.getElementById('history-close-btn').addEventListener('click', HistoryPanel.close);
+  document.getElementById('history-overlay').addEventListener('click', HistoryPanel.close);
+  document.getElementById('export-md-btn').addEventListener('click', HistoryPanel.exportAsMarkdown);
+  document.getElementById('export-json-btn').addEventListener('click', HistoryPanel.exportAsJSON);
+
+  // Keyboard shortcut: Escape closes history panel
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') HistoryPanel.close();
+  });
 });
