@@ -64,7 +64,8 @@
   <div class="toolbar" role="form" aria-label="Chat input">
     <label for="chat-input" class="sr-only">Your message</label>
     <input id="chat-input" placeholder="Ask anything…" autocomplete="off">
-    <button onclick="sendChat()">Send</button>
+    <button id="send-btn" onclick="sendChat()">Send</button>
+    <button id="cancel-btn" onclick="cancelExecution()" style="background:#ef4444;color:#fff;display:none;" title="Cancel running sandbox execution">Cancel</button>
     <button onclick="clearHistory()" style="background:#555;color:#eee;" title="Clear conversation history">Clear</button>
   </div>
 
@@ -149,6 +150,35 @@ Always \`return\` the final value.
       return m ? m[1] : "Unknown Service";
     }
 
+    // Track the current sandbox cleanup function so it can be called
+    // from the Cancel button. Null when no sandbox is running. (fixes #13)
+    let _sandboxCleanup = null;
+
+    /**
+     * Cancel the currently running sandbox execution, if any.
+     * Destroys the iframe immediately and resets UI state. (fixes #13)
+     */
+    function cancelExecution() {
+      if (_sandboxCleanup) {
+        _sandboxCleanup();
+        document.getElementById('console-output').textContent = '(execution cancelled)';
+      }
+    }
+
+    /**
+     * Show/hide the Cancel button and keep Send disabled while the
+     * sandbox is running so the user has a clear execution indicator. (fixes #13)
+     */
+    function setSandboxRunning(running) {
+      const cancelBtn = document.getElementById('cancel-btn');
+      const sendBtn = document.getElementById('send-btn');
+      cancelBtn.style.display = running ? 'inline-block' : 'none';
+      if (running) {
+        sendBtn.disabled = true;
+        sendBtn.textContent = 'Running…';
+      }
+    }
+
     /**
      * Execute LLM-generated code inside a sandboxed iframe so it cannot
      * access the parent page's DOM, API keys, cookies, or localStorage.
@@ -162,6 +192,9 @@ Always \`return\` the final value.
     function runCode(code) {
       const out = document.getElementById('console-output');
       out.textContent = '(running in sandbox…)';
+
+      // Show Cancel button and keep Send disabled during execution (fixes #13)
+      setSandboxRunning(true);
 
       // Generate a unique nonce to tie this execution to its result,
       // preventing stale or replayed postMessage events. (fixes #4, #5)
@@ -210,7 +243,21 @@ Always \`return\` the final value.
         window.removeEventListener('message', onMessage);
         const f = document.getElementById('sandbox-frame');
         if (f) f.remove();
+        // Reset sandbox state — hide Cancel, re-enable Send (fixes #13)
+        _sandboxCleanup = null;
+        setSandboxRunning(false);
+        // Re-enable Send button fully (sendChat's finally block handles
+        // the isSending flag, but if code was run from askKey path we
+        // need to ensure the button is usable)
+        const sendBtn = document.getElementById('send-btn');
+        if (!isSending) {
+          sendBtn.disabled = false;
+          sendBtn.textContent = 'Send';
+        }
       }
+
+      // Expose cleanup for the Cancel button (fixes #13)
+      _sandboxCleanup = cleanup;
 
       function onMessage(e) {
         // Validate origin: sandboxed iframes without allow-same-origin
@@ -290,7 +337,7 @@ Always \`return\` the final value.
 
       const key = _openaiKey;
 
-      const sendBtn = document.querySelector('.toolbar button');
+      const sendBtn = document.getElementById('send-btn');
       const chatInput = document.getElementById('chat-input');
       isSending = true;
       sendBtn.disabled = true;
