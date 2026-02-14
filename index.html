@@ -87,8 +87,41 @@ Always \`return\` the final value.
     const serviceKeys = {};
     let pendingCode = null, pendingDomain = null;
 
+    // Maximum number of user+assistant message pairs to keep (excluding system prompt).
+    // 20 pairs ≈ 40 messages — keeps context well under GPT-4o's 128K limit
+    // while preserving enough conversational context. (fixes #3)
+    const MAX_HISTORY_PAIRS = 20;
+
+    // Rough token estimate: ~4 characters per token (conservative)
+    const CHARS_PER_TOKEN = 4;
+    const TOKEN_WARNING_THRESHOLD = 80000; // warn at ~80K tokens
+
     // Conversation history — maintains context across messages (fixes #2)
     const history = [{ role: 'system', content: systemPrompt }];
+
+    /**
+     * Trim conversation history to keep at most MAX_HISTORY_PAIRS
+     * user+assistant exchanges, always preserving the system prompt.
+     */
+    function trimHistory() {
+      // Count non-system messages
+      const messages = history.slice(1); // everything after system prompt
+      const maxMessages = MAX_HISTORY_PAIRS * 2; // each pair = user + assistant
+
+      if (messages.length > maxMessages) {
+        const trimmed = messages.slice(messages.length - maxMessages);
+        history.length = 0;
+        history.push({ role: 'system', content: systemPrompt }, ...trimmed);
+      }
+    }
+
+    /**
+     * Estimate total token count of the current history.
+     */
+    function estimateTokens() {
+      const totalChars = history.reduce((sum, m) => sum + m.content.length, 0);
+      return Math.ceil(totalChars / CHARS_PER_TOKEN);
+    }
 
     function clearHistory() {
       history.length = 0;
@@ -239,6 +272,15 @@ Always \`return\` the final value.
 
         // Append assistant reply to conversation history
         history.push({ role: 'assistant', content: reply });
+
+        // Trim history to sliding window to prevent unbounded growth (fixes #3)
+        trimHistory();
+
+        // Warn if estimated token count is getting high
+        const estTokens = estimateTokens();
+        if (estTokens > TOKEN_WARNING_THRESHOLD) {
+          console.warn(`[agenticchat] History ~${estTokens} tokens — consider clicking Clear`);
+        }
 
         const codeMatch = reply.match(/```(?:js|javascript)?\n([\s\S]*?)```/i);
 
