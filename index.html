@@ -331,7 +331,23 @@ Always \`return\` the final value.
           } catch (_) { /* response wasn't JSON, use status code only */ }
 
           // Provide actionable hints for common error codes
-          if (rsp.status === 401) errMsg += ' — check your API key';
+          if (rsp.status === 401) {
+            errMsg += ' — check your API key';
+            // Reset stored key and re-show the input so user can retry (fixes #12)
+            _openaiKey = null;
+            if (!document.getElementById('api-key')) {
+              const toolbar = document.querySelector('.toolbar[aria-label="API key entry"]');
+              if (toolbar) {
+                const inp = document.createElement('input');
+                inp.id = 'api-key';
+                inp.type = 'password';
+                inp.placeholder = 'OpenAI API Key';
+                inp.autocomplete = 'off';
+                toolbar.appendChild(inp);
+                inp.focus();
+              }
+            }
+          }
           else if (rsp.status === 429) errMsg += ' — rate limited, try again shortly';
           else if (rsp.status === 503) errMsg += ' — service temporarily unavailable';
 
