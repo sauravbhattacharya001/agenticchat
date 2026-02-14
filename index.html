@@ -152,8 +152,10 @@ Always \`return\` the final value.
       // preventing stale or replayed postMessage events. (fixes #4, #5)
       const nonce = crypto.randomUUID();
 
-      // Build a self-contained HTML document that runs the code and posts the result back
-      const iframeHTML = `<!DOCTYPE html><html><body><script>
+      // Build a self-contained HTML document that runs the code and posts the result back.
+      // The CSP meta tag blocks all network requests (fetch, XHR, WebSocket, etc.)
+      // from the sandboxed code, preventing data exfiltration. (fixes #7)
+      const iframeHTML = `<!DOCTYPE html><html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline';"></head><body><script>
         (async () => {
           try {
             const __result = await (async () => { ${code} })();

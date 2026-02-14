@@ -1,0 +1,1 @@
+fix: add CSP to sandbox iframe to block outbound network requests (closes #7)
