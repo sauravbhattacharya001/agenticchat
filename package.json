@@ -1,0 +1,31 @@
+{
+  "name": "agenticchat",
+  "version": "1.0.0",
+  "description": "A lightweight browser-based chat interface that turns natural language prompts into executable JavaScript, powered by OpenAI GPT-4o.",
+  "main": "app.js",
+  "scripts": {
+    "test": "jest --verbose"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sauravbhattacharya001/agenticchat.git"
+  },
+  "keywords": [
+    "ai",
+    "chat",
+    "openai",
+    "javascript",
+    "sandbox"
+  ],
+  "author": "Saurav Bhattacharya",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/sauravbhattacharya001/agenticchat/issues"
+  },
+  "homepage": "https://github.com/sauravbhattacharya001/agenticchat#readme",
+  "devDependencies": {
+    "jest": "^30.2.0",
+    "jest-environment-jsdom": "^30.2.0",
+    "jsdom": "^28.0.0"
+  }
+}

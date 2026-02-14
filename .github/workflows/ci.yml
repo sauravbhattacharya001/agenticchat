@@ -27,6 +27,9 @@ jobs:
         run: |
           npm install -g htmlhint eslint@8
 
+      - name: Install test dependencies
+        run: npm ci
+
       - name: Lint HTML
         run: |
           htmlhint "**/*.html" --config <(cat <<'EOF'
@@ -159,3 +162,6 @@ jobs:
           else:
               print('All structural checks passed ✓')
           "
+
+      - name: Run unit tests
+        run: npx jest --verbose --ci
