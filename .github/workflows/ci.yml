@@ -1,0 +1,161 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate HTML & JavaScript
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install linting tools
+        run: |
+          npm install -g htmlhint eslint@8
+
+      - name: Lint HTML
+        run: |
+          htmlhint "**/*.html" --config <(cat <<'EOF'
+          {
+            "tagname-lowercase": true,
+            "attr-lowercase": true,
+            "attr-value-double-quotes": true,
+            "doctype-first": true,
+            "tag-pair": true,
+            "spec-char-escape": false,
+            "id-unique": true,
+            "src-not-empty": true,
+            "attr-no-duplication": true,
+            "title-require": true,
+            "alt-require": true,
+            "inline-style-disabled": false,
+            "inline-script-disabled": false
+          }
+          EOF
+          )
+
+      - name: Extract and lint inline JavaScript
+        run: |
+          # Extract inline JS from script tags for linting
+          python3 -c "
+          import re, sys
+          with open('index.html') as f:
+              html = f.read()
+          scripts = re.findall(r'<script[^>]*>(.*?)</script>', html, re.DOTALL)
+          if scripts:
+              combined = '\n'.join(scripts)
+              with open('_extracted.js', 'w') as out:
+                  out.write(combined)
+              print(f'Extracted {len(scripts)} script block(s), {len(combined)} chars')
+          else:
+              print('No inline scripts found')
+              sys.exit(0)
+          "
+
+          # Lint with permissive config suitable for browser globals
+          cat > .eslintrc.json << 'EOF'
+          {
+            "env": {
+              "browser": true,
+              "es2022": true
+            },
+            "parserOptions": {
+              "ecmaVersion": "latest"
+            },
+            "rules": {
+              "no-unused-vars": "warn",
+              "no-undef": "warn",
+              "no-redeclare": "error",
+              "no-dupe-keys": "error",
+              "no-unreachable": "error",
+              "no-constant-condition": "warn",
+              "no-empty": "warn",
+              "eqeqeq": ["warn", "smart"],
+              "no-eval": "error",
+              "no-implied-eval": "error"
+            }
+          }
+          EOF
+
+          if [ -f _extracted.js ]; then
+            eslint _extracted.js --no-eslintrc -c .eslintrc.json || true
+          fi
+
+      - name: Check for hardcoded secrets
+        run: |
+          # Scan for accidentally committed API keys or secrets
+          if grep -rniE '(sk-[a-zA-Z0-9]{20,}|AKIA[0-9A-Z]{16}|ghp_[a-zA-Z0-9]{36})' \
+              --include="*.html" --include="*.js" --include="*.json" .; then
+            echo "::error::Potential hardcoded secrets detected!"
+            exit 1
+          fi
+
+      - name: Validate HTML structure
+        run: |
+          python3 -c "
+          from html.parser import HTMLParser
+          import sys
+
+          class Validator(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.errors = []
+                  self.has_doctype = False
+                  self.has_html = False
+                  self.has_head = False
+                  self.has_body = False
+                  self.has_title = False
+                  self.has_charset = False
+                  self.has_viewport = False
+
+              def handle_decl(self, decl):
+                  if decl.lower().startswith('doctype'):
+                      self.has_doctype = True
+
+              def handle_starttag(self, tag, attrs):
+                  attr_dict = dict(attrs)
+                  if tag == 'html': self.has_html = True
+                  if tag == 'head': self.has_head = True
+                  if tag == 'body': self.has_body = True
+                  if tag == 'title': self.has_title = True
+                  if tag == 'meta':
+                      if attr_dict.get('charset'): self.has_charset = True
+                      if attr_dict.get('name') == 'viewport': self.has_viewport = True
+
+          with open('index.html') as f:
+              content = f.read()
+
+          v = Validator()
+          v.feed(content)
+
+          checks = [
+              (v.has_doctype, 'Missing DOCTYPE'),
+              (v.has_html, 'Missing <html> tag'),
+              (v.has_head, 'Missing <head> tag'),
+              (v.has_body, 'Missing <body> tag'),
+              (v.has_title, 'Missing <title> tag'),
+              (v.has_charset, 'Missing charset meta tag'),
+              (v.has_viewport, 'Missing viewport meta tag'),
+          ]
+
+          failed = [msg for ok, msg in checks if not ok]
+          if failed:
+              for f in failed:
+                  print(f'::warning::{f}')
+          else:
+              print('All structural checks passed ✓')
+          "
