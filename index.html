@@ -18,6 +18,7 @@
       background:#38bdf8; color:#000; cursor:pointer;
     }
     button:hover { background:#0ea5e9; }
+    button:disabled { background:#555; color:#999; cursor:not-allowed; }
     #blackbox {
       max-width:700px; margin:0 auto 2rem; background:#0d0d0d;
       border:2px solid #333; border-radius:8px;
@@ -71,7 +72,7 @@
 
   <div id="blackbox">
     <div id="chat-output"></div>
-    <div id="console-output">(results appear here)</div>
+    <div id="console-output" aria-live="polite">(results appear here)</div>
     <div id="token-usage" style="color:#888; font-size:0.8rem; margin-top:0.5rem; text-align:right;"></div>
   </div>
 
@@ -290,9 +291,11 @@ Always \`return\` the final value.
       const key = _openaiKey;
 
       const sendBtn = document.querySelector('.toolbar button');
+      const chatInput = document.getElementById('chat-input');
       isSending = true;
       sendBtn.disabled = true;
       sendBtn.textContent = 'Sending…';
+      chatInput.disabled = true;
 
       updateLastPrompt(prompt);
 
@@ -394,8 +397,9 @@ Always \`return\` the final value.
         isSending = false;
         sendBtn.disabled = false;
         sendBtn.textContent = 'Send';
-        document.getElementById('chat-input').value = '';
-        document.getElementById('chat-input').focus();
+        chatInput.disabled = false;
+        chatInput.value = '';
+        chatInput.focus();
       }
     }
 
