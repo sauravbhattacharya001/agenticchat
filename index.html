@@ -124,7 +124,11 @@ Always \`return\` the final value.
       document.getElementById('last-prompt').textContent = `Last input: ${prompt}`;
     }
 
+    let isSending = false;
+
     async function sendChat() {
+      if (isSending) return;
+
       const openai = document.getElementById('api-key');
       const key = openai.value.trim();
       const prompt = document.getElementById('chat-input').value.trim();
@@ -132,6 +136,11 @@ Always \`return\` the final value.
         alert('Enter both your OpenAI key and a question.');
         return;
       }
+
+      const sendBtn = document.querySelector('.toolbar button');
+      isSending = true;
+      sendBtn.disabled = true;
+      sendBtn.textContent = 'Sending…';
 
       updateLastPrompt(prompt);
       if (!openai.dataset.hidden) {
@@ -143,46 +152,58 @@ Always \`return\` the final value.
       chatOut.textContent = 'Thinking…';
       document.getElementById('console-output').textContent = '(processing)';
 
-      const rsp = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${key}`
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o',
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: prompt }
-          ]
-        })
-      });
+      try {
+        const rsp = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${key}`
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o',
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: prompt }
+            ]
+          })
+        });
 
-      if (!rsp.ok) {
-        chatOut.textContent = 'OpenAI error ' + rsp.status;
-        return;
-      }
-
-      const data = await rsp.json();
-      const reply = data.choices?.[0]?.message?.content || 'No response';
-      const codeMatch = reply.match(/```(?:js|javascript)?\n([\s\S]*?)```/i);
-
-      if (codeMatch) {
-        const code = codeMatch[1];
-        chatOut.innerHTML = '<pre>' + code + '</pre>';
-        if (/YOUR_API_KEY/.test(code)) {
-          const domain = extractDomain(code);
-          if (serviceKeys[domain]) runCode(code.replace(/YOUR_API_KEY/g, serviceKeys[domain]));
-          else askKey(domain, code);
-        } else {
-          runCode(code);
+        if (!rsp.ok) {
+          chatOut.textContent = 'OpenAI error ' + rsp.status;
+          document.getElementById('console-output').textContent = '(request failed)';
+          return;
         }
-      } else {
-        chatOut.textContent = reply;
-        document.getElementById('console-output').textContent = '(no code to run)';
-      }
 
-      document.getElementById('chat-input').value = '';
+        const data = await rsp.json();
+        const reply = data.choices?.[0]?.message?.content || 'No response';
+        const codeMatch = reply.match(/```(?:js|javascript)?\n([\s\S]*?)```/i);
+
+        if (codeMatch) {
+          const code = codeMatch[1];
+          const pre = document.createElement('pre');
+          pre.textContent = code;
+          chatOut.innerHTML = '';
+          chatOut.appendChild(pre);
+          if (/YOUR_API_KEY/.test(code)) {
+            const domain = extractDomain(code);
+            if (serviceKeys[domain]) runCode(code.replace(/YOUR_API_KEY/g, serviceKeys[domain]));
+            else askKey(domain, code);
+          } else {
+            runCode(code);
+          }
+        } else {
+          chatOut.textContent = reply;
+          document.getElementById('console-output').textContent = '(no code to run)';
+        }
+      } catch (err) {
+        chatOut.textContent = 'Network error: ' + err.message;
+        document.getElementById('console-output').textContent = '(request failed)';
+      } finally {
+        isSending = false;
+        sendBtn.disabled = false;
+        sendBtn.textContent = 'Send';
+        document.getElementById('chat-input').value = '';
+      }
     }
 
     // Pressing Enter submits the chat
