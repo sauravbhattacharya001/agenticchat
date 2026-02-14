@@ -1,0 +1,46 @@
+name: Copilot Setup Steps
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npx jest --verbose --ci
+
+      - name: Lint JavaScript
+        run: |
+          npm install -g eslint@8
+          cat > .eslintrc.json << 'EOF'
+          {
+            "env": { "browser": true, "es2022": true },
+            "parserOptions": { "ecmaVersion": "latest" },
+            "rules": {
+              "no-unused-vars": "warn",
+              "no-undef": "warn",
+              "no-redeclare": "error",
+              "no-dupe-keys": "error",
+              "no-unreachable": "error",
+              "no-eval": "error",
+              "no-implied-eval": "error"
+            }
+          }
+          EOF
+          eslint app.js --no-eslintrc -c .eslintrc.json
