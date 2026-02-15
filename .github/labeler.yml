@@ -1,0 +1,49 @@
+# Auto-labeler configuration for agenticchat
+# Maps file globs to labels applied on pull requests
+
+"core":
+  - changed-files:
+      - any-glob-to-any-file: "app.js"
+
+"ui":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "index.html"
+          - "style.css"
+
+"tests":
+  - changed-files:
+      - any-glob-to-any-file: "tests/**"
+
+"ci/cd":
+  - changed-files:
+      - any-glob-to-any-file: ".github/workflows/**"
+
+"docker":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "Dockerfile"
+          - ".dockerignore"
+
+"docs":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "docs/**"
+          - "README.md"
+          - "CONTRIBUTING.md"
+          - "LICENSE"
+
+"config":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "package.json"
+          - "package-lock.json"
+          - "jest.config.js"
+          - ".gitignore"
+          - ".npmignore"
+
+"github":
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/**"
+          - "!.github/workflows/**"
