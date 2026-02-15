@@ -522,10 +522,12 @@ const ChatController = (() => {
       const codeMatch = reply.match(/```(?:js|javascript)?\n([\s\S]*?)```/i);
       if (codeMatch) {
         UIController.displayCode(codeMatch[1]);
+        SnippetLibrary.setCurrentCode(codeMatch[1]);
         await executeCode(codeMatch[1]);
       } else {
         UIController.setChatOutput(reply);
         UIController.setConsoleOutput('(no code to run)');
+        SnippetLibrary.setCurrentCode(null);
       }
 
       // Update history panel if open
@@ -549,6 +551,7 @@ const ChatController = (() => {
     UIController.setChatOutput('');
     UIController.setConsoleOutput('(results appear here)');
     UIController.setLastPrompt('(history cleared)');
+    SnippetLibrary.setCurrentCode(null);
     HistoryPanel.refresh();
   }
 
@@ -961,6 +964,412 @@ const HistoryPanel = (() => {
   return { toggle, close, refresh, exportAsMarkdown, exportAsJSON };
 })();
 
+/* ---------- Snippet Library ---------- */
+const SnippetLibrary = (() => {
+  const STORAGE_KEY = 'agenticchat_snippets';
+  let isOpen = false;
+  let currentCode = null;  // code displayed in chat-output for save
+  let _searchTimer = null;
+
+  /** Load snippets from localStorage. */
+  function load() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch { return []; }
+  }
+
+  /** Save snippets to localStorage. */
+  function save(snippets) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(snippets));
+  }
+
+  function getAll() { return load(); }
+
+  function getCount() { return load().length; }
+
+  /** Add a new snippet. */
+  function add(name, code, tags) {
+    const snippets = load();
+    snippets.unshift({
+      id: crypto.randomUUID(),
+      name: name.trim(),
+      code,
+      tags: tags.map(t => t.trim()).filter(t => t.length > 0),
+      createdAt: new Date().toISOString()
+    });
+    save(snippets);
+    return snippets;
+  }
+
+  /** Delete a snippet by ID. */
+  function remove(id) {
+    const snippets = load().filter(s => s.id !== id);
+    save(snippets);
+    return snippets;
+  }
+
+  /** Rename a snippet. */
+  function rename(id, newName) {
+    const snippets = load();
+    const snippet = snippets.find(s => s.id === id);
+    if (snippet) snippet.name = newName.trim();
+    save(snippets);
+    return snippets;
+  }
+
+  /** Clear all snippets. */
+  function clearAll() {
+    save([]);
+  }
+
+  /** Search snippets by name, tags, or code content. */
+  function search(query) {
+    if (!query) return load();
+    const q = query.toLowerCase();
+    return load().filter(s =>
+      s.name.toLowerCase().includes(q) ||
+      s.code.toLowerCase().includes(q) ||
+      s.tags.some(t => t.toLowerCase().includes(q))
+    );
+  }
+
+  /** Set current code (called when AI generates code). */
+  function setCurrentCode(code) {
+    currentCode = code;
+    const actionsEl = document.getElementById('code-actions');
+    if (actionsEl) actionsEl.style.display = code ? 'flex' : 'none';
+  }
+
+  function getCurrentCode() { return currentCode; }
+
+  /** Open save dialog for current code. */
+  function openSaveDialog() {
+    if (!currentCode) return;
+    const modal = document.getElementById('snippet-save-modal');
+    const nameInput = document.getElementById('snippet-name-input');
+    const tagsInput = document.getElementById('snippet-tags-input');
+    const preview = document.getElementById('snippet-code-preview');
+
+    nameInput.value = '';
+    tagsInput.value = '';
+
+    // Show first 5 lines of code as preview
+    const lines = currentCode.split('\n');
+    const previewText = lines.slice(0, 5).join('\n') +
+      (lines.length > 5 ? `\n… (${lines.length - 5} more lines)` : '');
+    preview.textContent = previewText;
+
+    modal.style.display = 'flex';
+    nameInput.focus();
+  }
+
+  /** Confirm save from dialog. */
+  function confirmSave() {
+    const nameInput = document.getElementById('snippet-name-input');
+    const tagsInput = document.getElementById('snippet-tags-input');
+
+    const name = nameInput.value.trim();
+    if (!name) { nameInput.focus(); return; }
+    if (!currentCode) return;
+
+    const tags = tagsInput.value
+      .split(',')
+      .map(t => t.trim().toLowerCase())
+      .filter(t => t.length > 0);
+
+    add(name, currentCode, tags);
+    closeSaveDialog();
+
+    // Show brief confirmation
+    const actionsEl = document.getElementById('code-actions');
+    const saveBtn = document.getElementById('save-snippet-btn');
+    if (saveBtn) {
+      saveBtn.textContent = '✅ Saved!';
+      setTimeout(() => { saveBtn.textContent = '💾 Save Snippet'; }, 1500);
+    }
+
+    // Refresh snippets panel if open
+    if (isOpen) refresh();
+  }
+
+  function closeSaveDialog() {
+    const modal = document.getElementById('snippet-save-modal');
+    if (modal) modal.style.display = 'none';
+  }
+
+  /** Copy current code to clipboard. */
+  function copyCurrentCode() {
+    if (!currentCode) return;
+    navigator.clipboard.writeText(currentCode).then(() => {
+      const btn = document.getElementById('copy-code-btn');
+      if (btn) {
+        btn.textContent = '✅ Copied!';
+        setTimeout(() => { btn.textContent = '📋 Copy'; }, 1500);
+      }
+    }).catch(() => {});
+  }
+
+  /** Re-run current code in sandbox. */
+  async function rerunCurrentCode() {
+    if (!currentCode || SandboxRunner.isRunning()) return;
+    const substituted = ApiKeyManager.substituteServiceKey(currentCode);
+    if (substituted === null) {
+      UIController.showServiceKeyModal(ApiKeyManager.getPendingDomain());
+      return;
+    }
+    UIController.setConsoleOutput('(running in sandbox…)');
+    UIController.setSandboxRunning(true);
+    const result = await SandboxRunner.run(substituted);
+    UIController.setConsoleOutput(result.value, result.ok ? '#4ade80' : '#f87171');
+    UIController.resetSandboxUI();
+  }
+
+  /** Toggle snippets panel. */
+  function toggle() {
+    isOpen = !isOpen;
+    const panel = document.getElementById('snippets-panel');
+    const overlay = document.getElementById('snippets-overlay');
+    if (isOpen) {
+      panel.classList.add('open');
+      overlay.classList.add('visible');
+      const searchInput = document.getElementById('snippets-search');
+      if (searchInput) { searchInput.value = ''; searchInput.focus(); }
+      refresh();
+    } else {
+      panel.classList.remove('open');
+      overlay.classList.remove('visible');
+    }
+  }
+
+  function close() {
+    isOpen = false;
+    const panel = document.getElementById('snippets-panel');
+    const overlay = document.getElementById('snippets-overlay');
+    if (panel) panel.classList.remove('open');
+    if (overlay) overlay.classList.remove('visible');
+  }
+
+  /** Render snippets list. */
+  function refresh() {
+    const searchInput = document.getElementById('snippets-search');
+    const query = searchInput ? searchInput.value.trim() : '';
+    const snippets = search(query);
+    render(snippets);
+  }
+
+  function render(snippets) {
+    const container = document.getElementById('snippets-list');
+    const countEl = document.getElementById('snippets-count');
+    if (!container) return;
+
+    const total = getCount();
+    if (countEl) {
+      countEl.textContent = total === 0 ? '' :
+        `${snippets.length}${snippets.length !== total ? ' of ' + total : ''} snippet${total !== 1 ? 's' : ''}`;
+    }
+
+    if (snippets.length === 0) {
+      container.innerHTML = '';
+      const empty = document.createElement('div');
+      empty.className = 'snippets-empty';
+      empty.textContent = total === 0
+        ? 'No saved snippets yet.\nGenerate code, then click 💾 Save Snippet.'
+        : 'No snippets match your search.';
+      container.appendChild(empty);
+      return;
+    }
+
+    const fragment = document.createDocumentFragment();
+
+    snippets.forEach(snippet => {
+      const card = document.createElement('div');
+      card.className = 'snippet-card';
+      card.dataset.id = snippet.id;
+
+      // Header row: name + time
+      const header = document.createElement('div');
+      header.className = 'snippet-card-header';
+
+      const nameEl = document.createElement('span');
+      nameEl.className = 'snippet-name';
+      nameEl.textContent = snippet.name;
+      nameEl.title = 'Double-click to rename';
+      nameEl.addEventListener('dblclick', () => startRename(snippet.id, nameEl));
+      header.appendChild(nameEl);
+
+      const timeEl = document.createElement('span');
+      timeEl.className = 'snippet-time';
+      timeEl.textContent = formatRelativeTime(snippet.createdAt);
+      timeEl.title = new Date(snippet.createdAt).toLocaleString();
+      header.appendChild(timeEl);
+      card.appendChild(header);
+
+      // Tags
+      if (snippet.tags && snippet.tags.length > 0) {
+        const tagsEl = document.createElement('div');
+        tagsEl.className = 'snippet-tags';
+        snippet.tags.forEach(tag => {
+          const tagSpan = document.createElement('span');
+          tagSpan.className = 'snippet-tag';
+          tagSpan.textContent = tag;
+          tagsEl.appendChild(tagSpan);
+        });
+        card.appendChild(tagsEl);
+      }
+
+      // Code preview (first 3 lines)
+      const codePreview = document.createElement('pre');
+      codePreview.className = 'snippet-code-preview';
+      const lines = snippet.code.split('\n');
+      codePreview.textContent = lines.slice(0, 3).join('\n') +
+        (lines.length > 3 ? '\n…' : '');
+      card.appendChild(codePreview);
+
+      // Action buttons
+      const actions = document.createElement('div');
+      actions.className = 'snippet-card-actions';
+
+      const useBtn = document.createElement('button');
+      useBtn.className = 'btn-sm';
+      useBtn.textContent = '▶️ Run';
+      useBtn.title = 'Load and run this snippet';
+      useBtn.addEventListener('click', () => useSnippet(snippet));
+      actions.appendChild(useBtn);
+
+      const copyBtn = document.createElement('button');
+      copyBtn.className = 'btn-sm';
+      copyBtn.textContent = '📋 Copy';
+      copyBtn.title = 'Copy code to clipboard';
+      copyBtn.addEventListener('click', () => {
+        navigator.clipboard.writeText(snippet.code).then(() => {
+          copyBtn.textContent = '✅';
+          setTimeout(() => { copyBtn.textContent = '📋 Copy'; }, 1000);
+        }).catch(() => {});
+      });
+      actions.appendChild(copyBtn);
+
+      const insertBtn = document.createElement('button');
+      insertBtn.className = 'btn-sm';
+      insertBtn.textContent = '📝 Insert';
+      insertBtn.title = 'Insert code into chat input';
+      insertBtn.addEventListener('click', () => {
+        const input = document.getElementById('chat-input');
+        if (input) {
+          input.value = 'Run this code:\n```js\n' + snippet.code + '\n```';
+          input.focus();
+          UIController.updateCharCount(input.value.length);
+        }
+        close();
+      });
+      actions.appendChild(insertBtn);
+
+      const deleteBtn = document.createElement('button');
+      deleteBtn.className = 'btn-sm btn-danger-sm';
+      deleteBtn.textContent = '🗑️';
+      deleteBtn.title = 'Delete snippet';
+      deleteBtn.addEventListener('click', () => {
+        remove(snippet.id);
+        refresh();
+      });
+      actions.appendChild(deleteBtn);
+
+      card.appendChild(actions);
+      fragment.appendChild(card);
+    });
+
+    container.innerHTML = '';
+    container.appendChild(fragment);
+  }
+
+  /** Inline rename on double-click. */
+  function startRename(id, nameEl) {
+    const currentName = nameEl.textContent;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'snippet-rename-input';
+    input.value = currentName;
+
+    function finishRename() {
+      const newName = input.value.trim();
+      if (newName && newName !== currentName) {
+        rename(id, newName);
+      }
+      refresh();
+    }
+
+    input.addEventListener('blur', finishRename);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+      if (e.key === 'Escape') { input.value = currentName; input.blur(); }
+    });
+
+    nameEl.textContent = '';
+    nameEl.appendChild(input);
+    input.focus();
+    input.select();
+  }
+
+  /** Load snippet into chat output and run it. */
+  async function useSnippet(snippet) {
+    close();
+    UIController.displayCode(snippet.code);
+    setCurrentCode(snippet.code);
+
+    const substituted = ApiKeyManager.substituteServiceKey(snippet.code);
+    if (substituted === null) {
+      UIController.showServiceKeyModal(ApiKeyManager.getPendingDomain());
+      return;
+    }
+    UIController.setConsoleOutput('(running in sandbox…)');
+    UIController.setSandboxRunning(true);
+    const result = await SandboxRunner.run(substituted);
+    UIController.setConsoleOutput(result.value, result.ok ? '#4ade80' : '#f87171');
+    UIController.resetSandboxUI();
+  }
+
+  /** Format relative time (e.g. "2h ago", "3d ago"). */
+  function formatRelativeTime(isoString) {
+    const now = Date.now();
+    const then = new Date(isoString).getTime();
+    const diff = now - then;
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    if (days < 30) return `${days}d ago`;
+    return new Date(isoString).toLocaleDateString();
+  }
+
+  function handleSearchDebounced() {
+    if (_searchTimer) clearTimeout(_searchTimer);
+    _searchTimer = setTimeout(() => {
+      _searchTimer = null;
+      refresh();
+    }, 150);
+  }
+
+  function handleClearAll() {
+    const count = getCount();
+    if (count === 0) return;
+    if (!confirm(`Delete all ${count} saved snippet${count !== 1 ? 's' : ''}?`)) return;
+    clearAll();
+    refresh();
+  }
+
+  return {
+    getAll, getCount, add, remove, rename, clearAll, search,
+    setCurrentCode, getCurrentCode,
+    openSaveDialog, confirmSave, closeSaveDialog,
+    copyCurrentCode, rerunCurrentCode,
+    toggle, close, refresh, render,
+    formatRelativeTime, handleSearchDebounced, handleClearAll,
+    load, save  // exposed for testing
+  };
+})();
+
 /* ---------- Event Bindings ---------- */
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('send-btn').addEventListener('click', ChatController.send);
@@ -1000,6 +1409,27 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.key === 'Escape') {
       HistoryPanel.close();
       PromptTemplates.close();
+      SnippetLibrary.close();
+      SnippetLibrary.closeSaveDialog();
     }
   });
+
+  // Code action buttons (save/copy/rerun)
+  document.getElementById('save-snippet-btn').addEventListener('click', SnippetLibrary.openSaveDialog);
+  document.getElementById('copy-code-btn').addEventListener('click', SnippetLibrary.copyCurrentCode);
+  document.getElementById('rerun-code-btn').addEventListener('click', SnippetLibrary.rerunCurrentCode);
+
+  // Snippet save dialog
+  document.getElementById('snippet-confirm-btn').addEventListener('click', SnippetLibrary.confirmSave);
+  document.getElementById('snippet-cancel-btn').addEventListener('click', SnippetLibrary.closeSaveDialog);
+  document.getElementById('snippet-name-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); SnippetLibrary.confirmSave(); }
+  });
+
+  // Snippets panel
+  document.getElementById('snippets-btn').addEventListener('click', SnippetLibrary.toggle);
+  document.getElementById('snippets-close-btn').addEventListener('click', SnippetLibrary.close);
+  document.getElementById('snippets-overlay').addEventListener('click', SnippetLibrary.close);
+  document.getElementById('snippets-search').addEventListener('input', SnippetLibrary.handleSearchDebounced);
+  document.getElementById('snippets-clear-btn').addEventListener('click', SnippetLibrary.handleClearAll);
 });

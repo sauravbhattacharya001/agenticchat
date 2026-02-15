@@ -601,3 +601,304 @@ describe('HistoryPanel', () => {
     alertSpy.mockRestore();
   });
 });
+
+/* ================================================================
+ * SnippetLibrary
+ * ================================================================ */
+describe('SnippetLibrary', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    SnippetLibrary.setCurrentCode(null);
+  });
+
+  test('starts with no snippets', () => {
+    expect(SnippetLibrary.getAll()).toEqual([]);
+    expect(SnippetLibrary.getCount()).toBe(0);
+  });
+
+  test('add creates a snippet with correct fields', () => {
+    const snippets = SnippetLibrary.add('Test Snippet', 'console.log("hi")', ['test', 'demo']);
+    expect(snippets).toHaveLength(1);
+    expect(snippets[0].name).toBe('Test Snippet');
+    expect(snippets[0].code).toBe('console.log("hi")');
+    expect(snippets[0].tags).toEqual(['test', 'demo']);
+    expect(snippets[0].id).toBeDefined();
+    expect(snippets[0].createdAt).toBeDefined();
+  });
+
+  test('add prepends new snippets (newest first)', () => {
+    SnippetLibrary.add('First', 'code1', []);
+    SnippetLibrary.add('Second', 'code2', []);
+    const all = SnippetLibrary.getAll();
+    expect(all[0].name).toBe('Second');
+    expect(all[1].name).toBe('First');
+  });
+
+  test('add filters empty tags', () => {
+    const snippets = SnippetLibrary.add('Test', 'code', ['valid', '', '  ', 'also-valid']);
+    // Only non-empty after trim
+    expect(snippets[0].tags).toEqual(['valid', 'also-valid']);
+  });
+
+  test('remove deletes snippet by ID', () => {
+    SnippetLibrary.add('Keep', 'keep-code', []);
+    SnippetLibrary.add('Delete', 'delete-code', []);
+    const all = SnippetLibrary.getAll();
+    const deleteId = all.find(s => s.name === 'Delete').id;
+
+    const remaining = SnippetLibrary.remove(deleteId);
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].name).toBe('Keep');
+  });
+
+  test('remove with non-existent ID is safe', () => {
+    SnippetLibrary.add('Test', 'code', []);
+    const remaining = SnippetLibrary.remove('non-existent-id');
+    expect(remaining).toHaveLength(1);
+  });
+
+  test('rename updates snippet name', () => {
+    SnippetLibrary.add('Old Name', 'code', []);
+    const id = SnippetLibrary.getAll()[0].id;
+
+    SnippetLibrary.rename(id, 'New Name');
+    expect(SnippetLibrary.getAll()[0].name).toBe('New Name');
+  });
+
+  test('rename trims whitespace', () => {
+    SnippetLibrary.add('Test', 'code', []);
+    const id = SnippetLibrary.getAll()[0].id;
+
+    SnippetLibrary.rename(id, '  Trimmed  ');
+    expect(SnippetLibrary.getAll()[0].name).toBe('Trimmed');
+  });
+
+  test('clearAll removes all snippets', () => {
+    SnippetLibrary.add('One', 'code1', []);
+    SnippetLibrary.add('Two', 'code2', []);
+    SnippetLibrary.clearAll();
+    expect(SnippetLibrary.getAll()).toEqual([]);
+    expect(SnippetLibrary.getCount()).toBe(0);
+  });
+
+  test('search filters by name', () => {
+    SnippetLibrary.add('Bar Chart', 'chart-code', []);
+    SnippetLibrary.add('Password Gen', 'pass-code', []);
+    const results = SnippetLibrary.search('bar');
+    expect(results).toHaveLength(1);
+    expect(results[0].name).toBe('Bar Chart');
+  });
+
+  test('search filters by tag', () => {
+    SnippetLibrary.add('Chart', 'code', ['canvas', 'data']);
+    SnippetLibrary.add('Form', 'code', ['html', 'input']);
+    const results = SnippetLibrary.search('canvas');
+    expect(results).toHaveLength(1);
+    expect(results[0].name).toBe('Chart');
+  });
+
+  test('search filters by code content', () => {
+    SnippetLibrary.add('Alpha', 'document.getElementById("x")', []);
+    SnippetLibrary.add('Beta', 'fetch("https://api.com")', []);
+    const results = SnippetLibrary.search('getElementById');
+    expect(results).toHaveLength(1);
+    expect(results[0].name).toBe('Alpha');
+  });
+
+  test('search with empty query returns all', () => {
+    SnippetLibrary.add('One', 'code1', []);
+    SnippetLibrary.add('Two', 'code2', []);
+    expect(SnippetLibrary.search('')).toHaveLength(2);
+  });
+
+  test('search is case-insensitive', () => {
+    SnippetLibrary.add('MY CHART', 'code', ['DATA']);
+    expect(SnippetLibrary.search('my chart')).toHaveLength(1);
+    expect(SnippetLibrary.search('data')).toHaveLength(1);
+  });
+
+  test('setCurrentCode shows/hides code-actions', () => {
+    const actionsEl = document.getElementById('code-actions');
+
+    SnippetLibrary.setCurrentCode('some code');
+    expect(actionsEl.style.display).toBe('flex');
+    expect(SnippetLibrary.getCurrentCode()).toBe('some code');
+
+    SnippetLibrary.setCurrentCode(null);
+    expect(actionsEl.style.display).toBe('none');
+    expect(SnippetLibrary.getCurrentCode()).toBeNull();
+  });
+
+  test('openSaveDialog shows modal with code preview', () => {
+    SnippetLibrary.setCurrentCode('line1\nline2\nline3\nline4\nline5\nline6\nline7');
+    SnippetLibrary.openSaveDialog();
+
+    const modal = document.getElementById('snippet-save-modal');
+    expect(modal.style.display).toBe('flex');
+
+    const preview = document.getElementById('snippet-code-preview');
+    expect(preview.textContent).toContain('line1');
+    expect(preview.textContent).toContain('line5');
+    expect(preview.textContent).toContain('2 more lines');
+  });
+
+  test('openSaveDialog does nothing when no current code', () => {
+    SnippetLibrary.setCurrentCode(null);
+    SnippetLibrary.openSaveDialog();
+    const modal = document.getElementById('snippet-save-modal');
+    expect(modal.style.display).not.toBe('flex');
+  });
+
+  test('confirmSave saves snippet and closes dialog', () => {
+    SnippetLibrary.setCurrentCode('test code');
+    SnippetLibrary.openSaveDialog();
+
+    document.getElementById('snippet-name-input').value = 'My Snippet';
+    document.getElementById('snippet-tags-input').value = 'test, demo';
+    SnippetLibrary.confirmSave();
+
+    expect(SnippetLibrary.getCount()).toBe(1);
+    const saved = SnippetLibrary.getAll()[0];
+    expect(saved.name).toBe('My Snippet');
+    expect(saved.code).toBe('test code');
+    expect(saved.tags).toEqual(['test', 'demo']);
+
+    const modal = document.getElementById('snippet-save-modal');
+    expect(modal.style.display).toBe('none');
+  });
+
+  test('confirmSave does not save with empty name', () => {
+    SnippetLibrary.setCurrentCode('test code');
+    SnippetLibrary.openSaveDialog();
+
+    document.getElementById('snippet-name-input').value = '';
+    SnippetLibrary.confirmSave();
+
+    expect(SnippetLibrary.getCount()).toBe(0);
+  });
+
+  test('closeSaveDialog hides modal', () => {
+    SnippetLibrary.setCurrentCode('code');
+    SnippetLibrary.openSaveDialog();
+    SnippetLibrary.closeSaveDialog();
+
+    const modal = document.getElementById('snippet-save-modal');
+    expect(modal.style.display).toBe('none');
+  });
+
+  test('toggle opens and closes panel', () => {
+    const panel = document.getElementById('snippets-panel');
+    const overlay = document.getElementById('snippets-overlay');
+
+    expect(panel.classList.contains('open')).toBe(false);
+
+    SnippetLibrary.toggle();
+    expect(panel.classList.contains('open')).toBe(true);
+    expect(overlay.classList.contains('visible')).toBe(true);
+
+    SnippetLibrary.toggle();
+    expect(panel.classList.contains('open')).toBe(false);
+    expect(overlay.classList.contains('visible')).toBe(false);
+  });
+
+  test('close always closes panel', () => {
+    SnippetLibrary.toggle();
+    SnippetLibrary.close();
+
+    const panel = document.getElementById('snippets-panel');
+    expect(panel.classList.contains('open')).toBe(false);
+  });
+
+  test('render shows empty state with no snippets', () => {
+    SnippetLibrary.render([]);
+    const container = document.getElementById('snippets-list');
+    expect(container.querySelector('.snippets-empty')).not.toBeNull();
+    expect(container.textContent).toContain('No saved snippets');
+  });
+
+  test('render shows snippet cards', () => {
+    SnippetLibrary.add('Chart Code', 'canvas.draw()', ['chart']);
+    SnippetLibrary.add('API Call', 'fetch("url")', ['api']);
+
+    const snippets = SnippetLibrary.getAll();
+    SnippetLibrary.render(snippets);
+
+    const container = document.getElementById('snippets-list');
+    const cards = container.querySelectorAll('.snippet-card');
+    expect(cards).toHaveLength(2);
+
+    // Check first card (newest = API Call)
+    expect(cards[0].querySelector('.snippet-name').textContent).toBe('API Call');
+    expect(cards[0].querySelector('.snippet-tag').textContent).toBe('api');
+    expect(cards[0].querySelector('.snippet-code-preview').textContent).toContain('fetch');
+  });
+
+  test('render shows code preview truncated at 3 lines', () => {
+    SnippetLibrary.add('Multi', 'line1\nline2\nline3\nline4\nline5', []);
+    SnippetLibrary.render(SnippetLibrary.getAll());
+
+    const preview = document.querySelector('.snippet-code-preview');
+    expect(preview.textContent).toContain('line1');
+    expect(preview.textContent).toContain('line3');
+    expect(preview.textContent).toContain('…');
+  });
+
+  test('formatRelativeTime returns human-readable times', () => {
+    const now = new Date();
+    expect(SnippetLibrary.formatRelativeTime(now.toISOString())).toBe('just now');
+
+    const fiveMin = new Date(now - 5 * 60000);
+    expect(SnippetLibrary.formatRelativeTime(fiveMin.toISOString())).toBe('5m ago');
+
+    const threeHours = new Date(now - 3 * 3600000);
+    expect(SnippetLibrary.formatRelativeTime(threeHours.toISOString())).toBe('3h ago');
+
+    const twoDays = new Date(now - 2 * 86400000);
+    expect(SnippetLibrary.formatRelativeTime(twoDays.toISOString())).toBe('2d ago');
+  });
+
+  test('getCount returns correct count', () => {
+    expect(SnippetLibrary.getCount()).toBe(0);
+    SnippetLibrary.add('A', 'code', []);
+    expect(SnippetLibrary.getCount()).toBe(1);
+    SnippetLibrary.add('B', 'code', []);
+    expect(SnippetLibrary.getCount()).toBe(2);
+  });
+
+  test('persists to localStorage', () => {
+    SnippetLibrary.add('Persistent', 'my code', ['saved']);
+    const raw = localStorage.getItem('agenticchat_snippets');
+    expect(raw).toBeTruthy();
+    const parsed = JSON.parse(raw);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].name).toBe('Persistent');
+  });
+
+  test('handles corrupted localStorage gracefully', () => {
+    localStorage.setItem('agenticchat_snippets', 'not valid json');
+    expect(SnippetLibrary.getAll()).toEqual([]);
+  });
+
+  test('handleClearAll requires confirmation', () => {
+    SnippetLibrary.add('Test', 'code', []);
+
+    // Cancel confirmation
+    const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(false);
+    SnippetLibrary.handleClearAll();
+    expect(SnippetLibrary.getCount()).toBe(1);
+
+    // Accept confirmation
+    confirmSpy.mockReturnValue(true);
+    SnippetLibrary.handleClearAll();
+    expect(SnippetLibrary.getCount()).toBe(0);
+
+    confirmSpy.mockRestore();
+  });
+
+  test('handleClearAll does nothing when no snippets', () => {
+    const confirmSpy = jest.spyOn(window, 'confirm').mockReturnValue(true);
+    SnippetLibrary.handleClearAll(); // should not call confirm
+    expect(confirmSpy).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
+});

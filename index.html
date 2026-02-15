@@ -24,6 +24,7 @@
     <button id="clear-btn" class="btn-secondary" title="Clear conversation history">Clear</button>
     <button id="templates-btn" class="btn-secondary" title="Browse prompt templates">Templates</button>
     <button id="history-btn" class="btn-secondary" title="Toggle conversation history panel">History</button>
+    <button id="snippets-btn" class="btn-secondary" title="Saved code snippets">Snippets</button>
   </div>
 
   <div id="char-count"></div>
@@ -31,6 +32,11 @@
 
   <div id="blackbox">
     <div id="chat-output"></div>
+    <div id="code-actions" style="display:none;">
+      <button id="save-snippet-btn" class="btn-sm" title="Save this code snippet">💾 Save Snippet</button>
+      <button id="copy-code-btn" class="btn-sm" title="Copy code to clipboard">📋 Copy</button>
+      <button id="rerun-code-btn" class="btn-sm" title="Re-run this code">▶️ Re-run</button>
+    </div>
     <div id="console-output" aria-live="polite">(results appear here)</div>
     <div id="token-usage"></div>
   </div>
@@ -55,6 +61,23 @@
 
   <!-- Conversation History Panel -->
   <div id="history-panel" aria-label="Conversation history">
+
+  <!-- Snippets Panel -->
+  <div id="snippets-overlay"></div>
+  <div id="snippets-panel" aria-label="Saved code snippets">
+    <div id="snippets-header">
+      <span>💾 Saved Snippets</span>
+      <div id="snippets-actions">
+        <button id="snippets-clear-btn" class="btn-sm btn-danger-sm" title="Delete all snippets">Clear All</button>
+        <button id="snippets-close-btn" class="btn-sm" title="Close panel">✕</button>
+      </div>
+    </div>
+    <div id="snippets-search-wrap">
+      <input id="snippets-search" type="text" placeholder="Search snippets…" autocomplete="off">
+    </div>
+    <div id="snippets-count"></div>
+    <div id="snippets-list"></div>
+  </div>
     <div id="history-header">
       <span>Conversation History</span>
       <div id="history-actions">
@@ -74,6 +97,22 @@
       <input id="user-api-key" type="password" placeholder="Paste key" autocomplete="off">
       <br><br>
       <button id="apikey-submit-btn">OK</button>
+    </div>
+  </div>
+
+  <!-- Save Snippet Dialog -->
+  <div id="snippet-save-modal" role="dialog" aria-modal="true" aria-labelledby="snippet-modal-title">
+    <div id="snippet-save-content">
+      <p id="snippet-modal-title"><strong>Save Code Snippet</strong></p>
+      <label for="snippet-name-input">Name</label>
+      <input id="snippet-name-input" type="text" placeholder="e.g. Bar Chart Generator" autocomplete="off">
+      <label for="snippet-tags-input">Tags <span class="label-hint">(comma-separated, optional)</span></label>
+      <input id="snippet-tags-input" type="text" placeholder="e.g. chart, canvas, data" autocomplete="off">
+      <div id="snippet-code-preview"></div>
+      <div id="snippet-modal-buttons">
+        <button id="snippet-cancel-btn" class="btn-secondary">Cancel</button>
+        <button id="snippet-confirm-btn">Save</button>
+      </div>
     </div>
   </div>
 

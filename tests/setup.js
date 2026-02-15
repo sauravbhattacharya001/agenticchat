@@ -24,6 +24,11 @@ function setupDOM() {
     <div id="last-prompt">(no input yet)</div>
     <div id="blackbox">
       <div id="chat-output"></div>
+      <div id="code-actions" style="display:none;">
+        <button id="save-snippet-btn" class="btn-sm">💾 Save Snippet</button>
+        <button id="copy-code-btn" class="btn-sm">📋 Copy</button>
+        <button id="rerun-code-btn" class="btn-sm">▶️ Re-run</button>
+      </div>
       <div id="console-output" aria-live="polite">(results appear here)</div>
       <div id="token-usage"></div>
     </div>
@@ -60,6 +65,35 @@ function setupDOM() {
         <button id="apikey-submit-btn">OK</button>
       </div>
     </div>
+    <div id="snippets-overlay"></div>
+    <div id="snippets-panel" aria-label="Saved code snippets">
+      <div id="snippets-header">
+        <span>💾 Saved Snippets</span>
+        <div id="snippets-actions">
+          <button id="snippets-clear-btn" class="btn-sm btn-danger-sm">Clear All</button>
+          <button id="snippets-close-btn" class="btn-sm">✕</button>
+        </div>
+      </div>
+      <div id="snippets-search-wrap">
+        <input id="snippets-search" type="text" placeholder="Search snippets…" autocomplete="off">
+      </div>
+      <div id="snippets-count"></div>
+      <div id="snippets-list"></div>
+    </div>
+    <div id="snippet-save-modal" role="dialog" aria-modal="true" style="display:none;">
+      <div id="snippet-save-content">
+        <p id="snippet-modal-title"><strong>Save Code Snippet</strong></p>
+        <label for="snippet-name-input">Name</label>
+        <input id="snippet-name-input" type="text" placeholder="e.g. Bar Chart Generator" autocomplete="off">
+        <label for="snippet-tags-input">Tags</label>
+        <input id="snippet-tags-input" type="text" placeholder="e.g. chart, canvas, data" autocomplete="off">
+        <div id="snippet-code-preview"></div>
+        <div id="snippet-modal-buttons">
+          <button id="snippet-cancel-btn" class="btn-secondary">Cancel</button>
+          <button id="snippet-confirm-btn">Save</button>
+        </div>
+      </div>
+    </div>
   `;
 }
 
@@ -88,7 +122,8 @@ function loadApp() {
     'UIController',
     'PromptTemplates',
     'ChatController',
-    'HistoryPanel'
+    'HistoryPanel',
+    'SnippetLibrary'
   ];
 
   for (const mod of modules) {
