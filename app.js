@@ -37,6 +37,13 @@ Always \`return\` the final value.
 /* ---------- Conversation Manager ---------- */
 const ConversationManager = (() => {
   const history = [{ role: 'system', content: ChatConfig.SYSTEM_PROMPT }];
+  let cachedCharCount = ChatConfig.SYSTEM_PROMPT.length;
+  let charCountDirty = false;
+
+  function recomputeCharCount() {
+    cachedCharCount = history.reduce((sum, m) => sum + m.content.length, 0);
+    charCountDirty = false;
+  }
 
   return {
     getHistory()   { return history; },
@@ -44,11 +51,15 @@ const ConversationManager = (() => {
 
     addMessage(role, content) {
       history.push({ role, content });
+      cachedCharCount += content.length;
     },
 
     /** Remove the last message (used on API failure). */
     popLast() {
-      if (history.length > 1) history.pop();
+      if (history.length > 1) {
+        const removed = history.pop();
+        cachedCharCount -= removed.content.length;
+      }
     },
 
     /** Keep at most MAX_HISTORY_PAIRS user+assistant exchanges. */
@@ -59,18 +70,25 @@ const ConversationManager = (() => {
         const trimmed = messages.slice(messages.length - max);
         history.length = 0;
         history.push({ role: 'system', content: ChatConfig.SYSTEM_PROMPT }, ...trimmed);
+        charCountDirty = true;
       }
     },
 
     clear() {
       history.length = 0;
       history.push({ role: 'system', content: ChatConfig.SYSTEM_PROMPT });
+      cachedCharCount = ChatConfig.SYSTEM_PROMPT.length;
+      charCountDirty = false;
     },
 
-    /** Rough token estimate based on character count. */
+    /**
+     * Rough token estimate based on character count.
+     * Uses a cached character count that is incrementally maintained
+     * on addMessage/popLast/clear and only recomputed after trim.
+     */
     estimateTokens() {
-      const chars = history.reduce((sum, m) => sum + m.content.length, 0);
-      return Math.ceil(chars / ChatConfig.CHARS_PER_TOKEN);
+      if (charCountDirty) recomputeCharCount();
+      return Math.ceil(cachedCharCount / ChatConfig.CHARS_PER_TOKEN);
     }
   };
 })();
@@ -243,7 +261,17 @@ const ApiKeyManager = (() => {
 
 /* ---------- UI Controller ---------- */
 const UIController = (() => {
-  const el = (id) => document.getElementById(id);
+  // Cache DOM references on first access to avoid repeated getElementById lookups.
+  // Uses a lazy cache that populates on DOMContentLoaded or first call.
+  const _cache = {};
+  function el(id) {
+    let node = _cache[id];
+    if (!node) {
+      node = document.getElementById(id);
+      if (node) _cache[id] = node;
+    }
+    return node;
+  }
 
   function setChatOutput(text)    { el('chat-output').textContent = text; }
   function setConsoleOutput(text, color) {
@@ -264,15 +292,17 @@ const UIController = (() => {
   function setSandboxRunning(running) {
     el('cancel-btn').style.display = running ? 'inline-block' : 'none';
     if (running) {
-      el('send-btn').disabled = true;
-      el('send-btn').textContent = 'Running…';
+      const btn = el('send-btn');
+      btn.disabled = true;
+      btn.textContent = 'Running…';
     }
   }
 
   function resetSandboxUI() {
     setSandboxRunning(false);
-    el('send-btn').disabled = false;
-    el('send-btn').textContent = 'Send';
+    const btn = el('send-btn');
+    btn.disabled = false;
+    btn.textContent = 'Send';
   }
 
   function showTokenUsage(usage) {
@@ -295,12 +325,18 @@ const UIController = (() => {
     inp.placeholder = 'OpenAI API Key';
     inp.autocomplete = 'off';
     toolbar.appendChild(inp);
+    // Invalidate cache since we added a new element
+    _cache['api-key'] = inp;
     inp.focus();
   }
 
   function removeApiKeyInput() {
     const inp = el('api-key');
-    if (inp) { inp.value = ''; inp.remove(); }
+    if (inp) {
+      inp.value = '';
+      inp.remove();
+      delete _cache['api-key'];
+    }
   }
 
   function showServiceKeyModal(domain) {
@@ -315,7 +351,7 @@ const UIController = (() => {
   }
 
   function getChatInput()   { return el('chat-input').value.trim(); }
-  function clearChatInput() { el('chat-input').value = ''; el('chat-input').focus(); }
+  function clearChatInput() { const inp = el('chat-input'); inp.value = ''; inp.focus(); }
   function getApiKeyInput() { const inp = el('api-key'); return inp ? inp.value.trim() : ''; }
   function getServiceKeyInput() { return el('user-api-key').value.trim(); }
 
@@ -680,15 +716,19 @@ const PromptTemplates = (() => {
   function render(data) {
     const container = document.getElementById('templates-list');
     if (!container) return;
-    container.innerHTML = '';
 
     if (data.length === 0) {
+      container.innerHTML = '';
       const empty = document.createElement('div');
       empty.className = 'templates-empty';
       empty.textContent = 'No templates match your search.';
       container.appendChild(empty);
       return;
     }
+
+    // Build all template nodes in a DocumentFragment to avoid
+    // repeated reflows from per-category appendChild calls.
+    const fragment = document.createDocumentFragment();
 
     data.forEach(cat => {
       const catEl = document.createElement('div');
@@ -726,8 +766,12 @@ const PromptTemplates = (() => {
         catEl.appendChild(card);
       });
 
-      container.appendChild(catEl);
+      fragment.appendChild(catEl);
     });
+
+    // Single DOM mutation: clear and append all categories at once
+    container.innerHTML = '';
+    container.appendChild(fragment);
   }
 
   function selectTemplate(item) {
@@ -748,7 +792,18 @@ const PromptTemplates = (() => {
     render(results);
   }
 
-  return { getTemplates, search, toggle, close, render, handleSearch, selectTemplate };
+  // Debounced version: waits 150ms after last keystroke before searching.
+  // Prevents unnecessary array allocations and DOM rebuilds on every keypress.
+  let _searchTimer = null;
+  function handleSearchDebounced() {
+    if (_searchTimer) clearTimeout(_searchTimer);
+    _searchTimer = setTimeout(() => {
+      _searchTimer = null;
+      handleSearch();
+    }, 150);
+  }
+
+  return { getTemplates, search, toggle, close, render, handleSearch, handleSearchDebounced, selectTemplate };
 })();
 
 /* ---------- History Panel ---------- */
@@ -775,17 +830,32 @@ const HistoryPanel = (() => {
     document.getElementById('history-overlay').classList.remove('visible');
   }
 
+  /**
+   * Rebuild the history panel DOM.
+   * Uses DocumentFragment for batch DOM insertion (single reflow/repaint).
+   */
   function refresh() {
     const container = document.getElementById('history-messages');
-    const messages = ConversationManager.getMessages().filter(m => m.role !== 'system');
+    const history = ConversationManager.getHistory();
+
+    // Filter out system messages — iterate directly instead of
+    // creating a filtered copy via getMessages() + filter().
+    const messages = [];
+    for (let i = 0; i < history.length; i++) {
+      if (history[i].role !== 'system') messages.push(history[i]);
+    }
 
     if (messages.length === 0) {
       container.innerHTML = '<div class="history-empty">No messages yet.<br>Start a conversation to see history here.</div>';
       return;
     }
 
-    container.innerHTML = '';
-    messages.forEach((msg) => {
+    // Build all nodes in a DocumentFragment (off-DOM) to trigger
+    // only a single reflow when appended, instead of one per message.
+    const fragment = document.createDocumentFragment();
+
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
       const div = document.createElement('div');
       div.className = `history-msg ${msg.role}`;
 
@@ -798,7 +868,6 @@ const HistoryPanel = (() => {
       if (msg.role === 'assistant') {
         const codeMatch = msg.content.match(/```(?:js|javascript)?\n([\s\S]*?)```/i);
         if (codeMatch) {
-          // Show text before code block if any
           const beforeCode = msg.content.substring(0, msg.content.indexOf('```')).trim();
           if (beforeCode) {
             const textEl = document.createElement('div');
@@ -809,7 +878,6 @@ const HistoryPanel = (() => {
           const pre = document.createElement('pre');
           pre.textContent = codeMatch[1];
           div.appendChild(pre);
-          // Show text after code block if any
           const afterIdx = msg.content.indexOf('```', msg.content.indexOf('```') + 3);
           const afterCode = afterIdx >= 0 ? msg.content.substring(afterIdx + 3).trim() : '';
           if (afterCode) {
@@ -831,8 +899,12 @@ const HistoryPanel = (() => {
         div.appendChild(textEl);
       }
 
-      container.appendChild(div);
-    });
+      fragment.appendChild(div);
+    }
+
+    // Single DOM mutation: clear + append fragment
+    container.innerHTML = '';
+    container.appendChild(fragment);
 
     // Auto-scroll to bottom
     container.scrollTop = container.scrollHeight;
@@ -921,7 +993,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('templates-btn').addEventListener('click', PromptTemplates.toggle);
   document.getElementById('templates-close-btn').addEventListener('click', PromptTemplates.close);
   document.getElementById('templates-overlay').addEventListener('click', PromptTemplates.close);
-  document.getElementById('templates-search').addEventListener('input', PromptTemplates.handleSearch);
+  document.getElementById('templates-search').addEventListener('input', PromptTemplates.handleSearchDebounced);
 
   // Keyboard shortcut: Escape closes history panel
   document.addEventListener('keydown', (e) => {
