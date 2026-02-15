@@ -15,7 +15,7 @@
 
 A lightweight, zero-dependency chat interface that sends your prompts to GPT-4o, extracts the JavaScript it writes, and executes it in a sandboxed iframe — all from a single HTML file.
 
-[**Live Demo**](https://gray-forest-0f6217910.4.azurestaticapps.net) · [**Report Bug**](https://github.com/sauravbhattacharya001/agenticchat/issues) · [**Request Feature**](https://github.com/sauravbhattacharya001/agenticchat/issues)
+[**Live Demo**](https://sauravbhattacharya001.github.io/agenticchat/) · [**Report Bug**](https://github.com/sauravbhattacharya001/agenticchat/issues) · [**Request Feature**](https://github.com/sauravbhattacharya001/agenticchat/issues)
 
 </div>
 
@@ -42,7 +42,7 @@ A lightweight, zero-dependency chat interface that sends your prompts to GPT-4o,
 
 ### Usage
 
-1. **Open** `index.html` in your browser — or visit the [live demo](https://gray-forest-0f6217910.4.azurestaticapps.net)
+1. **Open** `index.html` in your browser — or visit the [live demo](https://sauravbhattacharya001.github.io/agenticchat/)
 2. **Paste** your OpenAI API key into the key field (stored in memory only, never persisted)
 3. **Type** a question or task and press **Enter**
 4. **Watch** the generated code and its output appear in the console area
@@ -103,7 +103,7 @@ The app executes AI-generated code, so security is a first-class concern:
 | **Frontend** | Vanilla HTML5 + CSS + JavaScript (single file) |
 | **AI Model** | OpenAI GPT-4o via REST API |
 | **Sandbox** | HTML5 iframe sandbox with CSP |
-| **Hosting** | Azure Static Web Apps |
+| **Hosting** | GitHub Pages |
 | **CI/CD** | GitHub Actions |
 | **Security** | CodeQL analysis |
 
