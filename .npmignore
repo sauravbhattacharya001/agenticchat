@@ -1,0 +1,9 @@
+# Development and CI files
+.github/
+tests/
+docs/
+jest.config.js
+.gitignore
+.dockerignore
+Dockerfile
+node_modules/
