@@ -10,7 +10,7 @@
 # ============================================================
 
 # --- Stage 1: Test ---
-FROM node:22-alpine AS test
+FROM node:25-alpine AS test
 
 WORKDIR /app
 COPY package.json package-lock.json ./
