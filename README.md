@@ -12,6 +12,7 @@
 [![OpenAI](https://img.shields.io/badge/Powered%20by-GPT--4o-412991?logo=openai&logoColor=white)](https://platform.openai.com/)
 [![GitHub repo size](https://img.shields.io/github/repo-size/sauravbhattacharya001/agenticchat)](https://github.com/sauravbhattacharya001/agenticchat)
 [![GitHub last commit](https://img.shields.io/github/last-commit/sauravbhattacharya001/agenticchat)](https://github.com/sauravbhattacharya001/agenticchat/commits/main)
+[![codecov](https://codecov.io/gh/sauravbhattacharya001/agenticchat/graph/badge.svg)](https://codecov.io/gh/sauravbhattacharya001/agenticchat)
 
 A lightweight, zero-dependency chat interface that sends your prompts to GPT-4o, extracts the JavaScript it writes, and executes it in a sandboxed iframe — all from a single HTML file.
 
