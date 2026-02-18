@@ -61,6 +61,16 @@
 
   <!-- Conversation History Panel -->
   <div id="history-panel" aria-label="Conversation history">
+    <div id="history-header">
+      <span>Conversation History</span>
+      <div id="history-actions">
+        <button id="export-md-btn" class="btn-sm" title="Export as Markdown">📄 MD</button>
+        <button id="export-json-btn" class="btn-sm" title="Export as JSON">📋 JSON</button>
+        <button id="history-close-btn" class="btn-sm" title="Close panel">✕</button>
+      </div>
+    </div>
+    <div id="history-messages"></div>
+  </div>
 
   <!-- Snippets Panel -->
   <div id="snippets-overlay"></div>
@@ -77,16 +87,6 @@
     </div>
     <div id="snippets-count"></div>
     <div id="snippets-list"></div>
-  </div>
-    <div id="history-header">
-      <span>Conversation History</span>
-      <div id="history-actions">
-        <button id="export-md-btn" class="btn-sm" title="Export as Markdown">📄 MD</button>
-        <button id="export-json-btn" class="btn-sm" title="Export as JSON">📋 JSON</button>
-        <button id="history-close-btn" class="btn-sm" title="Close panel">✕</button>
-      </div>
-    </div>
-    <div id="history-messages"></div>
   </div>
 
   <!-- API Key Modal -->
