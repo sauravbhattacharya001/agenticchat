@@ -19,7 +19,7 @@ COPY . .
 RUN npm test
 
 # --- Stage 2: Production ---
-FROM nginx:1.27-alpine AS production
+FROM nginx:1.29-alpine AS production
 
 # Remove default nginx config
 RUN rm /etc/nginx/conf.d/default.conf
