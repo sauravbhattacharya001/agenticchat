@@ -28,11 +28,13 @@ A lightweight, zero-dependency chat interface that sends your prompts to GPT-4o,
 - **Sandboxed Execution** — Generated code runs in an `<iframe sandbox="allow-scripts">` with no access to the parent page's DOM, cookies, localStorage, or variables
 - **Content Security Policy** — The sandbox iframe enforces `default-src 'none'; connect-src https:` so code can call external APIs but nothing else
 - **Nonce Validation** — Each execution gets a `crypto.randomUUID()` nonce to prevent stale or replayed postMessage events
-- **Conversation History** — Maintains a sliding window of up to 20 message pairs with automatic trimming and token-count warnings
+- **Conversation History** — Maintains a sliding window of up to 20 message pairs with automatic trimming and token-count warnings; viewable in a side panel with Markdown/JSON export
+- **Prompt Templates** — Built-in library of categorized prompt templates (data visualization, web APIs, utilities, creative) with search filtering
+- **Snippet Library** — Save, tag, search, rename, and re-run generated code snippets; persisted to localStorage
 - **API Key Management** — Detects `YOUR_API_KEY` placeholders in generated code and prompts for credentials per domain; keys are cached per session
 - **Input Guardrails** — Character limit (50K chars), total token estimate warnings (~80K threshold), and real-time character counter
 - **Cancel Execution** — Stop long-running sandbox code with a single click
-- **Zero Dependencies** — Single HTML file. No build tools, no npm, no bundler. Just open and go.
+- **Zero Dependencies** — Single HTML file + CSS + JS. No build tools, no npm, no bundler. Just open and go.
 
 ## 🚀 Getting Started
 
@@ -79,6 +81,22 @@ User Prompt  →  GPT-4o (system prompt: reply with JS only)
 3. The iframe **executes** the code with `new Function()` inside an async wrapper
 4. Results are **returned** via `postMessage` with origin validation (`'null'` for sandboxed iframes) and nonce matching
 
+### Modules
+
+The codebase is organized into **nine** IIFE modules in `app.js`:
+
+| Module | Purpose |
+|--------|---------|
+| `ChatConfig` | Frozen constants (model, limits, timeouts, system prompt) |
+| `ConversationManager` | Message history with sliding window trimming and token estimation |
+| `SandboxRunner` | Iframe sandbox lifecycle, execution, timeout, cancellation |
+| `ApiKeyManager` | OpenAI + per-service key storage, substitution, validation |
+| `UIController` | All DOM manipulation — button states, modals, output |
+| `ChatController` | Orchestrates send flow: input → API → code extraction → sandbox |
+| `PromptTemplates` | Browseable template library with search and category filtering |
+| `HistoryPanel` | Conversation viewer with Markdown/JSON export |
+| `SnippetLibrary` | Save, tag, search, rename, and re-run code snippets (localStorage) |
+
 ## 🔒 Security Model
 
 The app executes AI-generated code, so security is a first-class concern:
@@ -112,14 +130,38 @@ The app executes AI-generated code, so security is a first-class concern:
 
 ```
 agenticchat/
-├── index.html          # The entire application (HTML + CSS + JS)
-├── LICENSE             # MIT License
-├── README.md           # This file
-├── .gitignore
+├── index.html              # Single-page UI with CSP headers
+├── app.js                  # All application logic (modular IIFEs)
+├── style.css               # Responsive dark-theme styling
+├── package.json            # npm metadata + test scripts
+├── jest.config.js          # Jest test configuration
+├── Dockerfile              # Multi-stage container build
+├── CONTRIBUTING.md         # Contribution guidelines
+├── LICENSE                 # MIT License
+├── README.md               # This file
+├── docs/
+│   └── index.html          # API reference & architecture docs (GitHub Pages)
+├── tests/
+│   ├── setup.js            # DOM mocking & app.js loader for jsdom
+│   └── app.test.js         # 90+ unit & integration tests
 └── .github/
+    ├── copilot-instructions.md    # Copilot coding agent context
+    ├── copilot-setup-steps.yml    # Copilot agent setup workflow
+    ├── dependabot.yml             # Automated dependency updates
+    ├── labeler.yml                # Auto-label configuration
+    ├── PULL_REQUEST_TEMPLATE.md   # PR template
+    ├── ISSUE_TEMPLATE/
+    │   ├── bug_report.yml         # Bug report form
+    │   ├── feature_request.yml    # Feature request form
+    │   └── config.yml             # Issue template config
     └── workflows/
-        ├── azure-static-web-apps-*.yml   # Azure deployment
-        └── codeql.yml                     # Security scanning
+        ├── ci.yml                 # Build + test + lint
+        ├── codeql.yml             # CodeQL security scanning
+        ├── docker.yml             # Docker build & push
+        ├── labeler.yml            # Auto-labeler workflow
+        ├── pages.yml              # GitHub Pages deployment
+        ├── publish.yml            # npm package publishing
+        └── stale.yml              # Stale issue/PR management
 ```
 
 ## 🤝 Contributing

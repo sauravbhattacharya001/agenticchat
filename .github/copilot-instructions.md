@@ -14,17 +14,24 @@ The app uses a modular IIFE (Immediately Invoked Function Expression) pattern in
 - **ApiKeyManager** — Handles OpenAI API key and per-service key storage/substitution
 - **UIController** — All DOM manipulation (button states, modals, output display)
 - **ChatController** — Orchestrates the send flow: user input → OpenAI API → code extraction → sandbox execution
+- **PromptTemplates** — Browseable template library with categories (Data & Charts, Web & APIs, Utilities, Fun & Creative), search filtering, and debounced rendering
+- **HistoryPanel** — Slide-out conversation history viewer; renders code blocks in assistant messages; supports Markdown and JSON export via file download
+- **SnippetLibrary** — Persistent code snippet manager (localStorage-backed); supports save with name/tags, search, inline rename, re-run, copy, and delete; renders snippet cards with code preview
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `app.js` | All application logic (modular IIFEs) |
+| `app.js` | All application logic (9 modular IIFEs) |
 | `index.html` | Single-page UI with CSP headers |
-| `style.css` | Styling |
-| `tests/app.test.js` | Jest tests (jsdom environment) |
+| `style.css` | Responsive dark-theme styling |
+| `tests/app.test.js` | Jest tests — 90+ covering all modules (jsdom environment) |
+| `tests/setup.js` | Test DOM fixtures and app.js loader |
 | `jest.config.js` | Jest configuration |
-| `package.json` | Dependencies (jest, jsdom for testing) |
+| `package.json` | Dependencies (jest, jsdom, c8 for coverage) |
+| `docs/index.html` | API reference and architecture docs (deployed via GitHub Pages) |
+| `Dockerfile` | Multi-stage container build |
+| `CONTRIBUTING.md` | Contribution guidelines |
 
 ## Conventions
 
@@ -41,6 +48,7 @@ The app uses a modular IIFE (Immediately Invoked Function Expression) pattern in
 - The main page CSP restricts sources to `'self'` and `https://api.openai.com`
 - API key format validation prevents injection via the key input
 - `sanitizeKeyForCodeInjection()` escapes quotes, backticks, backslashes, and newlines
+- SnippetLibrary uses localStorage key `agenticchat_snippets` — handle corrupted data gracefully (try/catch on JSON.parse)
 
 ## Testing
 

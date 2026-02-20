@@ -128,6 +128,7 @@
     <a href="#architecture">Architecture</a>
     <a href="#api">API Reference</a>
     <a href="#configuration">Configuration</a>
+    <a href="#keyboard-shortcuts">Keyboard Shortcuts</a>
     <a href="#security">Security Model</a>
     <a href="#testing">Testing</a>
     <a href="#contributing">Contributing</a>
@@ -175,6 +176,18 @@
           <h3>⚡ Conversation Memory</h3>
           <p>Maintains conversation context with automatic trimming to stay within token limits.</p>
         </div>
+        <div class="card">
+          <h3>📋 Prompt Templates</h3>
+          <p>Built-in categorized template library (data viz, web APIs, utilities, creative) with search.</p>
+        </div>
+        <div class="card">
+          <h3>💾 Snippet Library</h3>
+          <p>Save, tag, search, rename, and re-run generated code snippets. Persisted to localStorage.</p>
+        </div>
+        <div class="card">
+          <h3>📜 History &amp; Export</h3>
+          <p>Side-panel conversation viewer with code-block rendering and Markdown/JSON export.</p>
+        </div>
       </div>
     </section>
 
@@ -204,7 +217,7 @@ open index.html</code></pre>
     <!-- Architecture -->
     <section id="architecture">
       <h2>Architecture</h2>
-      <p>The application is organized into six clearly separated modules, each implemented as an IIFE (Immediately Invoked Function Expression) exposing a clean public API:</p>
+      <p>The application is organized into nine clearly separated modules, each implemented as an IIFE (Immediately Invoked Function Expression) exposing a clean public API:</p>
 
       <table>
         <thead>
@@ -234,6 +247,18 @@ open index.html</code></pre>
           <tr>
             <td><code>ChatController</code></td>
             <td>Orchestration — sends messages, processes responses, coordinates other modules</td>
+          </tr>
+          <tr>
+            <td><code>PromptTemplates</code></td>
+            <td>Browseable template library with category grouping, search, and debounced filtering</td>
+          </tr>
+          <tr>
+            <td><code>HistoryPanel</code></td>
+            <td>Conversation history viewer with code-block rendering and Markdown/JSON export</td>
+          </tr>
+          <tr>
+            <td><code>SnippetLibrary</code></td>
+            <td>Persistent code snippet manager — save, tag, search, rename, re-run (localStorage-backed)</td>
           </tr>
         </tbody>
       </table>
@@ -296,11 +321,65 @@ open index.html</code></pre>
         <thead><tr><th>Method</th><th>Returns</th><th>Description</th></tr></thead>
         <tbody>
           <tr><td><code>getOpenAIKey()</code></td><td>string|null</td><td>Current OpenAI API key</td></tr>
-          <tr><td><code>setOpenAIKey(key)</code></td><td>void</td><td>Store the OpenAI key</td></tr>
+          <tr><td><code>setOpenAIKey(key)</code></td><td>void</td><td>Store the OpenAI key (validates <code>sk-</code> prefix format)</td></tr>
           <tr><td><code>clearOpenAIKey()</code></td><td>void</td><td>Reset key to null</td></tr>
           <tr><td><code>substituteServiceKey(code)</code></td><td>string|null</td><td>Replace YOUR_API_KEY placeholders; returns null if user input needed</td></tr>
           <tr><td><code>submitServiceKey(key)</code></td><td>string|null</td><td>Complete pending key substitution</td></tr>
           <tr><td><code>extractDomain(code)</code></td><td>string</td><td>Extract domain from first URL in code</td></tr>
+          <tr><td><code>getPendingDomain()</code></td><td>string|null</td><td>Domain awaiting a service key, or null</td></tr>
+        </tbody>
+      </table>
+
+      <h3>PromptTemplates</h3>
+      <p>Browseable library of categorized prompt templates with search/filter. Templates are organized into categories (Data &amp; Charts, Web &amp; APIs, Utilities, Fun &amp; Creative).</p>
+      <table>
+        <thead><tr><th>Method</th><th>Returns</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>getTemplates()</code></td><td>Array</td><td>All template categories with items (<code>{category, items[]}</code>)</td></tr>
+          <tr><td><code>search(query)</code></td><td>Array</td><td>Filter templates by name, description, or prompt content (case-insensitive)</td></tr>
+          <tr><td><code>toggle()</code></td><td>void</td><td>Open/close the templates side panel</td></tr>
+          <tr><td><code>close()</code></td><td>void</td><td>Close the panel (idempotent)</td></tr>
+          <tr><td><code>render(data)</code></td><td>void</td><td>Render template categories and cards into the panel DOM</td></tr>
+          <tr><td><code>selectTemplate(item)</code></td><td>void</td><td>Insert a template's prompt into the chat input and close the panel</td></tr>
+          <tr><td><code>handleSearch()</code></td><td>void</td><td>Read the search input value and re-render filtered results</td></tr>
+          <tr><td><code>handleSearchDebounced()</code></td><td>void</td><td>Debounced version of handleSearch (150ms delay)</td></tr>
+        </tbody>
+      </table>
+
+      <h3>HistoryPanel</h3>
+      <p>Slide-out conversation viewer with export capabilities.</p>
+      <table>
+        <thead><tr><th>Method</th><th>Returns</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>toggle()</code></td><td>void</td><td>Open/close the history side panel</td></tr>
+          <tr><td><code>close()</code></td><td>void</td><td>Close the panel (idempotent)</td></tr>
+          <tr><td><code>refresh()</code></td><td>void</td><td>Rebuild the history panel DOM from ConversationManager state; auto-scrolls to bottom</td></tr>
+          <tr><td><code>exportAsMarkdown()</code></td><td>void</td><td>Download conversation as a timestamped <code>.md</code> file</td></tr>
+          <tr><td><code>exportAsJSON()</code></td><td>void</td><td>Download conversation as a timestamped <code>.json</code> file with model metadata</td></tr>
+        </tbody>
+      </table>
+
+      <h3>SnippetLibrary</h3>
+      <p>Persistent code snippet manager backed by <code>localStorage</code>. Supports save, tag, search, rename, and re-run workflows.</p>
+      <table>
+        <thead><tr><th>Method</th><th>Returns</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>getAll()</code></td><td>Array</td><td>All saved snippets (<code>{id, name, code, tags[], createdAt}</code>)</td></tr>
+          <tr><td><code>getCount()</code></td><td>number</td><td>Total number of saved snippets</td></tr>
+          <tr><td><code>add(name, code, tags)</code></td><td>Array</td><td>Create a new snippet (prepended — newest first); returns updated list</td></tr>
+          <tr><td><code>remove(id)</code></td><td>Array</td><td>Delete a snippet by UUID; returns updated list</td></tr>
+          <tr><td><code>rename(id, newName)</code></td><td>Array</td><td>Update a snippet's name; returns updated list</td></tr>
+          <tr><td><code>clearAll()</code></td><td>void</td><td>Delete all snippets from localStorage</td></tr>
+          <tr><td><code>search(query)</code></td><td>Array</td><td>Filter by name, tag, or code content (case-insensitive)</td></tr>
+          <tr><td><code>setCurrentCode(code)</code></td><td>void</td><td>Track the latest AI-generated code; shows/hides code action buttons</td></tr>
+          <tr><td><code>getCurrentCode()</code></td><td>string|null</td><td>The code currently displayed in chat output</td></tr>
+          <tr><td><code>openSaveDialog()</code></td><td>void</td><td>Open the save-snippet modal with code preview</td></tr>
+          <tr><td><code>confirmSave()</code></td><td>void</td><td>Save the current code with user-provided name/tags</td></tr>
+          <tr><td><code>closeSaveDialog()</code></td><td>void</td><td>Close the save modal without saving</td></tr>
+          <tr><td><code>copyCurrentCode()</code></td><td>void</td><td>Copy current code to clipboard</td></tr>
+          <tr><td><code>rerunCurrentCode()</code></td><td>Promise</td><td>Re-execute the current code in the sandbox</td></tr>
+          <tr><td><code>toggle()</code></td><td>void</td><td>Open/close the snippets side panel</td></tr>
+          <tr><td><code>close()</code></td><td>void</td><td>Close the panel (idempotent)</td></tr>
         </tbody>
       </table>
     </section>
@@ -318,6 +397,23 @@ open index.html</code></pre>
   SYSTEM_PROMPT: `...`       // Agent instructions
 });</code></pre>
       <p><strong>Note:</strong> Since the config is frozen, you must modify the source and reload — this is by design to prevent runtime tampering.</p>
+    </section>
+
+    <!-- Keyboard Shortcuts -->
+    <section id="keyboard-shortcuts">
+      <h2>Keyboard Shortcuts</h2>
+      <p>The application supports the following keyboard shortcuts:</p>
+      <table>
+        <thead><tr><th>Key</th><th>Context</th><th>Action</th></tr></thead>
+        <tbody>
+          <tr><td><code>Enter</code></td><td>Chat input</td><td>Send message</td></tr>
+          <tr><td><code>Enter</code></td><td>Service key modal</td><td>Submit API key</td></tr>
+          <tr><td><code>Enter</code></td><td>Snippet name input</td><td>Confirm save</td></tr>
+          <tr><td><code>Escape</code></td><td>Anywhere</td><td>Close all open panels and modals (History, Templates, Snippets, Save dialog)</td></tr>
+          <tr><td><code>Enter</code></td><td>Snippet rename (inline)</td><td>Confirm rename</td></tr>
+          <tr><td><code>Escape</code></td><td>Snippet rename (inline)</td><td>Cancel rename and restore original name</td></tr>
+        </tbody>
+      </table>
     </section>
 
     <!-- Security -->
@@ -362,13 +458,16 @@ npm test
 # Run with coverage
 npx jest --coverage</code></pre>
 
-      <p>The test suite includes <strong>42 tests</strong> covering all modules:</p>
+      <p>The test suite includes <strong>90+ tests</strong> covering all nine modules:</p>
       <ul>
         <li><code>ChatConfig</code> — immutability, configuration values, system prompt content</li>
         <li><code>ConversationManager</code> — CRUD operations, history trimming, token estimation</li>
         <li><code>ApiKeyManager</code> — key lifecycle, service key substitution and caching</li>
         <li><code>UIController</code> — DOM state management, modal handling, character counting</li>
         <li><code>SandboxRunner</code> — initialization state, safe cancellation</li>
+        <li><code>PromptTemplates</code> — template retrieval, search filtering, panel toggle, rendering, accessibility attributes</li>
+        <li><code>HistoryPanel</code> — panel toggle, message rendering, code block display, empty state, export guards</li>
+        <li><code>SnippetLibrary</code> — CRUD, search, localStorage persistence, save dialog, rename, corrupted data handling</li>
         <li>Integration tests for token estimation accuracy and cost calculation</li>
       </ul>
     </section>
