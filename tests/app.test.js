@@ -1423,3 +1423,160 @@ describe('VoiceInput', () => {
     expect(VoiceInput.getFinalTranscript()).toBe('hello world');
   });
 });
+
+/* ================================================================
+ * ThemeManager
+ * ================================================================ */
+describe('ThemeManager', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    document.documentElement.removeAttribute('data-theme');
+  });
+
+  test('getTheme returns current theme', () => {
+    expect(typeof ThemeManager.getTheme()).toBe('string');
+  });
+
+  test('getThemes returns available themes', () => {
+    const themes = ThemeManager.getThemes();
+    expect(themes).toContain('dark');
+    expect(themes).toContain('light');
+    expect(themes).toHaveLength(2);
+  });
+
+  test('getThemes returns a copy, not the internal array', () => {
+    const themes = ThemeManager.getThemes();
+    themes.push('neon');
+    expect(ThemeManager.getThemes()).toHaveLength(2);
+  });
+
+  test('init defaults to dark theme when no saved preference', () => {
+    ThemeManager.init();
+    expect(ThemeManager.getTheme()).toBe('dark');
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+  });
+
+  test('init loads saved theme from localStorage', () => {
+    localStorage.setItem('agenticchat_theme', 'light');
+    ThemeManager.init();
+    expect(ThemeManager.getTheme()).toBe('light');
+    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
+  });
+
+  test('init ignores invalid saved theme', () => {
+    localStorage.setItem('agenticchat_theme', 'neon');
+    ThemeManager.init();
+    expect(ThemeManager.getTheme()).toBe('dark');
+  });
+
+  test('toggle switches from dark to light', () => {
+    ThemeManager.init();
+    const result = ThemeManager.toggle();
+    expect(result).toBe('light');
+    expect(ThemeManager.getTheme()).toBe('light');
+    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
+  });
+
+  test('toggle switches from light to dark', () => {
+    localStorage.setItem('agenticchat_theme', 'light');
+    ThemeManager.init();
+    const result = ThemeManager.toggle();
+    expect(result).toBe('dark');
+    expect(ThemeManager.getTheme()).toBe('dark');
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+  });
+
+  test('toggle persists to localStorage', () => {
+    ThemeManager.init();
+    ThemeManager.toggle();
+    expect(localStorage.getItem('agenticchat_theme')).toBe('light');
+    ThemeManager.toggle();
+    expect(localStorage.getItem('agenticchat_theme')).toBe('dark');
+  });
+
+  test('toggle updates theme button text', () => {
+    ThemeManager.init();
+    const btn = document.getElementById('theme-btn');
+    expect(btn.textContent).toBe('☀️'); // dark mode shows sun
+
+    ThemeManager.toggle();
+    expect(btn.textContent).toBe('🌙'); // light mode shows moon
+
+    ThemeManager.toggle();
+    expect(btn.textContent).toBe('☀️'); // back to sun
+  });
+
+  test('toggle updates theme button title', () => {
+    ThemeManager.init();
+    const btn = document.getElementById('theme-btn');
+    expect(btn.title).toContain('light');
+
+    ThemeManager.toggle();
+    expect(btn.title).toContain('dark');
+  });
+
+  test('setTheme sets a valid theme', () => {
+    ThemeManager.init();
+    const result = ThemeManager.setTheme('light');
+    expect(result).toBe('light');
+    expect(ThemeManager.getTheme()).toBe('light');
+    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
+  });
+
+  test('setTheme rejects invalid theme and returns current', () => {
+    ThemeManager.init();
+    const result = ThemeManager.setTheme('neon');
+    expect(result).toBe('dark'); // unchanged
+    expect(ThemeManager.getTheme()).toBe('dark');
+  });
+
+  test('setTheme persists to localStorage', () => {
+    ThemeManager.init();
+    ThemeManager.setTheme('light');
+    expect(localStorage.getItem('agenticchat_theme')).toBe('light');
+  });
+
+  test('setTheme updates button', () => {
+    ThemeManager.init();
+    ThemeManager.setTheme('light');
+    const btn = document.getElementById('theme-btn');
+    expect(btn.textContent).toBe('🌙');
+  });
+
+  test('double toggle returns to original theme', () => {
+    ThemeManager.init();
+    const original = ThemeManager.getTheme();
+    ThemeManager.toggle();
+    ThemeManager.toggle();
+    expect(ThemeManager.getTheme()).toBe(original);
+  });
+
+  test('data-theme attribute is set on document element', () => {
+    ThemeManager.init();
+    expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+    ThemeManager.setTheme('light');
+    expect(document.documentElement.getAttribute('data-theme')).toBe('light');
+  });
+
+  test('Ctrl+D keyboard shortcut toggles theme', () => {
+    ThemeManager.init();
+    expect(ThemeManager.getTheme()).toBe('dark');
+
+    const event = new KeyboardEvent('keydown', {
+      key: 'd', ctrlKey: true, bubbles: true
+    });
+    const prevented = !document.dispatchEvent(event);
+    // Since we call handleKeydown directly, verify by toggling
+    KeyboardShortcuts.handleKeydown(new KeyboardEvent('keydown', {
+      key: 'd', ctrlKey: true, bubbles: true
+    }));
+    expect(ThemeManager.getTheme()).toBe('light');
+  });
+
+  test('theme survives multiple init calls', () => {
+    ThemeManager.init();
+    ThemeManager.setTheme('light');
+    ThemeManager.init(); // re-init should load from localStorage
+    expect(ThemeManager.getTheme()).toBe('light');
+  });
+});

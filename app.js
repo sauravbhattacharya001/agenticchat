@@ -1460,6 +1460,13 @@ const KeyboardShortcuts = (() => {
       return;
     }
 
+    // Ctrl+D — toggle dark/light theme
+    if (ctrl && e.key === 'd') {
+      e.preventDefault();
+      ThemeManager.toggle();
+      return;
+    }
+
     // ? — show shortcuts help (only when not typing in an input)
     if (e.key === '?' && !ctrl && !e.altKey && !isInputFocused()) {
       e.preventDefault();
@@ -1612,6 +1619,85 @@ const VoiceInput = (() => {
   };
 })();
 
+/* ---------- Theme Manager ---------- */
+const ThemeManager = (() => {
+  const STORAGE_KEY = 'agenticchat_theme';
+  const THEMES = ['dark', 'light'];
+  let currentTheme = 'dark';
+
+  /** Load saved theme or detect system preference. */
+  function init() {
+    const saved = _loadSaved();
+    if (saved && THEMES.includes(saved)) {
+      currentTheme = saved;
+    } else if (typeof window !== 'undefined' && window.matchMedia) {
+      // Detect OS-level preference
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)');
+      currentTheme = prefersDark.matches ? 'dark' : 'light';
+    }
+    _apply(currentTheme);
+    _updateButton();
+  }
+
+  /** Toggle between dark and light themes. */
+  function toggle() {
+    currentTheme = currentTheme === 'dark' ? 'light' : 'dark';
+    _apply(currentTheme);
+    _save(currentTheme);
+    _updateButton();
+    return currentTheme;
+  }
+
+  /** Set a specific theme. */
+  function setTheme(theme) {
+    if (!THEMES.includes(theme)) return currentTheme;
+    currentTheme = theme;
+    _apply(currentTheme);
+    _save(currentTheme);
+    _updateButton();
+    return currentTheme;
+  }
+
+  /** Get the current theme name. */
+  function getTheme() {
+    return currentTheme;
+  }
+
+  /** Get available theme names. */
+  function getThemes() {
+    return [...THEMES];
+  }
+
+  function _apply(theme) {
+    if (typeof document !== 'undefined') {
+      document.documentElement.setAttribute('data-theme', theme);
+    }
+  }
+
+  function _save(theme) {
+    try { localStorage.setItem(STORAGE_KEY, theme); } catch (_) {}
+  }
+
+  function _loadSaved() {
+    try { return localStorage.getItem(STORAGE_KEY); } catch (_) { return null; }
+  }
+
+  function _updateButton() {
+    if (typeof document === 'undefined') return;
+    const btn = document.getElementById('theme-btn');
+    if (!btn) return;
+    if (currentTheme === 'dark') {
+      btn.textContent = '☀️';
+      btn.title = 'Switch to light theme (Ctrl+D)';
+    } else {
+      btn.textContent = '🌙';
+      btn.title = 'Switch to dark theme (Ctrl+D)';
+    }
+  }
+
+  return { init, toggle, setTheme, getTheme, getThemes };
+})();
+
 /* ---------- Event Bindings ---------- */
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('send-btn').addEventListener('click', ChatController.send);
@@ -1707,6 +1793,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // Close when clicking overlay (outside modal content)
     if (e.target.id === 'shortcuts-modal') KeyboardShortcuts.hideHelp();
   });
+
+  // Theme toggle
+  document.getElementById('theme-btn').addEventListener('click', ThemeManager.toggle);
+  ThemeManager.init();
 
   // Code action buttons (save/copy/rerun)
   document.getElementById('save-snippet-btn').addEventListener('click', SnippetLibrary.openSaveDialog);
