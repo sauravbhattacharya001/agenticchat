@@ -25,6 +25,7 @@
     <button id="templates-btn" class="btn-secondary" title="Browse prompt templates">Templates</button>
     <button id="history-btn" class="btn-secondary" title="Toggle conversation history panel">History</button>
     <button id="snippets-btn" class="btn-secondary" title="Saved code snippets">Snippets</button>
+    <button id="shortcuts-btn" class="btn-secondary" title="Keyboard shortcuts (press ? for help)">⌨️</button>
   </div>
 
   <div id="char-count"></div>
@@ -112,6 +113,35 @@
       <div id="snippet-modal-buttons">
         <button id="snippet-cancel-btn" class="btn-secondary">Cancel</button>
         <button id="snippet-confirm-btn">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Keyboard Shortcuts Help Modal -->
+  <div id="shortcuts-modal" role="dialog" aria-modal="true" aria-labelledby="shortcuts-modal-title">
+    <div id="shortcuts-modal-content">
+      <div id="shortcuts-modal-header">
+        <span id="shortcuts-modal-title">⌨️ Keyboard Shortcuts</span>
+        <button id="shortcuts-modal-close" class="btn-sm" title="Close">✕</button>
+      </div>
+      <div id="shortcuts-list">
+        <div class="shortcut-group">
+          <div class="shortcut-group-title">Chat</div>
+          <div class="shortcut-row"><kbd>Enter</kbd><span>Send message</span></div>
+          <div class="shortcut-row"><kbd>Ctrl</kbd> + <kbd>L</kbd><span>Clear conversation</span></div>
+          <div class="shortcut-row"><kbd>Ctrl</kbd> + <kbd>K</kbd><span>Focus chat input</span></div>
+        </div>
+        <div class="shortcut-group">
+          <div class="shortcut-group-title">Panels</div>
+          <div class="shortcut-row"><kbd>Ctrl</kbd> + <kbd>H</kbd><span>Toggle history</span></div>
+          <div class="shortcut-row"><kbd>Ctrl</kbd> + <kbd>T</kbd><span>Toggle templates</span></div>
+          <div class="shortcut-row"><kbd>Ctrl</kbd> + <kbd>S</kbd><span>Toggle snippets</span></div>
+        </div>
+        <div class="shortcut-group">
+          <div class="shortcut-group-title">General</div>
+          <div class="shortcut-row"><kbd>?</kbd><span>Show this help</span></div>
+          <div class="shortcut-row"><kbd>Escape</kbd><span>Close any panel / modal</span></div>
+        </div>
       </div>
     </div>
   </div>

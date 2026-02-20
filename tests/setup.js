@@ -19,6 +19,8 @@ function setupDOM() {
       <button id="clear-btn" class="btn-secondary">Clear</button>
       <button id="templates-btn" class="btn-secondary">Templates</button>
       <button id="history-btn" class="btn-secondary">History</button>
+      <button id="snippets-btn" class="btn-secondary">Snippets</button>
+      <button id="shortcuts-btn" class="btn-secondary">⌨️</button>
     </div>
     <div id="char-count"></div>
     <div id="last-prompt">(no input yet)</div>
@@ -94,6 +96,15 @@ function setupDOM() {
         </div>
       </div>
     </div>
+    <div id="shortcuts-modal" role="dialog" aria-modal="true" aria-labelledby="shortcuts-modal-title">
+      <div id="shortcuts-modal-content">
+        <div id="shortcuts-modal-header">
+          <span id="shortcuts-modal-title">⌨️ Keyboard Shortcuts</span>
+          <button id="shortcuts-modal-close" class="btn-sm">✕</button>
+        </div>
+        <div id="shortcuts-list"></div>
+      </div>
+    </div>
   `;
 }
 
@@ -123,7 +134,8 @@ function loadApp() {
     'PromptTemplates',
     'ChatController',
     'HistoryPanel',
-    'SnippetLibrary'
+    'SnippetLibrary',
+    'KeyboardShortcuts'
   ];
 
   for (const mod of modules) {

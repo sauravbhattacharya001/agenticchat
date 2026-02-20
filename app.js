@@ -1370,6 +1370,105 @@ const SnippetLibrary = (() => {
   };
 })();
 
+/* ---------- Keyboard Shortcuts ---------- */
+const KeyboardShortcuts = (() => {
+  let isHelpOpen = false;
+
+  /** Check if user is typing in an input/textarea. */
+  function isInputFocused() {
+    const el = document.activeElement;
+    if (!el) return false;
+    const tag = el.tagName;
+    return tag === 'INPUT' || tag === 'TEXTAREA' || !!el.isContentEditable;
+  }
+
+  function showHelp() {
+    isHelpOpen = true;
+    const modal = document.getElementById('shortcuts-modal');
+    if (modal) modal.classList.add('visible');
+  }
+
+  function hideHelp() {
+    isHelpOpen = false;
+    const modal = document.getElementById('shortcuts-modal');
+    if (modal) modal.classList.remove('visible');
+  }
+
+  function toggleHelp() {
+    if (isHelpOpen) hideHelp();
+    else showHelp();
+  }
+
+  function isOpen() {
+    return isHelpOpen;
+  }
+
+  /**
+   * Main keyboard handler.
+   * Ctrl+L: clear conversation
+   * Ctrl+H: toggle history
+   * Ctrl+T: toggle templates
+   * Ctrl+S: toggle snippets
+   * Ctrl+K: focus chat input
+   * ?: show shortcuts help (only when not typing)
+   * Escape: close any open panel/modal
+   */
+  function handleKeydown(e) {
+    const ctrl = e.ctrlKey || e.metaKey;
+
+    // Ctrl+L — clear conversation
+    if (ctrl && e.key === 'l') {
+      e.preventDefault();
+      ChatController.clearHistory();
+      return;
+    }
+
+    // Ctrl+H — toggle history panel
+    if (ctrl && e.key === 'h') {
+      e.preventDefault();
+      HistoryPanel.toggle();
+      return;
+    }
+
+    // Ctrl+T — toggle templates panel
+    if (ctrl && e.key === 't') {
+      e.preventDefault();
+      PromptTemplates.toggle();
+      return;
+    }
+
+    // Ctrl+S — toggle snippets panel
+    if (ctrl && e.key === 's') {
+      e.preventDefault();
+      SnippetLibrary.toggle();
+      return;
+    }
+
+    // Ctrl+K — focus chat input
+    if (ctrl && e.key === 'k') {
+      e.preventDefault();
+      const input = document.getElementById('chat-input');
+      if (input) input.focus();
+      return;
+    }
+
+    // ? — show shortcuts help (only when not typing in an input)
+    if (e.key === '?' && !ctrl && !e.altKey && !isInputFocused()) {
+      e.preventDefault();
+      toggleHelp();
+      return;
+    }
+
+    // Escape — close shortcuts help (other panels handled by existing handler)
+    if (e.key === 'Escape' && isHelpOpen) {
+      hideHelp();
+      // Don't return — let existing Escape handler also close other panels
+    }
+  }
+
+  return { showHelp, hideHelp, toggleHelp, isOpen, handleKeydown, isInputFocused };
+})();
+
 /* ---------- Event Bindings ---------- */
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('send-btn').addEventListener('click', ChatController.send);
@@ -1411,7 +1510,19 @@ document.addEventListener('DOMContentLoaded', () => {
       PromptTemplates.close();
       SnippetLibrary.close();
       SnippetLibrary.closeSaveDialog();
+      KeyboardShortcuts.hideHelp();
     }
+  });
+
+  // Global keyboard shortcuts
+  document.addEventListener('keydown', KeyboardShortcuts.handleKeydown);
+
+  // Shortcuts help button + modal close
+  document.getElementById('shortcuts-btn').addEventListener('click', KeyboardShortcuts.toggleHelp);
+  document.getElementById('shortcuts-modal-close').addEventListener('click', KeyboardShortcuts.hideHelp);
+  document.getElementById('shortcuts-modal').addEventListener('click', (e) => {
+    // Close when clicking overlay (outside modal content)
+    if (e.target.id === 'shortcuts-modal') KeyboardShortcuts.hideHelp();
   });
 
   // Code action buttons (save/copy/rerun)

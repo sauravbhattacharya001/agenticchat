@@ -708,3 +708,94 @@ pre {
   padding: 0.4rem 1rem;
   font-size: 0.88rem;
 }
+
+/* ---- Keyboard Shortcuts Modal ---- */
+#shortcuts-modal {
+  position: fixed;
+  inset: 0;
+  background: var(--modal-bg);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 300;
+}
+
+#shortcuts-modal.visible {
+  display: flex;
+}
+
+#shortcuts-modal-content {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  padding: 0;
+  border-radius: 10px;
+  width: 90%;
+  max-width: 420px;
+  border: 1px solid var(--border-box);
+  box-shadow: 0 8px 32px var(--shadow);
+  overflow: hidden;
+}
+
+#shortcuts-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border-box);
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+#shortcuts-list {
+  padding: 0.75rem 1rem 1rem;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.shortcut-group {
+  margin-bottom: 0.85rem;
+}
+
+.shortcut-group:last-child {
+  margin-bottom: 0;
+}
+
+.shortcut-group-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-bottom: 0.4rem;
+  padding-bottom: 0.2rem;
+  border-bottom: 1px solid var(--border-box);
+}
+
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.3rem 0;
+  font-size: 0.85rem;
+}
+
+.shortcut-row span {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+kbd {
+  display: inline-block;
+  padding: 0.15rem 0.45rem;
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  min-width: 1.4rem;
+  text-align: center;
+  line-height: 1.4;
+}

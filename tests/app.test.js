@@ -902,3 +902,205 @@ describe('SnippetLibrary', () => {
     confirmSpy.mockRestore();
   });
 });
+
+/* ================================================================
+ * KeyboardShortcuts
+ * ================================================================ */
+describe('KeyboardShortcuts', () => {
+  test('showHelp opens the shortcuts modal', () => {
+    const modal = document.getElementById('shortcuts-modal');
+    expect(modal.classList.contains('visible')).toBe(false);
+
+    KeyboardShortcuts.showHelp();
+    expect(modal.classList.contains('visible')).toBe(true);
+    expect(KeyboardShortcuts.isOpen()).toBe(true);
+  });
+
+  test('hideHelp closes the shortcuts modal', () => {
+    KeyboardShortcuts.showHelp();
+    KeyboardShortcuts.hideHelp();
+
+    const modal = document.getElementById('shortcuts-modal');
+    expect(modal.classList.contains('visible')).toBe(false);
+    expect(KeyboardShortcuts.isOpen()).toBe(false);
+  });
+
+  test('toggleHelp opens and closes', () => {
+    KeyboardShortcuts.toggleHelp();
+    expect(KeyboardShortcuts.isOpen()).toBe(true);
+
+    KeyboardShortcuts.toggleHelp();
+    expect(KeyboardShortcuts.isOpen()).toBe(false);
+  });
+
+  test('? key opens help when not in input', () => {
+    const event = new KeyboardEvent('keydown', {
+      key: '?', ctrlKey: false, altKey: false, bubbles: true
+    });
+    // activeElement is body (not an input)
+    KeyboardShortcuts.handleKeydown(event);
+    expect(KeyboardShortcuts.isOpen()).toBe(true);
+
+    // Toggle off
+    KeyboardShortcuts.handleKeydown(event);
+    expect(KeyboardShortcuts.isOpen()).toBe(false);
+  });
+
+  test('? key does NOT open help when typing in input', () => {
+    const input = document.getElementById('chat-input');
+    input.focus();
+
+    const event = new KeyboardEvent('keydown', {
+      key: '?', ctrlKey: false, altKey: false, bubbles: true
+    });
+    KeyboardShortcuts.handleKeydown(event);
+    expect(KeyboardShortcuts.isOpen()).toBe(false);
+  });
+
+  test('Escape closes shortcuts help', () => {
+    KeyboardShortcuts.showHelp();
+    expect(KeyboardShortcuts.isOpen()).toBe(true);
+
+    const event = new KeyboardEvent('keydown', {
+      key: 'Escape', bubbles: true
+    });
+    KeyboardShortcuts.handleKeydown(event);
+    expect(KeyboardShortcuts.isOpen()).toBe(false);
+  });
+
+  test('Ctrl+L clears conversation', () => {
+    ConversationManager.addMessage('user', 'hello');
+    ConversationManager.addMessage('assistant', 'hi');
+    expect(ConversationManager.getHistory().length).toBe(3);
+
+    const event = new KeyboardEvent('keydown', {
+      key: 'l', ctrlKey: true, bubbles: true
+    });
+    // Spy on preventDefault to verify it was called
+    const preventSpy = jest.fn();
+    event.preventDefault = preventSpy;
+
+    KeyboardShortcuts.handleKeydown(event);
+    expect(preventSpy).toHaveBeenCalled();
+    // History should be cleared (only system prompt remains)
+    expect(ConversationManager.getHistory().length).toBe(1);
+  });
+
+  test('Ctrl+H toggles history panel', () => {
+    const panel = document.getElementById('history-panel');
+    expect(panel.classList.contains('open')).toBe(false);
+
+    const event = new KeyboardEvent('keydown', {
+      key: 'h', ctrlKey: true, bubbles: true
+    });
+    event.preventDefault = jest.fn();
+
+    KeyboardShortcuts.handleKeydown(event);
+    expect(panel.classList.contains('open')).toBe(true);
+
+    KeyboardShortcuts.handleKeydown(event);
+    expect(panel.classList.contains('open')).toBe(false);
+  });
+
+  test('Ctrl+T toggles templates panel', () => {
+    const panel = document.getElementById('templates-panel');
+    expect(panel.classList.contains('open')).toBe(false);
+
+    const event = new KeyboardEvent('keydown', {
+      key: 't', ctrlKey: true, bubbles: true
+    });
+    event.preventDefault = jest.fn();
+
+    KeyboardShortcuts.handleKeydown(event);
+    expect(panel.classList.contains('open')).toBe(true);
+
+    KeyboardShortcuts.handleKeydown(event);
+    expect(panel.classList.contains('open')).toBe(false);
+  });
+
+  test('Ctrl+S toggles snippets panel', () => {
+    const panel = document.getElementById('snippets-panel');
+    expect(panel.classList.contains('open')).toBe(false);
+
+    const event = new KeyboardEvent('keydown', {
+      key: 's', ctrlKey: true, bubbles: true
+    });
+    event.preventDefault = jest.fn();
+
+    KeyboardShortcuts.handleKeydown(event);
+    expect(panel.classList.contains('open')).toBe(true);
+
+    KeyboardShortcuts.handleKeydown(event);
+    expect(panel.classList.contains('open')).toBe(false);
+  });
+
+  test('Ctrl+K focuses chat input', () => {
+    // Focus something else first
+    document.getElementById('send-btn').focus();
+    expect(document.activeElement.id).toBe('send-btn');
+
+    const event = new KeyboardEvent('keydown', {
+      key: 'k', ctrlKey: true, bubbles: true
+    });
+    event.preventDefault = jest.fn();
+
+    KeyboardShortcuts.handleKeydown(event);
+    expect(document.activeElement.id).toBe('chat-input');
+  });
+
+  test('metaKey (Cmd on Mac) works as Ctrl', () => {
+    const panel = document.getElementById('history-panel');
+
+    const event = new KeyboardEvent('keydown', {
+      key: 'h', metaKey: true, bubbles: true
+    });
+    event.preventDefault = jest.fn();
+
+    KeyboardShortcuts.handleKeydown(event);
+    expect(panel.classList.contains('open')).toBe(true);
+  });
+
+  test('isInputFocused detects input focus correctly', () => {
+    // No input focused
+    expect(KeyboardShortcuts.isInputFocused()).toBe(false);
+
+    // Focus an input
+    document.getElementById('chat-input').focus();
+    expect(KeyboardShortcuts.isInputFocused()).toBe(true);
+
+    // Focus a button (not an input)
+    document.getElementById('send-btn').focus();
+    expect(KeyboardShortcuts.isInputFocused()).toBe(false);
+  });
+
+  test('? key with Ctrl held does NOT open help', () => {
+    const event = new KeyboardEvent('keydown', {
+      key: '?', ctrlKey: true, bubbles: true
+    });
+    KeyboardShortcuts.handleKeydown(event);
+    expect(KeyboardShortcuts.isOpen()).toBe(false);
+  });
+
+  test('? key with Alt held does NOT open help', () => {
+    const event = new KeyboardEvent('keydown', {
+      key: '?', altKey: true, bubbles: true
+    });
+    KeyboardShortcuts.handleKeydown(event);
+    expect(KeyboardShortcuts.isOpen()).toBe(false);
+  });
+
+  test('unrecognized keys are ignored', () => {
+    // Should not throw and should not change any state
+    const event = new KeyboardEvent('keydown', {
+      key: 'z', ctrlKey: false, bubbles: true
+    });
+    expect(() => KeyboardShortcuts.handleKeydown(event)).not.toThrow();
+    expect(KeyboardShortcuts.isOpen()).toBe(false);
+  });
+
+  test('hideHelp is safe to call when already closed', () => {
+    expect(KeyboardShortcuts.isOpen()).toBe(false);
+    expect(() => KeyboardShortcuts.hideHelp()).not.toThrow();
+    expect(KeyboardShortcuts.isOpen()).toBe(false);
+  });
+});
