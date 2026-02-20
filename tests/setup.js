@@ -21,6 +21,7 @@ function setupDOM() {
       <button id="history-btn" class="btn-secondary">History</button>
       <button id="snippets-btn" class="btn-secondary">Snippets</button>
       <button id="shortcuts-btn" class="btn-secondary">⌨️</button>
+      <button id="voice-btn" class="btn-secondary" aria-label="Toggle voice input">🎤</button>
     </div>
     <div id="char-count"></div>
     <div id="last-prompt">(no input yet)</div>
@@ -135,7 +136,8 @@ function loadApp() {
     'ChatController',
     'HistoryPanel',
     'SnippetLibrary',
-    'KeyboardShortcuts'
+    'KeyboardShortcuts',
+    'VoiceInput'
   ];
 
   for (const mod of modules) {

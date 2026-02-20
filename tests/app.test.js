@@ -1104,3 +1104,322 @@ describe('KeyboardShortcuts', () => {
     expect(KeyboardShortcuts.isOpen()).toBe(false);
   });
 });
+
+/* ================================================================
+ * VoiceInput
+ * ================================================================ */
+describe('VoiceInput', () => {
+  let mockRecognition;
+  let eventListeners;
+
+  beforeEach(() => {
+    eventListeners = {};
+    mockRecognition = {
+      continuous: false,
+      interimResults: false,
+      lang: '',
+      maxAlternatives: 1,
+      start: jest.fn(),
+      stop: jest.fn(),
+      addEventListener: jest.fn((event, handler) => {
+        if (!eventListeners[event]) eventListeners[event] = [];
+        eventListeners[event].push(handler);
+      })
+    };
+    window.SpeechRecognition = jest.fn(() => mockRecognition);
+    delete window.webkitSpeechRecognition;
+  });
+
+  afterEach(() => {
+    delete window.SpeechRecognition;
+    delete window.webkitSpeechRecognition;
+  });
+
+  test('isSupported returns true when SpeechRecognition is available', () => {
+    expect(VoiceInput.isSupported()).toBe(true);
+  });
+
+  test('isSupported returns true for webkitSpeechRecognition', () => {
+    delete window.SpeechRecognition;
+    window.webkitSpeechRecognition = jest.fn(() => mockRecognition);
+    // Need to reload app to pick up the change
+    setupDOM();
+    loadApp();
+    expect(VoiceInput.isSupported()).toBe(true);
+  });
+
+  test('isSupported returns false when no recognition API exists', () => {
+    delete window.SpeechRecognition;
+    delete window.webkitSpeechRecognition;
+    // Need to reload app to pick up the change
+    setupDOM();
+    loadApp();
+    expect(VoiceInput.isSupported()).toBe(false);
+  });
+
+  test('starts and stops listening', () => {
+    VoiceInput.start();
+    expect(VoiceInput.getIsListening()).toBe(true);
+    expect(mockRecognition.start).toHaveBeenCalled();
+
+    VoiceInput.stop();
+    expect(VoiceInput.getIsListening()).toBe(false);
+    expect(mockRecognition.stop).toHaveBeenCalled();
+  });
+
+  test('start is idempotent when already listening', () => {
+    VoiceInput.start();
+    VoiceInput.start(); // should not throw or double-start
+    expect(mockRecognition.start).toHaveBeenCalledTimes(1);
+  });
+
+  test('stop returns empty string when not listening', () => {
+    const result = VoiceInput.stop();
+    expect(result).toBe('');
+  });
+
+  test('toggle starts then stops', () => {
+    const r1 = VoiceInput.toggle();
+    expect(r1.listening).toBe(true);
+    expect(VoiceInput.getIsListening()).toBe(true);
+
+    const r2 = VoiceInput.toggle();
+    expect(r2.listening).toBe(false);
+    expect(VoiceInput.getIsListening()).toBe(false);
+  });
+
+  test('onResult callback receives final and interim transcripts', () => {
+    const resultFn = jest.fn();
+    VoiceInput.onResult(resultFn);
+    VoiceInput.start();
+
+    // Simulate a speech recognition result event
+    const resultHandler = eventListeners['result']?.[0];
+    expect(resultHandler).toBeDefined();
+
+    // Simulate interim result
+    resultHandler({
+      resultIndex: 0,
+      results: [
+        { 0: { transcript: 'hello ' }, isFinal: false, length: 1 }
+      ]
+    });
+    expect(resultFn).toHaveBeenCalledWith('', 'hello ');
+
+    // Simulate final result
+    resultHandler({
+      resultIndex: 0,
+      results: [
+        { 0: { transcript: 'hello world' }, isFinal: true, length: 1 }
+      ]
+    });
+    expect(resultFn).toHaveBeenCalledWith('hello world', '');
+  });
+
+  test('onStateChange callback fires on start/stop', () => {
+    const stateFn = jest.fn();
+    VoiceInput.onStateChange(stateFn);
+
+    VoiceInput.start();
+    expect(stateFn).toHaveBeenCalledWith(true);
+
+    VoiceInput.stop();
+    expect(stateFn).toHaveBeenCalledWith(false);
+  });
+
+  test('setLanguage and getLanguage work', () => {
+    VoiceInput.start(); // ensure recognition is initialized
+    VoiceInput.setLanguage('es-ES');
+    expect(VoiceInput.getLanguage()).toBe('es-ES');
+  });
+
+  test('getLanguage returns en-US as default', () => {
+    // Before init, default is en-US
+    expect(VoiceInput.getLanguage()).toBe('en-US');
+  });
+
+  test('stop returns accumulated transcript', () => {
+    VoiceInput.start();
+
+    const resultHandler = eventListeners['result']?.[0];
+    resultHandler({
+      resultIndex: 0,
+      results: [
+        { 0: { transcript: 'hello world' }, isFinal: true, length: 1 }
+      ]
+    });
+
+    const transcript = VoiceInput.stop();
+    expect(transcript).toBe('hello world');
+  });
+
+  test('stop clears transcript after returning it', () => {
+    VoiceInput.start();
+
+    const resultHandler = eventListeners['result']?.[0];
+    resultHandler({
+      resultIndex: 0,
+      results: [
+        { 0: { transcript: 'test' }, isFinal: true, length: 1 }
+      ]
+    });
+
+    VoiceInput.stop();
+    expect(VoiceInput.getFinalTranscript()).toBe('');
+    expect(VoiceInput.getInterimTranscript()).toBe('');
+  });
+
+  test('recognition configures continuous and interimResults', () => {
+    VoiceInput.start();
+    expect(mockRecognition.continuous).toBe(true);
+    expect(mockRecognition.interimResults).toBe(true);
+    expect(mockRecognition.lang).toBe('en-US');
+  });
+
+  test('soft errors (no-speech, aborted) do not stop listening', () => {
+    VoiceInput.start();
+    expect(VoiceInput.getIsListening()).toBe(true);
+
+    const errorHandler = eventListeners['error']?.[0];
+    expect(errorHandler).toBeDefined();
+
+    errorHandler({ error: 'no-speech' });
+    expect(VoiceInput.getIsListening()).toBe(true);
+
+    errorHandler({ error: 'aborted' });
+    expect(VoiceInput.getIsListening()).toBe(true);
+  });
+
+  test('hard errors stop listening', () => {
+    VoiceInput.start();
+    expect(VoiceInput.getIsListening()).toBe(true);
+
+    const errorHandler = eventListeners['error']?.[0];
+    errorHandler({ error: 'not-allowed' });
+    expect(VoiceInput.getIsListening()).toBe(false);
+  });
+
+  test('auto-restarts on end event when still listening', () => {
+    VoiceInput.start();
+    mockRecognition.start.mockClear();
+
+    const endHandler = eventListeners['end']?.[0];
+    expect(endHandler).toBeDefined();
+
+    endHandler();
+    expect(mockRecognition.start).toHaveBeenCalledTimes(1);
+  });
+
+  test('does not restart on end event when stopped', () => {
+    VoiceInput.start();
+    VoiceInput.stop();
+    mockRecognition.start.mockClear();
+
+    const endHandler = eventListeners['end']?.[0];
+    endHandler();
+    expect(mockRecognition.start).not.toHaveBeenCalled();
+  });
+
+  test('voice button exists in DOM', () => {
+    const btn = document.getElementById('voice-btn');
+    expect(btn).toBeTruthy();
+    expect(btn.getAttribute('aria-label')).toBe('Toggle voice input');
+  });
+
+  test('voice button is disabled when Speech API not supported', () => {
+    delete window.SpeechRecognition;
+    delete window.webkitSpeechRecognition;
+    setupDOM();
+    loadApp();
+
+    // Simulate the DOMContentLoaded check: disable button if not supported
+    const btn = document.getElementById('voice-btn');
+    if (!VoiceInput.isSupported()) {
+      btn.disabled = true;
+    }
+    expect(btn.disabled).toBe(true);
+  });
+
+  test('Ctrl+M shortcut triggers voice button click', () => {
+    const voiceBtn = document.getElementById('voice-btn');
+    const clickSpy = jest.spyOn(voiceBtn, 'click');
+
+    const event = new KeyboardEvent('keydown', {
+      key: 'm', ctrlKey: true, bubbles: true
+    });
+    event.preventDefault = jest.fn();
+
+    KeyboardShortcuts.handleKeydown(event);
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(clickSpy).toHaveBeenCalled();
+
+    clickSpy.mockRestore();
+  });
+
+  test('Ctrl+M does not click disabled voice button', () => {
+    const voiceBtn = document.getElementById('voice-btn');
+    voiceBtn.disabled = true;
+    const clickSpy = jest.spyOn(voiceBtn, 'click');
+
+    const event = new KeyboardEvent('keydown', {
+      key: 'm', ctrlKey: true, bubbles: true
+    });
+    event.preventDefault = jest.fn();
+
+    KeyboardShortcuts.handleKeydown(event);
+    expect(clickSpy).not.toHaveBeenCalled();
+
+    clickSpy.mockRestore();
+  });
+
+  test('start does nothing when not supported', () => {
+    delete window.SpeechRecognition;
+    delete window.webkitSpeechRecognition;
+    setupDOM();
+    loadApp();
+
+    VoiceInput.start();
+    expect(VoiceInput.getIsListening()).toBe(false);
+  });
+
+  test('toggle returns transcript on stop', () => {
+    VoiceInput.start();
+
+    const resultHandler = eventListeners['result']?.[0];
+    resultHandler({
+      resultIndex: 0,
+      results: [
+        { 0: { transcript: 'dictated text' }, isFinal: true, length: 1 }
+      ]
+    });
+
+    const result = VoiceInput.toggle();
+    expect(result.listening).toBe(false);
+    expect(result.transcript).toBe('dictated text');
+  });
+
+  test('accumulates multiple final results', () => {
+    VoiceInput.start();
+
+    const resultHandler = eventListeners['result']?.[0];
+
+    // First final result
+    resultHandler({
+      resultIndex: 0,
+      results: [
+        { 0: { transcript: 'hello ' }, isFinal: true, length: 1 }
+      ]
+    });
+
+    // Second final result
+    resultHandler({
+      resultIndex: 1,
+      results: [
+        { 0: { transcript: 'hello ' }, isFinal: true, length: 1 },
+        { 0: { transcript: 'world' }, isFinal: true, length: 1 }
+      ]
+    });
+
+    expect(VoiceInput.getFinalTranscript()).toBe('hello world');
+  });
+});

@@ -799,3 +799,32 @@ kbd {
   text-align: center;
   line-height: 1.4;
 }
+
+/* ---- Voice Input Button ---- */
+#voice-btn {
+  position: relative;
+  transition: background 0.2s, color 0.2s, box-shadow 0.2s;
+}
+
+#voice-btn.voice-recording {
+  background: var(--danger);
+  color: #fff;
+  box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6);
+  animation: voice-pulse 1.5s ease-in-out infinite;
+}
+
+#voice-btn:disabled {
+  opacity: 0.4;
+}
+
+@keyframes voice-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(239, 68, 68, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+  }
+}

@@ -1452,6 +1452,14 @@ const KeyboardShortcuts = (() => {
       return;
     }
 
+    // Ctrl+M — toggle voice input
+    if (ctrl && e.key === 'm') {
+      e.preventDefault();
+      const voiceBtn = document.getElementById('voice-btn');
+      if (voiceBtn && !voiceBtn.disabled) voiceBtn.click();
+      return;
+    }
+
     // ? — show shortcuts help (only when not typing in an input)
     if (e.key === '?' && !ctrl && !e.altKey && !isInputFocused()) {
       e.preventDefault();
@@ -1467,6 +1475,141 @@ const KeyboardShortcuts = (() => {
   }
 
   return { showHelp, hideHelp, toggleHelp, isOpen, handleKeydown, isInputFocused };
+})();
+
+/* ---------- Voice Input ---------- */
+const VoiceInput = (() => {
+  let recognition = null;
+  let isListening = false;
+  let finalTranscript = '';
+  let interimTranscript = '';
+  let _onResult = null;
+  let _onStateChange = null;
+  let _autoSend = false;
+
+  /** Check if Speech Recognition is available in this browser. */
+  function isSupported() {
+    return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+  }
+
+  /** Initialize the recognition engine. Idempotent. */
+  function _ensureRecognition() {
+    if (recognition) return recognition;
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) return null;
+
+    recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+    recognition.maxAlternatives = 1;
+
+    recognition.addEventListener('result', (event) => {
+      interimTranscript = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          finalTranscript += transcript;
+        } else {
+          interimTranscript += transcript;
+        }
+      }
+      if (_onResult) {
+        _onResult(finalTranscript, interimTranscript);
+      }
+    });
+
+    recognition.addEventListener('error', (event) => {
+      // 'no-speech' and 'aborted' are soft errors — don't stop listening
+      if (event.error === 'no-speech' || event.error === 'aborted') return;
+      stop();
+    });
+
+    recognition.addEventListener('end', () => {
+      // Auto-restart if we're still supposed to be listening
+      // (browser can stop recognition after silence)
+      if (isListening) {
+        try { recognition.start(); } catch (_) {}
+      }
+    });
+
+    return recognition;
+  }
+
+  /** Start listening. */
+  function start() {
+    if (isListening) return;
+    if (!isSupported()) return;
+
+    const rec = _ensureRecognition();
+    if (!rec) return;
+
+    finalTranscript = '';
+    interimTranscript = '';
+    isListening = true;
+
+    try {
+      rec.start();
+    } catch (_) {
+      // Already started — ignore
+    }
+
+    if (_onStateChange) _onStateChange(true);
+  }
+
+  /** Stop listening and return the final transcript. */
+  function stop() {
+    if (!isListening) return '';
+    isListening = false;
+
+    if (recognition) {
+      try { recognition.stop(); } catch (_) {}
+    }
+
+    if (_onStateChange) _onStateChange(false);
+
+    const result = (finalTranscript + interimTranscript).trim();
+    finalTranscript = '';
+    interimTranscript = '';
+    return result;
+  }
+
+  /** Toggle listening on/off. Returns true if now listening. */
+  function toggle() {
+    if (isListening) {
+      const transcript = stop();
+      return { listening: false, transcript };
+    } else {
+      start();
+      return { listening: true, transcript: '' };
+    }
+  }
+
+  function getIsListening() { return isListening; }
+  function getFinalTranscript() { return finalTranscript; }
+  function getInterimTranscript() { return interimTranscript; }
+
+  /** Set callback for speech results: (finalText, interimText) => void */
+  function onResult(fn) { _onResult = fn; }
+
+  /** Set callback for state changes: (isListening) => void */
+  function onStateChange(fn) { _onStateChange = fn; }
+
+  /** Set the recognition language (e.g. 'en-US', 'es-ES', 'fr-FR'). */
+  function setLanguage(lang) {
+    if (recognition) recognition.lang = lang;
+  }
+
+  /** Get current language. */
+  function getLanguage() {
+    return recognition ? recognition.lang : 'en-US';
+  }
+
+  return {
+    isSupported, start, stop, toggle,
+    getIsListening, getFinalTranscript, getInterimTranscript,
+    onResult, onStateChange, setLanguage, getLanguage
+  };
 })();
 
 /* ---------- Event Bindings ---------- */
@@ -1516,6 +1659,46 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Global keyboard shortcuts
   document.addEventListener('keydown', KeyboardShortcuts.handleKeydown);
+
+  // Voice input
+  const voiceBtn = document.getElementById('voice-btn');
+  if (!VoiceInput.isSupported()) {
+    voiceBtn.disabled = true;
+    voiceBtn.title = 'Voice input not supported in this browser';
+  }
+
+  // Wire up result callback: update chat input in real-time
+  VoiceInput.onResult((finalText, interimText) => {
+    const input = document.getElementById('chat-input');
+    if (input) {
+      // Show final + interim (interim in progress)
+      const combined = (finalText + interimText).trim();
+      input.value = combined;
+      UIController.updateCharCount(combined.length);
+    }
+  });
+
+  // Wire up state change: toggle button appearance
+  VoiceInput.onStateChange((listening) => {
+    if (listening) {
+      voiceBtn.classList.add('voice-recording');
+      voiceBtn.textContent = '⏹️';
+      voiceBtn.title = 'Stop voice input';
+    } else {
+      voiceBtn.classList.remove('voice-recording');
+      voiceBtn.textContent = '🎤';
+      voiceBtn.title = 'Voice input — speak your prompt (Ctrl+M)';
+    }
+  });
+
+  voiceBtn.addEventListener('click', () => {
+    const result = VoiceInput.toggle();
+    // If stopped, the transcript is already in the input field
+    if (!result.listening && result.transcript) {
+      const input = document.getElementById('chat-input');
+      if (input) input.focus();
+    }
+  });
 
   // Shortcuts help button + modal close
   document.getElementById('shortcuts-btn').addEventListener('click', KeyboardShortcuts.toggleHelp);
