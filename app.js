@@ -982,16 +982,22 @@ const SnippetLibrary = (() => {
     } catch { return []; }
   }
 
-  /** Save snippets to localStorage. */
+  /** Save snippets to localStorage. Returns true on success, false on failure. */
   function save(snippets) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(snippets));
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(snippets));
+      return true;
+    } catch (e) {
+      console.error('[SnippetLibrary] Failed to persist snippets:', e.message);
+      return false;
+    }
   }
 
   function getAll() { return load(); }
 
   function getCount() { return load().length; }
 
-  /** Add a new snippet. */
+  /** Add a new snippet. Returns {snippets, saved} where saved indicates persistence. */
   function add(name, code, tags) {
     const snippets = load();
     snippets.unshift({
@@ -1001,29 +1007,30 @@ const SnippetLibrary = (() => {
       tags: tags.map(t => t.trim()).filter(t => t.length > 0),
       createdAt: new Date().toISOString()
     });
-    save(snippets);
-    return snippets;
+    const saved = save(snippets);
+    return { snippets, saved };
   }
 
-  /** Delete a snippet by ID. */
+  /** Delete a snippet by ID. Returns {snippets, saved}. */
   function remove(id) {
     const snippets = load().filter(s => s.id !== id);
-    save(snippets);
-    return snippets;
+    const saved = save(snippets);
+    return { snippets, saved };
   }
 
-  /** Rename a snippet. */
+  /** Rename a snippet. Returns {snippets, saved}. */
   function rename(id, newName) {
     const snippets = load();
     const snippet = snippets.find(s => s.id === id);
     if (snippet) snippet.name = newName.trim();
-    save(snippets);
-    return snippets;
+    const saved = save(snippets);
+    return { snippets, saved };
   }
 
-  /** Clear all snippets. */
+  /** Clear all snippets. Returns {saved}. */
   function clearAll() {
-    save([]);
+    const saved = save([]);
+    return { saved };
   }
 
   /** Search snippets by name, tags, or code content. */
@@ -1081,15 +1088,18 @@ const SnippetLibrary = (() => {
       .map(t => t.trim().toLowerCase())
       .filter(t => t.length > 0);
 
-    add(name, currentCode, tags);
+    const result = add(name, currentCode, tags);
     closeSaveDialog();
 
-    // Show brief confirmation
-    const actionsEl = document.getElementById('code-actions');
+    // Show confirmation or error feedback
     const saveBtn = document.getElementById('save-snippet-btn');
     if (saveBtn) {
-      saveBtn.textContent = '✅ Saved!';
-      setTimeout(() => { saveBtn.textContent = '💾 Save Snippet'; }, 1500);
+      if (result.saved) {
+        saveBtn.textContent = '✅ Saved!';
+      } else {
+        saveBtn.textContent = '❌ Storage full!';
+      }
+      setTimeout(() => { saveBtn.textContent = '💾 Save Snippet'; }, 2000);
     }
 
     // Refresh snippets panel if open
@@ -1272,7 +1282,10 @@ const SnippetLibrary = (() => {
       deleteBtn.textContent = '🗑️';
       deleteBtn.title = 'Delete snippet';
       deleteBtn.addEventListener('click', () => {
-        remove(snippet.id);
+        const result = remove(snippet.id);
+        if (!result.saved) {
+          alert('Failed to delete snippet — storage may be unavailable.');
+        }
         refresh();
       });
       actions.appendChild(deleteBtn);
@@ -1358,7 +1371,10 @@ const SnippetLibrary = (() => {
     const count = getCount();
     if (count === 0) return;
     if (!confirm(`Delete all ${count} saved snippet${count !== 1 ? 's' : ''}?`)) return;
-    clearAll();
+    const result = clearAll();
+    if (!result.saved) {
+      alert('Failed to clear snippets — storage may be unavailable.');
+    }
     refresh();
   }
 

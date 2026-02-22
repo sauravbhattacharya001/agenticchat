@@ -617,7 +617,9 @@ describe('SnippetLibrary', () => {
   });
 
   test('add creates a snippet with correct fields', () => {
-    const snippets = SnippetLibrary.add('Test Snippet', 'console.log("hi")', ['test', 'demo']);
+    const result = SnippetLibrary.add('Test Snippet', 'console.log("hi")', ['test', 'demo']);
+    expect(result.saved).toBe(true);
+    const snippets = result.snippets;
     expect(snippets).toHaveLength(1);
     expect(snippets[0].name).toBe('Test Snippet');
     expect(snippets[0].code).toBe('console.log("hi")');
@@ -635,9 +637,9 @@ describe('SnippetLibrary', () => {
   });
 
   test('add filters empty tags', () => {
-    const snippets = SnippetLibrary.add('Test', 'code', ['valid', '', '  ', 'also-valid']);
+    const result = SnippetLibrary.add('Test', 'code', ['valid', '', '  ', 'also-valid']);
     // Only non-empty after trim
-    expect(snippets[0].tags).toEqual(['valid', 'also-valid']);
+    expect(result.snippets[0].tags).toEqual(['valid', 'also-valid']);
   });
 
   test('remove deletes snippet by ID', () => {
@@ -646,15 +648,16 @@ describe('SnippetLibrary', () => {
     const all = SnippetLibrary.getAll();
     const deleteId = all.find(s => s.name === 'Delete').id;
 
-    const remaining = SnippetLibrary.remove(deleteId);
-    expect(remaining).toHaveLength(1);
-    expect(remaining[0].name).toBe('Keep');
+    const result = SnippetLibrary.remove(deleteId);
+    expect(result.saved).toBe(true);
+    expect(result.snippets).toHaveLength(1);
+    expect(result.snippets[0].name).toBe('Keep');
   });
 
   test('remove with non-existent ID is safe', () => {
     SnippetLibrary.add('Test', 'code', []);
-    const remaining = SnippetLibrary.remove('non-existent-id');
-    expect(remaining).toHaveLength(1);
+    const result = SnippetLibrary.remove('non-existent-id');
+    expect(result.snippets).toHaveLength(1);
   });
 
   test('rename updates snippet name', () => {
@@ -900,6 +903,73 @@ describe('SnippetLibrary', () => {
     SnippetLibrary.handleClearAll(); // should not call confirm
     expect(confirmSpy).not.toHaveBeenCalled();
     confirmSpy.mockRestore();
+  });
+
+  test('add returns saved:false when localStorage throws', () => {
+    const origSet = Storage.prototype.setItem;
+    Storage.prototype.setItem = () => { throw new DOMException('QuotaExceededError'); };
+
+    const result = SnippetLibrary.add('Test', 'code', ['tag']);
+    expect(result.saved).toBe(false);
+    expect(result.snippets).toHaveLength(1); // in-memory array still built
+    expect(result.snippets[0].name).toBe('Test');
+
+    Storage.prototype.setItem = origSet;
+  });
+
+  test('remove returns saved:false when localStorage throws', () => {
+    SnippetLibrary.add('Keep', 'code', []);
+    const id = SnippetLibrary.getAll()[0].id;
+
+    const origSet = Storage.prototype.setItem;
+    Storage.prototype.setItem = () => { throw new DOMException('QuotaExceededError'); };
+
+    const result = SnippetLibrary.remove(id);
+    expect(result.saved).toBe(false);
+    expect(result.snippets).toHaveLength(0);
+
+    Storage.prototype.setItem = origSet;
+  });
+
+  test('rename returns saved:false when localStorage throws', () => {
+    SnippetLibrary.add('Old', 'code', []);
+    const id = SnippetLibrary.getAll()[0].id;
+
+    const origSet = Storage.prototype.setItem;
+    Storage.prototype.setItem = () => { throw new DOMException('QuotaExceededError'); };
+
+    const result = SnippetLibrary.rename(id, 'New');
+    expect(result.saved).toBe(false);
+
+    Storage.prototype.setItem = origSet;
+  });
+
+  test('clearAll returns saved:false when localStorage throws', () => {
+    SnippetLibrary.add('Test', 'code', []);
+
+    const origSet = Storage.prototype.setItem;
+    Storage.prototype.setItem = () => { throw new DOMException('QuotaExceededError'); };
+
+    const result = SnippetLibrary.clearAll();
+    expect(result.saved).toBe(false);
+
+    Storage.prototype.setItem = origSet;
+  });
+
+  test('confirmSave shows error when save fails', () => {
+    SnippetLibrary.setCurrentCode('test code');
+    SnippetLibrary.openSaveDialog();
+    document.getElementById('snippet-name-input').value = 'Quota Test';
+
+    const origSet = Storage.prototype.setItem;
+    Storage.prototype.setItem = () => { throw new DOMException('QuotaExceededError'); };
+
+    SnippetLibrary.confirmSave();
+
+    const saveBtn = document.getElementById('save-snippet-btn');
+    expect(saveBtn.textContent).toBe('❌ Storage full!');
+
+    Storage.prototype.setItem = origSet;
   });
 });
 
