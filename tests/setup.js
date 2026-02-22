@@ -107,6 +107,38 @@ function setupDOM() {
         <div id="shortcuts-list"></div>
       </div>
     </div>
+    <div id="sessions-overlay"></div>
+    <div id="sessions-panel" aria-label="Chat sessions">
+      <div id="sessions-header">
+        <span>💬 Chat Sessions</span>
+        <div id="sessions-actions">
+          <button id="sessions-close-btn" class="btn-sm">✕</button>
+        </div>
+      </div>
+      <div id="sessions-toolbar">
+        <button id="sessions-new-btn" class="btn-sm">➕ New</button>
+        <button id="sessions-save-btn" class="btn-sm">💾 Save</button>
+        <button id="sessions-import-btn" class="btn-sm">📥 Import</button>
+        <button id="sessions-clear-btn" class="btn-sm btn-danger-sm">Clear All</button>
+        <label class="sessions-autosave-label">
+          <input type="checkbox" id="sessions-autosave">
+          Auto-save
+        </label>
+      </div>
+      <div id="sessions-count"></div>
+      <div id="sessions-list"></div>
+    </div>
+    <div id="session-save-modal" role="dialog" aria-modal="true" style="display:none;">
+      <div id="session-save-content">
+        <p id="session-modal-title"><strong>Save Session</strong></p>
+        <label for="session-name-input">Session Name</label>
+        <input id="session-name-input" type="text" autocomplete="off">
+        <div id="session-modal-buttons">
+          <button id="session-save-cancel" class="btn-secondary">Cancel</button>
+          <button id="session-save-confirm">Save</button>
+        </div>
+      </div>
+    </div>
   `;
 }
 
@@ -139,7 +171,8 @@ function loadApp() {
     'SnippetLibrary',
     'KeyboardShortcuts',
     'VoiceInput',
-    'ThemeManager'
+    'ThemeManager',
+    'SessionManager'
   ];
 
   for (const mod of modules) {

@@ -532,6 +532,9 @@ const ChatController = (() => {
 
       // Update history panel if open
       HistoryPanel.refresh();
+
+      // Auto-save session if enabled
+      SessionManager.autoSaveIfEnabled();
     } catch (err) {
       if (ConversationManager.getHistory().length > 1 &&
           ConversationManager.getHistory().at(-1).role === 'user') {
@@ -1444,6 +1447,20 @@ const KeyboardShortcuts = (() => {
       return;
     }
 
+    // Ctrl+J — toggle sessions panel
+    if (ctrl && e.key === 'j') {
+      e.preventDefault();
+      SessionManager.toggle();
+      return;
+    }
+
+    // Ctrl+N — new session
+    if (ctrl && e.key === 'n') {
+      e.preventDefault();
+      SessionManager.newSession();
+      return;
+    }
+
     // Ctrl+K — focus chat input
     if (ctrl && e.key === 'k') {
       e.preventDefault();
@@ -1698,6 +1715,580 @@ const ThemeManager = (() => {
   return { init, toggle, setTheme, getTheme, getThemes };
 })();
 
+/* ---------- Session Manager ---------- */
+const SessionManager = (() => {
+  const STORAGE_KEY = 'agenticchat_sessions';
+  const ACTIVE_KEY = 'agenticchat_active_session';
+  const AUTO_SAVE_KEY = 'agenticchat_autosave';
+  let isOpen = false;
+  let autoSave = false;
+
+  /** Load all sessions from localStorage. */
+  function _loadAll() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch { return []; }
+  }
+
+  /** Save all sessions to localStorage. */
+  function _saveAll(sessions) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
+  }
+
+  /** Get or set the active session ID. */
+  function _getActiveId() {
+    try { return localStorage.getItem(ACTIVE_KEY) || null; } catch { return null; }
+  }
+  function _setActiveId(id) {
+    try {
+      if (id) localStorage.setItem(ACTIVE_KEY, id);
+      else localStorage.removeItem(ACTIVE_KEY);
+    } catch {}
+  }
+
+  /** Initialize auto-save preference. */
+  function initAutoSave() {
+    try {
+      autoSave = localStorage.getItem(AUTO_SAVE_KEY) === 'true';
+    } catch { autoSave = false; }
+    _updateAutoSaveUI();
+  }
+
+  function isAutoSaveEnabled() { return autoSave; }
+
+  function toggleAutoSave() {
+    autoSave = !autoSave;
+    try { localStorage.setItem(AUTO_SAVE_KEY, String(autoSave)); } catch {}
+    _updateAutoSaveUI();
+    return autoSave;
+  }
+
+  function _updateAutoSaveUI() {
+    const toggle = document.getElementById('sessions-autosave');
+    if (toggle) {
+      toggle.checked = autoSave;
+      toggle.title = autoSave ? 'Auto-save is ON' : 'Auto-save is OFF';
+    }
+  }
+
+  /** Get all sessions sorted by updatedAt (newest first). */
+  function getAll() {
+    return _loadAll().sort((a, b) =>
+      new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+    );
+  }
+
+  /** Get the count of saved sessions. */
+  function getCount() {
+    return _loadAll().length;
+  }
+
+  /**
+   * Save the current conversation as a named session.
+   * If activeId matches an existing session, updates it. Otherwise creates new.
+   */
+  function save(name) {
+    const messages = ConversationManager.getMessages().filter(m => m.role !== 'system');
+    if (messages.length === 0 && !name) return null;
+
+    const sessions = _loadAll();
+    const activeId = _getActiveId();
+    const now = new Date().toISOString();
+
+    // Check if we're updating an existing session
+    const existing = activeId ? sessions.find(s => s.id === activeId) : null;
+
+    if (existing) {
+      existing.messages = messages;
+      existing.messageCount = messages.length;
+      existing.updatedAt = now;
+      if (name && name.trim()) existing.name = name.trim();
+      // Update preview from last user message
+      const lastUser = messages.filter(m => m.role === 'user').pop();
+      existing.preview = lastUser
+        ? lastUser.content.substring(0, 120)
+        : existing.preview;
+      _saveAll(sessions);
+      return existing;
+    }
+
+    // Create new session
+    const sessionName = (name && name.trim())
+      ? name.trim()
+      : _generateName(messages);
+    const lastUser = messages.filter(m => m.role === 'user').pop();
+
+    const session = {
+      id: crypto.randomUUID(),
+      name: sessionName,
+      messages,
+      messageCount: messages.length,
+      preview: lastUser ? lastUser.content.substring(0, 120) : '',
+      createdAt: now,
+      updatedAt: now
+    };
+
+    sessions.unshift(session);
+    _saveAll(sessions);
+    _setActiveId(session.id);
+    return session;
+  }
+
+  /** Auto-save the current session (called after each message). */
+  function autoSaveIfEnabled() {
+    if (!autoSave) return;
+    const messages = ConversationManager.getMessages().filter(m => m.role !== 'system');
+    if (messages.length === 0) return;
+
+    const activeId = _getActiveId();
+    if (activeId) {
+      // Update existing session silently
+      save();
+    } else {
+      // Create a new auto-named session
+      save();
+    }
+    if (isOpen) refresh();
+  }
+
+  /** Generate a session name from the first user message. */
+  function _generateName(messages) {
+    const firstUser = messages.find(m => m.role === 'user');
+    if (firstUser) {
+      const text = firstUser.content.trim();
+      if (text.length <= 40) return text;
+      return text.substring(0, 37) + '…';
+    }
+    return `Session ${new Date().toLocaleString()}`;
+  }
+
+  /** Load a session by ID — replaces current conversation. */
+  function load(id) {
+    const sessions = _loadAll();
+    const session = sessions.find(s => s.id === id);
+    if (!session) return null;
+
+    // Save current session first if auto-save is on
+    const currentMessages = ConversationManager.getMessages().filter(m => m.role !== 'system');
+    if (autoSave && currentMessages.length > 0) {
+      save();
+    }
+
+    // Replace conversation history
+    ConversationManager.clear();
+    session.messages.forEach(msg => {
+      ConversationManager.addMessage(msg.role, msg.content);
+    });
+
+    _setActiveId(session.id);
+
+    // Update UI
+    UIController.setChatOutput('');
+    UIController.setConsoleOutput('(results appear here)');
+    UIController.setLastPrompt(`Loaded: ${session.name}`);
+    SnippetLibrary.setCurrentCode(null);
+    HistoryPanel.refresh();
+
+    return session;
+  }
+
+  /** Delete a session by ID. */
+  function remove(id) {
+    const sessions = _loadAll().filter(s => s.id !== id);
+    _saveAll(sessions);
+    if (_getActiveId() === id) _setActiveId(null);
+    return sessions;
+  }
+
+  /** Rename a session. */
+  function rename(id, newName) {
+    const sessions = _loadAll();
+    const session = sessions.find(s => s.id === id);
+    if (session && newName && newName.trim()) {
+      session.name = newName.trim();
+      session.updatedAt = new Date().toISOString();
+      _saveAll(sessions);
+    }
+    return sessions;
+  }
+
+  /** Start a new empty session. Optionally saves current first. */
+  function newSession() {
+    const currentMessages = ConversationManager.getMessages().filter(m => m.role !== 'system');
+    if (autoSave && currentMessages.length > 0) {
+      save();
+    }
+
+    ConversationManager.clear();
+    _setActiveId(null);
+
+    UIController.setChatOutput('');
+    UIController.setConsoleOutput('(results appear here)');
+    UIController.setLastPrompt('(new session)');
+    SnippetLibrary.setCurrentCode(null);
+    HistoryPanel.refresh();
+    if (isOpen) refresh();
+  }
+
+  /** Duplicate a session. */
+  function duplicate(id) {
+    const sessions = _loadAll();
+    const original = sessions.find(s => s.id === id);
+    if (!original) return null;
+
+    const now = new Date().toISOString();
+    const copy = {
+      id: crypto.randomUUID(),
+      name: original.name + ' (copy)',
+      messages: JSON.parse(JSON.stringify(original.messages)),
+      messageCount: original.messageCount,
+      preview: original.preview,
+      createdAt: now,
+      updatedAt: now
+    };
+
+    sessions.unshift(copy);
+    _saveAll(sessions);
+    return copy;
+  }
+
+  /** Export a session as JSON. */
+  function exportSession(id) {
+    const sessions = _loadAll();
+    const session = sessions.find(s => s.id === id);
+    if (!session) return;
+
+    const data = {
+      exported: new Date().toISOString(),
+      model: ChatConfig.MODEL,
+      session: {
+        name: session.name,
+        messageCount: session.messageCount,
+        createdAt: session.createdAt,
+        updatedAt: session.updatedAt,
+        messages: session.messages
+      }
+    };
+
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const safeName = session.name.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 50);
+    a.download = `session-${safeName}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  /** Import a session from a JSON file. */
+  function importSession(jsonString) {
+    try {
+      const data = JSON.parse(jsonString);
+      if (!data.session || !data.session.messages) {
+        throw new Error('Invalid session format');
+      }
+
+      const now = new Date().toISOString();
+      const session = {
+        id: crypto.randomUUID(),
+        name: data.session.name || 'Imported Session',
+        messages: data.session.messages,
+        messageCount: data.session.messages.length,
+        preview: '',
+        createdAt: now,
+        updatedAt: now
+      };
+
+      const lastUser = session.messages.filter(m => m.role === 'user').pop();
+      session.preview = lastUser ? lastUser.content.substring(0, 120) : '';
+
+      const sessions = _loadAll();
+      sessions.unshift(session);
+      _saveAll(sessions);
+      return session;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /** Clear all saved sessions. */
+  function clearAll() {
+    _saveAll([]);
+    _setActiveId(null);
+  }
+
+  /** Toggle sessions panel. */
+  function toggle() {
+    isOpen = !isOpen;
+    const panel = document.getElementById('sessions-panel');
+    const overlay = document.getElementById('sessions-overlay');
+    if (isOpen) {
+      panel.classList.add('open');
+      overlay.classList.add('visible');
+      refresh();
+    } else {
+      panel.classList.remove('open');
+      overlay.classList.remove('visible');
+    }
+  }
+
+  function close() {
+    isOpen = false;
+    const panel = document.getElementById('sessions-panel');
+    const overlay = document.getElementById('sessions-overlay');
+    if (panel) panel.classList.remove('open');
+    if (overlay) overlay.classList.remove('visible');
+  }
+
+  /** Render the sessions list. */
+  function refresh() {
+    const container = document.getElementById('sessions-list');
+    const countEl = document.getElementById('sessions-count');
+    if (!container) return;
+
+    const sessions = getAll();
+    const activeId = _getActiveId();
+
+    if (countEl) {
+      countEl.textContent = sessions.length === 0 ? '' :
+        `${sessions.length} session${sessions.length !== 1 ? 's' : ''}`;
+    }
+
+    if (sessions.length === 0) {
+      container.innerHTML = '';
+      const empty = document.createElement('div');
+      empty.className = 'sessions-empty';
+      empty.textContent = 'No saved sessions.\nSend messages and save, or enable auto-save.';
+      container.appendChild(empty);
+      return;
+    }
+
+    const fragment = document.createDocumentFragment();
+
+    sessions.forEach(session => {
+      const card = document.createElement('div');
+      card.className = 'session-card';
+      if (session.id === activeId) card.classList.add('session-active');
+      card.dataset.id = session.id;
+
+      // Header: name + badge
+      const header = document.createElement('div');
+      header.className = 'session-card-header';
+
+      const nameEl = document.createElement('span');
+      nameEl.className = 'session-name';
+      nameEl.textContent = session.name;
+      nameEl.title = 'Double-click to rename';
+      nameEl.addEventListener('dblclick', () => _startRename(session.id, nameEl));
+      header.appendChild(nameEl);
+
+      if (session.id === activeId) {
+        const badge = document.createElement('span');
+        badge.className = 'session-badge';
+        badge.textContent = 'active';
+        header.appendChild(badge);
+      }
+
+      card.appendChild(header);
+
+      // Meta: message count + time
+      const meta = document.createElement('div');
+      meta.className = 'session-meta';
+      meta.textContent = `${session.messageCount} msg${session.messageCount !== 1 ? 's' : ''} · ${_formatTime(session.updatedAt)}`;
+      meta.title = `Created: ${new Date(session.createdAt).toLocaleString()}\nUpdated: ${new Date(session.updatedAt).toLocaleString()}`;
+      card.appendChild(meta);
+
+      // Preview
+      if (session.preview) {
+        const preview = document.createElement('div');
+        preview.className = 'session-preview';
+        preview.textContent = session.preview;
+        card.appendChild(preview);
+      }
+
+      // Action buttons
+      const actions = document.createElement('div');
+      actions.className = 'session-card-actions';
+
+      const loadBtn = document.createElement('button');
+      loadBtn.className = 'btn-sm';
+      loadBtn.textContent = '📂 Load';
+      loadBtn.title = 'Load this session';
+      loadBtn.addEventListener('click', () => {
+        load(session.id);
+        close();
+      });
+      actions.appendChild(loadBtn);
+
+      const exportBtn = document.createElement('button');
+      exportBtn.className = 'btn-sm';
+      exportBtn.textContent = '📤 Export';
+      exportBtn.title = 'Export as JSON';
+      exportBtn.addEventListener('click', () => exportSession(session.id));
+      actions.appendChild(exportBtn);
+
+      const dupBtn = document.createElement('button');
+      dupBtn.className = 'btn-sm';
+      dupBtn.textContent = '📋 Copy';
+      dupBtn.title = 'Duplicate session';
+      dupBtn.addEventListener('click', () => {
+        duplicate(session.id);
+        refresh();
+      });
+      actions.appendChild(dupBtn);
+
+      const deleteBtn = document.createElement('button');
+      deleteBtn.className = 'btn-sm btn-danger-sm';
+      deleteBtn.textContent = '🗑️';
+      deleteBtn.title = 'Delete session';
+      deleteBtn.addEventListener('click', () => {
+        remove(session.id);
+        refresh();
+      });
+      actions.appendChild(deleteBtn);
+
+      card.appendChild(actions);
+      fragment.appendChild(card);
+    });
+
+    container.innerHTML = '';
+    container.appendChild(fragment);
+  }
+
+  /** Inline rename on double-click. */
+  function _startRename(id, nameEl) {
+    const currentName = nameEl.textContent;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'session-rename-input';
+    input.value = currentName;
+
+    function finishRename() {
+      const newName = input.value.trim();
+      if (newName && newName !== currentName) {
+        rename(id, newName);
+      }
+      refresh();
+    }
+
+    input.addEventListener('blur', finishRename);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+      if (e.key === 'Escape') { input.value = currentName; input.blur(); }
+    });
+
+    nameEl.textContent = '';
+    nameEl.appendChild(input);
+    input.focus();
+    input.select();
+  }
+
+  /** Format relative time for display. */
+  function _formatTime(isoString) {
+    const now = Date.now();
+    const then = new Date(isoString).getTime();
+    const diff = now - then;
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    if (days < 30) return `${days}d ago`;
+    return new Date(isoString).toLocaleDateString();
+  }
+
+  /** Open save dialog. */
+  function openSaveDialog() {
+    const modal = document.getElementById('session-save-modal');
+    const nameInput = document.getElementById('session-name-input');
+    if (!modal || !nameInput) return;
+
+    // Pre-fill with existing session name or auto-generated
+    const activeId = _getActiveId();
+    const sessions = _loadAll();
+    const active = activeId ? sessions.find(s => s.id === activeId) : null;
+
+    if (active) {
+      nameInput.value = active.name;
+    } else {
+      const messages = ConversationManager.getMessages().filter(m => m.role !== 'system');
+      nameInput.value = _generateName(messages);
+    }
+
+    modal.style.display = 'flex';
+    nameInput.focus();
+    nameInput.select();
+  }
+
+  /** Confirm save from dialog. */
+  function confirmSave() {
+    const nameInput = document.getElementById('session-name-input');
+    const name = nameInput ? nameInput.value.trim() : '';
+    if (!name) { if (nameInput) nameInput.focus(); return; }
+
+    const session = save(name);
+    closeSaveDialog();
+
+    if (session) {
+      UIController.setLastPrompt(`Saved: ${session.name}`);
+    }
+
+    if (isOpen) refresh();
+  }
+
+  function closeSaveDialog() {
+    const modal = document.getElementById('session-save-modal');
+    if (modal) modal.style.display = 'none';
+  }
+
+  /** Handle import from file input. */
+  function handleImport() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.addEventListener('change', () => {
+      const file = input.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const session = importSession(reader.result);
+        if (session) {
+          UIController.setLastPrompt(`Imported: ${session.name}`);
+          if (isOpen) refresh();
+        } else {
+          alert('Invalid session file format.');
+        }
+      };
+      reader.readAsText(file);
+    });
+    input.click();
+  }
+
+  /** Handle clear all with confirmation. */
+  function handleClearAll() {
+    const count = getCount();
+    if (count === 0) return;
+    if (!confirm(`Delete all ${count} saved session${count !== 1 ? 's' : ''}? This cannot be undone.`)) return;
+    clearAll();
+    refresh();
+  }
+
+  return {
+    getAll, getCount, save, load, remove, rename, duplicate,
+    newSession, exportSession, importSession, clearAll,
+    isAutoSaveEnabled, toggleAutoSave, autoSaveIfEnabled, initAutoSave,
+    toggle, close, refresh,
+    openSaveDialog, confirmSave, closeSaveDialog,
+    handleImport, handleClearAll,
+    // Exposed for testing
+    _loadAll, _saveAll, _getActiveId, _setActiveId, _formatTime
+  };
+})();
+
 /* ---------- Event Bindings ---------- */
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('send-btn').addEventListener('click', ChatController.send);
@@ -1739,6 +2330,8 @@ document.addEventListener('DOMContentLoaded', () => {
       PromptTemplates.close();
       SnippetLibrary.close();
       SnippetLibrary.closeSaveDialog();
+      SessionManager.close();
+      SessionManager.closeSaveDialog();
       KeyboardShortcuts.hideHelp();
     }
   });
@@ -1816,4 +2409,24 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('snippets-overlay').addEventListener('click', SnippetLibrary.close);
   document.getElementById('snippets-search').addEventListener('input', SnippetLibrary.handleSearchDebounced);
   document.getElementById('snippets-clear-btn').addEventListener('click', SnippetLibrary.handleClearAll);
+
+  // Sessions panel
+  document.getElementById('sessions-btn').addEventListener('click', SessionManager.toggle);
+  document.getElementById('sessions-close-btn').addEventListener('click', SessionManager.close);
+  document.getElementById('sessions-overlay').addEventListener('click', SessionManager.close);
+  document.getElementById('sessions-new-btn').addEventListener('click', SessionManager.newSession);
+  document.getElementById('sessions-save-btn').addEventListener('click', SessionManager.openSaveDialog);
+  document.getElementById('sessions-import-btn').addEventListener('click', SessionManager.handleImport);
+  document.getElementById('sessions-clear-btn').addEventListener('click', SessionManager.handleClearAll);
+  document.getElementById('sessions-autosave').addEventListener('change', SessionManager.toggleAutoSave);
+
+  // Session save dialog
+  document.getElementById('session-save-confirm').addEventListener('click', SessionManager.confirmSave);
+  document.getElementById('session-save-cancel').addEventListener('click', SessionManager.closeSaveDialog);
+  document.getElementById('session-name-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); SessionManager.confirmSave(); }
+  });
+
+  // Initialize session auto-save preference
+  SessionManager.initAutoSave();
 });

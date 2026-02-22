@@ -1580,3 +1580,449 @@ describe('ThemeManager', () => {
     expect(ThemeManager.getTheme()).toBe('light');
   });
 });
+
+/* ================================================================
+ * SessionManager
+ * ================================================================ */
+describe('SessionManager', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    SessionManager.clearAll();
+  });
+
+  // ── Core CRUD ──────────────────────────────────────────────────
+
+  test('starts with zero sessions', () => {
+    expect(SessionManager.getCount()).toBe(0);
+    expect(SessionManager.getAll()).toEqual([]);
+  });
+
+  test('save creates a new session from conversation', () => {
+    ConversationManager.addMessage('user', 'Hello world');
+    ConversationManager.addMessage('assistant', 'Hi there!');
+
+    const session = SessionManager.save('Test Session');
+    expect(session).not.toBeNull();
+    expect(session.name).toBe('Test Session');
+    expect(session.messageCount).toBe(2);
+    expect(session.messages).toHaveLength(2);
+    expect(SessionManager.getCount()).toBe(1);
+  });
+
+  test('save auto-generates name from first user message', () => {
+    ConversationManager.addMessage('user', 'Create a bar chart');
+    const session = SessionManager.save();
+    expect(session.name).toBe('Create a bar chart');
+  });
+
+  test('save truncates long auto-generated names', () => {
+    const longMsg = 'A'.repeat(50);
+    ConversationManager.addMessage('user', longMsg);
+    const session = SessionManager.save();
+    expect(session.name.length).toBeLessThanOrEqual(40);
+    expect(session.name).toContain('…');
+  });
+
+  test('save updates existing session when active', () => {
+    ConversationManager.addMessage('user', 'First message');
+    const session1 = SessionManager.save('My Session');
+
+    ConversationManager.addMessage('user', 'Second message');
+    const session2 = SessionManager.save();
+
+    expect(SessionManager.getCount()).toBe(1);
+    expect(session2.id).toBe(session1.id);
+    expect(session2.messageCount).toBe(2); // both user messages (system filtered out)
+  });
+
+  test('load restores conversation history', () => {
+    ConversationManager.addMessage('user', 'Test prompt');
+    ConversationManager.addMessage('assistant', 'Test response');
+    const session = SessionManager.save('Load Test');
+
+    ConversationManager.clear();
+    expect(ConversationManager.getHistory()).toHaveLength(1); // system only
+
+    const loaded = SessionManager.load(session.id);
+    expect(loaded).not.toBeNull();
+    expect(loaded.name).toBe('Load Test');
+    // History should have system + user + assistant
+    expect(ConversationManager.getHistory()).toHaveLength(3);
+  });
+
+  test('load returns null for non-existent session', () => {
+    expect(SessionManager.load('nonexistent-id')).toBeNull();
+  });
+
+  test('remove deletes a session', () => {
+    ConversationManager.addMessage('user', 'Hello');
+    const session = SessionManager.save('Delete Me');
+    expect(SessionManager.getCount()).toBe(1);
+
+    SessionManager.remove(session.id);
+    expect(SessionManager.getCount()).toBe(0);
+  });
+
+  test('rename changes session name', () => {
+    ConversationManager.addMessage('user', 'Hello');
+    const session = SessionManager.save('Original');
+
+    SessionManager.rename(session.id, 'Renamed');
+    const all = SessionManager.getAll();
+    expect(all[0].name).toBe('Renamed');
+  });
+
+  test('rename trims whitespace', () => {
+    ConversationManager.addMessage('user', 'Hello');
+    const session = SessionManager.save('Original');
+
+    SessionManager.rename(session.id, '  Trimmed  ');
+    const all = SessionManager.getAll();
+    expect(all[0].name).toBe('Trimmed');
+  });
+
+  test('rename ignores empty name', () => {
+    ConversationManager.addMessage('user', 'Hello');
+    const session = SessionManager.save('Original');
+
+    SessionManager.rename(session.id, '  ');
+    const all = SessionManager.getAll();
+    expect(all[0].name).toBe('Original');
+  });
+
+  // ── Multiple Sessions ──────────────────────────────────────────
+
+  test('multiple sessions are sorted newest first', () => {
+    ConversationManager.addMessage('user', 'First');
+    SessionManager.save('Session A');
+
+    // Force a new session
+    ConversationManager.clear();
+    SessionManager._setActiveId(null);
+
+    ConversationManager.addMessage('user', 'Second');
+    SessionManager.save('Session B');
+
+    const all = SessionManager.getAll();
+    expect(all).toHaveLength(2);
+    expect(all[0].name).toBe('Session B');
+    expect(all[1].name).toBe('Session A');
+  });
+
+  // ── New Session ────────────────────────────────────────────────
+
+  test('newSession clears conversation and active ID', () => {
+    ConversationManager.addMessage('user', 'Hello');
+    SessionManager.save('Current');
+    expect(SessionManager._getActiveId()).not.toBeNull();
+
+    SessionManager.newSession();
+    expect(ConversationManager.getHistory()).toHaveLength(1); // system only
+    expect(SessionManager._getActiveId()).toBeNull();
+  });
+
+  // ── Duplicate ──────────────────────────────────────────────────
+
+  test('duplicate creates a copy with different ID', () => {
+    ConversationManager.addMessage('user', 'Test');
+    const original = SessionManager.save('Original');
+
+    const copy = SessionManager.duplicate(original.id);
+    expect(copy).not.toBeNull();
+    expect(copy.id).not.toBe(original.id);
+    expect(copy.name).toBe('Original (copy)');
+    expect(copy.messageCount).toBe(original.messageCount);
+    expect(SessionManager.getCount()).toBe(2);
+  });
+
+  test('duplicate returns null for non-existent session', () => {
+    expect(SessionManager.duplicate('nonexistent')).toBeNull();
+  });
+
+  // ── Import / Export ────────────────────────────────────────────
+
+  test('exportSession and importSession round-trip', () => {
+    ConversationManager.addMessage('user', 'Export test');
+    ConversationManager.addMessage('assistant', 'Response');
+    const original = SessionManager.save('Export Session');
+
+    // Simulate export by creating the same JSON format
+    const exportData = {
+      exported: new Date().toISOString(),
+      model: 'gpt-4o',
+      session: {
+        name: original.name,
+        messageCount: original.messageCount,
+        createdAt: original.createdAt,
+        updatedAt: original.updatedAt,
+        messages: original.messages
+      }
+    };
+
+    // Clear and import
+    SessionManager.clearAll();
+    expect(SessionManager.getCount()).toBe(0);
+
+    const imported = SessionManager.importSession(JSON.stringify(exportData));
+    expect(imported).not.toBeNull();
+    expect(imported.name).toBe('Export Session');
+    expect(imported.messageCount).toBe(2);
+    expect(SessionManager.getCount()).toBe(1);
+  });
+
+  test('importSession returns null for invalid JSON', () => {
+    expect(SessionManager.importSession('not json')).toBeNull();
+  });
+
+  test('importSession returns null for missing session data', () => {
+    expect(SessionManager.importSession('{"foo":"bar"}')).toBeNull();
+  });
+
+  // ── Auto-Save ──────────────────────────────────────────────────
+
+  test('auto-save is off by default', () => {
+    SessionManager.initAutoSave();
+    expect(SessionManager.isAutoSaveEnabled()).toBe(false);
+  });
+
+  test('toggleAutoSave flips the preference', () => {
+    SessionManager.initAutoSave();
+    expect(SessionManager.isAutoSaveEnabled()).toBe(false);
+
+    SessionManager.toggleAutoSave();
+    expect(SessionManager.isAutoSaveEnabled()).toBe(true);
+
+    SessionManager.toggleAutoSave();
+    expect(SessionManager.isAutoSaveEnabled()).toBe(false);
+  });
+
+  test('auto-save persists across init', () => {
+    SessionManager.toggleAutoSave(); // turn on
+    expect(SessionManager.isAutoSaveEnabled()).toBe(true);
+
+    // Re-init should load saved preference
+    SessionManager.initAutoSave();
+    expect(SessionManager.isAutoSaveEnabled()).toBe(true);
+  });
+
+  test('autoSaveIfEnabled saves when auto-save is on', () => {
+    SessionManager.toggleAutoSave(); // turn on
+    ConversationManager.addMessage('user', 'Auto saved message');
+
+    SessionManager.autoSaveIfEnabled();
+    expect(SessionManager.getCount()).toBe(1);
+  });
+
+  test('autoSaveIfEnabled does nothing when auto-save is off', () => {
+    SessionManager.initAutoSave();
+    ConversationManager.addMessage('user', 'Not saved');
+
+    SessionManager.autoSaveIfEnabled();
+    expect(SessionManager.getCount()).toBe(0);
+  });
+
+  test('autoSaveIfEnabled does nothing with empty conversation', () => {
+    SessionManager.toggleAutoSave(); // turn on
+    SessionManager.autoSaveIfEnabled();
+    expect(SessionManager.getCount()).toBe(0);
+  });
+
+  // ── clearAll ───────────────────────────────────────────────────
+
+  test('clearAll removes all sessions', () => {
+    ConversationManager.addMessage('user', 'One');
+    SessionManager.save('Session 1');
+
+    ConversationManager.clear();
+    SessionManager._setActiveId(null);
+    ConversationManager.addMessage('user', 'Two');
+    SessionManager.save('Session 2');
+
+    expect(SessionManager.getCount()).toBe(2);
+    SessionManager.clearAll();
+    expect(SessionManager.getCount()).toBe(0);
+  });
+
+  // ── localStorage Persistence ───────────────────────────────────
+
+  test('sessions persist in localStorage', () => {
+    ConversationManager.addMessage('user', 'Persist');
+    SessionManager.save('Persistent');
+
+    // Simulate page reload by loading from storage directly
+    const raw = localStorage.getItem('agenticchat_sessions');
+    expect(raw).not.toBeNull();
+    const data = JSON.parse(raw);
+    expect(data).toHaveLength(1);
+    expect(data[0].name).toBe('Persistent');
+  });
+
+  // ── Panel Toggle ───────────────────────────────────────────────
+
+  test('toggle opens and closes the sessions panel', () => {
+    const panel = document.getElementById('sessions-panel');
+    const overlay = document.getElementById('sessions-overlay');
+
+    expect(panel.classList.contains('open')).toBe(false);
+
+    SessionManager.toggle();
+    expect(panel.classList.contains('open')).toBe(true);
+    expect(overlay.classList.contains('visible')).toBe(true);
+
+    SessionManager.toggle();
+    expect(panel.classList.contains('open')).toBe(false);
+    expect(overlay.classList.contains('visible')).toBe(false);
+  });
+
+  test('close closes the panel', () => {
+    SessionManager.toggle(); // open
+    const panel = document.getElementById('sessions-panel');
+    expect(panel.classList.contains('open')).toBe(true);
+
+    SessionManager.close();
+    expect(panel.classList.contains('open')).toBe(false);
+  });
+
+  // ── Refresh Rendering ──────────────────────────────────────────
+
+  test('refresh renders session cards', () => {
+    ConversationManager.addMessage('user', 'Render test');
+    SessionManager.save('Rendered Session');
+
+    SessionManager.toggle(); // opens and refreshes
+    const list = document.getElementById('sessions-list');
+    const cards = list.querySelectorAll('.session-card');
+    expect(cards).toHaveLength(1);
+
+    const name = cards[0].querySelector('.session-name');
+    expect(name.textContent).toBe('Rendered Session');
+  });
+
+  test('refresh shows empty message when no sessions', () => {
+    SessionManager.toggle();
+    const list = document.getElementById('sessions-list');
+    const empty = list.querySelector('.sessions-empty');
+    expect(empty).not.toBeNull();
+    expect(empty.textContent).toContain('No saved sessions');
+  });
+
+  test('refresh shows active badge on current session', () => {
+    ConversationManager.addMessage('user', 'Active test');
+    SessionManager.save('Active Session');
+
+    SessionManager.toggle();
+    const list = document.getElementById('sessions-list');
+    const badge = list.querySelector('.session-badge');
+    expect(badge).not.toBeNull();
+    expect(badge.textContent).toBe('active');
+  });
+
+  // ── Preview Generation ─────────────────────────────────────────
+
+  test('session preview contains first user message', () => {
+    ConversationManager.addMessage('user', 'Create a visualization of population data');
+    SessionManager.save('Preview Test');
+
+    const sessions = SessionManager.getAll();
+    expect(sessions[0].preview).toContain('Create a visualization');
+  });
+
+  test('preview is truncated to 120 characters', () => {
+    const longMessage = 'A'.repeat(200);
+    ConversationManager.addMessage('user', longMessage);
+    SessionManager.save('Long Preview');
+
+    const sessions = SessionManager.getAll();
+    expect(sessions[0].preview.length).toBeLessThanOrEqual(120);
+  });
+
+  // ── _formatTime ────────────────────────────────────────────────
+
+  test('_formatTime handles just now', () => {
+    const now = new Date().toISOString();
+    expect(SessionManager._formatTime(now)).toBe('just now');
+  });
+
+  test('_formatTime handles minutes ago', () => {
+    const tenMinsAgo = new Date(Date.now() - 10 * 60000).toISOString();
+    expect(SessionManager._formatTime(tenMinsAgo)).toBe('10m ago');
+  });
+
+  test('_formatTime handles hours ago', () => {
+    const threeHoursAgo = new Date(Date.now() - 3 * 3600000).toISOString();
+    expect(SessionManager._formatTime(threeHoursAgo)).toBe('3h ago');
+  });
+
+  test('_formatTime handles days ago', () => {
+    const fiveDaysAgo = new Date(Date.now() - 5 * 86400000).toISOString();
+    expect(SessionManager._formatTime(fiveDaysAgo)).toBe('5d ago');
+  });
+
+  // ── Save Dialog ────────────────────────────────────────────────
+
+  test('openSaveDialog shows the modal', () => {
+    const modal = document.getElementById('session-save-modal');
+    expect(modal.style.display).not.toBe('flex');
+
+    SessionManager.openSaveDialog();
+    expect(modal.style.display).toBe('flex');
+  });
+
+  test('closeSaveDialog hides the modal', () => {
+    SessionManager.openSaveDialog();
+    SessionManager.closeSaveDialog();
+    const modal = document.getElementById('session-save-modal');
+    expect(modal.style.display).toBe('none');
+  });
+
+  test('confirmSave saves and closes dialog', () => {
+    ConversationManager.addMessage('user', 'Confirm test');
+    SessionManager.openSaveDialog();
+
+    const nameInput = document.getElementById('session-name-input');
+    nameInput.value = 'Confirmed Session';
+
+    SessionManager.confirmSave();
+    expect(SessionManager.getCount()).toBe(1);
+    expect(SessionManager.getAll()[0].name).toBe('Confirmed Session');
+
+    const modal = document.getElementById('session-save-modal');
+    expect(modal.style.display).toBe('none');
+  });
+
+  test('confirmSave does nothing with empty name', () => {
+    ConversationManager.addMessage('user', 'Test');
+    SessionManager.openSaveDialog();
+
+    const nameInput = document.getElementById('session-name-input');
+    nameInput.value = '';
+
+    SessionManager.confirmSave();
+    expect(SessionManager.getCount()).toBe(0);
+  });
+
+  // ── Edge Cases ─────────────────────────────────────────────────
+
+  test('save with no messages and no name returns null', () => {
+    ConversationManager.clear();
+    const result = SessionManager.save();
+    expect(result).toBeNull();
+  });
+
+  test('load updates last-prompt text', () => {
+    ConversationManager.addMessage('user', 'Hello');
+    const session = SessionManager.save('My Session');
+
+    ConversationManager.clear();
+    SessionManager.load(session.id);
+
+    const lastPrompt = document.getElementById('last-prompt');
+    expect(lastPrompt.textContent).toContain('Loaded: My Session');
+  });
+
+  test('newSession updates last-prompt text', () => {
+    SessionManager.newSession();
+    const lastPrompt = document.getElementById('last-prompt');
+    expect(lastPrompt.textContent).toContain('new session');
+  });
+});

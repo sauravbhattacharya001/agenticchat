@@ -25,6 +25,7 @@
     <button id="templates-btn" class="btn-secondary" title="Browse prompt templates">Templates</button>
     <button id="history-btn" class="btn-secondary" title="Toggle conversation history panel">History</button>
     <button id="snippets-btn" class="btn-secondary" title="Saved code snippets">Snippets</button>
+    <button id="sessions-btn" class="btn-secondary" title="Chat sessions (Ctrl+J)">Sessions</button>
     <button id="shortcuts-btn" class="btn-secondary" title="Keyboard shortcuts (press ? for help)">⌨️</button>
     <button id="voice-btn" class="btn-secondary" title="Voice input — speak your prompt (Ctrl+M)" aria-label="Toggle voice input">🎤</button>
     <button id="theme-btn" class="btn-secondary" title="Switch to light theme (Ctrl+D)" aria-label="Toggle theme">☀️</button>
@@ -92,6 +93,42 @@
     <div id="snippets-list"></div>
   </div>
 
+  <!-- Sessions Panel -->
+  <div id="sessions-overlay"></div>
+  <div id="sessions-panel" aria-label="Chat sessions">
+    <div id="sessions-header">
+      <span>💬 Chat Sessions</span>
+      <div id="sessions-actions">
+        <button id="sessions-close-btn" class="btn-sm" title="Close panel">✕</button>
+      </div>
+    </div>
+    <div id="sessions-toolbar">
+      <button id="sessions-new-btn" class="btn-sm" title="Start new session (Ctrl+N)">➕ New</button>
+      <button id="sessions-save-btn" class="btn-sm" title="Save current session">💾 Save</button>
+      <button id="sessions-import-btn" class="btn-sm" title="Import session from JSON">📥 Import</button>
+      <button id="sessions-clear-btn" class="btn-sm btn-danger-sm" title="Delete all sessions">Clear All</button>
+      <label class="sessions-autosave-label" title="Auto-save after each message">
+        <input type="checkbox" id="sessions-autosave">
+        Auto-save
+      </label>
+    </div>
+    <div id="sessions-count"></div>
+    <div id="sessions-list"></div>
+  </div>
+
+  <!-- Session Save Dialog -->
+  <div id="session-save-modal" role="dialog" aria-modal="true" aria-labelledby="session-modal-title">
+    <div id="session-save-content">
+      <p id="session-modal-title"><strong>Save Session</strong></p>
+      <label for="session-name-input">Session Name</label>
+      <input id="session-name-input" type="text" placeholder="e.g. API Integration Test" autocomplete="off">
+      <div id="session-modal-buttons">
+        <button id="session-save-cancel" class="btn-secondary">Cancel</button>
+        <button id="session-save-confirm">Save</button>
+      </div>
+    </div>
+  </div>
+
   <!-- API Key Modal -->
   <div id="apikey-modal" role="dialog" aria-modal="true" aria-labelledby="api-modal-title">
     <div id="apikey-modal-content">
@@ -138,6 +175,11 @@
           <div class="shortcut-row"><kbd>Ctrl</kbd> + <kbd>H</kbd><span>Toggle history</span></div>
           <div class="shortcut-row"><kbd>Ctrl</kbd> + <kbd>T</kbd><span>Toggle templates</span></div>
           <div class="shortcut-row"><kbd>Ctrl</kbd> + <kbd>S</kbd><span>Toggle snippets</span></div>
+          <div class="shortcut-row"><kbd>Ctrl</kbd> + <kbd>J</kbd><span>Toggle sessions</span></div>
+        </div>
+        <div class="shortcut-group">
+          <div class="shortcut-group-title">Sessions</div>
+          <div class="shortcut-row"><kbd>Ctrl</kbd> + <kbd>N</kbd><span>New session</span></div>
         </div>
         <div class="shortcut-group">
           <div class="shortcut-group-title">Voice</div>
