@@ -1373,6 +1373,287 @@ const SnippetLibrary = (() => {
   };
 })();
 
+/* ---------- Message Search ---------- */
+const MessageSearch = (() => {
+  let isOpen = false;
+  let matches = [];
+  let currentIndex = -1;
+  let debounceTimer = null;
+  let lastQuery = '';
+  const DEBOUNCE_MS = 200;
+
+  /**
+   * Open the search bar and focus the input.
+   */
+  function open() {
+    const bar = document.getElementById('search-bar');
+    if (!bar) return;
+    bar.style.display = 'flex';
+    isOpen = true;
+    const input = document.getElementById('search-input');
+    if (input) {
+      input.focus();
+      // Re-search if there's existing text
+      if (input.value.trim()) performSearch(input.value.trim());
+    }
+  }
+
+  /**
+   * Close the search bar and clear highlights.
+   */
+  function close() {
+    const bar = document.getElementById('search-bar');
+    if (!bar) return;
+    bar.style.display = 'none';
+    isOpen = false;
+    clearHighlights();
+    const input = document.getElementById('search-input');
+    if (input) input.value = '';
+    updateCount();
+  }
+
+  /**
+   * Toggle search bar visibility.
+   */
+  function toggle() {
+    if (isOpen) close();
+    else open();
+  }
+
+  /**
+   * Perform a case-insensitive search through chat messages.
+   * Highlights all matches with <mark> elements.
+   * @param {string} query  Search string.
+   */
+  function performSearch(query) {
+    clearHighlights();
+    lastQuery = query || '';
+
+    if (!query || query.length === 0) {
+      updateCount();
+      return;
+    }
+
+    const output = document.getElementById('chat-output');
+    if (!output) return;
+
+    const messageDivs = output.querySelectorAll('.chat-msg, .code-block, [class*="msg"]');
+    // If no structured messages, search all child elements
+    const targets = messageDivs.length > 0
+      ? messageDivs
+      : output.children;
+
+    matches = [];
+    const lowerQuery = query.toLowerCase();
+
+    for (let i = 0; i < targets.length; i++) {
+      highlightTextNodes(targets[i], lowerQuery);
+    }
+
+    // Collect all marks
+    matches = Array.from(output.querySelectorAll('mark.search-highlight'));
+    currentIndex = matches.length > 0 ? 0 : -1;
+
+    updateCount();
+    updateNavButtons();
+
+    if (currentIndex >= 0) {
+      scrollToCurrent();
+    }
+  }
+
+  /**
+   * Recursively walk text nodes and wrap matches in <mark>.
+   * @param {Node} node       Element to search within.
+   * @param {string} query    Lowercase search string.
+   */
+  function highlightTextNodes(node, query) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent;
+      const lowerText = text.toLowerCase();
+      const idx = lowerText.indexOf(query);
+
+      if (idx === -1) return;
+
+      const parent = node.parentNode;
+      if (!parent) return;
+
+      // Split the text node at the match boundaries
+      const before = text.substring(0, idx);
+      const match = text.substring(idx, idx + query.length);
+      const after = text.substring(idx + query.length);
+
+      const frag = document.createDocumentFragment();
+
+      if (before) frag.appendChild(document.createTextNode(before));
+
+      const mark = document.createElement('mark');
+      mark.className = 'search-highlight';
+      mark.textContent = match;
+      frag.appendChild(mark);
+
+      if (after) {
+        const afterNode = document.createTextNode(after);
+        frag.appendChild(afterNode);
+        parent.replaceChild(frag, node);
+        // Continue searching in the remaining text
+        highlightTextNodes(afterNode, query);
+      } else {
+        parent.replaceChild(frag, node);
+      }
+    } else if (node.nodeType === Node.ELEMENT_NODE) {
+      // Skip already-highlighted marks and script/style
+      if (node.tagName === 'MARK' && node.classList.contains('search-highlight')) return;
+      if (node.tagName === 'SCRIPT' || node.tagName === 'STYLE') return;
+
+      // Snapshot child nodes (live NodeList mutates during highlighting)
+      const children = Array.from(node.childNodes);
+      for (let i = 0; i < children.length; i++) {
+        highlightTextNodes(children[i], query);
+      }
+    }
+  }
+
+  /**
+   * Remove all <mark> highlights and restore original text nodes.
+   */
+  function clearHighlights() {
+    const output = document.getElementById('chat-output');
+    if (!output) return;
+
+    const marks = output.querySelectorAll('mark.search-highlight');
+    for (let i = marks.length - 1; i >= 0; i--) {
+      const mark = marks[i];
+      const parent = mark.parentNode;
+      if (!parent) continue;
+      const text = document.createTextNode(mark.textContent);
+      parent.replaceChild(text, mark);
+      // Merge adjacent text nodes
+      parent.normalize();
+    }
+
+    matches = [];
+    currentIndex = -1;
+    updateNavButtons();
+  }
+
+  /**
+   * Navigate to the next match.
+   */
+  function next() {
+    if (matches.length === 0) return;
+    currentIndex = (currentIndex + 1) % matches.length;
+    scrollToCurrent();
+    updateCount();
+  }
+
+  /**
+   * Navigate to the previous match.
+   */
+  function prev() {
+    if (matches.length === 0) return;
+    currentIndex = (currentIndex - 1 + matches.length) % matches.length;
+    scrollToCurrent();
+    updateCount();
+  }
+
+  /**
+   * Scroll the current match into view and highlight it.
+   */
+  function scrollToCurrent() {
+    // Remove current indicator from all marks
+    for (let i = 0; i < matches.length; i++) {
+      matches[i].classList.remove('search-current');
+    }
+
+    if (currentIndex >= 0 && currentIndex < matches.length) {
+      matches[currentIndex].classList.add('search-current');
+      if (typeof matches[currentIndex].scrollIntoView === 'function') {
+        matches[currentIndex].scrollIntoView({
+          behavior: 'smooth',
+          block: 'center'
+        });
+      }
+    }
+  }
+
+  /**
+   * Update the match count display.
+   */
+  function updateCount() {
+    const countEl = document.getElementById('search-count');
+    if (!countEl) return;
+
+    if (matches.length === 0) {
+      countEl.textContent = lastQuery ? 'No results' : '';
+    } else {
+      countEl.textContent = `${currentIndex + 1} of ${matches.length}`;
+    }
+  }
+
+  /**
+   * Enable/disable nav buttons based on match count.
+   */
+  function updateNavButtons() {
+    const prevBtn = document.getElementById('search-prev');
+    const nextBtn = document.getElementById('search-next');
+    if (prevBtn) prevBtn.disabled = matches.length === 0;
+    if (nextBtn) nextBtn.disabled = matches.length === 0;
+  }
+
+  /**
+   * Debounced search input handler.
+   */
+  function handleInput() {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      const input = document.getElementById('search-input');
+      if (input) performSearch(input.value.trim());
+    }, DEBOUNCE_MS);
+  }
+
+  /**
+   * Handle keydown in the search input.
+   * Enter = next match, Shift+Enter = prev match, Escape = close.
+   */
+  function handleKeydown(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (e.shiftKey) prev();
+      else next();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      close();
+    }
+  }
+
+  /**
+   * Return search state for testing.
+   */
+  function getState() {
+    return {
+      isOpen,
+      matchCount: matches.length,
+      currentIndex,
+      matches: matches.slice()
+    };
+  }
+
+  return {
+    open,
+    close,
+    toggle,
+    performSearch,
+    clearHighlights,
+    next,
+    prev,
+    getState,
+    handleInput,
+    handleKeydown,
+    isSearchOpen: () => isOpen
+  };
+})();
+
 /* ---------- Keyboard Shortcuts ---------- */
 const KeyboardShortcuts = (() => {
   let isHelpOpen = false;
@@ -1469,6 +1750,13 @@ const KeyboardShortcuts = (() => {
       return;
     }
 
+    // Ctrl+F — toggle message search
+    if (ctrl && e.key === 'f') {
+      e.preventDefault();
+      MessageSearch.toggle();
+      return;
+    }
+
     // Ctrl+M — toggle voice input
     if (ctrl && e.key === 'm') {
       e.preventDefault();
@@ -1495,6 +1783,11 @@ const KeyboardShortcuts = (() => {
     if (e.key === 'Escape' && isHelpOpen) {
       hideHelp();
       // Don't return — let existing Escape handler also close other panels
+    }
+
+    // Escape — close search bar
+    if (e.key === 'Escape' && MessageSearch.isSearchOpen()) {
+      MessageSearch.close();
     }
   }
 
@@ -2390,6 +2683,13 @@ document.addEventListener('DOMContentLoaded', () => {
   // Theme toggle
   document.getElementById('theme-btn').addEventListener('click', ThemeManager.toggle);
   ThemeManager.init();
+
+  // Message search bar
+  document.getElementById('search-input').addEventListener('input', MessageSearch.handleInput);
+  document.getElementById('search-input').addEventListener('keydown', MessageSearch.handleKeydown);
+  document.getElementById('search-prev').addEventListener('click', MessageSearch.prev);
+  document.getElementById('search-next').addEventListener('click', MessageSearch.next);
+  document.getElementById('search-close').addEventListener('click', MessageSearch.close);
 
   // Code action buttons (save/copy/rerun)
   document.getElementById('save-snippet-btn').addEventListener('click', SnippetLibrary.openSaveDialog);

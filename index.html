@@ -35,6 +35,13 @@
   <div id="last-prompt">(no input yet)</div>
 
   <div id="blackbox">
+    <div id="search-bar" class="search-bar" role="search" aria-label="Search messages" style="display:none;">
+      <input id="search-input" type="text" placeholder="Search messages…" autocomplete="off" aria-label="Search query">
+      <span id="search-count" class="search-count" aria-live="polite"></span>
+      <button id="search-prev" class="btn-sm search-nav" title="Previous match (Shift+Enter)" aria-label="Previous match" disabled>▲</button>
+      <button id="search-next" class="btn-sm search-nav" title="Next match (Enter)" aria-label="Next match" disabled>▼</button>
+      <button id="search-close" class="btn-sm search-nav" title="Close search (Escape)" aria-label="Close search">✕</button>
+    </div>
     <div id="chat-output"></div>
     <div id="code-actions" style="display:none;">
       <button id="save-snippet-btn" class="btn-sm" title="Save this code snippet">💾 Save Snippet</button>
@@ -169,6 +176,7 @@
           <div class="shortcut-row"><kbd>Enter</kbd><span>Send message</span></div>
           <div class="shortcut-row"><kbd>Ctrl</kbd> + <kbd>L</kbd><span>Clear conversation</span></div>
           <div class="shortcut-row"><kbd>Ctrl</kbd> + <kbd>K</kbd><span>Focus chat input</span></div>
+          <div class="shortcut-row"><kbd>Ctrl</kbd> + <kbd>F</kbd><span>Search messages</span></div>
         </div>
         <div class="shortcut-group">
           <div class="shortcut-group-title">Panels</div>

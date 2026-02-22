@@ -27,6 +27,13 @@ function setupDOM() {
     <div id="char-count"></div>
     <div id="last-prompt">(no input yet)</div>
     <div id="blackbox">
+      <div id="search-bar" class="search-bar" role="search" aria-label="Search messages" style="display:none;">
+        <input id="search-input" type="text" placeholder="Search messages…" autocomplete="off" aria-label="Search query">
+        <span id="search-count" class="search-count" aria-live="polite"></span>
+        <button id="search-prev" class="btn-sm search-nav" title="Previous match" aria-label="Previous match" disabled>▲</button>
+        <button id="search-next" class="btn-sm search-nav" title="Next match" aria-label="Next match" disabled>▼</button>
+        <button id="search-close" class="btn-sm search-nav" title="Close search" aria-label="Close search">✕</button>
+      </div>
       <div id="chat-output"></div>
       <div id="code-actions" style="display:none;">
         <button id="save-snippet-btn" class="btn-sm">💾 Save Snippet</button>
@@ -170,6 +177,7 @@ function loadApp() {
     'HistoryPanel',
     'SnippetLibrary',
     'KeyboardShortcuts',
+    'MessageSearch',
     'VoiceInput',
     'ThemeManager',
     'SessionManager'

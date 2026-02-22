@@ -655,6 +655,77 @@ pre {
   background: rgba(239, 68, 68, 0.15);
 }
 
+/* ---- Message Search ---- */
+
+.search-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  border-radius: 6px 6px 0 0;
+}
+
+.search-bar input {
+  flex: 1;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 5px 8px;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  min-width: 0;
+}
+
+.search-bar input:focus {
+  border-color: var(--accent);
+}
+
+.search-count {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  min-width: 50px;
+  text-align: center;
+}
+
+.search-nav {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 3px;
+  padding: 2px 6px;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.search-nav:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.search-nav:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+mark.search-highlight {
+  background: rgba(250, 204, 21, 0.35);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+mark.search-highlight.search-current {
+  background: rgba(250, 204, 21, 0.75);
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 /* ---- Theme Toggle ---- */
 #theme-btn {
   font-size: 1rem;

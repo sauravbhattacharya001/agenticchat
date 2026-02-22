@@ -1562,11 +1562,6 @@ describe('ThemeManager', () => {
     ThemeManager.init();
     expect(ThemeManager.getTheme()).toBe('dark');
 
-    const event = new KeyboardEvent('keydown', {
-      key: 'd', ctrlKey: true, bubbles: true
-    });
-    const prevented = !document.dispatchEvent(event);
-    // Since we call handleKeydown directly, verify by toggling
     KeyboardShortcuts.handleKeydown(new KeyboardEvent('keydown', {
       key: 'd', ctrlKey: true, bubbles: true
     }));
@@ -2024,5 +2019,318 @@ describe('SessionManager', () => {
     SessionManager.newSession();
     const lastPrompt = document.getElementById('last-prompt');
     expect(lastPrompt.textContent).toContain('new session');
+  });
+});
+
+/* ================================================================
+ * MessageSearch
+ * ================================================================ */
+describe('MessageSearch', () => {
+  function addMessages(...texts) {
+    const output = document.getElementById('chat-output');
+    texts.forEach(text => {
+      const div = document.createElement('div');
+      div.className = 'chat-msg';
+      div.textContent = text;
+      output.appendChild(div);
+    });
+  }
+
+  /* --- Open/Close/Toggle --- */
+
+  test('module exists with expected API', () => {
+    expect(MessageSearch).toBeDefined();
+    expect(typeof MessageSearch.open).toBe('function');
+    expect(typeof MessageSearch.close).toBe('function');
+    expect(typeof MessageSearch.toggle).toBe('function');
+    expect(typeof MessageSearch.performSearch).toBe('function');
+    expect(typeof MessageSearch.clearHighlights).toBe('function');
+    expect(typeof MessageSearch.next).toBe('function');
+    expect(typeof MessageSearch.prev).toBe('function');
+    expect(typeof MessageSearch.getState).toBe('function');
+    expect(typeof MessageSearch.isSearchOpen).toBe('function');
+  });
+
+  test('starts closed', () => {
+    expect(MessageSearch.isSearchOpen()).toBe(false);
+    const bar = document.getElementById('search-bar');
+    expect(bar.style.display).toBe('none');
+  });
+
+  test('open() shows search bar', () => {
+    MessageSearch.open();
+    expect(MessageSearch.isSearchOpen()).toBe(true);
+    const bar = document.getElementById('search-bar');
+    expect(bar.style.display).toBe('flex');
+  });
+
+  test('close() hides search bar', () => {
+    MessageSearch.open();
+    MessageSearch.close();
+    expect(MessageSearch.isSearchOpen()).toBe(false);
+    const bar = document.getElementById('search-bar');
+    expect(bar.style.display).toBe('none');
+  });
+
+  test('toggle() switches state', () => {
+    MessageSearch.toggle();
+    expect(MessageSearch.isSearchOpen()).toBe(true);
+    MessageSearch.toggle();
+    expect(MessageSearch.isSearchOpen()).toBe(false);
+  });
+
+  test('close() clears input', () => {
+    MessageSearch.open();
+    document.getElementById('search-input').value = 'test';
+    MessageSearch.close();
+    expect(document.getElementById('search-input').value).toBe('');
+  });
+
+  /* --- performSearch --- */
+
+  test('performSearch finds matching text', () => {
+    addMessages('Hello world', 'Goodbye world', 'No match here');
+    MessageSearch.performSearch('world');
+    const state = MessageSearch.getState();
+    expect(state.matchCount).toBe(2);
+    expect(state.currentIndex).toBe(0);
+  });
+
+  test('performSearch is case-insensitive', () => {
+    addMessages('Hello World', 'WORLD class', 'nothing');
+    MessageSearch.performSearch('world');
+    expect(MessageSearch.getState().matchCount).toBe(2);
+  });
+
+  test('performSearch with empty query clears results', () => {
+    addMessages('Hello world');
+    MessageSearch.performSearch('world');
+    expect(MessageSearch.getState().matchCount).toBe(1);
+    MessageSearch.performSearch('');
+    expect(MessageSearch.getState().matchCount).toBe(0);
+  });
+
+  test('performSearch with no matches shows zero', () => {
+    addMessages('Hello world');
+    MessageSearch.performSearch('xyz');
+    expect(MessageSearch.getState().matchCount).toBe(0);
+    expect(MessageSearch.getState().currentIndex).toBe(-1);
+  });
+
+  test('performSearch finds multiple matches in one message', () => {
+    addMessages('the cat sat on the mat');
+    MessageSearch.performSearch('the');
+    expect(MessageSearch.getState().matchCount).toBe(2);
+  });
+
+  test('performSearch creates <mark> elements', () => {
+    addMessages('Hello world');
+    MessageSearch.performSearch('world');
+    const marks = document.querySelectorAll('mark.search-highlight');
+    expect(marks.length).toBe(1);
+    expect(marks[0].textContent).toBe('world');
+  });
+
+  test('first match gets search-current class', () => {
+    addMessages('Hello world', 'world again');
+    MessageSearch.performSearch('world');
+    const marks = document.querySelectorAll('mark.search-highlight');
+    expect(marks[0].classList.contains('search-current')).toBe(true);
+    expect(marks[1].classList.contains('search-current')).toBe(false);
+  });
+
+  /* --- Navigation --- */
+
+  test('next() advances to next match', () => {
+    addMessages('world one', 'world two', 'world three');
+    MessageSearch.performSearch('world');
+    expect(MessageSearch.getState().currentIndex).toBe(0);
+    MessageSearch.next();
+    expect(MessageSearch.getState().currentIndex).toBe(1);
+  });
+
+  test('next() wraps around to first', () => {
+    addMessages('world one', 'world two');
+    MessageSearch.performSearch('world');
+    MessageSearch.next();
+    MessageSearch.next();
+    expect(MessageSearch.getState().currentIndex).toBe(0);
+  });
+
+  test('prev() goes to previous match', () => {
+    addMessages('world one', 'world two', 'world three');
+    MessageSearch.performSearch('world');
+    MessageSearch.next();
+    MessageSearch.next();
+    expect(MessageSearch.getState().currentIndex).toBe(2);
+    MessageSearch.prev();
+    expect(MessageSearch.getState().currentIndex).toBe(1);
+  });
+
+  test('prev() wraps around to last', () => {
+    addMessages('world one', 'world two');
+    MessageSearch.performSearch('world');
+    MessageSearch.prev();
+    expect(MessageSearch.getState().currentIndex).toBe(1);
+  });
+
+  test('next/prev do nothing with no matches', () => {
+    addMessages('nothing here');
+    MessageSearch.performSearch('xyz');
+    MessageSearch.next();
+    expect(MessageSearch.getState().currentIndex).toBe(-1);
+    MessageSearch.prev();
+    expect(MessageSearch.getState().currentIndex).toBe(-1);
+  });
+
+  test('current match highlight moves with navigation', () => {
+    addMessages('world one', 'world two');
+    MessageSearch.performSearch('world');
+    let marks = document.querySelectorAll('mark.search-highlight');
+    expect(marks[0].classList.contains('search-current')).toBe(true);
+    MessageSearch.next();
+    marks = document.querySelectorAll('mark.search-highlight');
+    expect(marks[0].classList.contains('search-current')).toBe(false);
+    expect(marks[1].classList.contains('search-current')).toBe(true);
+  });
+
+  /* --- clearHighlights --- */
+
+  test('clearHighlights removes all marks', () => {
+    addMessages('Hello world');
+    MessageSearch.performSearch('world');
+    expect(document.querySelectorAll('mark.search-highlight').length).toBe(1);
+    MessageSearch.clearHighlights();
+    expect(document.querySelectorAll('mark.search-highlight').length).toBe(0);
+  });
+
+  test('clearHighlights restores text content', () => {
+    addMessages('Hello world');
+    MessageSearch.performSearch('world');
+    MessageSearch.clearHighlights();
+    const output = document.getElementById('chat-output');
+    expect(output.textContent).toBe('Hello world');
+  });
+
+  test('clearHighlights resets state', () => {
+    addMessages('world one', 'world two');
+    MessageSearch.performSearch('world');
+    MessageSearch.clearHighlights();
+    const state = MessageSearch.getState();
+    expect(state.matchCount).toBe(0);
+    expect(state.currentIndex).toBe(-1);
+  });
+
+  /* --- Search count display --- */
+
+  test('count shows "1 of N" format', () => {
+    addMessages('world one', 'world two', 'world three');
+    MessageSearch.performSearch('world');
+    const count = document.getElementById('search-count');
+    expect(count.textContent).toBe('1 of 3');
+  });
+
+  test('count updates on navigation', () => {
+    addMessages('world one', 'world two');
+    MessageSearch.performSearch('world');
+    MessageSearch.next();
+    const count = document.getElementById('search-count');
+    expect(count.textContent).toBe('2 of 2');
+  });
+
+  test('count shows "No results" for no matches', () => {
+    addMessages('Hello');
+    MessageSearch.performSearch('xyz');
+    const count = document.getElementById('search-count');
+    expect(count.textContent).toBe('No results');
+  });
+
+  test('count is empty when query is empty', () => {
+    MessageSearch.performSearch('');
+    const count = document.getElementById('search-count');
+    expect(count.textContent).toBe('');
+  });
+
+  /* --- Nav button state --- */
+
+  test('nav buttons disabled when no matches', () => {
+    addMessages('Hello');
+    MessageSearch.performSearch('xyz');
+    expect(document.getElementById('search-prev').disabled).toBe(true);
+    expect(document.getElementById('search-next').disabled).toBe(true);
+  });
+
+  test('nav buttons enabled when matches found', () => {
+    addMessages('Hello world');
+    MessageSearch.performSearch('world');
+    expect(document.getElementById('search-prev').disabled).toBe(false);
+    expect(document.getElementById('search-next').disabled).toBe(false);
+  });
+
+  /* --- Re-search behavior --- */
+
+  test('new search clears previous highlights', () => {
+    addMessages('Hello world foo');
+    MessageSearch.performSearch('world');
+    expect(MessageSearch.getState().matchCount).toBe(1);
+    MessageSearch.performSearch('foo');
+    expect(MessageSearch.getState().matchCount).toBe(1);
+    // Old marks should be gone
+    const marks = document.querySelectorAll('mark.search-highlight');
+    expect(marks.length).toBe(1);
+    expect(marks[0].textContent).toBe('foo');
+  });
+
+  test('close() removes highlights', () => {
+    addMessages('Hello world');
+    MessageSearch.open();
+    MessageSearch.performSearch('world');
+    expect(document.querySelectorAll('mark.search-highlight').length).toBe(1);
+    MessageSearch.close();
+    expect(document.querySelectorAll('mark.search-highlight').length).toBe(0);
+  });
+
+  /* --- Edge cases --- */
+
+  test('search in empty chat output', () => {
+    MessageSearch.performSearch('anything');
+    expect(MessageSearch.getState().matchCount).toBe(0);
+  });
+
+  test('search handles special regex characters safely', () => {
+    addMessages('price is $100 (USD)');
+    MessageSearch.performSearch('$100');
+    expect(MessageSearch.getState().matchCount).toBe(1);
+  });
+
+  test('search in nested HTML elements', () => {
+    const output = document.getElementById('chat-output');
+    const div = document.createElement('div');
+    div.className = 'chat-msg';
+    div.innerHTML = '<strong>Hello</strong> <em>world</em>';
+    output.appendChild(div);
+    MessageSearch.performSearch('world');
+    expect(MessageSearch.getState().matchCount).toBe(1);
+  });
+
+  test('repeated open/close cycles work correctly', () => {
+    addMessages('Hello world');
+    for (let i = 0; i < 5; i++) {
+      MessageSearch.open();
+      MessageSearch.performSearch('world');
+      expect(MessageSearch.getState().matchCount).toBe(1);
+      MessageSearch.close();
+      expect(MessageSearch.getState().matchCount).toBe(0);
+    }
+  });
+
+  /* --- Keyboard shortcut integration --- */
+
+  test('Ctrl+F handled by KeyboardShortcuts', () => {
+    const event = new KeyboardEvent('keydown', {
+      key: 'f', ctrlKey: true, bubbles: true
+    });
+    KeyboardShortcuts.handleKeydown(event);
+    expect(MessageSearch.isSearchOpen()).toBe(true);
   });
 });
