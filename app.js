@@ -100,8 +100,15 @@ const SandboxRunner = (() => {
   /**
    * Execute code inside a sandboxed iframe.
    * Returns a Promise that resolves with { ok, value }.
+   *
+   * If a previous sandbox is still running, it is cancelled first
+   * to prevent promise/timer/listener leaks.
    */
   function run(code) {
+    // Cancel any in-flight execution to prevent leaking the old
+    // promise, its setTimeout, and its message-event listener.
+    if (cleanupFn) cleanupFn();
+
     return new Promise((resolve) => {
       const nonce = crypto.randomUUID();
 
@@ -228,7 +235,9 @@ const ApiKeyManager = (() => {
 
   /**
    * Escape a key value so it is safe to substitute into JS code strings.
-   * Prevents breakout via quotes, backslashes, backticks, or newlines.
+   * Prevents breakout via quotes, backslashes, backticks, newlines,
+   * null bytes, and Unicode line terminators (U+2028/U+2029) which are
+   * valid JavaScript line terminators that can break string literals.
    */
   function sanitizeKeyForCodeInjection(key) {
     return key
@@ -238,7 +247,10 @@ const ApiKeyManager = (() => {
       .replace(/`/g, '\\`')
       .replace(/\$/g, '\\$')
       .replace(/\n/g, '\\n')
-      .replace(/\r/g, '\\r');
+      .replace(/\r/g, '\\r')
+      .replace(/\0/g, '')                       // Strip null bytes
+      .replace(/\u2028/g, '\\u2028')            // Line Separator — JS line terminator
+      .replace(/\u2029/g, '\\u2029');           // Paragraph Separator — JS line terminator
   }
 
   /** Called when the user submits a key in the modal. */

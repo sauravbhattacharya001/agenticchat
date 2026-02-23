@@ -205,6 +205,98 @@ describe('ApiKeyManager', () => {
     ApiKeyManager.substituteServiceKey(code);
     expect(ApiKeyManager.submitServiceKey('')).toBeNull();
   });
+
+  // ── sanitizeKeyForCodeInjection security tests ──────────────────
+
+  test('substituteServiceKey escapes single quotes in key', () => {
+    const code = 'fetch("https://api.test.com/v1?key=YOUR_API_KEY")';
+    ApiKeyManager.substituteServiceKey(code);
+    const result = ApiKeyManager.submitServiceKey("key'break");
+    expect(result).toContain("key\\'break");
+    expect(result).not.toContain("key'break");
+  });
+
+  test('substituteServiceKey escapes double quotes in key', () => {
+    const code = 'fetch("https://api.test2.com/v1?key=YOUR_API_KEY")';
+    ApiKeyManager.substituteServiceKey(code);
+    const result = ApiKeyManager.submitServiceKey('key"break');
+    expect(result).toContain('key\\"break');
+  });
+
+  test('substituteServiceKey escapes backticks in key', () => {
+    const code = 'fetch("https://api.test3.com/v1?key=YOUR_API_KEY")';
+    ApiKeyManager.substituteServiceKey(code);
+    const result = ApiKeyManager.submitServiceKey('key`break');
+    expect(result).toContain('key\\`break');
+  });
+
+  test('substituteServiceKey escapes backslashes in key', () => {
+    const code = 'fetch("https://api.test4.com/v1?key=YOUR_API_KEY")';
+    ApiKeyManager.substituteServiceKey(code);
+    const result = ApiKeyManager.submitServiceKey('key\\break');
+    expect(result).toContain('key\\\\break');
+  });
+
+  test('substituteServiceKey escapes dollar signs in key', () => {
+    const code = 'fetch("https://api.test5.com/v1?key=YOUR_API_KEY")';
+    ApiKeyManager.substituteServiceKey(code);
+    const result = ApiKeyManager.submitServiceKey('key$break');
+    expect(result).toContain('key\\$break');
+  });
+
+  test('substituteServiceKey escapes newlines in key', () => {
+    const code = 'fetch("https://api.test6.com/v1?key=YOUR_API_KEY")';
+    ApiKeyManager.substituteServiceKey(code);
+    const result = ApiKeyManager.submitServiceKey("key\nbreak");
+    expect(result).toContain('key\\nbreak');
+    expect(result).not.toContain("key\nbreak");
+  });
+
+  test('substituteServiceKey strips null bytes from key', () => {
+    const code = 'fetch("https://api.test7.com/v1?key=YOUR_API_KEY")';
+    ApiKeyManager.substituteServiceKey(code);
+    const result = ApiKeyManager.submitServiceKey("key\0break");
+    expect(result).toContain('keybreak');
+    expect(result).not.toContain('\0');
+  });
+
+  test('substituteServiceKey escapes U+2028 Line Separator in key', () => {
+    const code = 'fetch("https://api.test8.com/v1?key=YOUR_API_KEY")';
+    ApiKeyManager.substituteServiceKey(code);
+    const result = ApiKeyManager.submitServiceKey("key\u2028break");
+    expect(result).toContain('key\\u2028break');
+    expect(result).not.toContain('\u2028');
+  });
+
+  test('substituteServiceKey escapes U+2029 Paragraph Separator in key', () => {
+    const code = 'fetch("https://api.test9.com/v1?key=YOUR_API_KEY")';
+    ApiKeyManager.substituteServiceKey(code);
+    const result = ApiKeyManager.submitServiceKey("key\u2029break");
+    expect(result).toContain('key\\u2029break');
+    expect(result).not.toContain('\u2029');
+  });
+
+  test('substituteServiceKey handles key with all dangerous chars combined', () => {
+    const code = 'fetch("https://api.test10.com/v1?key=YOUR_API_KEY")';
+    ApiKeyManager.substituteServiceKey(code);
+    const dangerousKey = "ab'cd\"ef`gh\\ij\nkl\rmnop\0qr\u2028st\u2029uv$wx";
+    const result = ApiKeyManager.submitServiceKey(dangerousKey);
+    // Should not contain any unescaped dangerous characters
+    expect(result).not.toContain("'cd\"");  // raw quote combo
+    expect(result).not.toContain('\0');
+    expect(result).not.toContain('\u2028');
+    expect(result).not.toContain('\u2029');
+    // Should contain the escaped versions
+    expect(result).toContain("\\'");
+    expect(result).toContain('\\"');
+    expect(result).toContain('\\`');
+    expect(result).toContain('\\\\');
+    expect(result).toContain('\\n');
+    expect(result).toContain('\\r');
+    expect(result).toContain('\\u2028');
+    expect(result).toContain('\\u2029');
+    expect(result).toContain('\\$');
+  });
 });
 
 /* ================================================================
@@ -359,6 +451,39 @@ describe('SandboxRunner', () => {
 
   test('cancel is safe to call when nothing is running', () => {
     expect(() => SandboxRunner.cancel()).not.toThrow();
+  });
+
+  test('run cancels previous execution before starting new one', async () => {
+    // Start first run — it won't resolve because JSDOM doesn't support
+    // srcdoc postMessage, but it WILL set cleanupFn (isRunning = true).
+    const firstPromise = SandboxRunner.run('return 1');
+    expect(SandboxRunner.isRunning()).toBe(true);
+
+    // Start second run — should cancel the first
+    const secondPromise = SandboxRunner.run('return 2');
+
+    // The first promise should have been cancelled (resolved with cancelled message)
+    const firstResult = await firstPromise;
+    expect(firstResult.ok).toBe(false);
+    expect(firstResult.value).toContain('cancelled');
+
+    // The second run is now the active one
+    expect(SandboxRunner.isRunning()).toBe(true);
+
+    // Clean up: cancel the second run
+    SandboxRunner.cancel();
+    const secondResult = await secondPromise;
+    expect(secondResult.ok).toBe(false);
+    expect(secondResult.value).toContain('cancelled');
+    expect(SandboxRunner.isRunning()).toBe(false);
+  });
+
+  test('only one sandbox iframe exists at a time', () => {
+    SandboxRunner.run('return 1');
+    SandboxRunner.run('return 2');
+    const iframes = document.querySelectorAll('#sandbox-frame');
+    expect(iframes).toHaveLength(1);
+    SandboxRunner.cancel();
   });
 });
 
