@@ -2187,7 +2187,12 @@ const SessionManager = (() => {
     // Replace conversation history
     ConversationManager.clear();
     session.messages.forEach(msg => {
-      ConversationManager.addMessage(msg.role, msg.content);
+      // Defense-in-depth: only load user/assistant messages even from
+      // localStorage (could be tampered via dev tools or XSS)
+      if (msg && typeof msg.role === 'string' && typeof msg.content === 'string'
+          && (msg.role === 'user' || msg.role === 'assistant')) {
+        ConversationManager.addMessage(msg.role, msg.content);
+      }
     });
 
     _setActiveId(session.id);
@@ -2300,12 +2305,53 @@ const SessionManager = (() => {
         throw new Error('Invalid session format');
       }
 
+      // --- Input validation (security) ---
+      // Imported files are untrusted. Validate message structure and
+      // strip system-role messages to prevent prompt injection.
+      const rawMessages = data.session.messages;
+      if (!Array.isArray(rawMessages)) {
+        throw new Error('Messages must be an array');
+      }
+
+      const ALLOWED_ROLES = { user: true, assistant: true };
+      const MAX_CONTENT_LENGTH = 200000; // 200 KB per message
+      const MAX_MESSAGES = 500;
+      const MAX_NAME_LENGTH = 200;
+
+      const validatedMessages = [];
+      const limit = Math.min(rawMessages.length, MAX_MESSAGES);
+      for (let i = 0; i < limit; i++) {
+        const msg = rawMessages[i];
+        if (!msg || typeof msg !== 'object') continue;
+        if (typeof msg.role !== 'string' || typeof msg.content !== 'string') continue;
+
+        // Only allow user/assistant — block system/function/tool roles
+        // to prevent prompt injection via imported sessions
+        if (!ALLOWED_ROLES[msg.role]) continue;
+
+        // Truncate excessively large content
+        const content = msg.content.length > MAX_CONTENT_LENGTH
+          ? msg.content.substring(0, MAX_CONTENT_LENGTH)
+          : msg.content;
+
+        validatedMessages.push({ role: msg.role, content: content });
+      }
+
+      if (validatedMessages.length === 0) {
+        throw new Error('No valid messages found in import');
+      }
+
+      // Sanitize session name
+      const rawName = typeof data.session.name === 'string'
+        ? data.session.name.trim().substring(0, MAX_NAME_LENGTH)
+        : '';
+
       const now = new Date().toISOString();
       const session = {
         id: crypto.randomUUID(),
-        name: data.session.name || 'Imported Session',
-        messages: data.session.messages,
-        messageCount: data.session.messages.length,
+        name: rawName || 'Imported Session',
+        messages: validatedMessages,
+        messageCount: validatedMessages.length,
         preview: '',
         createdAt: now,
         updatedAt: now
