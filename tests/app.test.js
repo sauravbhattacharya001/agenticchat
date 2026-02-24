@@ -4349,7 +4349,7 @@ describe('SlashCommands', () => {
   describe('getCommands', () => {
     test('returns all commands', () => {
       const cmds = SlashCommands.getCommands();
-      expect(cmds.length).toBe(12);
+      expect(cmds.length).toBe(13);
     });
 
     test('returns a defensive copy', () => {
@@ -4456,6 +4456,327 @@ describe('SlashCommands', () => {
       SlashCommands.showDropdown();
       expect(SlashCommands.isDropdownOpen()).toBe(true);
       SlashCommands.hideDropdown();
+    });
+  });
+});
+
+describe('MessageReactions', () => {
+  beforeEach(() => {
+    MessageReactions.reset();
+  });
+
+  describe('addReaction', () => {
+    test('adds reaction to message (returns true)', () => {
+      expect(MessageReactions.addReaction(0, '👍')).toBe(true);
+      expect(MessageReactions.getReactions(0)['👍']).toBe(1);
+    });
+
+    test('increments count for existing emoji', () => {
+      MessageReactions.addReaction(0, '👍');
+      MessageReactions.addReaction(0, '👍');
+      expect(MessageReactions.getReactions(0)['👍']).toBe(2);
+    });
+
+    test('rejects invalid emoji (returns false)', () => {
+      expect(MessageReactions.addReaction(0, '🦄')).toBe(false);
+    });
+
+    test('rejects negative messageIndex (returns false)', () => {
+      expect(MessageReactions.addReaction(-1, '👍')).toBe(false);
+    });
+
+    test('rejects non-number messageIndex (returns false)', () => {
+      expect(MessageReactions.addReaction('abc', '👍')).toBe(false);
+    });
+
+    test('respects MAX_REACTIONS_PER_MESSAGE limit', () => {
+      for (let i = 0; i < MessageReactions.MAX_REACTIONS_PER_MESSAGE; i++) {
+        MessageReactions.addReaction(0, '👍');
+      }
+      expect(MessageReactions.addReaction(0, '👍')).toBe(false);
+      expect(MessageReactions.getReactions(0)['👍']).toBe(MessageReactions.MAX_REACTIONS_PER_MESSAGE);
+    });
+  });
+
+  describe('removeReaction', () => {
+    test('removes reaction (decrements count)', () => {
+      MessageReactions.addReaction(0, '👍');
+      MessageReactions.addReaction(0, '👍');
+      MessageReactions.removeReaction(0, '👍');
+      expect(MessageReactions.getReactions(0)['👍']).toBe(1);
+    });
+
+    test('removes emoji key when count reaches 0', () => {
+      MessageReactions.addReaction(0, '👍');
+      MessageReactions.removeReaction(0, '👍');
+      expect(MessageReactions.getReactions(0)['👍']).toBeUndefined();
+    });
+
+    test('removes message entry when all emojis removed', () => {
+      MessageReactions.addReaction(0, '👍');
+      MessageReactions.removeReaction(0, '👍');
+      expect(MessageReactions.getReactedMessages()).toEqual([]);
+    });
+
+    test('returns false for non-existent reaction', () => {
+      MessageReactions.addReaction(0, '👍');
+      expect(MessageReactions.removeReaction(0, '❤️')).toBe(false);
+    });
+
+    test('returns false for non-existent message', () => {
+      expect(MessageReactions.removeReaction(99, '👍')).toBe(false);
+    });
+  });
+
+  describe('toggleReaction', () => {
+    test('adds when not present', () => {
+      expect(MessageReactions.toggleReaction(0, '👍')).toBe(true);
+      expect(MessageReactions.getReactions(0)['👍']).toBe(1);
+    });
+
+    test('removes when present (count 1)', () => {
+      MessageReactions.addReaction(0, '👍');
+      expect(MessageReactions.toggleReaction(0, '👍')).toBe(true);
+      expect(MessageReactions.getReactions(0)['👍']).toBeUndefined();
+    });
+
+    test('rejects invalid emoji', () => {
+      expect(MessageReactions.toggleReaction(0, '🦄')).toBe(false);
+    });
+
+    test('rejects invalid messageIndex', () => {
+      expect(MessageReactions.toggleReaction(-1, '👍')).toBe(false);
+      expect(MessageReactions.toggleReaction('abc', '👍')).toBe(false);
+    });
+  });
+
+  describe('getReactions', () => {
+    test('returns empty object for message with no reactions', () => {
+      expect(MessageReactions.getReactions(0)).toEqual({});
+    });
+
+    test('returns copy of reactions', () => {
+      MessageReactions.addReaction(0, '👍');
+      MessageReactions.addReaction(0, '❤️');
+      const r = MessageReactions.getReactions(0);
+      expect(r['👍']).toBe(1);
+      expect(r['❤️']).toBe(1);
+    });
+
+    test('returned copy is independent (mutation-safe)', () => {
+      MessageReactions.addReaction(0, '👍');
+      const r = MessageReactions.getReactions(0);
+      r['👍'] = 999;
+      expect(MessageReactions.getReactions(0)['👍']).toBe(1);
+    });
+  });
+
+  describe('getReactionCount', () => {
+    test('returns 0 for no reactions', () => {
+      expect(MessageReactions.getReactionCount(0)).toBe(0);
+    });
+
+    test('returns sum of all emoji counts', () => {
+      MessageReactions.addReaction(0, '👍');
+      MessageReactions.addReaction(0, '👍');
+      MessageReactions.addReaction(0, '❤️');
+      expect(MessageReactions.getReactionCount(0)).toBe(3);
+    });
+
+    test('returns correct count after add/remove', () => {
+      MessageReactions.addReaction(0, '👍');
+      MessageReactions.addReaction(0, '👍');
+      MessageReactions.removeReaction(0, '👍');
+      expect(MessageReactions.getReactionCount(0)).toBe(1);
+    });
+  });
+
+  describe('getReactedMessages', () => {
+    test('returns empty array initially', () => {
+      expect(MessageReactions.getReactedMessages()).toEqual([]);
+    });
+
+    test('returns sorted message indices', () => {
+      MessageReactions.addReaction(5, '👍');
+      MessageReactions.addReaction(2, '❤️');
+      MessageReactions.addReaction(8, '😂');
+      expect(MessageReactions.getReactedMessages()).toEqual([2, 5, 8]);
+    });
+
+    test('excludes cleared messages', () => {
+      MessageReactions.addReaction(0, '👍');
+      MessageReactions.addReaction(1, '❤️');
+      MessageReactions.clearReactions(0);
+      expect(MessageReactions.getReactedMessages()).toEqual([1]);
+    });
+  });
+
+  describe('clearReactions', () => {
+    test('clears all reactions for a message', () => {
+      MessageReactions.addReaction(0, '👍');
+      MessageReactions.addReaction(0, '❤️');
+      MessageReactions.clearReactions(0);
+      expect(MessageReactions.getReactions(0)).toEqual({});
+    });
+
+    test('returns count of removed reactions', () => {
+      MessageReactions.addReaction(0, '👍');
+      MessageReactions.addReaction(0, '👍');
+      MessageReactions.addReaction(0, '❤️');
+      expect(MessageReactions.clearReactions(0)).toBe(3);
+    });
+
+    test('returns 0 for message with no reactions', () => {
+      expect(MessageReactions.clearReactions(99)).toBe(0);
+    });
+  });
+
+  describe('clearAll', () => {
+    test('clears all reactions', () => {
+      MessageReactions.addReaction(0, '👍');
+      MessageReactions.addReaction(1, '❤️');
+      MessageReactions.clearAll();
+      expect(MessageReactions.getReactedMessages()).toEqual([]);
+    });
+
+    test('returns count of messages cleared', () => {
+      MessageReactions.addReaction(0, '👍');
+      MessageReactions.addReaction(1, '❤️');
+      expect(MessageReactions.clearAll()).toBe(2);
+    });
+
+    test('returns 0 when empty', () => {
+      expect(MessageReactions.clearAll()).toBe(0);
+    });
+  });
+
+  describe('getMostUsedEmoji', () => {
+    test('returns null when no reactions', () => {
+      expect(MessageReactions.getMostUsedEmoji()).toBeNull();
+    });
+
+    test('returns most used emoji', () => {
+      MessageReactions.addReaction(0, '👍');
+      MessageReactions.addReaction(0, '👍');
+      MessageReactions.addReaction(0, '❤️');
+      MessageReactions.addReaction(1, '👍');
+      expect(MessageReactions.getMostUsedEmoji()).toBe('👍');
+    });
+
+    test('returns first in case of tie (whichever was stored first)', () => {
+      MessageReactions.addReaction(0, '👍');
+      MessageReactions.addReaction(0, '❤️');
+      // Both have count 1; the first one found wins
+      const result = MessageReactions.getMostUsedEmoji();
+      expect(['👍', '❤️']).toContain(result);
+    });
+  });
+
+  describe('getAvailableEmojis', () => {
+    test('returns 8 emojis', () => {
+      expect(MessageReactions.getAvailableEmojis()).toHaveLength(8);
+    });
+
+    test('returns a copy (mutation-safe)', () => {
+      const emojis = MessageReactions.getAvailableEmojis();
+      emojis.push('🦄');
+      expect(MessageReactions.getAvailableEmojis()).toHaveLength(8);
+    });
+  });
+
+  describe('renderReactionBar', () => {
+    test('creates reaction-bar element', () => {
+      const el = document.createElement('div');
+      MessageReactions.renderReactionBar(el, 0);
+      expect(el.querySelector('.reaction-bar')).not.toBeNull();
+    });
+
+    test('shows badges for existing reactions', () => {
+      MessageReactions.addReaction(0, '👍');
+      MessageReactions.addReaction(0, '❤️');
+      const el = document.createElement('div');
+      MessageReactions.renderReactionBar(el, 0);
+      const badges = el.querySelectorAll('.reaction-badge');
+      expect(badges.length).toBe(2);
+    });
+
+    test('includes add button', () => {
+      const el = document.createElement('div');
+      MessageReactions.renderReactionBar(el, 0);
+      expect(el.querySelector('.reaction-add-btn')).not.toBeNull();
+    });
+
+    test('replaces existing bar on re-render', () => {
+      const el = document.createElement('div');
+      MessageReactions.renderReactionBar(el, 0);
+      MessageReactions.renderReactionBar(el, 0);
+      const bars = el.querySelectorAll('.reaction-bar');
+      expect(bars.length).toBe(1);
+    });
+  });
+
+  describe('hideEmojiPicker', () => {
+    test('removes picker from DOM', () => {
+      const picker = document.createElement('div');
+      picker.className = 'emoji-picker';
+      document.body.appendChild(picker);
+      MessageReactions.hideEmojiPicker();
+      expect(document.querySelector('.emoji-picker')).toBeNull();
+    });
+
+    test('safe to call when no picker exists', () => {
+      expect(() => MessageReactions.hideEmojiPicker()).not.toThrow();
+    });
+  });
+
+  describe('persistence', () => {
+    test('saves reactions to localStorage', () => {
+      MessageReactions.addReaction(0, '👍');
+      const stored = JSON.parse(localStorage.getItem('agenticchat_reactions'));
+      expect(stored['0']['👍']).toBe(1);
+    });
+
+    test('loads reactions from localStorage', () => {
+      localStorage.setItem('agenticchat_reactions', JSON.stringify({ '3': { '❤️': 2 } }));
+      MessageReactions.init();
+      expect(MessageReactions.getReactions(3)['❤️']).toBe(2);
+    });
+
+    test('handles corrupt localStorage gracefully', () => {
+      localStorage.setItem('agenticchat_reactions', 'not-json!!!');
+      expect(() => MessageReactions.init()).not.toThrow();
+      expect(MessageReactions.getReactedMessages()).toEqual([]);
+    });
+
+    test('handles missing localStorage gracefully', () => {
+      localStorage.removeItem('agenticchat_reactions');
+      expect(() => MessageReactions.init()).not.toThrow();
+      expect(MessageReactions.getReactedMessages()).toEqual([]);
+    });
+  });
+
+  describe('_getState', () => {
+    test('returns current state', () => {
+      MessageReactions.addReaction(0, '👍');
+      const state = MessageReactions._getState();
+      expect(state.reactions['0']['👍']).toBe(1);
+      expect(state.availableEmojis).toHaveLength(8);
+    });
+
+    test('returns deep copy of reactions', () => {
+      MessageReactions.addReaction(0, '👍');
+      const state = MessageReactions._getState();
+      state.reactions['0']['👍'] = 999;
+      expect(MessageReactions._getState().reactions['0']['👍']).toBe(1);
+    });
+  });
+
+  describe('reset', () => {
+    test('clears reactions and localStorage', () => {
+      MessageReactions.addReaction(0, '👍');
+      MessageReactions.reset();
+      expect(MessageReactions.getReactedMessages()).toEqual([]);
+      expect(localStorage.getItem('agenticchat_reactions')).toBeNull();
     });
   });
 });

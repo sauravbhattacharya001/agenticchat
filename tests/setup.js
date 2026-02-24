@@ -193,7 +193,8 @@ function loadApp() {
     'VoiceInput',
     'ThemeManager',
     'SessionManager',
-    'SlashCommands'
+    'SlashCommands',
+    'MessageReactions'
   ];
 
   for (const mod of modules) {

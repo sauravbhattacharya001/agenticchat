@@ -926,6 +926,9 @@ const HistoryPanel = (() => {
 
     // Auto-scroll to bottom
     container.scrollTop = container.scrollHeight;
+
+    // Decorate messages with reaction bars
+    MessageReactions.decorateMessages();
   }
 
   function exportAsMarkdown() {
@@ -1914,6 +1917,8 @@ const SlashCommands = (() => {
           action: () => KeyboardShortcuts.showHelp() },
         { name: 'voice', description: 'Toggle voice input', icon: '🎤',
           action: () => VoiceInput.toggle() },
+        { name: 'reactions', description: 'Toggle reactions in history', icon: '😀',
+          action: () => HistoryPanel.toggle() },
         { name: 'save', description: 'Save current session', icon: '💾',
           action: () => SessionManager.save() },
         { name: 'help', description: 'Show available commands', icon: '❓',
@@ -2049,6 +2054,290 @@ const SlashCommands = (() => {
         init, handleInput, handleKeydown, showDropdown, hideDropdown,
         executeCommand, getCommands, isDropdownOpen, filter,
         _getState: () => ({ isOpen, selectedIndex, filteredCommands: filteredCommands.slice() })
+    };
+})();
+
+/* ---------- Message Reactions ---------- */
+const MessageReactions = (() => {
+    const STORAGE_KEY = 'agenticchat_reactions';
+    const AVAILABLE_EMOJIS = ['👍', '👎', '❤️', '😂', '🤔', '💡', '🎉', '⚠️'];
+    const MAX_REACTIONS_PER_MESSAGE = 50;
+    
+    // reactions: { [messageIndex]: { [emoji]: count } }
+    let reactions = {};
+    
+    function init() {
+        load();
+    }
+    
+    // Add a reaction to a message (by its index in conversation history)
+    function addReaction(messageIndex, emoji) {
+        if (!AVAILABLE_EMOJIS.includes(emoji)) return false;
+        if (typeof messageIndex !== 'number' || messageIndex < 0) return false;
+        
+        if (!reactions[messageIndex]) reactions[messageIndex] = {};
+        const current = reactions[messageIndex][emoji] || 0;
+        if (current >= MAX_REACTIONS_PER_MESSAGE) return false;
+        
+        reactions[messageIndex][emoji] = current + 1;
+        save();
+        return true;
+    }
+    
+    // Remove a reaction (decrement count, remove if 0)
+    function removeReaction(messageIndex, emoji) {
+        if (!reactions[messageIndex] || !reactions[messageIndex][emoji]) return false;
+        reactions[messageIndex][emoji]--;
+        if (reactions[messageIndex][emoji] <= 0) {
+            delete reactions[messageIndex][emoji];
+        }
+        if (Object.keys(reactions[messageIndex]).length === 0) {
+            delete reactions[messageIndex];
+        }
+        save();
+        return true;
+    }
+    
+    // Toggle a reaction (add if not present, remove if already 1)
+    function toggleReaction(messageIndex, emoji) {
+        if (!AVAILABLE_EMOJIS.includes(emoji)) return false;
+        if (typeof messageIndex !== 'number' || messageIndex < 0) return false;
+        
+        const current = (reactions[messageIndex] && reactions[messageIndex][emoji]) || 0;
+        if (current > 0) {
+            return removeReaction(messageIndex, emoji);
+        } else {
+            return addReaction(messageIndex, emoji);
+        }
+    }
+    
+    // Get reactions for a message
+    function getReactions(messageIndex) {
+        if (!reactions[messageIndex]) return {};
+        // Return a copy
+        const copy = {};
+        for (const emoji in reactions[messageIndex]) {
+            copy[emoji] = reactions[messageIndex][emoji];
+        }
+        return copy;
+    }
+    
+    // Get total reaction count for a message
+    function getReactionCount(messageIndex) {
+        if (!reactions[messageIndex]) return 0;
+        let count = 0;
+        for (const emoji in reactions[messageIndex]) {
+            count += reactions[messageIndex][emoji];
+        }
+        return count;
+    }
+    
+    // Get all message indices that have reactions
+    function getReactedMessages() {
+        return Object.keys(reactions).map(Number).sort((a, b) => a - b);
+    }
+    
+    // Clear all reactions for a message
+    function clearReactions(messageIndex) {
+        if (!reactions[messageIndex]) return 0;
+        const count = getReactionCount(messageIndex);
+        delete reactions[messageIndex];
+        save();
+        return count;
+    }
+    
+    // Clear all reactions
+    function clearAll() {
+        const count = Object.keys(reactions).length;
+        reactions = {};
+        save();
+        return count;
+    }
+    
+    // Get most reacted emoji across all messages
+    function getMostUsedEmoji() {
+        const totals = {};
+        for (const msgIdx in reactions) {
+            for (const emoji in reactions[msgIdx]) {
+                totals[emoji] = (totals[emoji] || 0) + reactions[msgIdx][emoji];
+            }
+        }
+        let best = null;
+        let bestCount = 0;
+        for (const emoji in totals) {
+            if (totals[emoji] > bestCount) {
+                best = emoji;
+                bestCount = totals[emoji];
+            }
+        }
+        return best;
+    }
+    
+    // Render reaction bar for a message element in the history panel
+    function renderReactionBar(messageElement, messageIndex) {
+        // Remove existing reaction bar if any
+        const existing = messageElement.querySelector('.reaction-bar');
+        if (existing) existing.remove();
+        
+        const bar = document.createElement('div');
+        bar.className = 'reaction-bar';
+        bar.setAttribute('data-msg-index', messageIndex);
+        
+        // Show existing reactions as badges
+        const msgReactions = getReactions(messageIndex);
+        for (const emoji of AVAILABLE_EMOJIS) {
+            if (msgReactions[emoji]) {
+                const badge = document.createElement('span');
+                badge.className = 'reaction-badge active';
+                badge.textContent = emoji + ' ' + msgReactions[emoji];
+                badge.setAttribute('data-emoji', emoji);
+                badge.setAttribute('role', 'button');
+                badge.setAttribute('aria-label', 'Remove ' + emoji + ' reaction');
+                badge.addEventListener('click', function() {
+                    toggleReaction(messageIndex, emoji);
+                    renderReactionBar(messageElement, messageIndex);
+                });
+                bar.appendChild(badge);
+            }
+        }
+        
+        // Add reaction button (picker)
+        const addBtn = document.createElement('button');
+        addBtn.className = 'reaction-add-btn';
+        addBtn.textContent = '+';
+        addBtn.setAttribute('aria-label', 'Add reaction');
+        addBtn.setAttribute('title', 'Add reaction');
+        addBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            showEmojiPicker(messageElement, messageIndex, addBtn);
+        });
+        bar.appendChild(addBtn);
+        
+        messageElement.appendChild(bar);
+    }
+    
+    // Show emoji picker near the add button
+    function showEmojiPicker(messageElement, messageIndex, anchorBtn) {
+        // Remove any existing picker
+        hideEmojiPicker();
+        
+        const picker = document.createElement('div');
+        picker.className = 'emoji-picker';
+        picker.setAttribute('role', 'listbox');
+        picker.setAttribute('aria-label', 'Choose reaction emoji');
+        
+        for (const emoji of AVAILABLE_EMOJIS) {
+            const btn = document.createElement('button');
+            btn.className = 'emoji-option';
+            btn.textContent = emoji;
+            btn.setAttribute('role', 'option');
+            btn.setAttribute('aria-label', emoji);
+            btn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                toggleReaction(messageIndex, emoji);
+                hideEmojiPicker();
+                renderReactionBar(messageElement, messageIndex);
+            });
+            picker.appendChild(btn);
+        }
+        
+        anchorBtn.parentElement.appendChild(picker);
+        
+        // Close on outside click
+        setTimeout(function() {
+            document.addEventListener('click', _onOutsideClick);
+        }, 0);
+    }
+    
+    function _onOutsideClick(e) {
+        const picker = document.querySelector('.emoji-picker');
+        if (picker && !picker.contains(e.target)) {
+            hideEmojiPicker();
+        }
+    }
+    
+    function hideEmojiPicker() {
+        const picker = document.querySelector('.emoji-picker');
+        if (picker) picker.remove();
+        document.removeEventListener('click', _onOutsideClick);
+    }
+    
+    // Decorate all history messages with reaction bars
+    function decorateMessages() {
+        const container = document.getElementById('history-messages');
+        if (!container) return;
+        const msgs = container.querySelectorAll('.history-msg');
+        // Message index = index in ConversationManager (skip system at 0)
+        const history = ConversationManager.getHistory();
+        let nonSystemIdx = 0;
+        for (let i = 0; i < history.length; i++) {
+            if (history[i].role === 'system') continue;
+            if (nonSystemIdx < msgs.length) {
+                renderReactionBar(msgs[nonSystemIdx], i);
+            }
+            nonSystemIdx++;
+        }
+    }
+    
+    function save() {
+        try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(reactions));
+        } catch (e) {
+            // Storage full — silent fail
+        }
+    }
+    
+    function load() {
+        try {
+            const data = localStorage.getItem(STORAGE_KEY);
+            if (data) {
+                const parsed = JSON.parse(data);
+                if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                    reactions = parsed;
+                } else {
+                    reactions = {};
+                }
+            }
+        } catch (e) {
+            reactions = {};
+        }
+    }
+    
+    function getAvailableEmojis() {
+        return AVAILABLE_EMOJIS.slice();
+    }
+    
+    function _getState() {
+        return {
+            reactions: JSON.parse(JSON.stringify(reactions)),
+            availableEmojis: AVAILABLE_EMOJIS.slice()
+        };
+    }
+    
+    function reset() {
+        reactions = {};
+        localStorage.removeItem(STORAGE_KEY);
+    }
+    
+    return {
+        init,
+        addReaction,
+        removeReaction,
+        toggleReaction,
+        getReactions,
+        getReactionCount,
+        getReactedMessages,
+        clearReactions,
+        clearAll,
+        getMostUsedEmoji,
+        renderReactionBar,
+        showEmojiPicker,
+        hideEmojiPicker,
+        decorateMessages,
+        getAvailableEmojis,
+        _getState,
+        reset,
+        MAX_REACTIONS_PER_MESSAGE
     };
 })();
 
@@ -3208,4 +3497,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Slash commands
   SlashCommands.init();
+
+  // Message reactions
+  MessageReactions.init();
 });
