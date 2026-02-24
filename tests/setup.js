@@ -192,7 +192,8 @@ function loadApp() {
     'ChatBookmarks',
     'VoiceInput',
     'ThemeManager',
-    'SessionManager'
+    'SessionManager',
+    'SlashCommands'
   ];
 
   for (const mod of modules) {

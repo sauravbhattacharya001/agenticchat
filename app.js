@@ -1884,6 +1884,174 @@ const ChatBookmarks = (() => {
   };
 })();
 
+/* ---------- Slash Commands ---------- */
+const SlashCommands = (() => {
+    let isOpen = false;
+    let selectedIndex = -1;
+    let filteredCommands = [];
+    let dropdownEl = null;
+
+    const MAX_VISIBLE = 8;
+
+    const commands = Object.freeze([
+        { name: 'clear', description: 'Clear conversation history', icon: '🗑️',
+          action: () => ChatController.clearHistory() },
+        { name: 'export', description: 'Export chat as Markdown', icon: '📤',
+          action: () => HistoryPanel.exportAsMarkdown() },
+        { name: 'history', description: 'Toggle history panel', icon: '📜',
+          action: () => HistoryPanel.toggle() },
+        { name: 'templates', description: 'Open prompt templates', icon: '📋',
+          action: () => PromptTemplates.toggle() },
+        { name: 'snippets', description: 'Open code snippets', icon: '💾',
+          action: () => SnippetLibrary.toggle() },
+        { name: 'theme', description: 'Toggle dark/light theme', icon: '🎨',
+          action: () => ThemeManager.toggle() },
+        { name: 'search', description: 'Open message search', icon: '🔍',
+          action: () => MessageSearch.toggle() },
+        { name: 'bookmarks', description: 'Toggle bookmarks panel', icon: '🔖',
+          action: () => ChatBookmarks.togglePanel() },
+        { name: 'shortcuts', description: 'Show keyboard shortcuts', icon: '⌨️',
+          action: () => KeyboardShortcuts.showHelp() },
+        { name: 'voice', description: 'Toggle voice input', icon: '🎤',
+          action: () => VoiceInput.toggle() },
+        { name: 'save', description: 'Save current session', icon: '💾',
+          action: () => SessionManager.save() },
+        { name: 'help', description: 'Show available commands', icon: '❓',
+          action: () => { /* opening dropdown is the action */ } },
+    ]);
+
+    function init() {
+        const input = document.getElementById('chat-input');
+        if (!input) return;
+        input.addEventListener('input', function () {
+            handleInput(this.value);
+        });
+        input.addEventListener('keydown', function (e) {
+            handleKeydown(e);
+        });
+        document.addEventListener('click', function (e) {
+            if (isOpen && dropdownEl && !dropdownEl.contains(e.target) && e.target.id !== 'chat-input') {
+                hideDropdown();
+            }
+        });
+    }
+
+    function handleInput(value) {
+        if (!value || !value.startsWith('/')) {
+            hideDropdown();
+            return;
+        }
+        const query = value.slice(1);
+        filteredCommands = filter(query);
+        if (filteredCommands.length === 0) {
+            hideDropdown();
+            return;
+        }
+        selectedIndex = -1;
+        showDropdown();
+    }
+
+    function filter(query) {
+        if (!query && query !== '') return commands.slice();
+        const q = query.toLowerCase();
+        return commands.filter(cmd => cmd.name.toLowerCase().startsWith(q));
+    }
+
+    function showDropdown() {
+        if (!dropdownEl) {
+            dropdownEl = document.createElement('div');
+            dropdownEl.className = 'slash-dropdown';
+            const toolbar = document.querySelector('.toolbar');
+            if (toolbar) {
+                toolbar.style.position = 'relative';
+                toolbar.appendChild(dropdownEl);
+            } else {
+                document.body.appendChild(dropdownEl);
+            }
+        }
+        isOpen = true;
+        renderCommands();
+    }
+
+    function hideDropdown() {
+        if (dropdownEl && dropdownEl.parentNode) {
+            dropdownEl.parentNode.removeChild(dropdownEl);
+        }
+        dropdownEl = null;
+        isOpen = false;
+        selectedIndex = -1;
+        filteredCommands = [];
+    }
+
+    function renderCommands() {
+        if (!dropdownEl) return;
+        dropdownEl.innerHTML = '';
+        const visible = filteredCommands.slice(0, MAX_VISIBLE);
+        visible.forEach((cmd, i) => {
+            const item = document.createElement('div');
+            item.className = 'slash-item' + (i === selectedIndex ? ' slash-item-selected' : '');
+            const icon = document.createElement('span');
+            icon.className = 'slash-item-icon';
+            icon.textContent = cmd.icon;
+            const name = document.createElement('span');
+            name.className = 'slash-item-name';
+            name.textContent = '/' + cmd.name;
+            const desc = document.createElement('span');
+            desc.className = 'slash-item-desc';
+            desc.textContent = cmd.description;
+            item.appendChild(icon);
+            item.appendChild(name);
+            item.appendChild(desc);
+            item.addEventListener('click', () => executeCommand(cmd));
+            dropdownEl.appendChild(item);
+        });
+        if (filteredCommands.length > MAX_VISIBLE) {
+            dropdownEl.style.overflowY = 'auto';
+        }
+    }
+
+    function handleKeydown(e) {
+        if (!isOpen) return;
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            selectedIndex = (selectedIndex + 1) % filteredCommands.length;
+            renderCommands();
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            selectedIndex = selectedIndex <= 0 ? filteredCommands.length - 1 : selectedIndex - 1;
+            renderCommands();
+        } else if (e.key === 'Enter' || e.key === 'Tab') {
+            e.preventDefault();
+            const idx = selectedIndex >= 0 ? selectedIndex : 0;
+            if (filteredCommands[idx]) {
+                executeCommand(filteredCommands[idx]);
+            }
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            const input = document.getElementById('chat-input');
+            if (input) input.value = '';
+            hideDropdown();
+        }
+    }
+
+    function executeCommand(command) {
+        const input = document.getElementById('chat-input');
+        if (input) input.value = '';
+        hideDropdown();
+        command.action();
+    }
+
+    function getCommands() { return commands.slice(); }
+
+    function isDropdownOpen() { return isOpen; }
+
+    return {
+        init, handleInput, handleKeydown, showDropdown, hideDropdown,
+        executeCommand, getCommands, isDropdownOpen, filter,
+        _getState: () => ({ isOpen, selectedIndex, filteredCommands: filteredCommands.slice() })
+    };
+})();
+
 /* ---------- Keyboard Shortcuts ---------- */
 const KeyboardShortcuts = (() => {
   let isHelpOpen = false;
@@ -3037,4 +3205,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Initialize session auto-save preference
   SessionManager.initAutoSave();
+
+  // Slash commands
+  SlashCommands.init();
 });

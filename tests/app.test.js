@@ -4044,3 +4044,418 @@ describe('ChatController', () => {
     });
   });
 });
+
+/* ================================================================
+ * SlashCommands
+ * ================================================================ */
+describe('SlashCommands', () => {
+  beforeEach(() => {
+    SlashCommands.hideDropdown();
+  });
+
+  /* ---------- filter ---------- */
+  describe('filter', () => {
+    test('returns all commands for empty query', () => {
+      const result = SlashCommands.filter('');
+      expect(result.length).toBe(SlashCommands.getCommands().length);
+    });
+
+    test('matches prefix "cl" to clear', () => {
+      const result = SlashCommands.filter('cl');
+      expect(result.length).toBe(1);
+      expect(result[0].name).toBe('clear');
+    });
+
+    test('is case-insensitive', () => {
+      const result = SlashCommands.filter('CL');
+      expect(result.length).toBe(1);
+      expect(result[0].name).toBe('clear');
+    });
+
+    test('returns empty array for no matches', () => {
+      const result = SlashCommands.filter('zzz');
+      expect(result).toEqual([]);
+    });
+
+    test('full command name matches exactly one', () => {
+      const result = SlashCommands.filter('history');
+      expect(result.length).toBe(1);
+      expect(result[0].name).toBe('history');
+    });
+
+    test('prefix "s" matches multiple commands', () => {
+      const result = SlashCommands.filter('s');
+      const names = result.map(c => c.name);
+      expect(names).toContain('save');
+      expect(names).toContain('search');
+      expect(names).toContain('snippets');
+      expect(names).toContain('shortcuts');
+    });
+
+    test('prefix "he" matches help and history? no, just help', () => {
+      const result = SlashCommands.filter('he');
+      expect(result.length).toBe(1);
+      expect(result[0].name).toBe('help');
+    });
+
+    test('prefix "t" matches templates and theme', () => {
+      const result = SlashCommands.filter('t');
+      const names = result.map(c => c.name);
+      expect(names).toContain('templates');
+      expect(names).toContain('theme');
+    });
+  });
+
+  /* ---------- handleInput ---------- */
+  describe('handleInput', () => {
+    test('shows dropdown when input starts with /', () => {
+      SlashCommands.handleInput('/');
+      expect(SlashCommands.isDropdownOpen()).toBe(true);
+    });
+
+    test('hides dropdown when input does not start with /', () => {
+      SlashCommands.handleInput('/');
+      expect(SlashCommands.isDropdownOpen()).toBe(true);
+      SlashCommands.handleInput('hello');
+      expect(SlashCommands.isDropdownOpen()).toBe(false);
+    });
+
+    test('filters commands based on text after /', () => {
+      SlashCommands.handleInput('/cl');
+      const state = SlashCommands._getState();
+      expect(state.filteredCommands.length).toBe(1);
+      expect(state.filteredCommands[0].name).toBe('clear');
+    });
+
+    test('shows all commands for just /', () => {
+      SlashCommands.handleInput('/');
+      const state = SlashCommands._getState();
+      expect(state.filteredCommands.length).toBe(SlashCommands.getCommands().length);
+    });
+
+    test('hides dropdown on empty input', () => {
+      SlashCommands.handleInput('/');
+      expect(SlashCommands.isDropdownOpen()).toBe(true);
+      SlashCommands.handleInput('');
+      expect(SlashCommands.isDropdownOpen()).toBe(false);
+    });
+
+    test('hides dropdown when no commands match', () => {
+      SlashCommands.handleInput('/zzzzz');
+      expect(SlashCommands.isDropdownOpen()).toBe(false);
+    });
+
+    test('resets selectedIndex on new input', () => {
+      SlashCommands.handleInput('/');
+      const state = SlashCommands._getState();
+      expect(state.selectedIndex).toBe(-1);
+    });
+  });
+
+  /* ---------- Dropdown rendering ---------- */
+  describe('dropdown rendering', () => {
+    test('creates dropdown element with slash-dropdown class', () => {
+      SlashCommands.handleInput('/');
+      const dropdown = document.querySelector('.slash-dropdown');
+      expect(dropdown).not.toBeNull();
+    });
+
+    test('each item has slash-item class', () => {
+      SlashCommands.handleInput('/');
+      const items = document.querySelectorAll('.slash-item');
+      expect(items.length).toBeGreaterThan(0);
+      items.forEach(item => {
+        expect(item.classList.contains('slash-item')).toBe(true);
+      });
+    });
+
+    test('each item has icon, name, and description', () => {
+      SlashCommands.handleInput('/cl');
+      const item = document.querySelector('.slash-item');
+      expect(item).not.toBeNull();
+      const icon = item.querySelector('.slash-item-icon');
+      const name = item.querySelector('.slash-item-name');
+      const desc = item.querySelector('.slash-item-desc');
+      expect(icon).not.toBeNull();
+      expect(name).not.toBeNull();
+      expect(desc).not.toBeNull();
+      expect(icon.textContent).toBe('🗑️');
+      expect(name.textContent).toBe('/clear');
+      expect(desc.textContent).toBe('Clear conversation history');
+    });
+
+    test('dropdown has slash-dropdown class', () => {
+      SlashCommands.handleInput('/');
+      const dropdown = document.querySelector('.slash-dropdown');
+      expect(dropdown.className).toContain('slash-dropdown');
+    });
+
+    test('renders max MAX_VISIBLE items', () => {
+      SlashCommands.handleInput('/');
+      const items = document.querySelectorAll('.slash-item');
+      expect(items.length).toBeLessThanOrEqual(8);
+    });
+
+    test('clicking an item executes that command', () => {
+      SlashCommands.handleInput('/he');
+      const item = document.querySelector('.slash-item');
+      expect(item).not.toBeNull();
+      item.click();
+      expect(SlashCommands.isDropdownOpen()).toBe(false);
+    });
+
+    test('hiding removes dropdown element from DOM', () => {
+      SlashCommands.handleInput('/');
+      expect(document.querySelector('.slash-dropdown')).not.toBeNull();
+      SlashCommands.hideDropdown();
+      expect(document.querySelector('.slash-dropdown')).toBeNull();
+    });
+  });
+
+  /* ---------- Keyboard navigation ---------- */
+  describe('keyboard navigation', () => {
+    function makeKeyEvent(key) {
+      let prevented = false;
+      return {
+        key,
+        preventDefault: () => { prevented = true; },
+        get defaultPrevented() { return prevented; }
+      };
+    }
+
+    test('ArrowDown moves selection down', () => {
+      SlashCommands.handleInput('/');
+      const e = makeKeyEvent('ArrowDown');
+      SlashCommands.handleKeydown(e);
+      expect(SlashCommands._getState().selectedIndex).toBe(0);
+    });
+
+    test('ArrowUp moves selection up from 0 to last', () => {
+      SlashCommands.handleInput('/');
+      // Move down first
+      SlashCommands.handleKeydown(makeKeyEvent('ArrowDown'));
+      expect(SlashCommands._getState().selectedIndex).toBe(0);
+      // ArrowUp from 0 should wrap to last
+      SlashCommands.handleKeydown(makeKeyEvent('ArrowUp'));
+      const state = SlashCommands._getState();
+      expect(state.selectedIndex).toBe(state.filteredCommands.length - 1);
+    });
+
+    test('selection wraps at bottom', () => {
+      SlashCommands.handleInput('/cl'); // 1 command
+      const e = makeKeyEvent('ArrowDown');
+      SlashCommands.handleKeydown(e); // index 0
+      SlashCommands.handleKeydown(makeKeyEvent('ArrowDown')); // wraps to 0
+      expect(SlashCommands._getState().selectedIndex).toBe(0);
+    });
+
+    test('selection wraps at top', () => {
+      SlashCommands.handleInput('/cl'); // 1 command
+      const e = makeKeyEvent('ArrowDown');
+      SlashCommands.handleKeydown(e); // index 0
+      SlashCommands.handleKeydown(makeKeyEvent('ArrowUp')); // wraps to 0 (only 1 item)
+      expect(SlashCommands._getState().selectedIndex).toBe(0);
+    });
+
+    test('Enter executes selected command', () => {
+      SlashCommands.handleInput('/he');
+      SlashCommands.handleKeydown(makeKeyEvent('ArrowDown'));
+      const e = makeKeyEvent('Enter');
+      SlashCommands.handleKeydown(e);
+      expect(SlashCommands.isDropdownOpen()).toBe(false);
+    });
+
+    test('Tab executes selected command', () => {
+      SlashCommands.handleInput('/he');
+      SlashCommands.handleKeydown(makeKeyEvent('ArrowDown'));
+      const e = makeKeyEvent('Tab');
+      SlashCommands.handleKeydown(e);
+      expect(SlashCommands.isDropdownOpen()).toBe(false);
+    });
+
+    test('Escape closes dropdown', () => {
+      SlashCommands.handleInput('/');
+      expect(SlashCommands.isDropdownOpen()).toBe(true);
+      SlashCommands.handleKeydown(makeKeyEvent('Escape'));
+      expect(SlashCommands.isDropdownOpen()).toBe(false);
+    });
+
+    test('Escape clears the chat input', () => {
+      const input = document.getElementById('chat-input');
+      input.value = '/test';
+      SlashCommands.handleInput('/test');
+      // /test doesn't match, dropdown closed; open with valid
+      SlashCommands.handleInput('/');
+      SlashCommands.handleKeydown(makeKeyEvent('Escape'));
+      expect(input.value).toBe('');
+    });
+
+    test('prevents default on navigation keys when open', () => {
+      SlashCommands.handleInput('/');
+      const e1 = makeKeyEvent('ArrowDown');
+      SlashCommands.handleKeydown(e1);
+      expect(e1.defaultPrevented).toBe(true);
+      const e2 = makeKeyEvent('ArrowUp');
+      SlashCommands.handleKeydown(e2);
+      expect(e2.defaultPrevented).toBe(true);
+      const e3 = makeKeyEvent('Escape');
+      SlashCommands.handleKeydown(e3);
+      expect(e3.defaultPrevented).toBe(true);
+    });
+
+    test('does nothing when dropdown is closed', () => {
+      expect(SlashCommands.isDropdownOpen()).toBe(false);
+      const e = makeKeyEvent('ArrowDown');
+      SlashCommands.handleKeydown(e);
+      expect(e.defaultPrevented).toBe(false);
+    });
+
+    test('Enter with no selection executes first command', () => {
+      SlashCommands.handleInput('/cl');
+      const e = makeKeyEvent('Enter');
+      SlashCommands.handleKeydown(e);
+      expect(SlashCommands.isDropdownOpen()).toBe(false);
+      expect(document.getElementById('chat-input').value).toBe('');
+    });
+  });
+
+  /* ---------- Command execution ---------- */
+  describe('command execution', () => {
+    test('clears chat input after execution', () => {
+      const input = document.getElementById('chat-input');
+      input.value = '/help';
+      const helpCmd = SlashCommands.getCommands().find(c => c.name === 'help');
+      SlashCommands.executeCommand(helpCmd);
+      expect(input.value).toBe('');
+    });
+
+    test('hides dropdown after execution', () => {
+      SlashCommands.handleInput('/');
+      expect(SlashCommands.isDropdownOpen()).toBe(true);
+      const helpCmd = SlashCommands.getCommands().find(c => c.name === 'help');
+      SlashCommands.executeCommand(helpCmd);
+      expect(SlashCommands.isDropdownOpen()).toBe(false);
+    });
+
+    test('calls command action function', () => {
+      const mockAction = jest.fn();
+      const fakeCmd = { name: 'test', description: 'test', icon: '🧪', action: mockAction };
+      SlashCommands.executeCommand(fakeCmd);
+      expect(mockAction).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  /* ---------- getCommands ---------- */
+  describe('getCommands', () => {
+    test('returns all commands', () => {
+      const cmds = SlashCommands.getCommands();
+      expect(cmds.length).toBe(12);
+    });
+
+    test('returns a defensive copy', () => {
+      const cmds1 = SlashCommands.getCommands();
+      const cmds2 = SlashCommands.getCommands();
+      expect(cmds1).not.toBe(cmds2);
+      expect(cmds1).toEqual(cmds2);
+    });
+
+    test('each command has name, description, icon, action', () => {
+      const cmds = SlashCommands.getCommands();
+      cmds.forEach(cmd => {
+        expect(typeof cmd.name).toBe('string');
+        expect(typeof cmd.description).toBe('string');
+        expect(typeof cmd.icon).toBe('string');
+        expect(typeof cmd.action).toBe('function');
+      });
+    });
+  });
+
+  /* ---------- isDropdownOpen ---------- */
+  describe('isDropdownOpen', () => {
+    test('returns false initially', () => {
+      expect(SlashCommands.isDropdownOpen()).toBe(false);
+    });
+
+    test('returns true when dropdown is shown', () => {
+      SlashCommands.handleInput('/');
+      expect(SlashCommands.isDropdownOpen()).toBe(true);
+    });
+
+    test('returns false after hiding', () => {
+      SlashCommands.handleInput('/');
+      SlashCommands.hideDropdown();
+      expect(SlashCommands.isDropdownOpen()).toBe(false);
+    });
+  });
+
+  /* ---------- _getState ---------- */
+  describe('_getState', () => {
+    test('returns correct initial state', () => {
+      const state = SlashCommands._getState();
+      expect(state.isOpen).toBe(false);
+      expect(state.selectedIndex).toBe(-1);
+      expect(state.filteredCommands).toEqual([]);
+    });
+
+    test('returns correct state when open', () => {
+      SlashCommands.handleInput('/cl');
+      const state = SlashCommands._getState();
+      expect(state.isOpen).toBe(true);
+      expect(state.selectedIndex).toBe(-1);
+      expect(state.filteredCommands.length).toBe(1);
+    });
+
+    test('returns defensive copy of filteredCommands', () => {
+      SlashCommands.handleInput('/');
+      const state1 = SlashCommands._getState();
+      const state2 = SlashCommands._getState();
+      expect(state1.filteredCommands).not.toBe(state2.filteredCommands);
+    });
+  });
+
+  /* ---------- Edge cases ---------- */
+  describe('edge cases', () => {
+    test('multiple / characters in input treated as command prefix', () => {
+      SlashCommands.handleInput('//test');
+      // starts with / but "/test" won't match, so might be closed
+      // It starts with / so it tries to filter with query "/test" which won't match
+      expect(SlashCommands.isDropdownOpen()).toBe(false);
+    });
+
+    test('/ in middle of text does not trigger', () => {
+      SlashCommands.handleInput('hello /clear');
+      expect(SlashCommands.isDropdownOpen()).toBe(false);
+    });
+
+    test('rapid open/close does not break state', () => {
+      SlashCommands.handleInput('/');
+      expect(SlashCommands.isDropdownOpen()).toBe(true);
+      SlashCommands.hideDropdown();
+      expect(SlashCommands.isDropdownOpen()).toBe(false);
+      SlashCommands.handleInput('/cl');
+      expect(SlashCommands.isDropdownOpen()).toBe(true);
+      SlashCommands.hideDropdown();
+      expect(SlashCommands.isDropdownOpen()).toBe(false);
+      SlashCommands.handleInput('/');
+      expect(SlashCommands.isDropdownOpen()).toBe(true);
+    });
+
+    test('null input hides dropdown', () => {
+      SlashCommands.handleInput('/');
+      SlashCommands.handleInput(null);
+      expect(SlashCommands.isDropdownOpen()).toBe(false);
+    });
+
+    test('hideDropdown when already hidden is safe', () => {
+      expect(SlashCommands.isDropdownOpen()).toBe(false);
+      SlashCommands.hideDropdown();
+      expect(SlashCommands.isDropdownOpen()).toBe(false);
+    });
+
+    test('showDropdown without prior filter works', () => {
+      SlashCommands.showDropdown();
+      expect(SlashCommands.isDropdownOpen()).toBe(true);
+      SlashCommands.hideDropdown();
+    });
+  });
+});
