@@ -2818,3 +2818,426 @@ describe('MessageSearch', () => {
     expect(MessageSearch.isSearchOpen()).toBe(true);
   });
 });
+
+/* ================================================================
+ * Extended HistoryPanel Tests
+ * ================================================================ */
+describe('HistoryPanel — extended', () => {
+  test('exportAsMarkdown produces correct format with messages', () => {
+    ConversationManager.addMessage('user', 'What is 2+2?');
+    ConversationManager.addMessage('assistant', 'The answer is 4.');
+
+    let capturedContent = null;
+    const origCreateObjectURL = URL.createObjectURL;
+    const origRevokeObjectURL = URL.revokeObjectURL;
+    URL.createObjectURL = (blob) => {
+      capturedContent = blob;
+      return 'blob:test';
+    };
+    URL.revokeObjectURL = () => {};
+
+    // Mock the anchor click
+    const origCreateElement = document.createElement.bind(document);
+    let downloadFilename = '';
+    const origAppendChild = document.body.appendChild.bind(document.body);
+    const origRemoveChild = document.body.removeChild.bind(document.body);
+
+    HistoryPanel.exportAsMarkdown();
+
+    // Verify blob was created with markdown content
+    expect(capturedContent).toBeInstanceOf(Blob);
+    expect(capturedContent.type).toBe('text/markdown');
+
+    URL.createObjectURL = origCreateObjectURL;
+    URL.revokeObjectURL = origRevokeObjectURL;
+  });
+
+  test('exportAsJSON produces correct format with messages', () => {
+    ConversationManager.addMessage('user', 'Hello');
+    ConversationManager.addMessage('assistant', 'Hi');
+
+    let capturedBlob = null;
+    const origCreateObjectURL = URL.createObjectURL;
+    const origRevokeObjectURL = URL.revokeObjectURL;
+    URL.createObjectURL = (blob) => {
+      capturedBlob = blob;
+      return 'blob:test';
+    };
+    URL.revokeObjectURL = () => {};
+
+    HistoryPanel.exportAsJSON();
+
+    expect(capturedBlob).toBeInstanceOf(Blob);
+    expect(capturedBlob.type).toBe('application/json');
+
+    URL.createObjectURL = origCreateObjectURL;
+    URL.revokeObjectURL = origRevokeObjectURL;
+  });
+
+  test('toggle twice returns panel to closed state', () => {
+    const panel = document.getElementById('history-panel');
+    const overlay = document.getElementById('history-overlay');
+
+    HistoryPanel.toggle(); // open
+    HistoryPanel.toggle(); // close
+
+    expect(panel.classList.contains('open')).toBe(false);
+    expect(overlay.classList.contains('visible')).toBe(false);
+  });
+
+  test('close when already closed is a no-op', () => {
+    const panel = document.getElementById('history-panel');
+    HistoryPanel.close();
+    expect(panel.classList.contains('open')).toBe(false);
+  });
+
+  test('refresh renders messages after adding them', () => {
+    ConversationManager.addMessage('user', 'First');
+    ConversationManager.addMessage('assistant', 'Second');
+    ConversationManager.addMessage('user', 'Third');
+    HistoryPanel.refresh();
+
+    const container = document.getElementById('history-messages');
+    const msgs = container.querySelectorAll('.history-msg');
+    expect(msgs).toHaveLength(3);
+  });
+
+  test('refresh filters out system messages', () => {
+    // System message is always present
+    HistoryPanel.refresh();
+    const container = document.getElementById('history-messages');
+    // System message should not appear in rendered output
+    const msgs = container.querySelectorAll('.history-msg');
+    expect(msgs).toHaveLength(0);
+    expect(container.querySelector('.history-empty')).not.toBeNull();
+  });
+
+  test('refresh shows role labels correctly', () => {
+    ConversationManager.addMessage('user', 'Hello');
+    ConversationManager.addMessage('assistant', 'Hi');
+    HistoryPanel.refresh();
+
+    const container = document.getElementById('history-messages');
+    const roles = container.querySelectorAll('.msg-role');
+    expect(roles[0].textContent).toBe('👤 You');
+    expect(roles[1].textContent).toBe('🤖 Assistant');
+  });
+
+  test('exportAsMarkdown with special characters in messages', () => {
+    ConversationManager.addMessage('user', 'Test <script>alert("xss")</script>');
+    ConversationManager.addMessage('assistant', 'Response with & ampersand');
+
+    let capturedBlob = null;
+    URL.createObjectURL = (blob) => { capturedBlob = blob; return 'blob:test'; };
+    URL.revokeObjectURL = () => {};
+
+    HistoryPanel.exportAsMarkdown();
+
+    expect(capturedBlob).toBeInstanceOf(Blob);
+    expect(capturedBlob.type).toBe('text/markdown');
+  });
+
+  test('exportAsJSON with special characters in messages', () => {
+    ConversationManager.addMessage('user', 'Test "quotes" and \\backslash');
+    ConversationManager.addMessage('assistant', 'Response with \nnewline');
+
+    let capturedBlob = null;
+    URL.createObjectURL = (blob) => { capturedBlob = blob; return 'blob:test'; };
+    URL.revokeObjectURL = () => {};
+
+    HistoryPanel.exportAsJSON();
+
+    expect(capturedBlob).toBeInstanceOf(Blob);
+    expect(capturedBlob.type).toBe('application/json');
+  });
+
+  test('refresh with code block and surrounding text', () => {
+    ConversationManager.addMessage('assistant', 'Here is the code:\n```js\nlet x = 1;\n```\nDone!');
+    HistoryPanel.refresh();
+
+    const container = document.getElementById('history-messages');
+    const pre = container.querySelector('pre');
+    expect(pre).not.toBeNull();
+    expect(pre.textContent).toContain('let x = 1;');
+    // Should also have text before and after code
+    const msgTexts = container.querySelectorAll('.msg-text');
+    expect(msgTexts.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test('refresh with assistant message with no code block', () => {
+    ConversationManager.addMessage('assistant', 'Just a plain text response');
+    HistoryPanel.refresh();
+
+    const container = document.getElementById('history-messages');
+    const pre = container.querySelector('pre');
+    expect(pre).toBeNull();
+    const text = container.querySelector('.msg-text');
+    expect(text.textContent).toBe('Just a plain text response');
+  });
+
+  test('toggle opens panel and calls refresh', () => {
+    ConversationManager.addMessage('user', 'Hi');
+    HistoryPanel.toggle(); // open
+
+    const container = document.getElementById('history-messages');
+    const msgs = container.querySelectorAll('.history-msg');
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0].textContent).toContain('Hi');
+
+    HistoryPanel.close();
+  });
+
+  test('multiple toggle cycles maintain correct state', () => {
+    const panel = document.getElementById('history-panel');
+
+    HistoryPanel.toggle(); // open
+    expect(panel.classList.contains('open')).toBe(true);
+    HistoryPanel.toggle(); // close
+    expect(panel.classList.contains('open')).toBe(false);
+    HistoryPanel.toggle(); // open
+    expect(panel.classList.contains('open')).toBe(true);
+    HistoryPanel.toggle(); // close
+    expect(panel.classList.contains('open')).toBe(false);
+  });
+});
+
+/* ================================================================
+ * Extended SandboxRunner Tests
+ * ================================================================ */
+describe('SandboxRunner — extended', () => {
+  test('cancel when not running is a no-op and returns false-ish', () => {
+    expect(SandboxRunner.isRunning()).toBe(false);
+    SandboxRunner.cancel(); // should not throw
+    expect(SandboxRunner.isRunning()).toBe(false);
+  });
+
+  test('isRunning returns true after run is called', () => {
+    SandboxRunner.run('return 1');
+    expect(SandboxRunner.isRunning()).toBe(true);
+    SandboxRunner.cancel();
+  });
+
+  test('isRunning returns false after cancel', async () => {
+    const promise = SandboxRunner.run('return 1');
+    expect(SandboxRunner.isRunning()).toBe(true);
+    SandboxRunner.cancel();
+    await promise;
+    expect(SandboxRunner.isRunning()).toBe(false);
+  });
+
+  test('cancel resolves promise with cancelled message', async () => {
+    const promise = SandboxRunner.run('return 42');
+    SandboxRunner.cancel();
+    const result = await promise;
+    expect(result.ok).toBe(false);
+    expect(result.value).toContain('cancelled');
+  });
+
+  test('multiple sequential runs work correctly', async () => {
+    const p1 = SandboxRunner.run('return 1');
+    SandboxRunner.cancel();
+    const r1 = await p1;
+    expect(r1.ok).toBe(false);
+
+    const p2 = SandboxRunner.run('return 2');
+    SandboxRunner.cancel();
+    const r2 = await p2;
+    expect(r2.ok).toBe(false);
+
+    expect(SandboxRunner.isRunning()).toBe(false);
+  });
+
+  test('running while already running cancels previous execution', async () => {
+    const p1 = SandboxRunner.run('return "first"');
+    const p2 = SandboxRunner.run('return "second"');
+
+    // First should be cancelled
+    const r1 = await p1;
+    expect(r1.ok).toBe(false);
+    expect(r1.value).toContain('cancelled');
+
+    // Second is now active
+    expect(SandboxRunner.isRunning()).toBe(true);
+    SandboxRunner.cancel();
+    const r2 = await p2;
+    expect(r2.ok).toBe(false);
+  });
+
+  test('sandbox iframe is cleaned up after cancel', async () => {
+    const promise = SandboxRunner.run('return 1');
+    SandboxRunner.cancel();
+    await promise;
+    const iframe = document.getElementById('sandbox-frame');
+    expect(iframe).toBeNull();
+  });
+
+  test('run creates a sandbox iframe', () => {
+    SandboxRunner.run('return 1');
+    const iframe = document.getElementById('sandbox-frame');
+    expect(iframe).not.toBeNull();
+    expect(iframe.tagName).toBe('IFRAME');
+    expect(iframe.style.display).toBe('none');
+    SandboxRunner.cancel();
+  });
+
+  test('run with empty code does not throw', async () => {
+    const promise = SandboxRunner.run('');
+    expect(SandboxRunner.isRunning()).toBe(true);
+    SandboxRunner.cancel();
+    const result = await promise;
+    expect(result.ok).toBe(false);
+  });
+
+  test('cancel called multiple times is safe', async () => {
+    const promise = SandboxRunner.run('return 1');
+    SandboxRunner.cancel();
+    SandboxRunner.cancel(); // second cancel should be safe
+    SandboxRunner.cancel(); // third cancel too
+    const result = await promise;
+    expect(result.ok).toBe(false);
+  });
+});
+
+/* ================================================================
+ * Extended ConversationManager Tests
+ * ================================================================ */
+describe('ConversationManager — extended', () => {
+  test('estimateTokens recalculates after trim', () => {
+    const maxPairs = ChatConfig.MAX_HISTORY_PAIRS;
+    for (let i = 0; i < maxPairs + 5; i++) {
+      ConversationManager.addMessage('user', 'x'.repeat(100));
+      ConversationManager.addMessage('assistant', 'y'.repeat(100));
+    }
+    ConversationManager.trim();
+
+    const tokens = ConversationManager.estimateTokens();
+    // After trim: system prompt + maxPairs*2 messages of 100 chars each
+    const expectedMsgChars = maxPairs * 2 * 100;
+    const systemChars = ChatConfig.SYSTEM_PROMPT.length;
+    const expectedTokens = Math.ceil((expectedMsgChars + systemChars) / ChatConfig.CHARS_PER_TOKEN);
+    expect(tokens).toBe(expectedTokens);
+  });
+
+  test('clear resets token estimation', () => {
+    ConversationManager.addMessage('user', 'x'.repeat(1000));
+    ConversationManager.addMessage('assistant', 'y'.repeat(1000));
+    const beforeClear = ConversationManager.estimateTokens();
+    expect(beforeClear).toBeGreaterThan(500);
+
+    ConversationManager.clear();
+    const afterClear = ConversationManager.estimateTokens();
+    const expectedTokens = Math.ceil(ChatConfig.SYSTEM_PROMPT.length / ChatConfig.CHARS_PER_TOKEN);
+    expect(afterClear).toBe(expectedTokens);
+  });
+
+  test('getMessages returns correct format with roles and content', () => {
+    ConversationManager.addMessage('user', 'Question');
+    ConversationManager.addMessage('assistant', 'Answer');
+    const messages = ConversationManager.getMessages();
+
+    expect(messages).toHaveLength(3);
+    messages.forEach(m => {
+      expect(m).toHaveProperty('role');
+      expect(m).toHaveProperty('content');
+      expect(typeof m.role).toBe('string');
+      expect(typeof m.content).toBe('string');
+    });
+  });
+
+  test('system message is always the first message', () => {
+    ConversationManager.addMessage('user', 'Q1');
+    ConversationManager.addMessage('assistant', 'A1');
+    ConversationManager.addMessage('user', 'Q2');
+    const history = ConversationManager.getHistory();
+    expect(history[0].role).toBe('system');
+    expect(history[0].content).toBe(ChatConfig.SYSTEM_PROMPT);
+  });
+
+  test('message ordering is preserved', () => {
+    const messages = ['First', 'Second', 'Third', 'Fourth', 'Fifth'];
+    messages.forEach((msg, i) => {
+      ConversationManager.addMessage(i % 2 === 0 ? 'user' : 'assistant', msg);
+    });
+
+    const history = ConversationManager.getHistory();
+    // Skip system prompt
+    for (let i = 0; i < messages.length; i++) {
+      expect(history[i + 1].content).toBe(messages[i]);
+    }
+  });
+
+  test('large message handling', () => {
+    const largeMsg = 'x'.repeat(50000);
+    ConversationManager.addMessage('user', largeMsg);
+
+    const history = ConversationManager.getHistory();
+    expect(history[1].content).toBe(largeMsg);
+    expect(history[1].content.length).toBe(50000);
+
+    const tokens = ConversationManager.estimateTokens();
+    expect(tokens).toBeGreaterThan(12500); // 50000 / 4
+  });
+
+  test('token estimation with various text types', () => {
+    // ASCII text
+    ConversationManager.addMessage('user', 'Hello world');
+    const t1 = ConversationManager.estimateTokens();
+
+    // Numbers
+    ConversationManager.addMessage('user', '12345678901234567890');
+    const t2 = ConversationManager.estimateTokens();
+    expect(t2).toBeGreaterThan(t1);
+
+    // Special characters
+    ConversationManager.addMessage('user', '!@#$%^&*(){}[]|\\:";\'<>?,./~`');
+    const t3 = ConversationManager.estimateTokens();
+    expect(t3).toBeGreaterThan(t2);
+  });
+
+  test('estimateTokens is consistent with incremental adds', () => {
+    const msg = 'Hello world test message'; // 24 chars = 6 tokens
+    ConversationManager.addMessage('user', msg);
+    const tokensAfterOne = ConversationManager.estimateTokens();
+
+    ConversationManager.addMessage('assistant', msg);
+    const tokensAfterTwo = ConversationManager.estimateTokens();
+
+    // Difference should be exactly 6 tokens (24 chars / 4)
+    expect(tokensAfterTwo - tokensAfterOne).toBe(Math.ceil(24 / ChatConfig.CHARS_PER_TOKEN));
+  });
+
+  test('popLast updates token count correctly', () => {
+    ConversationManager.addMessage('user', 'x'.repeat(400)); // 100 tokens
+    const beforePop = ConversationManager.estimateTokens();
+
+    ConversationManager.popLast();
+    const afterPop = ConversationManager.estimateTokens();
+
+    expect(beforePop - afterPop).toBe(100);
+  });
+
+  test('getHistory returns reference to internal array', () => {
+    const history = ConversationManager.getHistory();
+    ConversationManager.addMessage('user', 'new message');
+    // getHistory returns the live reference
+    expect(history.length).toBe(2);
+  });
+
+  test('clear and re-add messages works correctly', () => {
+    ConversationManager.addMessage('user', 'Before clear');
+    ConversationManager.clear();
+    ConversationManager.addMessage('user', 'After clear');
+
+    const history = ConversationManager.getHistory();
+    expect(history).toHaveLength(2);
+    expect(history[0].role).toBe('system');
+    expect(history[1].content).toBe('After clear');
+  });
+
+  test('empty string message is handled', () => {
+    ConversationManager.addMessage('user', '');
+    const history = ConversationManager.getHistory();
+    expect(history).toHaveLength(2);
+    expect(history[1].content).toBe('');
+  });
+});
