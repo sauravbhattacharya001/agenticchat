@@ -1550,15 +1550,17 @@ const MessageSearch = (() => {
     if (!output) return;
 
     const marks = output.querySelectorAll('mark.search-highlight');
+    const parentsToNormalize = new Set();
     for (let i = marks.length - 1; i >= 0; i--) {
       const mark = marks[i];
       const parent = mark.parentNode;
       if (!parent) continue;
       const text = document.createTextNode(mark.textContent);
       parent.replaceChild(text, mark);
-      // Merge adjacent text nodes
-      parent.normalize();
+      parentsToNormalize.add(parent);
     }
+    // Normalize once per unique parent instead of once per mark
+    parentsToNormalize.forEach(parent => parent.normalize());
 
     matches = [];
     currentIndex = -1;
