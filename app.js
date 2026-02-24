@@ -1923,6 +1923,8 @@ const SlashCommands = (() => {
           action: () => SessionManager.save() },
         { name: 'help', description: 'Show available commands', icon: '❓',
           action: () => { /* opening dropdown is the action */ } },
+        { name: 'stats', description: 'Show chat statistics', icon: '📊',
+          action: () => ChatStats.toggle() },
     ]);
 
     function init() {
@@ -2463,6 +2465,13 @@ const KeyboardShortcuts = (() => {
     if (ctrl && e.key === 'd') {
       e.preventDefault();
       ThemeManager.toggle();
+      return;
+    }
+
+    // Ctrl+I — toggle chat statistics
+    if (ctrl && e.key === 'i') {
+      e.preventDefault();
+      ChatStats.toggle();
       return;
     }
 
@@ -3347,6 +3356,197 @@ const SessionManager = (() => {
   };
 })();
 
+/* ---------- Chat Statistics Dashboard ---------- */
+const ChatStats = (() => {
+  let isOpen = false;
+
+  /**
+   * Compute statistics from current conversation messages.
+   * Returns an object with computed stats.
+   */
+  function compute() {
+    const messages = ConversationManager.getMessages().filter(m => m.role !== 'system');
+    const userMsgs = messages.filter(m => m.role === 'user');
+    const assistantMsgs = messages.filter(m => m.role === 'assistant');
+
+    // Word counts
+    const wordCount = (text) => text.trim() ? text.trim().split(/\s+/).length : 0;
+    const totalUserWords = userMsgs.reduce((sum, m) => sum + wordCount(m.content), 0);
+    const totalAssistantWords = assistantMsgs.reduce((sum, m) => sum + wordCount(m.content), 0);
+
+    // Average message length (chars)
+    const avgUserLen = userMsgs.length ? Math.round(userMsgs.reduce((s, m) => s + m.content.length, 0) / userMsgs.length) : 0;
+    const avgAssistantLen = assistantMsgs.length ? Math.round(assistantMsgs.reduce((s, m) => s + m.content.length, 0) / assistantMsgs.length) : 0;
+
+    // Code blocks (triple backtick)
+    const codeBlockCount = messages.reduce((sum, m) => {
+      const matches = m.content.match(/```/g);
+      return sum + (matches ? Math.floor(matches.length / 2) : 0);
+    }, 0);
+
+    // Longest message
+    let longestMsg = { role: 'none', length: 0, preview: '' };
+    messages.forEach(m => {
+      if (m.content.length > longestMsg.length) {
+        longestMsg = {
+          role: m.role,
+          length: m.content.length,
+          preview: m.content.substring(0, 80) + (m.content.length > 80 ? '…' : '')
+        };
+      }
+    });
+
+    // Question count (messages ending with ?)
+    const questionCount = userMsgs.filter(m => m.content.trim().endsWith('?')).length;
+
+    // Top words (excluding common stop words, from user messages)
+    const stopWords = new Set(['the','a','an','is','are','was','were','be','been','being',
+      'have','has','had','do','does','did','will','would','could','should','may','might',
+      'shall','can','to','of','in','for','on','with','at','by','from','as','into','through',
+      'and','but','or','not','no','nor','so','yet','both','either','neither','i','me','my',
+      'you','your','he','she','it','we','they','them','this','that','these','those','what',
+      'which','who','how','if','then','than','when','where','there','here','all','each',
+      'every','any','some','just','about','up','out','get','like','also','very','really']);
+    const wordFreq = {};
+    userMsgs.forEach(m => {
+      m.content.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).forEach(w => {
+        if (w.length > 2 && !stopWords.has(w)) {
+          wordFreq[w] = (wordFreq[w] || 0) + 1;
+        }
+      });
+    });
+    const topWords = Object.entries(wordFreq)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([word, count]) => ({ word, count }));
+
+    // Conversation ratio
+    const ratio = userMsgs.length && assistantMsgs.length
+      ? (totalAssistantWords / totalUserWords).toFixed(1)
+      : '0';
+
+    return {
+      totalMessages: messages.length,
+      userMessages: userMsgs.length,
+      assistantMessages: assistantMsgs.length,
+      totalUserWords,
+      totalAssistantWords,
+      avgUserLen,
+      avgAssistantLen,
+      codeBlockCount,
+      longestMsg,
+      questionCount,
+      topWords,
+      responseRatio: ratio,
+    };
+  }
+
+  /** Render the stats panel. */
+  function render() {
+    const existing = document.getElementById('stats-panel');
+    if (existing) existing.remove();
+
+    const stats = compute();
+    const panel = document.createElement('div');
+    panel.id = 'stats-panel';
+    panel.className = 'stats-panel';
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-label', 'Chat Statistics');
+
+    // Top words as mini bar chart
+    const maxCount = stats.topWords.length ? stats.topWords[0].count : 1;
+    const topWordsHtml = stats.topWords.length
+      ? stats.topWords.map(tw =>
+          `<div class="stats-word-row">
+            <span class="stats-word-label">${tw.word}</span>
+            <div class="stats-word-bar" style="width:${Math.max(8, (tw.count / maxCount) * 100)}%">${tw.count}</div>
+          </div>`
+        ).join('')
+      : '<div class="stats-empty">No word data yet</div>';
+
+    panel.innerHTML = `
+      <div class="stats-header">
+        <h3>📊 Chat Statistics</h3>
+        <button class="stats-close" aria-label="Close statistics" title="Close">&times;</button>
+      </div>
+      <div class="stats-body">
+        <div class="stats-grid">
+          <div class="stats-card">
+            <div class="stats-card-value">${stats.totalMessages}</div>
+            <div class="stats-card-label">Total Messages</div>
+          </div>
+          <div class="stats-card">
+            <div class="stats-card-value">${stats.userMessages}</div>
+            <div class="stats-card-label">Your Messages</div>
+          </div>
+          <div class="stats-card">
+            <div class="stats-card-value">${stats.assistantMessages}</div>
+            <div class="stats-card-label">AI Responses</div>
+          </div>
+          <div class="stats-card">
+            <div class="stats-card-value">${stats.codeBlockCount}</div>
+            <div class="stats-card-label">Code Blocks</div>
+          </div>
+        </div>
+        <div class="stats-section">
+          <h4>💬 Message Analysis</h4>
+          <div class="stats-row"><span>Your avg length:</span><span>${stats.avgUserLen} chars</span></div>
+          <div class="stats-row"><span>AI avg length:</span><span>${stats.avgAssistantLen} chars</span></div>
+          <div class="stats-row"><span>Questions asked:</span><span>${stats.questionCount}</span></div>
+          <div class="stats-row"><span>Response ratio:</span><span>${stats.responseRatio}x</span></div>
+          <div class="stats-row"><span>Your words:</span><span>${stats.totalUserWords}</span></div>
+          <div class="stats-row"><span>AI words:</span><span>${stats.totalAssistantWords}</span></div>
+        </div>
+        ${stats.longestMsg.length > 0 ? `
+        <div class="stats-section">
+          <h4>📏 Longest Message</h4>
+          <div class="stats-longest">
+            <span class="stats-longest-role">${stats.longestMsg.role === 'user' ? 'You' : 'AI'}</span>
+            <span class="stats-longest-len">${stats.longestMsg.length} chars</span>
+          </div>
+          <div class="stats-longest-preview">${stats.longestMsg.preview}</div>
+        </div>` : ''}
+        <div class="stats-section">
+          <h4>🔤 Your Top Words</h4>
+          <div class="stats-words">${topWordsHtml}</div>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(panel);
+
+    // Close button
+    panel.querySelector('.stats-close').addEventListener('click', close);
+
+    // Click outside to close
+    const overlay = document.createElement('div');
+    overlay.id = 'stats-overlay';
+    overlay.className = 'stats-overlay';
+    overlay.addEventListener('click', close);
+    document.body.insertBefore(overlay, panel);
+
+    isOpen = true;
+  }
+
+  function open() {
+    if (!isOpen) render();
+  }
+
+  function close() {
+    const panel = document.getElementById('stats-panel');
+    const overlay = document.getElementById('stats-overlay');
+    if (panel) panel.remove();
+    if (overlay) overlay.remove();
+    isOpen = false;
+  }
+
+  function toggle() {
+    isOpen ? close() : open();
+  }
+
+  return { compute, render, open, close, toggle, isOpen: () => isOpen };
+})();
+
 /* ---------- Event Bindings ---------- */
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('send-btn').addEventListener('click', ChatController.send);
@@ -3391,6 +3591,7 @@ document.addEventListener('DOMContentLoaded', () => {
       SessionManager.close();
       SessionManager.closeSaveDialog();
       KeyboardShortcuts.hideHelp();
+      ChatStats.close();
     }
   });
 
@@ -3500,4 +3701,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Message reactions
   MessageReactions.init();
+
+  // Stats button
+  document.getElementById('stats-btn').addEventListener('click', ChatStats.toggle);
 });

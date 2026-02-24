@@ -21,6 +21,7 @@ function setupDOM() {
       <button id="history-btn" class="btn-secondary">History</button>
       <button id="snippets-btn" class="btn-secondary">Snippets</button>
       <button id="shortcuts-btn" class="btn-secondary">⌨️</button>
+      <button id="stats-btn" class="btn-secondary" title="Chat statistics (Ctrl+I)">📊</button>
       <button id="bookmarks-btn" title="Bookmarks (Ctrl+B)">🔖</button>
       <button id="voice-btn" class="btn-secondary" aria-label="Toggle voice input">🎤</button>
       <button id="theme-btn" class="btn-secondary" aria-label="Toggle theme">☀️</button>
@@ -194,7 +195,8 @@ function loadApp() {
     'ThemeManager',
     'SessionManager',
     'SlashCommands',
-    'MessageReactions'
+    'MessageReactions',
+    'ChatStats'
   ];
 
   for (const mod of modules) {

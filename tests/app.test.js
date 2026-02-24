@@ -4349,7 +4349,7 @@ describe('SlashCommands', () => {
   describe('getCommands', () => {
     test('returns all commands', () => {
       const cmds = SlashCommands.getCommands();
-      expect(cmds.length).toBe(13);
+      expect(cmds.length).toBe(14);
     });
 
     test('returns a defensive copy', () => {
@@ -4777,6 +4777,340 @@ describe('MessageReactions', () => {
       MessageReactions.reset();
       expect(MessageReactions.getReactedMessages()).toEqual([]);
       expect(localStorage.getItem('agenticchat_reactions')).toBeNull();
+    });
+  });
+});
+
+/* ================================================================
+ * ChatStats
+ * ================================================================ */
+describe('ChatStats', () => {
+  describe('compute()', () => {
+    test('returns object with all expected keys', () => {
+      const stats = ChatStats.compute();
+      expect(stats).toHaveProperty('totalMessages');
+      expect(stats).toHaveProperty('userMessages');
+      expect(stats).toHaveProperty('assistantMessages');
+      expect(stats).toHaveProperty('totalUserWords');
+      expect(stats).toHaveProperty('totalAssistantWords');
+      expect(stats).toHaveProperty('avgUserLen');
+      expect(stats).toHaveProperty('avgAssistantLen');
+      expect(stats).toHaveProperty('codeBlockCount');
+      expect(stats).toHaveProperty('longestMsg');
+      expect(stats).toHaveProperty('questionCount');
+      expect(stats).toHaveProperty('topWords');
+      expect(stats).toHaveProperty('responseRatio');
+    });
+
+    test('totalMessages counts non-system messages', () => {
+      ConversationManager.addMessage('user', 'Hello');
+      ConversationManager.addMessage('assistant', 'Hi');
+      const stats = ChatStats.compute();
+      expect(stats.totalMessages).toBe(2);
+    });
+
+    test('userMessages counts user role only', () => {
+      ConversationManager.addMessage('user', 'Hello');
+      ConversationManager.addMessage('assistant', 'Hi');
+      ConversationManager.addMessage('user', 'How are you?');
+      const stats = ChatStats.compute();
+      expect(stats.userMessages).toBe(2);
+    });
+
+    test('assistantMessages counts assistant role only', () => {
+      ConversationManager.addMessage('user', 'Hello');
+      ConversationManager.addMessage('assistant', 'Hi');
+      ConversationManager.addMessage('assistant', 'How can I help?');
+      const stats = ChatStats.compute();
+      expect(stats.assistantMessages).toBe(2);
+    });
+
+    test('totalUserWords counts words correctly', () => {
+      ConversationManager.addMessage('user', 'hello world');
+      ConversationManager.addMessage('user', 'foo bar baz');
+      const stats = ChatStats.compute();
+      expect(stats.totalUserWords).toBe(5);
+    });
+
+    test('totalAssistantWords counts words correctly', () => {
+      ConversationManager.addMessage('assistant', 'one two three four');
+      const stats = ChatStats.compute();
+      expect(stats.totalAssistantWords).toBe(4);
+    });
+
+    test('avgUserLen computes average character length', () => {
+      ConversationManager.addMessage('user', 'abcd'); // 4 chars
+      ConversationManager.addMessage('user', 'abcdef'); // 6 chars
+      const stats = ChatStats.compute();
+      expect(stats.avgUserLen).toBe(5); // (4+6)/2
+    });
+
+    test('avgAssistantLen computes average character length', () => {
+      ConversationManager.addMessage('assistant', 'abc'); // 3 chars
+      ConversationManager.addMessage('assistant', 'abcdefg'); // 7 chars
+      const stats = ChatStats.compute();
+      expect(stats.avgAssistantLen).toBe(5); // (3+7)/2
+    });
+
+    test('codeBlockCount counts paired backtick blocks', () => {
+      ConversationManager.addMessage('user', 'Here is code:\n```\nconsole.log("hi")\n```');
+      ConversationManager.addMessage('assistant', 'Two blocks:\n```\na\n```\nand\n```\nb\n```');
+      const stats = ChatStats.compute();
+      expect(stats.codeBlockCount).toBe(3);
+    });
+
+    test('codeBlockCount ignores unpaired backticks', () => {
+      ConversationManager.addMessage('user', 'Incomplete:\n```\ncode');
+      const stats = ChatStats.compute();
+      expect(stats.codeBlockCount).toBe(0);
+    });
+
+    test('longestMsg identifies longest message', () => {
+      ConversationManager.addMessage('user', 'short');
+      ConversationManager.addMessage('assistant', 'this is a much longer message than the other one');
+      const stats = ChatStats.compute();
+      expect(stats.longestMsg.role).toBe('assistant');
+      expect(stats.longestMsg.length).toBe('this is a much longer message than the other one'.length);
+    });
+
+    test('longestMsg truncates preview at 80 chars', () => {
+      const longText = 'a'.repeat(100);
+      ConversationManager.addMessage('user', longText);
+      const stats = ChatStats.compute();
+      expect(stats.longestMsg.preview.length).toBeLessThanOrEqual(81); // 80 + ellipsis char
+      expect(stats.longestMsg.preview).toContain('…');
+    });
+
+    test('longestMsg handles empty conversation', () => {
+      const stats = ChatStats.compute();
+      expect(stats.longestMsg.role).toBe('none');
+      expect(stats.longestMsg.length).toBe(0);
+    });
+
+    test('questionCount counts messages ending with ?', () => {
+      ConversationManager.addMessage('user', 'What is JS?');
+      ConversationManager.addMessage('user', 'Tell me more');
+      ConversationManager.addMessage('user', 'Why is that?');
+      const stats = ChatStats.compute();
+      expect(stats.questionCount).toBe(2);
+    });
+
+    test('topWords excludes stop words', () => {
+      ConversationManager.addMessage('user', 'the quick brown fox the the the');
+      const stats = ChatStats.compute();
+      const words = stats.topWords.map(tw => tw.word);
+      expect(words).not.toContain('the');
+      expect(words).toContain('quick');
+      expect(words).toContain('brown');
+      expect(words).toContain('fox');
+    });
+
+    test('topWords sorts by frequency descending', () => {
+      ConversationManager.addMessage('user', 'code code code test test debug');
+      const stats = ChatStats.compute();
+      expect(stats.topWords[0].word).toBe('code');
+      expect(stats.topWords[0].count).toBe(3);
+      expect(stats.topWords[1].word).toBe('test');
+      expect(stats.topWords[1].count).toBe(2);
+    });
+
+    test('topWords returns max 10 entries', () => {
+      const words = Array.from({ length: 15 }, (_, i) => `word${i}`).join(' ');
+      ConversationManager.addMessage('user', words);
+      const stats = ChatStats.compute();
+      expect(stats.topWords.length).toBeLessThanOrEqual(10);
+    });
+
+    test('topWords handles empty conversation', () => {
+      const stats = ChatStats.compute();
+      expect(stats.topWords).toEqual([]);
+    });
+
+    test('responseRatio computed correctly', () => {
+      ConversationManager.addMessage('user', 'one two'); // 2 words
+      ConversationManager.addMessage('assistant', 'one two three four five six'); // 6 words
+      const stats = ChatStats.compute();
+      expect(stats.responseRatio).toBe('3.0');
+    });
+
+    test('handles conversation with only user messages', () => {
+      ConversationManager.addMessage('user', 'Hello world');
+      const stats = ChatStats.compute();
+      expect(stats.userMessages).toBe(1);
+      expect(stats.assistantMessages).toBe(0);
+      expect(stats.responseRatio).toBe('0');
+    });
+
+    test('handles conversation with only assistant messages', () => {
+      ConversationManager.addMessage('assistant', 'Hello world');
+      const stats = ChatStats.compute();
+      expect(stats.userMessages).toBe(0);
+      expect(stats.assistantMessages).toBe(1);
+      expect(stats.responseRatio).toBe('0');
+    });
+
+    test('handles empty conversation', () => {
+      const stats = ChatStats.compute();
+      expect(stats.totalMessages).toBe(0);
+      expect(stats.userMessages).toBe(0);
+      expect(stats.assistantMessages).toBe(0);
+      expect(stats.totalUserWords).toBe(0);
+      expect(stats.totalAssistantWords).toBe(0);
+      expect(stats.avgUserLen).toBe(0);
+      expect(stats.avgAssistantLen).toBe(0);
+    });
+  });
+
+  describe('render()', () => {
+    test('creates stats-panel element', () => {
+      ConversationManager.addMessage('user', 'test message');
+      ChatStats.render();
+      expect(document.getElementById('stats-panel')).not.toBeNull();
+      ChatStats.close();
+    });
+
+    test('creates stats-overlay element', () => {
+      ConversationManager.addMessage('user', 'test message');
+      ChatStats.render();
+      expect(document.getElementById('stats-overlay')).not.toBeNull();
+      ChatStats.close();
+    });
+
+    test('panel has role=dialog', () => {
+      ConversationManager.addMessage('user', 'test');
+      ChatStats.render();
+      const panel = document.getElementById('stats-panel');
+      expect(panel.getAttribute('role')).toBe('dialog');
+      ChatStats.close();
+    });
+
+    test('panel has aria-label', () => {
+      ConversationManager.addMessage('user', 'test');
+      ChatStats.render();
+      const panel = document.getElementById('stats-panel');
+      expect(panel.getAttribute('aria-label')).toBe('Chat Statistics');
+      ChatStats.close();
+    });
+
+    test('shows all stat cards', () => {
+      ConversationManager.addMessage('user', 'hello');
+      ConversationManager.addMessage('assistant', 'hi');
+      ChatStats.render();
+      const cards = document.querySelectorAll('.stats-card');
+      expect(cards.length).toBe(4);
+      ChatStats.close();
+    });
+
+    test('shows top words section', () => {
+      ConversationManager.addMessage('user', 'javascript code test');
+      ChatStats.render();
+      const wordsSection = document.querySelector('.stats-words');
+      expect(wordsSection).not.toBeNull();
+      ChatStats.close();
+    });
+
+    test('close button removes panel', () => {
+      ConversationManager.addMessage('user', 'test');
+      ChatStats.render();
+      const closeBtn = document.querySelector('.stats-close');
+      closeBtn.click();
+      expect(document.getElementById('stats-panel')).toBeNull();
+      expect(document.getElementById('stats-overlay')).toBeNull();
+    });
+
+    test('overlay click removes panel', () => {
+      ConversationManager.addMessage('user', 'test');
+      ChatStats.render();
+      const overlay = document.getElementById('stats-overlay');
+      overlay.click();
+      expect(document.getElementById('stats-panel')).toBeNull();
+      expect(document.getElementById('stats-overlay')).toBeNull();
+    });
+  });
+
+  describe('open()', () => {
+    test('opens panel when closed', () => {
+      ConversationManager.addMessage('user', 'test');
+      ChatStats.open();
+      expect(ChatStats.isOpen()).toBe(true);
+      expect(document.getElementById('stats-panel')).not.toBeNull();
+      ChatStats.close();
+    });
+
+    test('does not double-open', () => {
+      ConversationManager.addMessage('user', 'test');
+      ChatStats.open();
+      ChatStats.open();
+      const panels = document.querySelectorAll('#stats-panel');
+      expect(panels.length).toBe(1);
+      ChatStats.close();
+    });
+  });
+
+  describe('close()', () => {
+    test('removes panel and overlay', () => {
+      ConversationManager.addMessage('user', 'test');
+      ChatStats.open();
+      ChatStats.close();
+      expect(document.getElementById('stats-panel')).toBeNull();
+      expect(document.getElementById('stats-overlay')).toBeNull();
+    });
+
+    test('handles close when not open', () => {
+      expect(() => ChatStats.close()).not.toThrow();
+    });
+  });
+
+  describe('toggle()', () => {
+    test('opens when closed', () => {
+      ConversationManager.addMessage('user', 'test');
+      ChatStats.toggle();
+      expect(ChatStats.isOpen()).toBe(true);
+      ChatStats.close();
+    });
+
+    test('closes when open', () => {
+      ConversationManager.addMessage('user', 'test');
+      ChatStats.open();
+      ChatStats.toggle();
+      expect(ChatStats.isOpen()).toBe(false);
+    });
+  });
+
+  describe('isOpen()', () => {
+    test('returns false initially', () => {
+      expect(ChatStats.isOpen()).toBe(false);
+    });
+
+    test('returns true after open', () => {
+      ConversationManager.addMessage('user', 'test');
+      ChatStats.open();
+      expect(ChatStats.isOpen()).toBe(true);
+      ChatStats.close();
+    });
+
+    test('returns false after close', () => {
+      ConversationManager.addMessage('user', 'test');
+      ChatStats.open();
+      ChatStats.close();
+      expect(ChatStats.isOpen()).toBe(false);
+    });
+  });
+
+  describe('Integration', () => {
+    test('/stats slash command exists', () => {
+      const cmds = SlashCommands.getCommands();
+      const statsCmd = cmds.find(c => c.name === 'stats');
+      expect(statsCmd).toBeDefined();
+      expect(statsCmd.description).toContain('statistics');
+    });
+
+    test('Ctrl+I shortcut registered', () => {
+      ConversationManager.addMessage('user', 'test');
+      const event = new KeyboardEvent('keydown', { key: 'i', ctrlKey: true, bubbles: true });
+      KeyboardShortcuts.handleKeydown(event);
+      expect(ChatStats.isOpen()).toBe(true);
+      ChatStats.close();
     });
   });
 });
