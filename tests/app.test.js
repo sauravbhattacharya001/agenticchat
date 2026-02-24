@@ -3241,3 +3241,387 @@ describe('ConversationManager — extended', () => {
     expect(history[1].content).toBe('');
   });
 });
+
+/* ================================================================
+ * ChatBookmarks
+ * ================================================================ */
+describe('ChatBookmarks', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    // Reload to reset module state
+    setupDOM();
+    loadApp();
+  });
+
+  test('add() creates bookmark with correct fields', () => {
+    const bm = ChatBookmarks.add(0, 'user', 'Hello world');
+    expect(bm).not.toBeNull();
+    expect(bm.id).toBeDefined();
+    expect(bm.messageIndex).toBe(0);
+    expect(bm.preview).toBe('Hello world');
+    expect(bm.role).toBe('user');
+    expect(bm.timestamp).toBeDefined();
+    // Verify timestamp is valid ISO string
+    expect(new Date(bm.timestamp).toISOString()).toBe(bm.timestamp);
+  });
+
+  test('add() truncates preview to 100 chars', () => {
+    const longText = 'A'.repeat(200);
+    const bm = ChatBookmarks.add(0, 'assistant', longText);
+    expect(bm.preview.length).toBe(100);
+    expect(bm.preview).toBe('A'.repeat(100));
+  });
+
+  test('add() prevents duplicates (same messageIndex)', () => {
+    ChatBookmarks.add(0, 'user', 'First');
+    const dup = ChatBookmarks.add(0, 'user', 'Duplicate');
+    expect(dup).toBeNull();
+    expect(ChatBookmarks.getCount()).toBe(1);
+  });
+
+  test('add() respects MAX_BOOKMARKS limit', () => {
+    for (let i = 0; i < ChatBookmarks.MAX_BOOKMARKS; i++) {
+      ChatBookmarks.add(i, 'user', `Message ${i}`);
+    }
+    expect(ChatBookmarks.getCount()).toBe(ChatBookmarks.MAX_BOOKMARKS);
+    const extra = ChatBookmarks.add(999, 'user', 'Over limit');
+    expect(extra).toBeNull();
+    expect(ChatBookmarks.getCount()).toBe(ChatBookmarks.MAX_BOOKMARKS);
+  });
+
+  test('remove() by id', () => {
+    const bm = ChatBookmarks.add(0, 'user', 'Remove me');
+    expect(ChatBookmarks.getCount()).toBe(1);
+    ChatBookmarks.remove(bm.id);
+    expect(ChatBookmarks.getCount()).toBe(0);
+  });
+
+  test('isBookmarked() returns true/false correctly', () => {
+    expect(ChatBookmarks.isBookmarked(0)).toBe(false);
+    ChatBookmarks.add(0, 'user', 'Test');
+    expect(ChatBookmarks.isBookmarked(0)).toBe(true);
+    expect(ChatBookmarks.isBookmarked(1)).toBe(false);
+  });
+
+  test('toggle() adds when not bookmarked', () => {
+    const result = ChatBookmarks.toggle(0, 'user', 'Test toggle');
+    expect(result).toBe(true);
+    expect(ChatBookmarks.isBookmarked(0)).toBe(true);
+    expect(ChatBookmarks.getCount()).toBe(1);
+  });
+
+  test('toggle() removes when already bookmarked', () => {
+    ChatBookmarks.add(0, 'user', 'Test');
+    const result = ChatBookmarks.toggle(0, 'user', 'Test');
+    expect(result).toBe(false);
+    expect(ChatBookmarks.isBookmarked(0)).toBe(false);
+    expect(ChatBookmarks.getCount()).toBe(0);
+  });
+
+  test('getAll() returns sorted by messageIndex', () => {
+    ChatBookmarks.add(5, 'assistant', 'Fifth');
+    ChatBookmarks.add(1, 'user', 'First');
+    ChatBookmarks.add(3, 'assistant', 'Third');
+    const all = ChatBookmarks.getAll();
+    expect(all.length).toBe(3);
+    expect(all[0].messageIndex).toBe(1);
+    expect(all[1].messageIndex).toBe(3);
+    expect(all[2].messageIndex).toBe(5);
+  });
+
+  test('getCount() returns correct count', () => {
+    expect(ChatBookmarks.getCount()).toBe(0);
+    ChatBookmarks.add(0, 'user', 'A');
+    expect(ChatBookmarks.getCount()).toBe(1);
+    ChatBookmarks.add(1, 'assistant', 'B');
+    expect(ChatBookmarks.getCount()).toBe(2);
+  });
+
+  test('clearAll() empties bookmarks', () => {
+    ChatBookmarks.add(0, 'user', 'A');
+    ChatBookmarks.add(1, 'assistant', 'B');
+    expect(ChatBookmarks.getCount()).toBe(2);
+    ChatBookmarks.clearAll();
+    expect(ChatBookmarks.getCount()).toBe(0);
+    expect(ChatBookmarks.getAll()).toEqual([]);
+  });
+
+  test('load/save round-trip via localStorage', () => {
+    ChatBookmarks.add(0, 'user', 'Persisted');
+    ChatBookmarks.add(1, 'assistant', 'Also persisted');
+
+    // Reload the app to simulate a page reload
+    setupDOM();
+    loadApp();
+
+    expect(ChatBookmarks.getCount()).toBe(2);
+    const all = ChatBookmarks.getAll();
+    expect(all[0].preview).toBe('Persisted');
+    expect(all[1].preview).toBe('Also persisted');
+  });
+
+  test('load handles corrupt localStorage gracefully', () => {
+    localStorage.setItem('chatBookmarks', 'not valid json{{{');
+    setupDOM();
+    loadApp();
+    expect(ChatBookmarks.getCount()).toBe(0);
+    expect(ChatBookmarks.getAll()).toEqual([]);
+  });
+
+  test('load handles empty/missing localStorage', () => {
+    localStorage.removeItem('chatBookmarks');
+    setupDOM();
+    loadApp();
+    expect(ChatBookmarks.getCount()).toBe(0);
+  });
+
+  test('jumpTo scrolls element into view', () => {
+    const output = document.getElementById('chat-output');
+    for (let i = 0; i < 5; i++) {
+      const div = document.createElement('div');
+      div.className = 'chat-msg';
+      div.textContent = `Message ${i}`;
+      output.appendChild(div);
+    }
+    const msgs = output.querySelectorAll('.chat-msg');
+    const scrollSpy = jest.fn();
+    msgs[2].scrollIntoView = scrollSpy;
+
+    ChatBookmarks.jumpTo(2);
+    expect(scrollSpy).toHaveBeenCalled();
+  });
+
+  test('panel toggle state', () => {
+    const state1 = ChatBookmarks._getState();
+    expect(state1.panelOpen).toBe(false);
+
+    ChatBookmarks.togglePanel();
+    const state2 = ChatBookmarks._getState();
+    expect(state2.panelOpen).toBe(true);
+
+    ChatBookmarks.togglePanel();
+    const state3 = ChatBookmarks._getState();
+    expect(state3.panelOpen).toBe(false);
+  });
+
+  test('open/close panel', () => {
+    ChatBookmarks.openPanel();
+    expect(ChatBookmarks._getState().panelOpen).toBe(true);
+    const panel = document.getElementById('bookmarks-panel');
+    expect(panel.style.display).not.toBe('none');
+
+    ChatBookmarks.closePanel();
+    expect(ChatBookmarks._getState().panelOpen).toBe(false);
+    expect(panel.style.display).toBe('none');
+  });
+
+  test('_getState() returns current state', () => {
+    ChatBookmarks.add(0, 'user', 'Test');
+    const state = ChatBookmarks._getState();
+    expect(state.bookmarks).toHaveLength(1);
+    expect(state.bookmarks[0].preview).toBe('Test');
+    expect(state.panelOpen).toBe(false);
+  });
+
+  test('multiple bookmarks ordering', () => {
+    ChatBookmarks.add(10, 'user', 'Ten');
+    ChatBookmarks.add(2, 'assistant', 'Two');
+    ChatBookmarks.add(7, 'user', 'Seven');
+    ChatBookmarks.add(0, 'assistant', 'Zero');
+
+    const all = ChatBookmarks.getAll();
+    expect(all.map(b => b.messageIndex)).toEqual([0, 2, 7, 10]);
+  });
+
+  test('preview handles empty text', () => {
+    const bm = ChatBookmarks.add(0, 'user', '');
+    expect(bm.preview).toBe('');
+  });
+
+  test('preview handles special characters', () => {
+    const special = 'Hello <script>alert("xss")</script> & "quotes" \'single\' `backtick`';
+    const bm = ChatBookmarks.add(0, 'user', special);
+    expect(bm.preview).toBe(special);
+  });
+
+  test('remove non-existent id (no-op)', () => {
+    ChatBookmarks.add(0, 'user', 'Keep');
+    ChatBookmarks.remove('non-existent-id-12345');
+    expect(ChatBookmarks.getCount()).toBe(1);
+  });
+
+  test('bookmark role is stored correctly', () => {
+    ChatBookmarks.add(0, 'user', 'User message');
+    ChatBookmarks.add(1, 'assistant', 'Assistant message');
+    const all = ChatBookmarks.getAll();
+    expect(all[0].role).toBe('user');
+    expect(all[1].role).toBe('assistant');
+  });
+
+  test('clear triggers save (localStorage is emptied)', () => {
+    ChatBookmarks.add(0, 'user', 'Test');
+    expect(localStorage.getItem('chatBookmarks')).not.toBeNull();
+    ChatBookmarks.clearAll();
+    const raw = localStorage.getItem('chatBookmarks');
+    expect(JSON.parse(raw)).toEqual([]);
+  });
+
+  test('decorating messages adds bookmark icons', () => {
+    const output = document.getElementById('chat-output');
+    for (let i = 0; i < 3; i++) {
+      const div = document.createElement('div');
+      div.className = 'chat-msg';
+      div.textContent = `Message ${i}`;
+      output.appendChild(div);
+    }
+
+    ChatBookmarks.decorateMessages();
+
+    const indicators = output.querySelectorAll('.bookmark-indicator');
+    expect(indicators.length).toBe(3);
+    expect(indicators[0].textContent).toBe('☆');
+  });
+
+  test('decorating messages shows star for bookmarked messages', () => {
+    const output = document.getElementById('chat-output');
+    for (let i = 0; i < 3; i++) {
+      const div = document.createElement('div');
+      div.className = 'chat-msg';
+      div.textContent = `Message ${i}`;
+      output.appendChild(div);
+    }
+
+    ChatBookmarks.add(1, 'user', 'Message 1');
+    ChatBookmarks.decorateMessages();
+
+    const indicators = output.querySelectorAll('.bookmark-indicator');
+    expect(indicators[0].textContent).toBe('☆');
+    expect(indicators[1].textContent).toBe('⭐');
+    expect(indicators[2].textContent).toBe('☆');
+  });
+
+  test('bookmarked message gets gold border', () => {
+    const output = document.getElementById('chat-output');
+    const div = document.createElement('div');
+    div.className = 'chat-msg';
+    div.textContent = 'Bookmarked msg';
+    output.appendChild(div);
+
+    ChatBookmarks.add(0, 'user', 'Bookmarked msg');
+    ChatBookmarks.decorateMessages();
+
+    expect(div.style.borderLeft).toBe('3px solid gold');
+  });
+
+  test('renderPanel shows empty state when no bookmarks', () => {
+    ChatBookmarks.openPanel();
+    const list = document.getElementById('bookmarks-list');
+    const empty = list.querySelector('.bookmarks-empty');
+    expect(empty).not.toBeNull();
+    expect(empty.textContent).toContain('No bookmarks yet');
+  });
+
+  test('renderPanel shows bookmark items', () => {
+    ChatBookmarks.add(0, 'user', 'First message');
+    ChatBookmarks.add(1, 'assistant', 'Second message');
+    ChatBookmarks.openPanel();
+
+    const list = document.getElementById('bookmarks-list');
+    const items = list.querySelectorAll('.bookmark-item');
+    expect(items.length).toBe(2);
+  });
+
+  test('renderPanel shows role badges', () => {
+    ChatBookmarks.add(0, 'user', 'User msg');
+    ChatBookmarks.add(1, 'assistant', 'Bot msg');
+    ChatBookmarks.openPanel();
+
+    const list = document.getElementById('bookmarks-list');
+    const roles = list.querySelectorAll('.bookmark-role');
+    expect(roles[0].textContent).toBe('👤');
+    expect(roles[1].textContent).toBe('🤖');
+  });
+
+  test('Ctrl+B toggles bookmarks panel', () => {
+    expect(ChatBookmarks._getState().panelOpen).toBe(false);
+
+    const event = new KeyboardEvent('keydown', {
+      key: 'b', ctrlKey: true, bubbles: true
+    });
+    event.preventDefault = jest.fn();
+
+    KeyboardShortcuts.handleKeydown(event);
+    expect(ChatBookmarks._getState().panelOpen).toBe(true);
+
+    KeyboardShortcuts.handleKeydown(event);
+    expect(ChatBookmarks._getState().panelOpen).toBe(false);
+  });
+
+  test('id uses Date.now() and messageIndex', () => {
+    const before = Date.now();
+    const bm = ChatBookmarks.add(42, 'user', 'Test');
+    const after = Date.now();
+
+    const parts = bm.id.split('-');
+    const ts = parseInt(parts[0], 10);
+    expect(ts).toBeGreaterThanOrEqual(before);
+    expect(ts).toBeLessThanOrEqual(after);
+    expect(parts[1]).toBe('42');
+  });
+
+  test('load handles non-array localStorage value gracefully', () => {
+    localStorage.setItem('chatBookmarks', '"just a string"');
+    setupDOM();
+    loadApp();
+    expect(ChatBookmarks.getCount()).toBe(0);
+  });
+
+  test('getAll returns a copy, not internal reference', () => {
+    ChatBookmarks.add(0, 'user', 'Test');
+    const all = ChatBookmarks.getAll();
+    all.push({ id: 'fake', messageIndex: 99 });
+    expect(ChatBookmarks.getCount()).toBe(1);
+  });
+
+  test('_getState bookmarks is a copy', () => {
+    ChatBookmarks.add(0, 'user', 'Test');
+    const state = ChatBookmarks._getState();
+    state.bookmarks.push({ id: 'fake' });
+    expect(ChatBookmarks.getCount()).toBe(1);
+  });
+
+  test('preview trims whitespace', () => {
+    const bm = ChatBookmarks.add(0, 'user', '  Hello world  ');
+    expect(bm.preview).toBe('Hello world');
+  });
+
+  test('jumpTo with invalid index does not throw', () => {
+    expect(() => ChatBookmarks.jumpTo(-1)).not.toThrow();
+    expect(() => ChatBookmarks.jumpTo(999)).not.toThrow();
+  });
+
+  test('decorateMessages is idempotent', () => {
+    const output = document.getElementById('chat-output');
+    const div = document.createElement('div');
+    div.className = 'chat-msg';
+    div.textContent = 'Test';
+    output.appendChild(div);
+
+    ChatBookmarks.decorateMessages();
+    ChatBookmarks.decorateMessages();
+    ChatBookmarks.decorateMessages();
+
+    const indicators = output.querySelectorAll('.bookmark-indicator');
+    expect(indicators.length).toBe(1);
+  });
+
+  test('closePanel is safe to call when already closed', () => {
+    expect(ChatBookmarks._getState().panelOpen).toBe(false);
+    expect(() => ChatBookmarks.closePanel()).not.toThrow();
+    expect(ChatBookmarks._getState().panelOpen).toBe(false);
+  });
+
+  test('MAX_BOOKMARKS is 50', () => {
+    expect(ChatBookmarks.MAX_BOOKMARKS).toBe(50);
+  });
+});

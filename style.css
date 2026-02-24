@@ -1206,3 +1206,121 @@ kbd {
   padding: 0.4rem 1rem;
   font-size: 0.88rem;
 }
+
+/* ---------- Bookmarks Panel ---------- */
+.bookmarks-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 380px;
+  max-width: 92vw;
+  height: 100vh;
+  background: var(--bg-secondary);
+  border-left: 2px solid var(--border-box);
+  box-shadow: -4px 0 20px var(--shadow);
+  display: flex;
+  flex-direction: column;
+  z-index: 55;
+}
+
+.bookmarks-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border-box);
+  flex-shrink: 0;
+}
+
+.bookmarks-header h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.bookmarks-header button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1rem;
+  color: var(--text-secondary);
+  padding: 0.25rem 0.5rem;
+}
+
+.bookmarks-header button:hover {
+  color: var(--text-primary);
+}
+
+.bookmarks-list {
+  overflow-y: auto;
+  flex: 1;
+  padding: 0.5rem;
+}
+
+.bookmarks-empty {
+  text-align: center;
+  color: var(--text-secondary);
+  padding: 2rem 1rem;
+  font-style: italic;
+}
+
+.bookmark-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+  border-bottom: 1px solid var(--border-box);
+}
+
+.bookmark-item:hover {
+  background: var(--bg-hover, rgba(255, 255, 255, 0.05));
+}
+
+.bookmark-role {
+  flex-shrink: 0;
+  font-size: 1rem;
+}
+
+.bookmark-preview {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+}
+
+.bookmark-time {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.bookmark-delete {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+}
+
+.bookmark-delete:hover {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.bookmark-indicator {
+  cursor: pointer;
+  font-size: 0.8rem;
+  margin-left: 0.5rem;
+  opacity: 0.6;
+  transition: opacity 0.15s;
+}
+
+.bookmark-indicator:hover {
+  opacity: 1;
+}

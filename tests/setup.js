@@ -21,6 +21,7 @@ function setupDOM() {
       <button id="history-btn" class="btn-secondary">History</button>
       <button id="snippets-btn" class="btn-secondary">Snippets</button>
       <button id="shortcuts-btn" class="btn-secondary">⌨️</button>
+      <button id="bookmarks-btn" title="Bookmarks (Ctrl+B)">🔖</button>
       <button id="voice-btn" class="btn-secondary" aria-label="Toggle voice input">🎤</button>
       <button id="theme-btn" class="btn-secondary" aria-label="Toggle theme">☀️</button>
     </div>
@@ -146,6 +147,16 @@ function setupDOM() {
         </div>
       </div>
     </div>
+    <div id="bookmarks-panel" class="bookmarks-panel" style="display:none;">
+      <div class="bookmarks-header">
+        <h3>🔖 Bookmarks</h3>
+        <div>
+          <button id="bookmarks-clear" title="Clear all">🗑️</button>
+          <button id="bookmarks-close" title="Close">✕</button>
+        </div>
+      </div>
+      <div id="bookmarks-list" class="bookmarks-list"></div>
+    </div>
   `;
 }
 
@@ -178,6 +189,7 @@ function loadApp() {
     'SnippetLibrary',
     'KeyboardShortcuts',
     'MessageSearch',
+    'ChatBookmarks',
     'VoiceInput',
     'ThemeManager',
     'SessionManager'

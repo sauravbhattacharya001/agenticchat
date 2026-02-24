@@ -1682,6 +1682,206 @@ const MessageSearch = (() => {
   };
 })();
 
+/* ---------- Chat Bookmarks ---------- */
+const ChatBookmarks = (() => {
+  const STORAGE_KEY = 'chatBookmarks';
+  const MAX_BOOKMARKS = 50;
+
+  let bookmarks = [];
+  let panelOpen = false;
+
+  function load() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) { bookmarks = []; return; }
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) { bookmarks = []; return; }
+      bookmarks = parsed;
+    } catch (_) {
+      bookmarks = [];
+    }
+  }
+
+  function save() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(bookmarks));
+    } catch (_) { /* storage full */ }
+  }
+
+  function add(messageIndex, role, fullText) {
+    if (isBookmarked(messageIndex)) return null;
+    if (bookmarks.length >= MAX_BOOKMARKS) return null;
+    const preview = (fullText || '').substring(0, 100).trim();
+    const bookmark = {
+      id: Date.now() + '-' + messageIndex,
+      messageIndex,
+      preview,
+      role,
+      timestamp: new Date().toISOString()
+    };
+    bookmarks.push(bookmark);
+    save();
+    return bookmark;
+  }
+
+  function remove(id) {
+    const before = bookmarks.length;
+    bookmarks = bookmarks.filter(b => b.id !== id);
+    if (bookmarks.length !== before) save();
+  }
+
+  function isBookmarked(messageIndex) {
+    return bookmarks.some(b => b.messageIndex === messageIndex);
+  }
+
+  function toggle(messageIndex, role, fullText) {
+    const existing = bookmarks.find(b => b.messageIndex === messageIndex);
+    if (existing) {
+      remove(existing.id);
+      return false;
+    } else {
+      add(messageIndex, role, fullText);
+      return true;
+    }
+  }
+
+  function getAll() {
+    return [...bookmarks].sort((a, b) => a.messageIndex - b.messageIndex);
+  }
+
+  function getCount() {
+    return bookmarks.length;
+  }
+
+  function clearAll() {
+    bookmarks = [];
+    save();
+  }
+
+  function jumpTo(messageIndex) {
+    const output = document.getElementById('chat-output');
+    if (!output) return;
+    const msgs = output.querySelectorAll('.chat-msg');
+    if (messageIndex >= 0 && messageIndex < msgs.length) {
+      msgs[messageIndex].scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }
+
+  function decorateMessages() {
+    const output = document.getElementById('chat-output');
+    if (!output) return;
+    const msgs = output.querySelectorAll('.chat-msg');
+    msgs.forEach((msg, idx) => {
+      // Remove existing indicator if any
+      const existing = msg.querySelector('.bookmark-indicator');
+      if (existing) existing.remove();
+
+      const indicator = document.createElement('span');
+      indicator.className = 'bookmark-indicator';
+      indicator.title = 'Toggle bookmark';
+      indicator.textContent = isBookmarked(idx) ? '⭐' : '☆';
+      indicator.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const role = msg.classList.contains('user') ? 'user' : 'assistant';
+        toggle(idx, role, msg.textContent);
+        decorateMessages();
+        if (panelOpen) renderPanel();
+      });
+
+      if (isBookmarked(idx)) {
+        msg.style.borderLeft = '3px solid gold';
+      } else {
+        msg.style.borderLeft = '';
+      }
+
+      msg.appendChild(indicator);
+    });
+  }
+
+  function togglePanel() {
+    if (panelOpen) closePanel();
+    else openPanel();
+  }
+
+  function openPanel() {
+    panelOpen = true;
+    const panel = document.getElementById('bookmarks-panel');
+    if (panel) panel.style.display = '';
+    renderPanel();
+  }
+
+  function closePanel() {
+    panelOpen = false;
+    const panel = document.getElementById('bookmarks-panel');
+    if (panel) panel.style.display = 'none';
+  }
+
+  function renderPanel() {
+    const list = document.getElementById('bookmarks-list');
+    if (!list) return;
+    list.innerHTML = '';
+
+    const sorted = getAll();
+    if (sorted.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'bookmarks-empty';
+      empty.textContent = 'No bookmarks yet. Click ☆ on a message to bookmark it.';
+      list.appendChild(empty);
+      return;
+    }
+
+    sorted.forEach(bm => {
+      const item = document.createElement('div');
+      item.className = 'bookmark-item';
+
+      const roleBadge = document.createElement('span');
+      roleBadge.className = 'bookmark-role';
+      roleBadge.textContent = bm.role === 'user' ? '👤' : '🤖';
+
+      const preview = document.createElement('span');
+      preview.className = 'bookmark-preview';
+      preview.textContent = bm.preview;
+
+      const time = document.createElement('span');
+      time.className = 'bookmark-time';
+      time.textContent = new Date(bm.timestamp).toLocaleTimeString();
+
+      const deleteBtn = document.createElement('button');
+      deleteBtn.className = 'bookmark-delete';
+      deleteBtn.textContent = '✕';
+      deleteBtn.title = 'Remove bookmark';
+      deleteBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        remove(bm.id);
+        renderPanel();
+        decorateMessages();
+      });
+
+      item.appendChild(roleBadge);
+      item.appendChild(preview);
+      item.appendChild(time);
+      item.appendChild(deleteBtn);
+
+      item.addEventListener('click', () => {
+        jumpTo(bm.messageIndex);
+      });
+
+      list.appendChild(item);
+    });
+  }
+
+  // Load on init
+  load();
+
+  return {
+    load, save, add, remove, isBookmarked, toggle,
+    getAll, getCount, clearAll, jumpTo,
+    decorateMessages, togglePanel, openPanel, closePanel, renderPanel,
+    _getState: () => ({ bookmarks: [...bookmarks], panelOpen }),
+    MAX_BOOKMARKS
+  };
+})();
+
 /* ---------- Keyboard Shortcuts ---------- */
 const KeyboardShortcuts = (() => {
   let isHelpOpen = false;
@@ -1775,6 +1975,13 @@ const KeyboardShortcuts = (() => {
       e.preventDefault();
       const input = document.getElementById('chat-input');
       if (input) input.focus();
+      return;
+    }
+
+    // Ctrl+B — toggle bookmarks panel
+    if (ctrl && e.key === 'b') {
+      e.preventDefault();
+      ChatBookmarks.togglePanel();
       return;
     }
 

@@ -26,6 +26,7 @@
     <button id="history-btn" class="btn-secondary" title="Toggle conversation history panel">History</button>
     <button id="snippets-btn" class="btn-secondary" title="Saved code snippets">Snippets</button>
     <button id="sessions-btn" class="btn-secondary" title="Chat sessions (Ctrl+J)">Sessions</button>
+    <button id="bookmarks-btn" title="Bookmarks (Ctrl+B)">🔖</button>
     <button id="shortcuts-btn" class="btn-secondary" title="Keyboard shortcuts (press ? for help)">⌨️</button>
     <button id="voice-btn" class="btn-secondary" title="Voice input — speak your prompt (Ctrl+M)" aria-label="Toggle voice input">🎤</button>
     <button id="theme-btn" class="btn-secondary" title="Switch to light theme (Ctrl+D)" aria-label="Toggle theme">☀️</button>
@@ -125,6 +126,18 @@
 
   <!-- Session Save Dialog -->
   <div id="session-save-modal" role="dialog" aria-modal="true" aria-labelledby="session-modal-title">
+
+  <!-- Bookmarks Panel -->
+  <div id="bookmarks-panel" class="bookmarks-panel" style="display:none;">
+    <div class="bookmarks-header">
+      <h3>🔖 Bookmarks</h3>
+      <div>
+        <button id="bookmarks-clear" title="Clear all">🗑️</button>
+        <button id="bookmarks-close" title="Close">✕</button>
+      </div>
+    </div>
+    <div id="bookmarks-list" class="bookmarks-list"></div>
+  </div>
     <div id="session-save-content">
       <p id="session-modal-title"><strong>Save Session</strong></p>
       <label for="session-name-input">Session Name</label>
@@ -184,6 +197,7 @@
           <div class="shortcut-row"><kbd>Ctrl</kbd> + <kbd>T</kbd><span>Toggle templates</span></div>
           <div class="shortcut-row"><kbd>Ctrl</kbd> + <kbd>S</kbd><span>Toggle snippets</span></div>
           <div class="shortcut-row"><kbd>Ctrl</kbd> + <kbd>J</kbd><span>Toggle sessions</span></div>
+          <div class="shortcut-row"><kbd>Ctrl</kbd> + <kbd>B</kbd><span>Toggle bookmarks</span></div>
         </div>
         <div class="shortcut-group">
           <div class="shortcut-group-title">Sessions</div>
