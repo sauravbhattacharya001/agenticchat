@@ -1832,6 +1832,27 @@ const VoiceInput = (() => {
   let _onStateChange = null;
   let _autoSend = false;
 
+  const LANG_STORAGE_KEY = 'agenticchat_voice_lang';
+  const DEFAULT_LANG = 'en-US';
+
+  /** Load saved language preference from localStorage, fallback to default. */
+  function _loadLanguage() {
+    try {
+      const saved = localStorage.getItem(LANG_STORAGE_KEY);
+      if (saved && typeof saved === 'string' && saved.length >= 2 && saved.length <= 10) {
+        return saved;
+      }
+    } catch (_) { /* localStorage unavailable */ }
+    return DEFAULT_LANG;
+  }
+
+  /** Persist language preference to localStorage. */
+  function _saveLanguage(lang) {
+    try {
+      localStorage.setItem(LANG_STORAGE_KEY, lang);
+    } catch (_) { /* localStorage unavailable */ }
+  }
+
   /** Check if Speech Recognition is available in this browser. */
   function isSupported() {
     return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
@@ -1846,7 +1867,7 @@ const VoiceInput = (() => {
     recognition = new SpeechRecognition();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = 'en-US';
+    recognition.lang = _loadLanguage();
     recognition.maxAlternatives = 1;
 
     recognition.addEventListener('result', (event) => {
@@ -1940,14 +1961,18 @@ const VoiceInput = (() => {
   /** Set callback for state changes: (isListening) => void */
   function onStateChange(fn) { _onStateChange = fn; }
 
-  /** Set the recognition language (e.g. 'en-US', 'es-ES', 'fr-FR'). */
+  /** Set the recognition language (e.g. 'en-US', 'es-ES', 'fr-FR'). Persists to localStorage. */
   function setLanguage(lang) {
-    if (recognition) recognition.lang = lang;
+    if (!lang || typeof lang !== 'string') return;
+    const trimmed = lang.trim();
+    if (trimmed.length < 2 || trimmed.length > 10) return;
+    _saveLanguage(trimmed);
+    if (recognition) recognition.lang = trimmed;
   }
 
   /** Get current language. */
   function getLanguage() {
-    return recognition ? recognition.lang : 'en-US';
+    return recognition ? recognition.lang : _loadLanguage();
   }
 
   return {

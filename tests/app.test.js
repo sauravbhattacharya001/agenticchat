@@ -1429,6 +1429,10 @@ describe('VoiceInput', () => {
   });
 
   test('getLanguage returns en-US as default', () => {
+    // Clear any persisted language to test the default fallback
+    localStorage.removeItem('agenticchat_voice_lang');
+    setupDOM();
+    loadApp();
     // Before init, default is en-US
     expect(VoiceInput.getLanguage()).toBe('en-US');
   });
@@ -1465,6 +1469,10 @@ describe('VoiceInput', () => {
   });
 
   test('recognition configures continuous and interimResults', () => {
+    // Clear persisted language so recognition initializes with default
+    localStorage.removeItem('agenticchat_voice_lang');
+    setupDOM();
+    loadApp();
     VoiceInput.start();
     expect(mockRecognition.continuous).toBe(true);
     expect(mockRecognition.interimResults).toBe(true);
@@ -1616,6 +1624,100 @@ describe('VoiceInput', () => {
     });
 
     expect(VoiceInput.getFinalTranscript()).toBe('hello world');
+  });
+
+  // ── Language Persistence (Issue #24) ──────────────────────────────
+
+  test('setLanguage persists to localStorage', () => {
+    VoiceInput.start(); // ensure recognition is initialized
+    VoiceInput.setLanguage('es-ES');
+    expect(localStorage.getItem('agenticchat_voice_lang')).toBe('es-ES');
+  });
+
+  test('getLanguage returns saved language before recognition init', () => {
+    localStorage.setItem('agenticchat_voice_lang', 'fr-FR');
+    // Reload app so VoiceInput picks up the saved language
+    setupDOM();
+    loadApp();
+    expect(VoiceInput.getLanguage()).toBe('fr-FR');
+  });
+
+  test('recognition initializes with saved language', () => {
+    localStorage.setItem('agenticchat_voice_lang', 'ja-JP');
+    setupDOM();
+    loadApp();
+    // Start to trigger _ensureRecognition
+    VoiceInput.start();
+    expect(mockRecognition.lang).toBe('ja-JP');
+  });
+
+  test('setLanguage updates both recognition and localStorage', () => {
+    VoiceInput.start();
+    VoiceInput.setLanguage('de-DE');
+    expect(mockRecognition.lang).toBe('de-DE');
+    expect(localStorage.getItem('agenticchat_voice_lang')).toBe('de-DE');
+  });
+
+  test('setLanguage rejects invalid inputs', () => {
+    VoiceInput.start();
+    const originalLang = VoiceInput.getLanguage();
+
+    VoiceInput.setLanguage('');
+    expect(VoiceInput.getLanguage()).toBe(originalLang);
+
+    VoiceInput.setLanguage(null);
+    expect(VoiceInput.getLanguage()).toBe(originalLang);
+
+    VoiceInput.setLanguage(undefined);
+    expect(VoiceInput.getLanguage()).toBe(originalLang);
+
+    VoiceInput.setLanguage('x'); // too short
+    expect(VoiceInput.getLanguage()).toBe(originalLang);
+
+    VoiceInput.setLanguage('very-long-language-code'); // too long
+    expect(VoiceInput.getLanguage()).toBe(originalLang);
+  });
+
+  test('setLanguage accepts valid language codes', () => {
+    VoiceInput.start();
+
+    VoiceInput.setLanguage('en');
+    expect(VoiceInput.getLanguage()).toBe('en');
+
+    VoiceInput.setLanguage('zh-CN');
+    expect(VoiceInput.getLanguage()).toBe('zh-CN');
+
+    VoiceInput.setLanguage('pt-BR');
+    expect(VoiceInput.getLanguage()).toBe('pt-BR');
+  });
+
+  test('getLanguage falls back to en-US when localStorage is empty', () => {
+    localStorage.removeItem('agenticchat_voice_lang');
+    setupDOM();
+    loadApp();
+    expect(VoiceInput.getLanguage()).toBe('en-US');
+  });
+
+  test('language persists across page reloads', () => {
+    // Set a language
+    VoiceInput.start();
+    VoiceInput.setLanguage('ko-KR');
+
+    // "Reload" by re-initializing the app
+    setupDOM();
+    loadApp();
+
+    // Should load saved language
+    VoiceInput.start();
+    expect(mockRecognition.lang).toBe('ko-KR');
+    expect(VoiceInput.getLanguage()).toBe('ko-KR');
+  });
+
+  test('setLanguage trims whitespace', () => {
+    VoiceInput.start();
+    VoiceInput.setLanguage('  it-IT  ');
+    expect(VoiceInput.getLanguage()).toBe('it-IT');
+    expect(localStorage.getItem('agenticchat_voice_lang')).toBe('it-IT');
   });
 });
 
