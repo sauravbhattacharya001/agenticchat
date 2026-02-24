@@ -3625,3 +3625,422 @@ describe('ChatBookmarks', () => {
     expect(ChatBookmarks.MAX_BOOKMARKS).toBe(50);
   });
 });
+
+/* ================================================================
+ * ChatController
+ * ================================================================ */
+describe('ChatController', () => {
+  const originalFetch = global.fetch;
+  const originalAlert = global.alert;
+  const originalConfirm = global.confirm;
+
+  beforeEach(() => {
+    global.fetch = jest.fn();
+    global.alert = jest.fn();
+    global.confirm = jest.fn(() => true);
+    // Ensure clean state: provide an API key so send() doesn't prompt for one
+    try { ApiKeyManager.setOpenAIKey('sk-testkey123456'); } catch (_) {}
+  });
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+    global.alert = originalAlert;
+    global.confirm = originalConfirm;
+    ApiKeyManager.clearOpenAIKey();
+    ConversationManager.clear();
+  });
+
+  /* ----------------------------------------------------------
+   * callOpenAI
+   * ---------------------------------------------------------- */
+  describe('callOpenAI', () => {
+    // We need to access callOpenAI indirectly through send() since it's
+    // private. Instead, we test it via the send() flow, but we can also
+    // test the fetch interaction directly by calling send() and inspecting
+    // the fetch mock. However, callOpenAI is not directly exposed.
+    // We'll test OpenAI interactions through the send() pathway.
+
+    // Helper: set up input and trigger send
+    async function triggerSend(prompt = 'Hello') {
+      document.getElementById('chat-input').value = prompt;
+      await ChatController.send();
+    }
+
+    test('returns ok:true data on successful response', async () => {
+      const mockResponse = { choices: [{ message: { content: 'Hi there' } }], usage: { prompt_tokens: 10, completion_tokens: 5 } };
+      fetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => mockResponse
+      });
+
+      await triggerSend('Hello');
+
+      expect(fetch).toHaveBeenCalledTimes(1);
+      // Chat output should show the reply (no code block → text display)
+      expect(document.getElementById('chat-output').textContent).toBe('Hi there');
+    });
+
+    test('returns ok:false with status on API error', async () => {
+      fetch.mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        json: async () => ({ error: { message: 'Internal server error' } })
+      });
+
+      await triggerSend('Hello');
+
+      expect(document.getElementById('chat-output').textContent).toContain('OpenAI error 500');
+    });
+
+    test('error message includes "check your API key" on 401', async () => {
+      fetch.mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        json: async () => ({ error: { message: 'Unauthorized' } })
+      });
+
+      await triggerSend('Hello');
+
+      expect(document.getElementById('chat-output').textContent).toContain('check your API key');
+    });
+
+    test('error message includes "rate limited" on 429', async () => {
+      fetch.mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        json: async () => ({ error: { message: 'Too many requests' } })
+      });
+
+      await triggerSend('Hello');
+
+      expect(document.getElementById('chat-output').textContent).toContain('rate limited');
+    });
+
+    test('error message includes "service temporarily unavailable" on 503', async () => {
+      fetch.mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        json: async () => ({ error: { message: 'Service unavailable' } })
+      });
+
+      await triggerSend('Hello');
+
+      expect(document.getElementById('chat-output').textContent).toContain('service temporarily unavailable');
+    });
+
+    test('includes model and max_tokens in request body', async () => {
+      fetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: 'ok' } }] })
+      });
+
+      await triggerSend('Hello');
+
+      const fetchCall = fetch.mock.calls[0];
+      const body = JSON.parse(fetchCall[1].body);
+      expect(body.model).toBe(ChatConfig.MODEL);
+      expect(body.max_tokens).toBe(ChatConfig.MAX_TOKENS_RESPONSE);
+    });
+
+    test('includes Authorization header with Bearer token', async () => {
+      fetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: 'ok' } }] })
+      });
+
+      await triggerSend('Hello');
+
+      const fetchCall = fetch.mock.calls[0];
+      expect(fetchCall[1].headers['Authorization']).toBe('Bearer sk-testkey123456');
+    });
+
+    test('handles JSON parse error in error response body gracefully', async () => {
+      fetch.mockResolvedValueOnce({
+        ok: false,
+        status: 502,
+        json: async () => { throw new Error('Invalid JSON'); }
+      });
+
+      await triggerSend('Hello');
+
+      // Should still show error message without crashing
+      expect(document.getElementById('chat-output').textContent).toContain('OpenAI error 502');
+    });
+  });
+
+  /* ----------------------------------------------------------
+   * send()
+   * ---------------------------------------------------------- */
+  describe('send()', () => {
+
+    test('does nothing when isSending is true (guard against double-send)', async () => {
+      // First call: slow response
+      let resolveFirst;
+      document.getElementById('chat-input').value = 'First';
+      fetch.mockImplementationOnce(() => new Promise(r => { resolveFirst = r; }));
+
+      const firstSend = ChatController.send();
+
+      // Trigger a second send while first is pending
+      document.getElementById('chat-input').value = 'Second';
+      await ChatController.send();
+
+      // Only one fetch should have been made
+      expect(fetch).toHaveBeenCalledTimes(1);
+
+      // Resolve the pending fetch so finally block runs
+      resolveFirst({
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: 'ok' } }] })
+      });
+      await firstSend;
+    });
+
+    test('alerts when no API key and no input', async () => {
+      ApiKeyManager.clearOpenAIKey();
+      document.getElementById('chat-input').value = '';
+
+      await ChatController.send();
+
+      expect(alert).toHaveBeenCalledWith('Enter both your OpenAI key and a question.');
+    });
+
+    test('alerts when API key set but no prompt', async () => {
+      document.getElementById('chat-input').value = '';
+
+      await ChatController.send();
+
+      expect(alert).toHaveBeenCalledWith('Enter a question.');
+    });
+
+    test('alerts when input exceeds MAX_INPUT_CHARS', async () => {
+      document.getElementById('chat-input').value = 'x'.repeat(ChatConfig.MAX_INPUT_CHARS + 1);
+
+      await ChatController.send();
+
+      expect(alert).toHaveBeenCalled();
+      const alertMsg = alert.mock.calls[0][0];
+      expect(alertMsg).toContain('too long');
+    });
+
+    test('shows confirm dialog when projected tokens exceed MAX_TOTAL_TOKENS', async () => {
+      // Add enough history to push projected tokens over the limit
+      // MAX_TOTAL_TOKENS = 100000, CHARS_PER_TOKEN = 4
+      // We need estimateTokens() + prompt tokens > MAX_TOTAL_TOKENS
+      // Add many large history messages to exceed 100k tokens
+      const bigContent = 'x'.repeat(ChatConfig.MAX_INPUT_CHARS);
+      for (let i = 0; i < 10; i++) {
+        ConversationManager.addMessage('user', bigContent);
+        ConversationManager.addMessage('assistant', bigContent);
+      }
+
+      document.getElementById('chat-input').value = 'test prompt';
+      confirm.mockReturnValueOnce(false);
+
+      await ChatController.send();
+
+      expect(confirm).toHaveBeenCalled();
+      // fetch should NOT have been called because user clicked Cancel
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    test('adds user message to ConversationManager', async () => {
+      fetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: 'response' } }] })
+      });
+
+      document.getElementById('chat-input').value = 'test message';
+      await ChatController.send();
+
+      const history = ConversationManager.getHistory();
+      // system + user + assistant
+      expect(history.some(m => m.role === 'user' && m.content === 'test message')).toBe(true);
+    });
+
+    test('pops last message on API error', async () => {
+      fetch.mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        json: async () => ({ error: { message: 'Server error' } })
+      });
+
+      const beforeCount = ConversationManager.getHistory().length;
+      document.getElementById('chat-input').value = 'test';
+      await ChatController.send();
+
+      // After error, the user message should be popped
+      expect(ConversationManager.getHistory().length).toBe(beforeCount);
+    });
+
+    test('on 401 error, clears API key and shows API key input', async () => {
+      fetch.mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        json: async () => ({ error: { message: 'Unauthorized' } })
+      });
+
+      document.getElementById('chat-input').value = 'test';
+      await ChatController.send();
+
+      expect(ApiKeyManager.getOpenAIKey()).toBeNull();
+      expect(document.getElementById('api-key')).not.toBeNull();
+    });
+
+    test('extracts code block from response and runs in sandbox', async () => {
+      const codeBlock = '```javascript\nconsole.log("hello");\n```';
+      fetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: codeBlock } }] })
+      });
+
+      // Mock SandboxRunner.run to avoid real iframe creation/timeout
+      const runSpy = jest.spyOn(SandboxRunner, 'run').mockResolvedValueOnce({ ok: true, value: 'hello' });
+
+      document.getElementById('chat-input').value = 'write code';
+      await ChatController.send();
+
+      // Code should have been displayed (pre element in chat-output)
+      const pre = document.getElementById('chat-output').querySelector('pre');
+      expect(pre).not.toBeNull();
+      expect(pre.textContent).toContain('console.log("hello")');
+
+      // Sandbox should have been called with the extracted code
+      expect(runSpy).toHaveBeenCalledWith('console.log("hello");\n');
+      runSpy.mockRestore();
+    });
+
+    test('displays text response when no code block found', async () => {
+      fetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: 'Just a text answer' } }] })
+      });
+
+      document.getElementById('chat-input').value = 'question';
+      await ChatController.send();
+
+      expect(document.getElementById('chat-output').textContent).toBe('Just a text answer');
+      expect(document.getElementById('console-output').textContent).toBe('(no code to run)');
+    });
+
+    test('calls HistoryPanel.refresh() after successful response', async () => {
+      const spy = jest.spyOn(HistoryPanel, 'refresh');
+      fetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: 'ok' } }] })
+      });
+
+      document.getElementById('chat-input').value = 'test';
+      await ChatController.send();
+
+      expect(spy).toHaveBeenCalled();
+      spy.mockRestore();
+    });
+
+    test('calls SessionManager.autoSaveIfEnabled() after success', async () => {
+      const spy = jest.spyOn(SessionManager, 'autoSaveIfEnabled');
+      fetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: 'ok' } }] })
+      });
+
+      document.getElementById('chat-input').value = 'test';
+      await ChatController.send();
+
+      expect(spy).toHaveBeenCalled();
+      spy.mockRestore();
+    });
+
+    test('clears chat input after send (in finally block)', async () => {
+      fetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: 'ok' } }] })
+      });
+
+      document.getElementById('chat-input').value = 'should be cleared';
+      await ChatController.send();
+
+      expect(document.getElementById('chat-input').value).toBe('');
+    });
+
+    test('sets isSending state during request', async () => {
+      let sendBtnDuringRequest;
+      fetch.mockImplementationOnce(async () => {
+        sendBtnDuringRequest = document.getElementById('send-btn').disabled;
+        return {
+          ok: true,
+          json: async () => ({ choices: [{ message: { content: 'ok' } }] })
+        };
+      });
+
+      document.getElementById('chat-input').value = 'test';
+      await ChatController.send();
+
+      // During request, send button should have been disabled
+      expect(sendBtnDuringRequest).toBe(true);
+      // After completion, send button should be re-enabled
+      expect(document.getElementById('send-btn').disabled).toBe(false);
+    });
+
+    test('handles network error (fetch throws)', async () => {
+      fetch.mockRejectedValueOnce(new Error('Network failure'));
+
+      document.getElementById('chat-input').value = 'test';
+      await ChatController.send();
+
+      expect(document.getElementById('chat-output').textContent).toContain('Network error');
+      expect(document.getElementById('chat-output').textContent).toContain('Network failure');
+    });
+  });
+
+  /* ----------------------------------------------------------
+   * clearHistory
+   * ---------------------------------------------------------- */
+  describe('clearHistory()', () => {
+    test('calls ConversationManager.clear()', () => {
+      ConversationManager.addMessage('user', 'test');
+      expect(ConversationManager.getHistory().length).toBeGreaterThan(1);
+
+      ChatController.clearHistory();
+
+      // After clear, only system prompt should remain
+      expect(ConversationManager.getHistory().length).toBe(1);
+      expect(ConversationManager.getHistory()[0].role).toBe('system');
+    });
+
+    test('resets UI outputs', () => {
+      document.getElementById('chat-output').textContent = 'some output';
+      document.getElementById('console-output').textContent = 'some result';
+
+      ChatController.clearHistory();
+
+      expect(document.getElementById('chat-output').textContent).toBe('');
+      expect(document.getElementById('console-output').textContent).toBe('(results appear here)');
+      expect(document.getElementById('last-prompt').textContent).toBe('(history cleared)');
+    });
+  });
+
+  /* ----------------------------------------------------------
+   * submitServiceKey
+   * ---------------------------------------------------------- */
+  describe('submitServiceKey()', () => {
+    test('gets key from UI and submits to ApiKeyManager', async () => {
+      const spy = jest.spyOn(ApiKeyManager, 'submitServiceKey');
+      document.getElementById('user-api-key').value = 'my-service-key';
+
+      await ChatController.submitServiceKey();
+
+      expect(spy).toHaveBeenCalledWith('my-service-key');
+      spy.mockRestore();
+    });
+
+    test('hides service key modal', async () => {
+      document.getElementById('apikey-modal').style.display = 'flex';
+      document.getElementById('user-api-key').value = 'test-key';
+
+      await ChatController.submitServiceKey();
+
+      expect(document.getElementById('apikey-modal').style.display).toBe('none');
+    });
+  });
+});
