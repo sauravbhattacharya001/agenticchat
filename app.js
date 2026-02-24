@@ -828,10 +828,20 @@ const PromptTemplates = (() => {
 const HistoryPanel = (() => {
   let isOpen = false;
 
+  const _cache = {};
+  function el(id) {
+    let node = _cache[id];
+    if (!node) {
+      node = document.getElementById(id);
+      if (node) _cache[id] = node;
+    }
+    return node;
+  }
+
   function toggle() {
     isOpen = !isOpen;
-    const panel = document.getElementById('history-panel');
-    const overlay = document.getElementById('history-overlay');
+    const panel = el('history-panel');
+    const overlay = el('history-overlay');
     if (isOpen) {
       panel.classList.add('open');
       overlay.classList.add('visible');
@@ -844,8 +854,8 @@ const HistoryPanel = (() => {
 
   function close() {
     isOpen = false;
-    document.getElementById('history-panel').classList.remove('open');
-    document.getElementById('history-overlay').classList.remove('visible');
+    el('history-panel').classList.remove('open');
+    el('history-overlay').classList.remove('visible');
   }
 
   /**
@@ -853,7 +863,7 @@ const HistoryPanel = (() => {
    * Uses DocumentFragment for batch DOM insertion (single reflow/repaint).
    */
   function refresh() {
-    const container = document.getElementById('history-messages');
+    const container = el('history-messages');
     const history = ConversationManager.getHistory();
 
     // Filter out system messages — iterate directly instead of
@@ -987,6 +997,16 @@ const SnippetLibrary = (() => {
   const STORAGE_KEY = 'agenticchat_snippets';
   let isOpen = false;
   let currentCode = null;  // code displayed in chat-output for save
+
+  const _cache = {};
+  function el(id) {
+    let node = _cache[id];
+    if (!node) {
+      node = document.getElementById(id);
+      if (node) _cache[id] = node;
+    }
+    return node;
+  }
   let _searchTimer = null;
 
   /** Load snippets from localStorage. */
@@ -1062,7 +1082,7 @@ const SnippetLibrary = (() => {
   /** Set current code (called when AI generates code). */
   function setCurrentCode(code) {
     currentCode = code;
-    const actionsEl = document.getElementById('code-actions');
+    const actionsEl = el('code-actions');
     if (actionsEl) actionsEl.style.display = code ? 'flex' : 'none';
   }
 
@@ -1071,10 +1091,10 @@ const SnippetLibrary = (() => {
   /** Open save dialog for current code. */
   function openSaveDialog() {
     if (!currentCode) return;
-    const modal = document.getElementById('snippet-save-modal');
-    const nameInput = document.getElementById('snippet-name-input');
-    const tagsInput = document.getElementById('snippet-tags-input');
-    const preview = document.getElementById('snippet-code-preview');
+    const modal = el('snippet-save-modal');
+    const nameInput = el('snippet-name-input');
+    const tagsInput = el('snippet-tags-input');
+    const preview = el('snippet-code-preview');
 
     nameInput.value = '';
     tagsInput.value = '';
@@ -1091,8 +1111,8 @@ const SnippetLibrary = (() => {
 
   /** Confirm save from dialog. */
   function confirmSave() {
-    const nameInput = document.getElementById('snippet-name-input');
-    const tagsInput = document.getElementById('snippet-tags-input');
+    const nameInput = el('snippet-name-input');
+    const tagsInput = el('snippet-tags-input');
 
     const name = nameInput.value.trim();
     if (!name) { nameInput.focus(); return; }
@@ -1107,7 +1127,7 @@ const SnippetLibrary = (() => {
     closeSaveDialog();
 
     // Show confirmation or error feedback
-    const saveBtn = document.getElementById('save-snippet-btn');
+    const saveBtn = el('save-snippet-btn');
     if (saveBtn) {
       if (result.saved) {
         saveBtn.textContent = '✅ Saved!';
@@ -1122,7 +1142,7 @@ const SnippetLibrary = (() => {
   }
 
   function closeSaveDialog() {
-    const modal = document.getElementById('snippet-save-modal');
+    const modal = el('snippet-save-modal');
     if (modal) modal.style.display = 'none';
   }
 
@@ -1130,7 +1150,7 @@ const SnippetLibrary = (() => {
   function copyCurrentCode() {
     if (!currentCode) return;
     navigator.clipboard.writeText(currentCode).then(() => {
-      const btn = document.getElementById('copy-code-btn');
+      const btn = el('copy-code-btn');
       if (btn) {
         btn.textContent = '✅ Copied!';
         setTimeout(() => { btn.textContent = '📋 Copy'; }, 1500);
@@ -1156,12 +1176,12 @@ const SnippetLibrary = (() => {
   /** Toggle snippets panel. */
   function toggle() {
     isOpen = !isOpen;
-    const panel = document.getElementById('snippets-panel');
-    const overlay = document.getElementById('snippets-overlay');
+    const panel = el('snippets-panel');
+    const overlay = el('snippets-overlay');
     if (isOpen) {
       panel.classList.add('open');
       overlay.classList.add('visible');
-      const searchInput = document.getElementById('snippets-search');
+      const searchInput = el('snippets-search');
       if (searchInput) { searchInput.value = ''; searchInput.focus(); }
       refresh();
     } else {
@@ -1172,23 +1192,23 @@ const SnippetLibrary = (() => {
 
   function close() {
     isOpen = false;
-    const panel = document.getElementById('snippets-panel');
-    const overlay = document.getElementById('snippets-overlay');
+    const panel = el('snippets-panel');
+    const overlay = el('snippets-overlay');
     if (panel) panel.classList.remove('open');
     if (overlay) overlay.classList.remove('visible');
   }
 
   /** Render snippets list. */
   function refresh() {
-    const searchInput = document.getElementById('snippets-search');
+    const searchInput = el('snippets-search');
     const query = searchInput ? searchInput.value.trim() : '';
     const snippets = search(query);
     render(snippets);
   }
 
   function render(snippets) {
-    const container = document.getElementById('snippets-list');
-    const countEl = document.getElementById('snippets-count');
+    const container = el('snippets-list');
+    const countEl = el('snippets-count');
     if (!container) return;
 
     const total = getCount();
@@ -1282,7 +1302,7 @@ const SnippetLibrary = (() => {
       insertBtn.textContent = '📝 Insert';
       insertBtn.title = 'Insert code into chat input';
       insertBtn.addEventListener('click', () => {
-        const input = document.getElementById('chat-input');
+        const input = el('chat-input');
         if (input) {
           input.value = 'Run this code:\n```js\n' + snippet.code + '\n```';
           input.focus();
@@ -3451,6 +3471,16 @@ const SessionManager = (() => {
 /* ---------- Chat Statistics Dashboard ---------- */
 const ChatStats = (() => {
   let isOpen = false;
+
+  const _cache = {};
+  function el(id) {
+    let node = _cache[id];
+    if (!node) {
+      node = document.getElementById(id);
+      if (node) _cache[id] = node;
+    }
+    return node;
+  }
 
   /**
    * Compute statistics from current conversation messages.
