@@ -2741,6 +2741,9 @@ const SessionManager = (() => {
   const STORAGE_KEY = 'agenticchat_sessions';
   const ACTIVE_KEY = 'agenticchat_active_session';
   const AUTO_SAVE_KEY = 'agenticchat_autosave';
+  const MAX_SESSIONS = 50;
+  const MAX_MESSAGE_AGE_DAYS = 90;
+  const QUOTA_WARNING_THRESHOLD = 0.8;  // 80% of estimated quota
   let isOpen = false;
   let autoSave = false;
 
@@ -2752,9 +2755,65 @@ const SessionManager = (() => {
     } catch { return []; }
   }
 
-  /** Save all sessions to localStorage. */
+  /** Save all sessions to localStorage with quota protection. */
   function _saveAll(sessions) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
+    try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
+        return true;
+    } catch (e) {
+        if (e.name === 'QuotaExceededError' || e.code === 22 || e.code === 1014) {
+            // Try to recover: evict oldest sessions and retry
+            const recovered = _evictOldest(sessions, 5);
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(recovered));
+                return true;
+            } catch {
+                return false;
+            }
+        }
+        return false;
+    }
+  }
+
+  /** Evict the N oldest sessions (by updatedAt). */
+  function _evictOldest(sessions, count) {
+    if (sessions.length <= count) return [];
+    const sorted = [...sessions].sort((a, b) =>
+        new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime()
+    );
+    return sorted.slice(count);
+  }
+
+  /** Enforce maximum session count, evicting oldest when exceeded. */
+  function _enforceSessionLimit(sessions) {
+    if (sessions.length <= MAX_SESSIONS) return sessions;
+    const sorted = [...sessions].sort((a, b) =>
+        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+    );
+    return sorted.slice(0, MAX_SESSIONS);
+  }
+
+  /** Estimate localStorage usage as a fraction of the ~5MB quota. */
+  function _estimateQuotaUsage() {
+    try {
+        let total = 0;
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            total += key.length + (localStorage.getItem(key) || '').length;
+        }
+        // 5MB ≈ 5,242,880 chars (UTF-16 = 2 bytes per char, but length counts chars)
+        return total / (5 * 1024 * 1024);
+    } catch { return 0; }
+  }
+
+  /** Check quota and show a warning if usage is high. Returns usage fraction. */
+  function _checkQuota() {
+    const usage = _estimateQuotaUsage();
+    if (usage >= QUOTA_WARNING_THRESHOLD) {
+        const pct = Math.round(usage * 100);
+        console.warn(`[SessionManager] localStorage usage is at ${pct}%. Consider clearing old sessions.`);
+    }
+    return usage;
   }
 
   /** Get or set the active session ID. */
@@ -2851,7 +2910,8 @@ const SessionManager = (() => {
     };
 
     sessions.unshift(session);
-    _saveAll(sessions);
+    const trimmed = _enforceSessionLimit(sessions);
+    _saveAll(trimmed);
     _setActiveId(session.id);
     return session;
   }
@@ -3344,6 +3404,36 @@ const SessionManager = (() => {
     refresh();
   }
 
+  /** Get storage usage information. */
+  function getStorageInfo() {
+    const sessions = _loadAll();
+    const usage = _estimateQuotaUsage();
+    return {
+        sessionCount: sessions.length,
+        maxSessions: MAX_SESSIONS,
+        quotaUsage: usage,
+        quotaWarning: usage >= QUOTA_WARNING_THRESHOLD,
+    };
+  }
+
+  /** Remove sessions older than MAX_MESSAGE_AGE_DAYS. */
+  function handleClearOld() {
+    const sessions = _loadAll();
+    const cutoff = Date.now() - MAX_MESSAGE_AGE_DAYS * 24 * 60 * 60 * 1000;
+    const kept = sessions.filter(s =>
+        new Date(s.updatedAt).getTime() > cutoff
+    );
+    const removed = sessions.length - kept.length;
+    if (removed === 0) {
+        alert('No sessions older than ' + MAX_MESSAGE_AGE_DAYS + ' days found.');
+        return;
+    }
+    if (confirm(`Remove ${removed} session(s) older than ${MAX_MESSAGE_AGE_DAYS} days?`)) {
+        _saveAll(kept);
+        if (isOpen) refresh();
+    }
+  }
+
   return {
     getAll, getCount, save, load, remove, rename, duplicate,
     newSession, exportSession, importSession, clearAll,
@@ -3351,8 +3441,10 @@ const SessionManager = (() => {
     toggle, close, refresh,
     openSaveDialog, confirmSave, closeSaveDialog,
     handleImport, handleClearAll,
+    getStorageInfo, handleClearOld,
     // Exposed for testing
-    _loadAll, _saveAll, _getActiveId, _setActiveId, _formatTime
+    _loadAll, _saveAll, _getActiveId, _setActiveId, _formatTime,
+    _evictOldest, _enforceSessionLimit, _estimateQuotaUsage, _checkQuota
   };
 })();
 
