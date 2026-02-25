@@ -188,6 +188,38 @@
           <h3>📜 History &amp; Export</h3>
           <p>Side-panel conversation viewer with code-block rendering and Markdown/JSON export.</p>
         </div>
+        <div class="card">
+          <h3>🔍 Message Search</h3>
+          <p>Full-text search across messages with match highlighting and forward/backward navigation (<code>Ctrl+F</code>).</p>
+        </div>
+        <div class="card">
+          <h3>🔖 Bookmarks</h3>
+          <p>Bookmark important messages for quick reference. Jump back to key moments in any conversation.</p>
+        </div>
+        <div class="card">
+          <h3>⚡ Slash Commands</h3>
+          <p>Type <code>/</code> for quick access to features with autocomplete dropdown and keyboard navigation.</p>
+        </div>
+        <div class="card">
+          <h3>😊 Message Reactions</h3>
+          <p>Add emoji reactions to individual messages. Reactions are persisted and displayed as reaction bars.</p>
+        </div>
+        <div class="card">
+          <h3>🎤 Voice Input</h3>
+          <p>Speech-to-text via Web Speech API with configurable language, interim results, and state callbacks.</p>
+        </div>
+        <div class="card">
+          <h3>🎨 Theme Manager</h3>
+          <p>Dark/light theme toggle with system preference detection and localStorage persistence.</p>
+        </div>
+        <div class="card">
+          <h3>💬 Session Manager</h3>
+          <p>Save, load, rename, duplicate, and export chat sessions. Auto-save and quota management built in.</p>
+        </div>
+        <div class="card">
+          <h3>📊 Chat Statistics</h3>
+          <p>Conversation analytics: message counts, word frequencies, code blocks, question ratio, and more.</p>
+        </div>
       </div>
     </section>
 
@@ -380,6 +412,150 @@ open index.html</code></pre>
           <tr><td><code>rerunCurrentCode()</code></td><td>Promise</td><td>Re-execute the current code in the sandbox</td></tr>
           <tr><td><code>toggle()</code></td><td>void</td><td>Open/close the snippets side panel</td></tr>
           <tr><td><code>close()</code></td><td>void</td><td>Close the panel (idempotent)</td></tr>
+        </tbody>
+      </table>
+
+      <h3>MessageSearch</h3>
+      <p>Full-text search across conversation messages with match highlighting, forward/backward navigation, and keyboard shortcut support (<code>Ctrl+F</code>).</p>
+      <table>
+        <thead><tr><th>Method</th><th>Returns</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>open()</code></td><td>void</td><td>Open the search bar and focus the input</td></tr>
+          <tr><td><code>close()</code></td><td>void</td><td>Close search bar and clear highlights</td></tr>
+          <tr><td><code>toggle()</code></td><td>void</td><td>Toggle search bar visibility</td></tr>
+          <tr><td><code>performSearch(query)</code></td><td>void</td><td>Search messages for <code>query</code> and highlight matches</td></tr>
+          <tr><td><code>clearHighlights()</code></td><td>void</td><td>Remove all search highlights from the DOM</td></tr>
+          <tr><td><code>next()</code></td><td>void</td><td>Navigate to the next match</td></tr>
+          <tr><td><code>prev()</code></td><td>void</td><td>Navigate to the previous match</td></tr>
+          <tr><td><code>getState()</code></td><td>Object</td><td>Current state: <code>{isOpen, matchCount, currentIndex, matches}</code></td></tr>
+          <tr><td><code>isSearchOpen()</code></td><td>boolean</td><td>Whether the search bar is currently visible</td></tr>
+        </tbody>
+      </table>
+
+      <h3>ChatBookmarks</h3>
+      <p>Bookmark important messages for quick reference. Persisted to <code>localStorage</code> with a limit of 50 bookmarks.</p>
+      <table>
+        <thead><tr><th>Method</th><th>Returns</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>load()</code></td><td>void</td><td>Load bookmarks from localStorage</td></tr>
+          <tr><td><code>save()</code></td><td>void</td><td>Persist bookmarks to localStorage</td></tr>
+          <tr><td><code>add(messageIndex, content)</code></td><td>void</td><td>Bookmark a message by index</td></tr>
+          <tr><td><code>remove(id)</code></td><td>void</td><td>Remove a bookmark by ID</td></tr>
+          <tr><td><code>isBookmarked(messageIndex)</code></td><td>boolean</td><td>Check if a message is bookmarked</td></tr>
+          <tr><td><code>toggle(messageIndex, content)</code></td><td>void</td><td>Toggle bookmark on a message</td></tr>
+          <tr><td><code>getAll()</code></td><td>Array</td><td>All bookmarks (<code>{id, messageIndex, content, createdAt}</code>)</td></tr>
+          <tr><td><code>getCount()</code></td><td>number</td><td>Total number of bookmarks</td></tr>
+          <tr><td><code>clearAll()</code></td><td>void</td><td>Delete all bookmarks</td></tr>
+          <tr><td><code>jumpTo(messageIndex)</code></td><td>void</td><td>Scroll to a bookmarked message in the chat</td></tr>
+          <tr><td><code>togglePanel()</code></td><td>void</td><td>Open/close the bookmarks side panel</td></tr>
+          <tr><td><code>decorateMessages()</code></td><td>void</td><td>Add bookmark icons to existing chat messages</td></tr>
+        </tbody>
+      </table>
+
+      <h3>SlashCommands</h3>
+      <p>Type <code>/</code> in the chat input to see available slash commands with autocomplete dropdown. Commands provide quick access to features like clearing history, exporting, or opening panels.</p>
+      <table>
+        <thead><tr><th>Method</th><th>Returns</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>init()</code></td><td>void</td><td>Create the dropdown DOM element and register event listeners</td></tr>
+          <tr><td><code>handleInput(value)</code></td><td>void</td><td>Process input text; shows dropdown if it starts with <code>/</code></td></tr>
+          <tr><td><code>handleKeydown(event)</code></td><td>void</td><td>Handle arrow keys, Enter, and Escape for dropdown navigation</td></tr>
+          <tr><td><code>showDropdown(commands)</code></td><td>void</td><td>Display the command dropdown with filtered results</td></tr>
+          <tr><td><code>hideDropdown()</code></td><td>void</td><td>Close the command dropdown</td></tr>
+          <tr><td><code>executeCommand(name)</code></td><td>void</td><td>Run a slash command by name</td></tr>
+          <tr><td><code>getCommands()</code></td><td>Array</td><td>All available commands (<code>{name, description, action}</code>)</td></tr>
+          <tr><td><code>isDropdownOpen()</code></td><td>boolean</td><td>Whether the autocomplete dropdown is visible</td></tr>
+          <tr><td><code>filter(query)</code></td><td>Array</td><td>Filter commands matching the query string</td></tr>
+        </tbody>
+      </table>
+
+      <h3>MessageReactions</h3>
+      <p>Add emoji reactions to individual messages. Reactions are persisted to <code>localStorage</code> and displayed as reaction bars below messages.</p>
+      <table>
+        <thead><tr><th>Method</th><th>Returns</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>init()</code></td><td>void</td><td>Load persisted reactions from localStorage</td></tr>
+          <tr><td><code>addReaction(messageIndex, emoji)</code></td><td>void</td><td>Add an emoji reaction to a message</td></tr>
+          <tr><td><code>removeReaction(messageIndex, emoji)</code></td><td>void</td><td>Remove a specific reaction from a message</td></tr>
+          <tr><td><code>toggleReaction(messageIndex, emoji)</code></td><td>void</td><td>Toggle a reaction on/off for a message</td></tr>
+          <tr><td><code>getReactions(messageIndex)</code></td><td>Object</td><td>Reactions for a message (<code>{emoji: count}</code>)</td></tr>
+          <tr><td><code>getReactionCount(messageIndex)</code></td><td>number</td><td>Total reaction count for a message</td></tr>
+          <tr><td><code>getReactedMessages()</code></td><td>Array</td><td>Message indices that have reactions</td></tr>
+          <tr><td><code>clearReactions(messageIndex)</code></td><td>void</td><td>Remove all reactions from a specific message</td></tr>
+          <tr><td><code>clearAll()</code></td><td>void</td><td>Remove all reactions from all messages</td></tr>
+          <tr><td><code>getMostUsedEmoji()</code></td><td>string|null</td><td>The emoji with the highest total usage</td></tr>
+          <tr><td><code>renderReactionBar(messageIndex)</code></td><td>HTMLElement</td><td>Create a reaction bar DOM element for a message</td></tr>
+          <tr><td><code>showEmojiPicker(messageIndex)</code></td><td>void</td><td>Show the emoji picker popup for a message</td></tr>
+          <tr><td><code>decorateMessages()</code></td><td>void</td><td>Add reaction bars to all existing chat messages</td></tr>
+        </tbody>
+      </table>
+
+      <h3>VoiceInput</h3>
+      <p>Speech-to-text input using the Web Speech API. Supports configurable language, interim results, and state callbacks.</p>
+      <table>
+        <thead><tr><th>Method</th><th>Returns</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>isSupported()</code></td><td>boolean</td><td>Whether the browser supports speech recognition</td></tr>
+          <tr><td><code>start()</code></td><td>void</td><td>Start listening for speech input</td></tr>
+          <tr><td><code>stop()</code></td><td>void</td><td>Stop listening</td></tr>
+          <tr><td><code>toggle()</code></td><td>Object</td><td>Toggle listening; returns <code>{listening, transcript}</code></td></tr>
+          <tr><td><code>getIsListening()</code></td><td>boolean</td><td>Whether currently recording</td></tr>
+          <tr><td><code>getFinalTranscript()</code></td><td>string</td><td>The finalized transcription text</td></tr>
+          <tr><td><code>getInterimTranscript()</code></td><td>string</td><td>In-progress transcription (may change)</td></tr>
+          <tr><td><code>onResult(fn)</code></td><td>void</td><td>Set callback for results: <code>(finalText, interimText) => void</code></td></tr>
+          <tr><td><code>onStateChange(fn)</code></td><td>void</td><td>Set callback for state changes: <code>(isListening) => void</code></td></tr>
+          <tr><td><code>setLanguage(lang)</code></td><td>void</td><td>Set recognition language (e.g. <code>'en-US'</code>, <code>'es-ES'</code>). Persisted to localStorage.</td></tr>
+          <tr><td><code>getLanguage()</code></td><td>string</td><td>Current recognition language</td></tr>
+        </tbody>
+      </table>
+
+      <h3>ThemeManager</h3>
+      <p>Dark/light theme toggle with system preference detection and localStorage persistence.</p>
+      <table>
+        <thead><tr><th>Method</th><th>Returns</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>init()</code></td><td>void</td><td>Load saved theme or detect system preference; apply CSS class</td></tr>
+          <tr><td><code>toggle()</code></td><td>void</td><td>Switch between dark and light themes</td></tr>
+          <tr><td><code>setTheme(name)</code></td><td>void</td><td>Set a specific theme (<code>'dark'</code> or <code>'light'</code>)</td></tr>
+          <tr><td><code>getTheme()</code></td><td>string</td><td>Current theme name</td></tr>
+          <tr><td><code>getThemes()</code></td><td>Array</td><td>Available theme names: <code>['dark', 'light']</code></td></tr>
+        </tbody>
+      </table>
+
+      <h3>SessionManager</h3>
+      <p>Save, load, rename, duplicate, and export entire chat sessions. Supports auto-save, session limits (max 50), and localStorage quota management with automatic eviction of oldest sessions on overflow.</p>
+      <table>
+        <thead><tr><th>Method</th><th>Returns</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>getAll()</code></td><td>Array</td><td>All saved sessions</td></tr>
+          <tr><td><code>getCount()</code></td><td>number</td><td>Number of saved sessions</td></tr>
+          <tr><td><code>save(name, messages)</code></td><td>void</td><td>Save a session with the given name and messages</td></tr>
+          <tr><td><code>load(id)</code></td><td>Object|null</td><td>Load a session by ID and restore conversation</td></tr>
+          <tr><td><code>remove(id)</code></td><td>void</td><td>Delete a saved session</td></tr>
+          <tr><td><code>rename(id, newName)</code></td><td>void</td><td>Rename a saved session</td></tr>
+          <tr><td><code>duplicate(id)</code></td><td>void</td><td>Create a copy of a session</td></tr>
+          <tr><td><code>newSession()</code></td><td>void</td><td>Start a fresh session (clears current conversation)</td></tr>
+          <tr><td><code>exportSession(id)</code></td><td>void</td><td>Download a session as JSON</td></tr>
+          <tr><td><code>importSession(file)</code></td><td>void</td><td>Import a session from a JSON file</td></tr>
+          <tr><td><code>clearAll()</code></td><td>void</td><td>Delete all saved sessions</td></tr>
+          <tr><td><code>isAutoSaveEnabled()</code></td><td>boolean</td><td>Whether auto-save is turned on</td></tr>
+          <tr><td><code>toggleAutoSave()</code></td><td>void</td><td>Toggle auto-save on/off</td></tr>
+          <tr><td><code>getStorageInfo()</code></td><td>Object</td><td>Storage usage stats (estimated quota, used bytes)</td></tr>
+          <tr><td><code>toggle()</code></td><td>void</td><td>Open/close the session manager panel</td></tr>
+        </tbody>
+      </table>
+
+      <h3>ChatStats</h3>
+      <p>Compute and display conversation statistics including message counts, word frequencies, code block count, and response ratio.</p>
+      <table>
+        <thead><tr><th>Method</th><th>Returns</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>compute(messages)</code></td><td>Object</td><td>Statistics object: <code>{totalMessages, userMessages, assistantMessages, totalUserWords, totalAssistantWords, avgUserLen, avgAssistantLen, codeBlockCount, longestMsg, questionCount, topWords, responseRatio}</code></td></tr>
+          <tr><td><code>render(stats)</code></td><td>void</td><td>Render the stats panel DOM with computed statistics</td></tr>
+          <tr><td><code>open()</code></td><td>void</td><td>Open the statistics panel (computes fresh stats)</td></tr>
+          <tr><td><code>close()</code></td><td>void</td><td>Close the statistics panel</td></tr>
+          <tr><td><code>toggle()</code></td><td>void</td><td>Toggle the statistics panel</td></tr>
+          <tr><td><code>isOpen()</code></td><td>boolean</td><td>Whether the stats panel is currently visible</td></tr>
         </tbody>
       </table>
     </section>
