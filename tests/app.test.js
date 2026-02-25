@@ -5114,3 +5114,342 @@ describe('ChatStats', () => {
     });
   });
 });
+
+/* ================================================================
+ * PromptTemplates - extended
+ * ================================================================ */
+describe('PromptTemplates - extended', () => {
+  afterEach(() => {
+    PromptTemplates.close();
+  });
+
+  test('search filters by prompt content', () => {
+    const results = PromptTemplates.search('canvas');
+    const items = results.flatMap(c => c.items);
+    expect(items.length).toBeGreaterThan(0);
+    items.forEach(item => {
+      const text = `${item.name} ${item.description} ${item.prompt}`.toLowerCase();
+      expect(text).toContain('canvas');
+    });
+  });
+
+  test('search is case-insensitive across all fields', () => {
+    const upper = PromptTemplates.search('BAR CHART');
+    const lower = PromptTemplates.search('bar chart');
+    const mixed = PromptTemplates.search('Bar Chart');
+    expect(upper.flatMap(c => c.items).length).toBe(lower.flatMap(c => c.items).length);
+    expect(upper.flatMap(c => c.items).length).toBe(mixed.flatMap(c => c.items).length);
+  });
+
+  test('search preserves category structure', () => {
+    const results = PromptTemplates.search('chart');
+    results.forEach(cat => {
+      expect(cat).toHaveProperty('category');
+      expect(cat).toHaveProperty('items');
+      expect(typeof cat.category).toBe('string');
+      expect(Array.isArray(cat.items)).toBe(true);
+      expect(cat.items.length).toBeGreaterThan(0);
+    });
+  });
+
+  test('search returns only matching categories', () => {
+    const results = PromptTemplates.search('fetch');
+    results.forEach(cat => {
+      cat.items.forEach(item => {
+        const text = `${item.name} ${item.description} ${item.prompt}`.toLowerCase();
+        expect(text).toContain('fetch');
+      });
+    });
+  });
+
+  test('every template prompt is at least 20 chars long', () => {
+    const templates = PromptTemplates.getTemplates();
+    templates.forEach(cat => {
+      cat.items.forEach(item => {
+        expect(item.prompt.length).toBeGreaterThanOrEqual(20);
+      });
+    });
+  });
+
+  test('template names are unique across all categories', () => {
+    const templates = PromptTemplates.getTemplates();
+    const names = templates.flatMap(c => c.items.map(i => i.name));
+    const unique = new Set(names);
+    expect(unique.size).toBe(names.length);
+  });
+
+  test('all categories have emoji prefix', () => {
+    const templates = PromptTemplates.getTemplates();
+    templates.forEach(cat => {
+      expect(cat.category.codePointAt(0)).toBeGreaterThan(255);
+    });
+  });
+
+  test('render populates category headers inside templates-list', () => {
+    const data = PromptTemplates.getTemplates();
+    PromptTemplates.render(data);
+    const container = document.getElementById('templates-list');
+    const categories = container.querySelectorAll('.template-category');
+    expect(categories.length).toBe(data.length);
+  });
+
+  test('render card shows name and description', () => {
+    const data = PromptTemplates.getTemplates();
+    PromptTemplates.render(data);
+    const firstItem = data[0].items[0];
+    const firstCard = document.querySelector('.template-card');
+    expect(firstCard.querySelector('.template-name').textContent).toBe(firstItem.name);
+    expect(firstCard.querySelector('.template-desc').textContent).toBe(firstItem.description);
+  });
+
+  test('selectTemplate focuses chat input', () => {
+    const item = { name: 'Test', description: 'desc', prompt: 'Test prompt' };
+    PromptTemplates.selectTemplate(item);
+    const input = document.getElementById('chat-input');
+    expect(document.activeElement).toBe(input);
+  });
+
+  test('search for partial word matches', () => {
+    const results = PromptTemplates.search('sort');
+    const items = results.flatMap(c => c.items);
+    expect(items.length).toBeGreaterThan(0);
+  });
+
+  test('toggle twice returns to closed state', () => {
+    const panel = document.getElementById('templates-panel');
+    PromptTemplates.toggle();
+    PromptTemplates.toggle();
+    expect(panel.classList.contains('open')).toBe(false);
+  });
+});
+
+/* ================================================================
+ * UIController - extended
+ * ================================================================ */
+describe('UIController - extended', () => {
+  test('setConsoleOutput sets output text and color', () => {
+    UIController.setConsoleOutput('Test output', '#ff0000');
+    const output = document.getElementById('console-output');
+    expect(output.textContent).toBe('Test output');
+    expect(output.style.color).toBe('rgb(255, 0, 0)');
+  });
+
+  test('setConsoleOutput with default color', () => {
+    UIController.setConsoleOutput('Default color');
+    const output = document.getElementById('console-output');
+    expect(output.textContent).toBe('Default color');
+  });
+
+  test('setChatOutput sets chat output HTML', () => {
+    UIController.setChatOutput('<p>Hello</p>');
+    const output = document.getElementById('chat-output');
+    expect(output.innerHTML).toContain('Hello');
+  });
+
+  test('setLastPrompt updates last prompt display', () => {
+    UIController.setLastPrompt('my question');
+    const el = document.getElementById('last-prompt');
+    expect(el.textContent).toContain('my question');
+  });
+
+  test('getChatInput reads from chat-input field', () => {
+    document.getElementById('chat-input').value = 'test input';
+    expect(UIController.getChatInput()).toBe('test input');
+  });
+
+  test('clearChatInput empties chat-input field', () => {
+    document.getElementById('chat-input').value = 'something';
+    UIController.clearChatInput();
+    expect(document.getElementById('chat-input').value).toBe('');
+  });
+
+  test('setSendingState disables send button and input', () => {
+    UIController.setSendingState(true);
+    const sendBtn = document.getElementById('send-btn');
+    const chatInput = document.getElementById('chat-input');
+    expect(sendBtn.disabled).toBe(true);
+    expect(sendBtn.textContent).toBe('Sending…');
+    expect(chatInput.disabled).toBe(true);
+
+    UIController.setSendingState(false);
+    expect(sendBtn.disabled).toBe(false);
+    expect(sendBtn.textContent).toBe('Send');
+    expect(chatInput.disabled).toBe(false);
+  });
+
+  test('showTokenUsage displays token breakdown', () => {
+    UIController.showTokenUsage({ prompt_tokens: 50, completion_tokens: 100 });
+    const el = document.getElementById('token-usage');
+    expect(el.textContent).toContain('50');
+    expect(el.textContent).toContain('100');
+    expect(el.textContent).toContain('150');
+  });
+
+  test('updateCharCount shows warning near limit', () => {
+    // MAX_INPUT_CHARS is 50000, so 80% = 40000; above that triggers display
+    UIController.updateCharCount(45000);
+    const counter = document.getElementById('char-count');
+    expect(counter.textContent).toContain('45');
+    expect(counter.textContent).toContain('chars');
+  });
+
+  test('updateCharCount hides when below threshold', () => {
+    UIController.updateCharCount(42);
+    const counter = document.getElementById('char-count');
+    expect(counter.textContent).toBe('');
+  });
+
+  test('displayCode renders code into chat output', () => {
+    UIController.displayCode('console.log("hi")');
+    const chatOutput = document.getElementById('chat-output');
+    expect(chatOutput.innerHTML).toContain('console.log');
+  });
+});
+
+/* ================================================================
+ * ConversationManager - edge cases extended
+ * ================================================================ */
+describe('ConversationManager - edge cases extended', () => {
+  beforeEach(() => {
+    ConversationManager.clear();
+  });
+
+  test('addMessage with empty content is allowed', () => {
+    ConversationManager.addMessage('user', '');
+    const msgs = ConversationManager.getMessages();
+    const userMsgs = msgs.filter(m => m.role === 'user');
+    expect(userMsgs.length).toBe(1);
+    expect(userMsgs[0].content).toBe('');
+  });
+
+  test('getMessages returns system prompt first', () => {
+    const msgs = ConversationManager.getMessages();
+    expect(msgs.length).toBeGreaterThanOrEqual(1);
+    expect(msgs[0].role).toBe('system');
+  });
+
+  test('clear removes all non-system messages', () => {
+    ConversationManager.addMessage('user', 'hello');
+    ConversationManager.addMessage('assistant', 'hi');
+    ConversationManager.clear();
+    const msgs = ConversationManager.getMessages();
+    const nonSystem = msgs.filter(m => m.role !== 'system');
+    expect(nonSystem.length).toBe(0);
+  });
+
+  test('multiple adds maintain order', () => {
+    ConversationManager.addMessage('user', 'first');
+    ConversationManager.addMessage('assistant', 'second');
+    ConversationManager.addMessage('user', 'third');
+    const msgs = ConversationManager.getMessages().filter(m => m.role !== 'system');
+    expect(msgs[0].content).toBe('first');
+    expect(msgs[1].content).toBe('second');
+    expect(msgs[2].content).toBe('third');
+  });
+
+  test('estimateTokens returns positive number for non-empty', () => {
+    ConversationManager.addMessage('user', 'Hello world');
+    const estimate = ConversationManager.estimateTokens();
+    expect(estimate).toBeGreaterThan(0);
+  });
+
+  test('estimateTokens with only system message', () => {
+    const estimate = ConversationManager.estimateTokens();
+    expect(estimate).toBeGreaterThan(0);
+  });
+
+  test('large conversation token estimate grows', () => {
+    const estimate1 = ConversationManager.estimateTokens();
+    for (let i = 0; i < 10; i++) {
+      ConversationManager.addMessage('user', 'This is a test message with several words');
+    }
+    const estimate2 = ConversationManager.estimateTokens();
+    expect(estimate2).toBeGreaterThan(estimate1);
+  });
+});
+
+/* ================================================================
+ * ChatStats - edge cases extended
+ * ================================================================ */
+describe('ChatStats - edge cases extended', () => {
+  beforeEach(() => {
+    ConversationManager.clear();
+    ChatStats.close();
+  });
+
+  afterEach(() => {
+    ChatStats.close();
+  });
+
+  test('wordCount handles multiple spaces', () => {
+    ConversationManager.addMessage('user', 'hello    world');
+    const stats = ChatStats.compute();
+    expect(stats.totalUserWords).toBe(2);
+  });
+
+  test('wordCount handles leading/trailing whitespace', () => {
+    ConversationManager.addMessage('user', '  hello world  ');
+    const stats = ChatStats.compute();
+    expect(stats.totalUserWords).toBe(2);
+  });
+
+  test('wordCount handles newlines', () => {
+    ConversationManager.addMessage('user', 'hello\nworld\nfoo');
+    const stats = ChatStats.compute();
+    expect(stats.totalUserWords).toBe(3);
+  });
+
+  test('codeBlockCount handles multiple code blocks per message', () => {
+    ConversationManager.addMessage('assistant', '```js\na\n```\ntext\n```py\nb\n```\nmore\n```\nc\n```');
+    const stats = ChatStats.compute();
+    expect(stats.codeBlockCount).toBe(3);
+  });
+
+  test('topWords excludes short words (<=2 chars)', () => {
+    ConversationManager.addMessage('user', 'go do an ok ai');
+    const stats = ChatStats.compute();
+    const words = stats.topWords.map(tw => tw.word);
+    words.forEach(w => {
+      expect(w.length).toBeGreaterThan(2);
+    });
+  });
+
+  test('topWords strips punctuation', () => {
+    ConversationManager.addMessage('user', 'javascript! python? typescript.');
+    const stats = ChatStats.compute();
+    const words = stats.topWords.map(tw => tw.word);
+    expect(words).toContain('javascript');
+    expect(words).toContain('python');
+    expect(words).toContain('typescript');
+  });
+
+  test('questionCount ignores questions from assistant', () => {
+    ConversationManager.addMessage('assistant', 'What can I help with?');
+    ConversationManager.addMessage('user', 'No question here');
+    const stats = ChatStats.compute();
+    expect(stats.questionCount).toBe(0);
+  });
+
+  test('responseRatio with equal words', () => {
+    ConversationManager.addMessage('user', 'hello world');
+    ConversationManager.addMessage('assistant', 'hi there');
+    const stats = ChatStats.compute();
+    expect(stats.responseRatio).toBe('1.0');
+  });
+
+  test('system messages excluded from all counts', () => {
+    const stats = ChatStats.compute();
+    expect(stats.totalMessages).toBe(0);
+    expect(stats.userMessages).toBe(0);
+    expect(stats.assistantMessages).toBe(0);
+  });
+
+  test('render replaces existing panel on re-render', () => {
+    ConversationManager.addMessage('user', 'test');
+    ChatStats.render();
+    ChatStats.render();
+    const panels = document.querySelectorAll('#stats-panel');
+    expect(panels.length).toBe(1);
+    ChatStats.close();
+  });
+});
