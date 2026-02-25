@@ -1945,6 +1945,8 @@ const SlashCommands = (() => {
           action: () => { /* opening dropdown is the action */ } },
         { name: 'stats', description: 'Show chat statistics', icon: '📊',
           action: () => ChatStats.toggle() },
+        { name: 'sessions', description: 'Toggle sessions panel', icon: '📋',
+          action: () => SessionManager.toggle() },
     ]);
 
     function init() {
@@ -2433,7 +2435,11 @@ const KeyboardShortcuts = (() => {
     // Ctrl+S — toggle snippets panel
     if (ctrl && e.key === 's') {
       e.preventDefault();
-      SnippetLibrary.toggle();
+      if (e.shiftKey) {
+        SessionManager.toggle();
+      } else {
+        SnippetLibrary.toggle();
+      }
       return;
     }
 
@@ -3462,9 +3468,142 @@ const SessionManager = (() => {
     openSaveDialog, confirmSave, closeSaveDialog,
     handleImport, handleClearAll,
     getStorageInfo, handleClearOld,
+    _isOpen: function () { return isOpen; },
     // Exposed for testing
     _loadAll, _saveAll, _getActiveId, _setActiveId, _formatTime,
     _evictOldest, _enforceSessionLimit, _estimateQuotaUsage, _checkQuota
+  };
+})();
+
+/* ---------- Conversation Sessions (facade) ---------- */
+const ConversationSessions = (function () {
+  var _confirmPending = false;
+
+  function save(name) {
+    return SessionManager.save(name || undefined);
+  }
+
+  function load(id) {
+    return SessionManager.load(id);
+  }
+
+  function rename(id, newName) {
+    SessionManager.rename(id, newName);
+  }
+
+  function deleteSession(id) {
+    SessionManager.remove(id);
+  }
+
+  function list() {
+    return SessionManager.getAll();
+  }
+
+  function getCurrent() {
+    return SessionManager._getActiveId();
+  }
+
+  function exportSession(id) {
+    var sessions = SessionManager._loadAll();
+    var session = sessions.find(function (s) { return s.id === id; });
+    if (!session) return null;
+    return JSON.stringify({
+      exported: new Date().toISOString(),
+      session: {
+        name: session.name,
+        messageCount: session.messageCount,
+        createdAt: session.createdAt,
+        updatedAt: session.updatedAt,
+        messages: session.messages
+      }
+    });
+  }
+
+  function importSession(jsonStr) {
+    return SessionManager.importSession(jsonStr);
+  }
+
+  function search(query) {
+    if (!query || typeof query !== 'string') return [];
+    var q = query.toLowerCase();
+    var sessions = SessionManager.getAll();
+    return sessions.filter(function (s) {
+      if (s.name && s.name.toLowerCase().indexOf(q) !== -1) return true;
+      if (Array.isArray(s.messages)) {
+        for (var i = 0; i < s.messages.length; i++) {
+          if (s.messages[i].content && s.messages[i].content.toLowerCase().indexOf(q) !== -1) return true;
+        }
+      }
+      return false;
+    });
+  }
+
+  function getStats(id) {
+    var sessions = SessionManager._loadAll();
+    var session = sessions.find(function (s) { return s.id === id; });
+    if (!session) return null;
+    var msgs = session.messages || [];
+    var wordCount = 0;
+    msgs.forEach(function (m) {
+      if (m.content && m.content.trim()) {
+        wordCount += m.content.trim().split(/\s+/).length;
+      }
+    });
+    return {
+      messageCount: msgs.length,
+      created: session.createdAt,
+      lastModified: session.updatedAt,
+      wordCount: wordCount
+    };
+  }
+
+  function clear() {
+    if (!_confirmPending) {
+      _confirmPending = true;
+      return false;
+    }
+    _confirmPending = false;
+    SessionManager.clearAll();
+    return true;
+  }
+
+  function resetConfirm() {
+    _confirmPending = false;
+  }
+
+  function autoSave() {
+    SessionManager.autoSaveIfEnabled();
+  }
+
+  function isOpen() {
+    return SessionManager._isOpen ? SessionManager._isOpen() : false;
+  }
+
+  function open() {
+    if (!isOpen()) SessionManager.toggle();
+  }
+
+  function close() {
+    SessionManager.close();
+  }
+
+  return {
+    save: save,
+    load: load,
+    rename: rename,
+    'delete': deleteSession,
+    list: list,
+    getCurrent: getCurrent,
+    exportSession: exportSession,
+    importSession: importSession,
+    search: search,
+    getStats: getStats,
+    clear: clear,
+    resetConfirm: resetConfirm,
+    autoSave: autoSave,
+    isOpen: isOpen,
+    open: open,
+    close: close
   };
 })();
 

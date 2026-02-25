@@ -194,6 +194,7 @@ function loadApp() {
     'VoiceInput',
     'ThemeManager',
     'SessionManager',
+    'ConversationSessions',
     'SlashCommands',
     'MessageReactions',
     'ChatStats'

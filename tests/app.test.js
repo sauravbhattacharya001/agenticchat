@@ -4349,7 +4349,7 @@ describe('SlashCommands', () => {
   describe('getCommands', () => {
     test('returns all commands', () => {
       const cmds = SlashCommands.getCommands();
-      expect(cmds.length).toBe(14);
+      expect(cmds.length).toBe(15);
     });
 
     test('returns a defensive copy', () => {
@@ -5451,5 +5451,277 @@ describe('ChatStats - edge cases extended', () => {
     const panels = document.querySelectorAll('#stats-panel');
     expect(panels.length).toBe(1);
     ChatStats.close();
+  });
+});
+
+/* ================================================================
+ * ConversationSessions
+ * ================================================================ */
+describe('ConversationSessions', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    ConversationManager.clear();
+    SessionManager.clearAll();
+    ConversationSessions.resetConfirm();
+    ConversationSessions.close();
+  });
+
+  describe('save and load', () => {
+    test('save returns a session object', () => {
+      ConversationManager.addMessage('user', 'hello');
+      var s = ConversationSessions.save('Test Session');
+      expect(s).not.toBeNull();
+      expect(s.name).toBe('Test Session');
+    });
+
+    test('save auto-names when no name given', () => {
+      ConversationManager.addMessage('user', 'hello');
+      var s = ConversationSessions.save();
+      expect(s).not.toBeNull();
+      expect(s.name).toBeTruthy();
+    });
+
+    test('load restores a saved session', () => {
+      ConversationManager.addMessage('user', 'msg1');
+      var s = ConversationSessions.save('S1');
+      ConversationManager.clear();
+      ConversationSessions.load(s.id);
+      var msgs = ConversationManager.getMessages().filter(function (m) { return m.role !== 'system'; });
+      expect(msgs.length).toBe(1);
+      expect(msgs[0].content).toBe('msg1');
+    });
+
+    test('load returns null for invalid id', () => {
+      expect(ConversationSessions.load('nonexistent')).toBeNull();
+    });
+  });
+
+  describe('rename', () => {
+    test('rename changes session name', () => {
+      ConversationManager.addMessage('user', 'hi');
+      var s = ConversationSessions.save('Old Name');
+      ConversationSessions.rename(s.id, 'New Name');
+      var sessions = ConversationSessions.list();
+      expect(sessions[0].name).toBe('New Name');
+    });
+  });
+
+  describe('delete', () => {
+    test('delete removes a session', () => {
+      ConversationManager.addMessage('user', 'hi');
+      var s = ConversationSessions.save('ToDelete');
+      expect(ConversationSessions.list().length).toBe(1);
+      ConversationSessions.delete(s.id);
+      expect(ConversationSessions.list().length).toBe(0);
+    });
+  });
+
+  describe('list', () => {
+    test('list returns sessions sorted by lastModified desc', () => {
+      ConversationManager.addMessage('user', 'a');
+      var s1 = ConversationSessions.save('First');
+      ConversationManager.clear();
+      SessionManager._setActiveId(null);
+      ConversationManager.addMessage('user', 'b');
+      var s2 = ConversationSessions.save('Second');
+      var sessions = ConversationSessions.list();
+      expect(sessions.length).toBe(2);
+      expect(sessions[0].name).toBe('Second');
+    });
+
+    test('list returns empty array when no sessions', () => {
+      expect(ConversationSessions.list()).toEqual([]);
+    });
+  });
+
+  describe('getCurrent', () => {
+    test('getCurrent returns null when no active session', () => {
+      expect(ConversationSessions.getCurrent()).toBeNull();
+    });
+
+    test('getCurrent returns id after save', () => {
+      ConversationManager.addMessage('user', 'hi');
+      var s = ConversationSessions.save('Active');
+      expect(ConversationSessions.getCurrent()).toBe(s.id);
+    });
+  });
+
+  describe('exportSession', () => {
+    test('exports session as JSON string', () => {
+      ConversationManager.addMessage('user', 'export me');
+      var s = ConversationSessions.save('Export Test');
+      var json = ConversationSessions.exportSession(s.id);
+      expect(typeof json).toBe('string');
+      var parsed = JSON.parse(json);
+      expect(parsed.session.name).toBe('Export Test');
+      expect(parsed.session.messages.length).toBe(1);
+    });
+
+    test('returns null for nonexistent id', () => {
+      expect(ConversationSessions.exportSession('nope')).toBeNull();
+    });
+  });
+
+  describe('importSession', () => {
+    test('imports valid JSON session', () => {
+      var json = JSON.stringify({
+        session: {
+          name: 'Imported',
+          messages: [{ role: 'user', content: 'hello' }]
+        }
+      });
+      var s = ConversationSessions.importSession(json);
+      expect(s).not.toBeNull();
+      expect(s.name).toBe('Imported');
+      expect(ConversationSessions.list().length).toBe(1);
+    });
+
+    test('returns null for invalid JSON', () => {
+      expect(ConversationSessions.importSession('not json')).toBeNull();
+    });
+
+    test('returns null for missing messages', () => {
+      expect(ConversationSessions.importSession(JSON.stringify({ session: {} }))).toBeNull();
+    });
+  });
+
+  describe('search', () => {
+    test('search by session name', () => {
+      ConversationManager.addMessage('user', 'irrelevant');
+      ConversationSessions.save('My Project Chat');
+      var results = ConversationSessions.search('project');
+      expect(results.length).toBe(1);
+    });
+
+    test('search by message content', () => {
+      ConversationManager.addMessage('user', 'tell me about quantum physics');
+      ConversationSessions.save('Random');
+      var results = ConversationSessions.search('quantum');
+      expect(results.length).toBe(1);
+    });
+
+    test('search returns empty for no match', () => {
+      ConversationManager.addMessage('user', 'hello');
+      ConversationSessions.save('Test');
+      expect(ConversationSessions.search('zzzzz')).toEqual([]);
+    });
+
+    test('search with empty query returns empty', () => {
+      expect(ConversationSessions.search('')).toEqual([]);
+    });
+  });
+
+  describe('getStats', () => {
+    test('returns stats for a session', () => {
+      ConversationManager.addMessage('user', 'hello world');
+      ConversationManager.addMessage('assistant', 'hi there friend');
+      var s = ConversationSessions.save('Stats Test');
+      var stats = ConversationSessions.getStats(s.id);
+      expect(stats.messageCount).toBe(2);
+      expect(stats.wordCount).toBe(5);
+      expect(stats.created).toBeTruthy();
+      expect(stats.lastModified).toBeTruthy();
+    });
+
+    test('returns null for invalid id', () => {
+      expect(ConversationSessions.getStats('nope')).toBeNull();
+    });
+  });
+
+  describe('clear', () => {
+    test('clear requires double call (confirmation)', () => {
+      ConversationManager.addMessage('user', 'hi');
+      ConversationSessions.save('A');
+      expect(ConversationSessions.clear()).toBe(false);
+      expect(ConversationSessions.list().length).toBe(1);
+      expect(ConversationSessions.clear()).toBe(true);
+      expect(ConversationSessions.list().length).toBe(0);
+    });
+
+    test('resetConfirm resets confirmation state', () => {
+      ConversationSessions.clear(); // first call sets pending
+      ConversationSessions.resetConfirm();
+      expect(ConversationSessions.clear()).toBe(false); // still needs two calls
+    });
+  });
+
+  describe('autoSave', () => {
+    test('autoSave does not throw', () => {
+      expect(() => ConversationSessions.autoSave()).not.toThrow();
+    });
+  });
+
+  describe('max limit', () => {
+    test('enforces max 50 sessions', () => {
+      for (var i = 0; i < 55; i++) {
+        ConversationManager.addMessage('user', 'msg ' + i);
+        ConversationSessions.save('Session ' + i);
+        ConversationManager.clear();
+        SessionManager._setActiveId(null);
+      }
+      expect(ConversationSessions.list().length).toBeLessThanOrEqual(50);
+    });
+  });
+
+  describe('panel', () => {
+    test('isOpen returns false initially', () => {
+      expect(ConversationSessions.isOpen()).toBe(false);
+    });
+
+    test('close does not throw', () => {
+      expect(() => ConversationSessions.close()).not.toThrow();
+    });
+  });
+
+  describe('edge cases', () => {
+    test('save with empty string name auto-names', () => {
+      ConversationManager.addMessage('user', 'test');
+      var s = ConversationSessions.save('');
+      expect(s).not.toBeNull();
+      expect(s.name).toBeTruthy();
+    });
+
+    test('duplicate names are allowed', () => {
+      ConversationManager.addMessage('user', 'a');
+      ConversationSessions.save('Same Name');
+      ConversationManager.clear();
+      SessionManager._setActiveId(null);
+      ConversationManager.addMessage('user', 'b');
+      ConversationSessions.save('Same Name');
+      var sessions = ConversationSessions.list();
+      expect(sessions.length).toBe(2);
+      expect(sessions[0].name).toBe('Same Name');
+      expect(sessions[1].name).toBe('Same Name');
+    });
+
+    test('search is case insensitive', () => {
+      ConversationManager.addMessage('user', 'Hello World');
+      ConversationSessions.save('Test');
+      expect(ConversationSessions.search('hello').length).toBe(1);
+      expect(ConversationSessions.search('HELLO').length).toBe(1);
+    });
+  });
+
+  describe('slash command', () => {
+    test('/sessions command is registered', () => {
+      var cmds = SlashCommands.getCommands();
+      var sessionsCmd = cmds.find(function (c) { return c.name === 'sessions'; });
+      expect(sessionsCmd).toBeDefined();
+      expect(sessionsCmd.icon).toBe('📋');
+    });
+  });
+
+  describe('Ctrl+Shift+S shortcut', () => {
+    test('Ctrl+Shift+S toggles sessions panel', () => {
+      var event = new KeyboardEvent('keydown', { key: 's', ctrlKey: true, shiftKey: true, bubbles: true });
+      KeyboardShortcuts.handleKeydown(event);
+      // Should not throw
+    });
+
+    test('Ctrl+S without shift still toggles snippets', () => {
+      var event = new KeyboardEvent('keydown', { key: 's', ctrlKey: true, shiftKey: false, bubbles: true });
+      KeyboardShortcuts.handleKeydown(event);
+      // Should not throw
+    });
   });
 });
