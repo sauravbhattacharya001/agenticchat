@@ -249,7 +249,7 @@ open index.html</code></pre>
     <!-- Architecture -->
     <section id="architecture">
       <h2>Architecture</h2>
-      <p>The application is organized into nine clearly separated modules, each implemented as an IIFE (Immediately Invoked Function Expression) exposing a clean public API:</p>
+      <p>The application is organized into seventeen clearly separated modules, each implemented as an IIFE (Immediately Invoked Function Expression) exposing a clean public API:</p>
 
       <table>
         <thead>
@@ -258,7 +258,7 @@ open index.html</code></pre>
         <tbody>
           <tr>
             <td><code>ChatConfig</code></td>
-            <td>Frozen configuration constants (model, limits, timeouts, system prompt)</td>
+            <td>Configuration constants (model, limits, timeouts, system prompt, per-model pricing)</td>
           </tr>
           <tr>
             <td><code>ConversationManager</code></td>
@@ -292,6 +292,38 @@ open index.html</code></pre>
             <td><code>SnippetLibrary</code></td>
             <td>Persistent code snippet manager — save, tag, search, rename, re-run (localStorage-backed)</td>
           </tr>
+          <tr>
+            <td><code>MessageSearch</code></td>
+            <td>Full-text search with match highlighting and forward/backward navigation</td>
+          </tr>
+          <tr>
+            <td><code>ChatBookmarks</code></td>
+            <td>Bookmark messages for quick reference, persisted to localStorage</td>
+          </tr>
+          <tr>
+            <td><code>SlashCommands</code></td>
+            <td>Slash-command dropdown with autocomplete, keyboard navigation, and extensible command registry</td>
+          </tr>
+          <tr>
+            <td><code>MessageReactions</code></td>
+            <td>Emoji reactions on messages with persistence and reaction bars</td>
+          </tr>
+          <tr>
+            <td><code>VoiceInput</code></td>
+            <td>Speech-to-text via Web Speech API with configurable language and interim results</td>
+          </tr>
+          <tr>
+            <td><code>ThemeManager</code></td>
+            <td>Dark/light theme toggle with system preference detection and persistence</td>
+          </tr>
+          <tr>
+            <td><code>SessionManager</code></td>
+            <td>Save, load, rename, duplicate, export/import sessions with auto-save and quota management</td>
+          </tr>
+          <tr>
+            <td><code>KeyboardShortcuts</code></td>
+            <td>Global keyboard shortcut handler with help modal</td>
+          </tr>
         </tbody>
       </table>
 
@@ -310,11 +342,13 @@ open index.html</code></pre>
       <h2>API Reference</h2>
 
       <h3>ChatConfig</h3>
-      <p>Immutable configuration object (<code>Object.freeze</code>).</p>
+      <p>Configuration object with model selection via getter/setter.</p>
       <table>
-        <thead><tr><th>Property</th><th>Type</th><th>Value</th><th>Description</th></tr></thead>
+        <thead><tr><th>Property</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
         <tbody>
-          <tr><td><code>MODEL</code></td><td>string</td><td><code>"gpt-4o"</code></td><td>OpenAI model identifier</td></tr>
+          <tr><td><code>MODEL</code></td><td>string</td><td><code>"gpt-4o"</code></td><td>Active OpenAI model (persisted to localStorage)</td></tr>
+          <tr><td><code>AVAILABLE_MODELS</code></td><td>Array</td><td>8 models</td><td>Selectable models (<code>{id, label}</code>): gpt-4o, gpt-4o-mini, gpt-4-turbo, gpt-4, gpt-3.5-turbo, o1-preview, o1-mini, o3-mini</td></tr>
+          <tr><td><code>MODEL_PRICING</code></td><td>Object</td><td>—</td><td>Per-model pricing in USD per 1M tokens: <code>{model: [input, output]}</code></td></tr>
           <tr><td><code>MAX_TOKENS_RESPONSE</code></td><td>number</td><td><code>4096</code></td><td>Max completion tokens</td></tr>
           <tr><td><code>MAX_HISTORY_PAIRS</code></td><td>number</td><td><code>20</code></td><td>Max user+assistant pairs kept</td></tr>
           <tr><td><code>MAX_INPUT_CHARS</code></td><td>number</td><td><code>50000</code></td><td>Input character limit</td></tr>
@@ -563,31 +597,67 @@ open index.html</code></pre>
     <!-- Configuration -->
     <section id="configuration">
       <h2>Configuration</h2>
-      <p>All configuration lives in the <code>ChatConfig</code> frozen object at the top of <code>app.js</code>. To modify defaults:</p>
-<pre><code>const ChatConfig = Object.freeze({
-  MODEL: 'gpt-4o',           // Change model here
-  MAX_TOKENS_RESPONSE: 4096, // Max response length
-  MAX_HISTORY_PAIRS: 20,     // Conversation depth
-  MAX_INPUT_CHARS: 50000,    // Input limit
-  SANDBOX_TIMEOUT_MS: 30000, // 30-second sandbox timeout
-  SYSTEM_PROMPT: `...`       // Agent instructions
-});</code></pre>
-      <p><strong>Note:</strong> Since the config is frozen, you must modify the source and reload — this is by design to prevent runtime tampering.</p>
+      <p>All configuration lives in the <code>ChatConfig</code> object at the top of <code>app.js</code>. The active model can be changed at runtime via the model selector and is persisted to localStorage. Other constants can be modified in the source:</p>
+<pre><code>// In ChatConfig IIFE (app.js)
+const _cfg = {
+  _model: localStorage.getItem('ac-selected-model') || 'gpt-4o',
+  MAX_TOKENS_RESPONSE: 4096,
+  MAX_HISTORY_PAIRS: 20,
+  MAX_INPUT_CHARS: 50000,
+  SANDBOX_TIMEOUT_MS: 30000,
+  AVAILABLE_MODELS: [
+    { id: 'gpt-4o', label: 'GPT-4o' },
+    { id: 'gpt-4o-mini', label: 'GPT-4o Mini' },
+    // ...
+  ],
+  MODEL_PRICING: {
+    'gpt-4o':        [2.50,  10.00],  // [input, output] USD per 1M tokens
+    'gpt-4o-mini':   [0.15,   0.60],
+    'gpt-4':         [30.00,  60.00],
+    // ...
+  },
+  get MODEL() { return _cfg._model; },
+  set MODEL(v) { _cfg._model = v; localStorage.setItem('ac-selected-model', v); }
+};</code></pre>
+      <p><strong>Note:</strong> Static constants require a source edit and page reload. The model can be switched at runtime via the UI model selector or by setting <code>ChatConfig.MODEL</code>.</p>
     </section>
 
     <!-- Keyboard Shortcuts -->
     <section id="keyboard-shortcuts">
       <h2>Keyboard Shortcuts</h2>
-      <p>The application supports the following keyboard shortcuts:</p>
+      <p>Global shortcuts (active when not typing in an input field):</p>
+      <table>
+        <thead><tr><th>Key</th><th>Action</th></tr></thead>
+        <tbody>
+          <tr><td><code>Ctrl+L</code></td><td>Clear conversation history</td></tr>
+          <tr><td><code>Ctrl+H</code></td><td>Toggle history panel</td></tr>
+          <tr><td><code>Ctrl+T</code></td><td>Toggle prompt templates</td></tr>
+          <tr><td><code>Ctrl+S</code></td><td>Toggle snippet library</td></tr>
+          <tr><td><code>Ctrl+Shift+S</code></td><td>Toggle session manager</td></tr>
+          <tr><td><code>Ctrl+J</code></td><td>Toggle session manager</td></tr>
+          <tr><td><code>Ctrl+N</code></td><td>New session</td></tr>
+          <tr><td><code>Ctrl+K</code></td><td>Focus chat input</td></tr>
+          <tr><td><code>Ctrl+B</code></td><td>Toggle bookmarks panel</td></tr>
+          <tr><td><code>Ctrl+F</code></td><td>Toggle message search</td></tr>
+          <tr><td><code>Ctrl+/</code></td><td>Focus input and show slash commands</td></tr>
+          <tr><td><code>?</code></td><td>Show keyboard shortcuts help</td></tr>
+          <tr><td><code>Escape</code></td><td>Close all open panels, modals, and search</td></tr>
+        </tbody>
+      </table>
+
+      <p>Context-specific shortcuts:</p>
       <table>
         <thead><tr><th>Key</th><th>Context</th><th>Action</th></tr></thead>
         <tbody>
           <tr><td><code>Enter</code></td><td>Chat input</td><td>Send message</td></tr>
           <tr><td><code>Enter</code></td><td>Service key modal</td><td>Submit API key</td></tr>
           <tr><td><code>Enter</code></td><td>Snippet name input</td><td>Confirm save</td></tr>
-          <tr><td><code>Escape</code></td><td>Anywhere</td><td>Close all open panels and modals (History, Templates, Snippets, Save dialog)</td></tr>
+          <tr><td><code>Enter</code></td><td>Search input</td><td>Next match</td></tr>
+          <tr><td><code>Shift+Enter</code></td><td>Search input</td><td>Previous match</td></tr>
           <tr><td><code>Enter</code></td><td>Snippet rename (inline)</td><td>Confirm rename</td></tr>
-          <tr><td><code>Escape</code></td><td>Snippet rename (inline)</td><td>Cancel rename and restore original name</td></tr>
+          <tr><td><code>Escape</code></td><td>Snippet rename (inline)</td><td>Cancel rename</td></tr>
+          <tr><td><code>↑ ↓</code></td><td>Slash command dropdown</td><td>Navigate commands</td></tr>
+          <tr><td><code>Enter</code></td><td>Slash command dropdown</td><td>Execute selected command</td></tr>
         </tbody>
       </table>
     </section>
@@ -634,16 +704,24 @@ npm test
 # Run with coverage
 npx jest --coverage</code></pre>
 
-      <p>The test suite includes <strong>90+ tests</strong> covering all nine modules:</p>
+      <p>The test suite includes <strong>590+ tests</strong> covering all modules:</p>
       <ul>
-        <li><code>ChatConfig</code> — immutability, configuration values, system prompt content</li>
+        <li><code>ChatConfig</code> — configuration values, model pricing, system prompt content</li>
         <li><code>ConversationManager</code> — CRUD operations, history trimming, token estimation</li>
         <li><code>ApiKeyManager</code> — key lifecycle, service key substitution and caching</li>
-        <li><code>UIController</code> — DOM state management, modal handling, character counting</li>
+        <li><code>UIController</code> — DOM state management, modal handling, character counting, per-model cost display</li>
         <li><code>SandboxRunner</code> — initialization state, safe cancellation</li>
         <li><code>PromptTemplates</code> — template retrieval, search filtering, panel toggle, rendering, accessibility attributes</li>
         <li><code>HistoryPanel</code> — panel toggle, message rendering, code block display, empty state, export guards</li>
         <li><code>SnippetLibrary</code> — CRUD, search, localStorage persistence, save dialog, rename, corrupted data handling</li>
+        <li><code>MessageSearch</code> — search, highlighting, navigation, keyboard events</li>
+        <li><code>ChatBookmarks</code> — add/remove/toggle, persistence, jump navigation</li>
+        <li><code>SlashCommands</code> — command registration, filtering, keyboard navigation, execution</li>
+        <li><code>MessageReactions</code> — add/remove/toggle, persistence, emoji picker, reaction bars</li>
+        <li><code>VoiceInput</code> — start/stop, language config, state callbacks</li>
+        <li><code>ThemeManager</code> — theme toggle, system preference detection, persistence</li>
+        <li><code>SessionManager</code> — save/load/rename/duplicate/export/import, auto-save, quota management</li>
+        <li><code>ChatStats</code> — message counts, word frequencies, code block detection</li>
         <li>Integration tests for token estimation accuracy and cost calculation</li>
       </ul>
     </section>

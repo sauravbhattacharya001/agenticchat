@@ -58,6 +58,17 @@ Always \`return\` the final value.
       { id: 'o1-mini', label: 'o1 Mini' },
       { id: 'o3-mini', label: 'o3 Mini' }
     ],
+    /** Per-model pricing in USD per 1M tokens: [input, output]. */
+    MODEL_PRICING: {
+      'gpt-4o':         [2.50,  10.00],
+      'gpt-4o-mini':    [0.15,   0.60],
+      'gpt-4-turbo':    [10.00,  30.00],
+      'gpt-4':          [30.00,  60.00],
+      'gpt-3.5-turbo':  [0.50,   1.50],
+      'o1-preview':     [15.00,  60.00],
+      'o1-mini':        [3.00,   12.00],
+      'o3-mini':        [1.10,   4.40]
+    },
     get MODEL() { return _cfg._model; },
     set MODEL(v) { _cfg._model = v; localStorage.setItem('ac-selected-model', v); }
   };
@@ -458,7 +469,8 @@ const UIController = (() => {
     const prompt = usage.prompt_tokens || 0;
     const completion = usage.completion_tokens || 0;
     const total = usage.total_tokens || (prompt + completion);
-    const cost = (prompt * 2.5 + completion * 10) / 1_000_000;
+    var pricing = ChatConfig.MODEL_PRICING[ChatConfig.MODEL] || [2.50, 10.00];
+    const cost = (prompt * pricing[0] + completion * pricing[1]) / 1_000_000;
     el('token-usage').textContent =
       `Tokens: ${prompt} in / ${completion} out (${total} total) · ~$${cost.toFixed(4)}`;
   }

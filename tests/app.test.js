@@ -34,6 +34,18 @@ describe('ChatConfig', () => {
     expect(ChatConfig.SANDBOX_TIMEOUT_MS).toBe(30000);
   });
 
+  test('MODEL_PRICING has entries for all available models', () => {
+    expect(ChatConfig.MODEL_PRICING).toBeDefined();
+    ChatConfig.AVAILABLE_MODELS.forEach(function(m) {
+      var pricing = ChatConfig.MODEL_PRICING[m.id];
+      expect(pricing).toBeDefined();
+      expect(pricing).toHaveLength(2);
+      expect(pricing[0]).toBeGreaterThan(0); // input price
+      expect(pricing[1]).toBeGreaterThan(0); // output price
+      expect(pricing[1]).toBeGreaterThanOrEqual(pricing[0]); // output >= input for all models
+    });
+  });
+
   test('SYSTEM_PROMPT instructs autonomous agent behavior', () => {
     expect(ChatConfig.SYSTEM_PROMPT).toContain('autonomous agent');
     expect(ChatConfig.SYSTEM_PROMPT).toContain('JavaScript');
@@ -367,6 +379,47 @@ describe('UIController', () => {
     UIController.showTokenUsage(null);
     // Should not throw
     expect(document.getElementById('token-usage').textContent).toBe('');
+  });
+
+  test('showTokenUsage uses per-model pricing, not hardcoded gpt-4o rates', () => {
+    // gpt-3.5-turbo: $0.50/$1.50 per 1M tokens
+    ChatConfig.MODEL = 'gpt-3.5-turbo';
+    UIController.showTokenUsage({
+      prompt_tokens: 1000000,
+      completion_tokens: 1000000,
+      total_tokens: 2000000
+    });
+    var text = document.getElementById('token-usage').textContent;
+    // gpt-3.5-turbo cost: (1M * 0.50 + 1M * 1.50) / 1M = $2.0000
+    expect(text).toContain('$2.0000');
+
+    // gpt-4: $30/$60 per 1M tokens — most expensive model
+    ChatConfig.MODEL = 'gpt-4';
+    UIController.showTokenUsage({
+      prompt_tokens: 1000000,
+      completion_tokens: 1000000,
+      total_tokens: 2000000
+    });
+    text = document.getElementById('token-usage').textContent;
+    // gpt-4 cost: (1M * 30 + 1M * 60) / 1M = $90.0000
+    expect(text).toContain('$90.0000');
+
+    // Reset
+    ChatConfig.MODEL = 'gpt-4o';
+  });
+
+  test('showTokenUsage falls back gracefully for unknown models', () => {
+    ChatConfig.MODEL = 'future-model-2027';
+    UIController.showTokenUsage({
+      prompt_tokens: 1000,
+      completion_tokens: 500,
+      total_tokens: 1500
+    });
+    var text = document.getElementById('token-usage').textContent;
+    // Should not crash; uses gpt-4o fallback pricing
+    expect(text).toContain('$');
+    expect(text).toContain('1500');
+    ChatConfig.MODEL = 'gpt-4o';
   });
 
   test('getChatInput and clearChatInput work correctly', () => {
