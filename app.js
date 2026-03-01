@@ -1076,7 +1076,7 @@ const HistoryPanel = (() => {
     }
 
     // Single DOM mutation: clear + append fragment
-    container.innerHTML = '';
+    container.textContent = '';
     container.appendChild(fragment);
 
     // Auto-scroll to bottom
@@ -1579,6 +1579,7 @@ const MessageSearch = (() => {
   let isOpen = false;
   let matches = [];
   let currentIndex = -1;
+  let previousIndex = -1;
   let debounceTimer = null;
   let lastQuery = '';
   const DEBOUNCE_MS = 200;
@@ -1737,6 +1738,7 @@ const MessageSearch = (() => {
 
     matches = [];
     currentIndex = -1;
+    previousIndex = -1;
     updateNavButtons();
   }
 
@@ -1764,9 +1766,9 @@ const MessageSearch = (() => {
    * Scroll the current match into view and highlight it.
    */
   function scrollToCurrent() {
-    // Remove current indicator from all marks
-    for (let i = 0; i < matches.length; i++) {
-      matches[i].classList.remove('search-current');
+    // Remove current indicator from the previous mark only (O(1) vs O(n))
+    if (previousIndex >= 0 && previousIndex < matches.length) {
+      matches[previousIndex].classList.remove('search-current');
     }
 
     if (currentIndex >= 0 && currentIndex < matches.length) {
@@ -1778,6 +1780,7 @@ const MessageSearch = (() => {
         });
       }
     }
+    previousIndex = currentIndex;
   }
 
   /**
@@ -3179,14 +3182,7 @@ const SessionManager = (() => {
     const messages = ConversationManager.getMessages().filter(m => m.role !== 'system');
     if (messages.length === 0) return;
 
-    const activeId = _getActiveId();
-    if (activeId) {
-      // Update existing session silently
-      save();
-    } else {
-      // Create a new auto-named session
-      save();
-    }
+    save();
     if (isOpen) refresh();
   }
 
@@ -3201,17 +3197,31 @@ const SessionManager = (() => {
     return `Session ${new Date().toLocaleString()}`;
   }
 
+  /** Auto-save the current conversation if auto-save is enabled. */
+  function _autoSaveCurrent() {
+    const currentMessages = ConversationManager.getMessages().filter(m => m.role !== 'system');
+    if (autoSave && currentMessages.length > 0) {
+      save();
+    }
+  }
+
+  /** Reset UI state after switching or clearing a session. */
+  function _resetUI(statusText) {
+    UIController.setChatOutput('');
+    UIController.setConsoleOutput('(results appear here)');
+    UIController.setLastPrompt(statusText);
+    SnippetLibrary.setCurrentCode(null);
+    ChatBookmarks.clearAll();
+    HistoryPanel.refresh();
+  }
+
   /** Load a session by ID — replaces current conversation. */
   function load(id) {
     const sessions = _loadAll();
     const session = sessions.find(s => s.id === id);
     if (!session) return null;
 
-    // Save current session first if auto-save is on
-    const currentMessages = ConversationManager.getMessages().filter(m => m.role !== 'system');
-    if (autoSave && currentMessages.length > 0) {
-      save();
-    }
+    _autoSaveCurrent();
 
     // Clear third-party service keys from the previous session context.
     // Different sessions may interact with different APIs; lingering keys
@@ -3230,14 +3240,7 @@ const SessionManager = (() => {
     });
 
     _setActiveId(session.id);
-
-    // Update UI — clear stale bookmarks from the previous conversation
-    UIController.setChatOutput('');
-    UIController.setConsoleOutput('(results appear here)');
-    UIController.setLastPrompt(`Loaded: ${session.name}`);
-    SnippetLibrary.setCurrentCode(null);
-    ChatBookmarks.clearAll();
-    HistoryPanel.refresh();
+    _resetUI(`Loaded: ${session.name}`);
 
     return session;
   }
@@ -3265,20 +3268,11 @@ const SessionManager = (() => {
 
   /** Start a new empty session. Optionally saves current first. */
   function newSession() {
-    const currentMessages = ConversationManager.getMessages().filter(m => m.role !== 'system');
-    if (autoSave && currentMessages.length > 0) {
-      save();
-    }
+    _autoSaveCurrent();
 
     ConversationManager.clear();
     _setActiveId(null);
-
-    UIController.setChatOutput('');
-    UIController.setConsoleOutput('(results appear here)');
-    UIController.setLastPrompt('(new session)');
-    SnippetLibrary.setCurrentCode(null);
-    ChatBookmarks.clearAll();
-    HistoryPanel.refresh();
+    _resetUI('(new session)');
     if (isOpen) refresh();
   }
 
