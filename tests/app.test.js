@@ -3624,6 +3624,46 @@ describe('ChatBookmarks', () => {
   test('MAX_BOOKMARKS is 50', () => {
     expect(ChatBookmarks.MAX_BOOKMARKS).toBe(50);
   });
+
+  test('clearHistory clears bookmarks to prevent stale index references', () => {
+    // Add bookmarks as if they belong to a conversation
+    ChatBookmarks.add(0, 'user', 'First msg');
+    ChatBookmarks.add(1, 'assistant', 'Reply');
+    expect(ChatBookmarks.getCount()).toBe(2);
+
+    // Clear history should also clear bookmarks
+    ChatController.clearHistory();
+    expect(ChatBookmarks.getCount()).toBe(0);
+    expect(ChatBookmarks.isBookmarked(0)).toBe(false);
+    expect(ChatBookmarks.isBookmarked(1)).toBe(false);
+  });
+
+  test('newSession clears bookmarks to prevent cross-session bleed', () => {
+    ChatBookmarks.add(0, 'user', 'Session A msg');
+    ChatBookmarks.add(2, 'assistant', 'Session A reply');
+    expect(ChatBookmarks.getCount()).toBe(2);
+
+    SessionManager.newSession();
+    expect(ChatBookmarks.getCount()).toBe(0);
+    expect(ChatBookmarks.isBookmarked(0)).toBe(false);
+    expect(ChatBookmarks.isBookmarked(2)).toBe(false);
+  });
+
+  test('loading a session clears bookmarks from the previous session', () => {
+    // Set up a saved session
+    ConversationManager.addMessage('user', 'Hello');
+    ConversationManager.addMessage('assistant', 'Hi there');
+    const saved = SessionManager.save('Test Session');
+
+    // Add bookmarks in current conversation
+    ChatBookmarks.add(0, 'user', 'Current msg');
+    expect(ChatBookmarks.getCount()).toBe(1);
+
+    // Load the saved session — bookmarks should be cleared
+    SessionManager.load(saved.id);
+    expect(ChatBookmarks.getCount()).toBe(0);
+    expect(ChatBookmarks.isBookmarked(0)).toBe(false);
+  });
 });
 
 /* ================================================================

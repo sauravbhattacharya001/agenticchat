@@ -622,6 +622,7 @@ const ChatController = (() => {
     UIController.setConsoleOutput('(results appear here)');
     UIController.setLastPrompt('(history cleared)');
     SnippetLibrary.setCurrentCode(null);
+    ChatBookmarks.clearAll();
     HistoryPanel.refresh();
   }
 
@@ -3038,11 +3039,12 @@ const SessionManager = (() => {
 
     _setActiveId(session.id);
 
-    // Update UI
+    // Update UI — clear stale bookmarks from the previous conversation
     UIController.setChatOutput('');
     UIController.setConsoleOutput('(results appear here)');
     UIController.setLastPrompt(`Loaded: ${session.name}`);
     SnippetLibrary.setCurrentCode(null);
+    ChatBookmarks.clearAll();
     HistoryPanel.refresh();
 
     return session;
@@ -3083,6 +3085,7 @@ const SessionManager = (() => {
     UIController.setConsoleOutput('(results appear here)');
     UIController.setLastPrompt('(new session)');
     SnippetLibrary.setCurrentCode(null);
+    ChatBookmarks.clearAll();
     HistoryPanel.refresh();
     if (isOpen) refresh();
   }
