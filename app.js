@@ -32,23 +32,37 @@
 'use strict';
 
 /* ---------- Configuration ---------- */
-const ChatConfig = Object.freeze({
-  MODEL: 'gpt-4o',
-  MAX_TOKENS_RESPONSE: 4096,
-  MAX_HISTORY_PAIRS: 20,        // 20 user+assistant pairs ≈ 40 messages
-  MAX_INPUT_CHARS: 50000,       // ~12,500 tokens
-  MAX_TOTAL_TOKENS: 100000,
-  CHARS_PER_TOKEN: 4,
-  TOKEN_WARNING_THRESHOLD: 80000,
-  SANDBOX_TIMEOUT_MS: 30000,
-
-  SYSTEM_PROMPT: `
+const ChatConfig = (() => {
+  const _cfg = {
+    _model: localStorage.getItem('ac-selected-model') || 'gpt-4o',
+    MAX_TOKENS_RESPONSE: 4096,
+    MAX_HISTORY_PAIRS: 20,
+    MAX_INPUT_CHARS: 50000,
+    MAX_TOTAL_TOKENS: 100000,
+    CHARS_PER_TOKEN: 4,
+    TOKEN_WARNING_THRESHOLD: 80000,
+    SANDBOX_TIMEOUT_MS: 30000,
+    SYSTEM_PROMPT: `
 You are an autonomous agent in a browser.
 Only reply with JavaScript in a single code block.
 If an external service needs a key use the placeholder "YOUR_API_KEY".
 Always \`return\` the final value.
-  `.trim()
-});
+    `.trim(),
+    AVAILABLE_MODELS: [
+      { id: 'gpt-4o', label: 'GPT-4o' },
+      { id: 'gpt-4o-mini', label: 'GPT-4o Mini' },
+      { id: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
+      { id: 'gpt-4', label: 'GPT-4' },
+      { id: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo' },
+      { id: 'o1-preview', label: 'o1 Preview' },
+      { id: 'o1-mini', label: 'o1 Mini' },
+      { id: 'o3-mini', label: 'o3 Mini' }
+    ],
+    get MODEL() { return _cfg._model; },
+    set MODEL(v) { _cfg._model = v; localStorage.setItem('ac-selected-model', v); }
+  };
+  return _cfg;
+})();
 
 /* ---------- Shared Utilities ---------- */
 
@@ -4220,6 +4234,66 @@ const PersonaPresets = (() => {
   return { open, close, toggle, init, render, applyCustom, isOpen: () => isOpen };
 })();
 
+/* ---------- Model Selector ---------- */
+/**
+ * Lets users pick which OpenAI model to use for chat completions.
+ * Selection persists in localStorage via ChatConfig.MODEL setter.
+ */
+const ModelSelector = (() => {
+  let open = false;
+
+  function _render() {
+    const list = document.getElementById('model-list');
+    if (!list) return;
+    list.innerHTML = '';
+    ChatConfig.AVAILABLE_MODELS.forEach(m => {
+      const btn = document.createElement('button');
+      btn.className = 'model-option' + (m.id === ChatConfig.MODEL ? ' model-active' : '');
+      btn.textContent = m.label;
+      btn.title = m.id;
+      btn.addEventListener('click', () => {
+        ChatConfig.MODEL = m.id;
+        const label = document.getElementById('model-label');
+        if (label) label.textContent = m.label;
+        _render();
+        close();
+      });
+      list.appendChild(btn);
+    });
+  }
+
+  function toggle() {
+    open ? close() : _open();
+  }
+
+  function _open() {
+    open = true;
+    const panel = document.getElementById('model-panel');
+    const overlay = document.getElementById('model-overlay');
+    if (panel) { panel.style.display = 'block'; }
+    if (overlay) { overlay.style.display = 'block'; }
+    _render();
+  }
+
+  function close() {
+    open = false;
+    const panel = document.getElementById('model-panel');
+    const overlay = document.getElementById('model-overlay');
+    if (panel) { panel.style.display = 'none'; }
+    if (overlay) { overlay.style.display = 'none'; }
+  }
+
+  function init() {
+    // Set initial label from saved model
+    const saved = ChatConfig.MODEL;
+    const match = ChatConfig.AVAILABLE_MODELS.find(m => m.id === saved);
+    const label = document.getElementById('model-label');
+    if (label && match) label.textContent = match.label;
+  }
+
+  return { toggle, close, init };
+})();
+
 /* ---------- Event Bindings ---------- */
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('send-btn').addEventListener('click', ChatController.send);
@@ -4266,6 +4340,7 @@ document.addEventListener('DOMContentLoaded', () => {
       KeyboardShortcuts.hideHelp();
       ChatStats.close();
       PersonaPresets.close();
+      ModelSelector.close();
     }
   });
 
@@ -4382,6 +4457,12 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('persona-overlay').addEventListener('click', PersonaPresets.close);
   document.getElementById('persona-custom-apply').addEventListener('click', PersonaPresets.applyCustom);
   PersonaPresets.init();
+
+  // Model selector
+  document.getElementById('model-btn').addEventListener('click', ModelSelector.toggle);
+  document.getElementById('model-close-btn').addEventListener('click', ModelSelector.close);
+  document.getElementById('model-overlay').addEventListener('click', ModelSelector.close);
+  ModelSelector.init();
 
   // Stats button
   document.getElementById('stats-btn').addEventListener('click', ChatStats.toggle);

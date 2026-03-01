@@ -31,6 +31,7 @@
     <button id="stats-btn" class="btn-secondary" title="Chat statistics (Ctrl+I)">📊</button>
     <button id="voice-btn" class="btn-secondary" title="Voice input — speak your prompt (Ctrl+M)" aria-label="Toggle voice input">🎤</button>
     <button id="persona-btn" class="btn-secondary" title="System prompt presets (Ctrl+P)">🎭</button>
+    <button id="model-btn" class="btn-secondary" title="Select AI model">🤖 <span id="model-label">GPT-4o</span></button>
     <button id="theme-btn" class="btn-secondary" title="Switch to light theme (Ctrl+D)" aria-label="Toggle theme">☀️</button>
   </div>
 
@@ -241,6 +242,16 @@
         </div>
       </div>
     </div>
+  </div>
+
+  <!-- Model Selector Panel -->
+  <div id="model-overlay"></div>
+  <div id="model-panel" aria-label="Model selector" style="display:none;">
+    <div id="model-header">
+      <span>🤖 Select Model</span>
+      <button id="model-close-btn" class="btn-sm" title="Close">✕</button>
+    </div>
+    <div id="model-list"></div>
   </div>
 
   <script src="app.js"></script>

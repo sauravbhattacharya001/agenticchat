@@ -1496,3 +1496,63 @@ kbd {
   cursor: pointer;
   font-weight: 600;
 }
+
+/* ---------- Model Selector ---------- */
+#model-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.4);
+  z-index: 1099;
+}
+#model-panel {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--bg, #1e1e1e);
+  border: 1px solid var(--border, #444);
+  border-radius: 12px;
+  padding: 1.25rem;
+  z-index: 1100;
+  min-width: 280px;
+  max-width: 360px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+}
+#model-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  font-weight: 600;
+  font-size: 1.05rem;
+}
+#model-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.model-option {
+  display: block;
+  width: 100%;
+  padding: 0.6rem 1rem;
+  text-align: left;
+  border: 1px solid var(--border, #444);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 0.95rem;
+  transition: background 0.15s;
+}
+.model-option:hover {
+  background: rgba(255,255,255,0.08);
+}
+.model-active {
+  background: rgba(99,102,241,0.2);
+  border-color: #6366f1;
+  font-weight: 600;
+}
+#model-btn #model-label {
+  font-size: 0.85rem;
+}
