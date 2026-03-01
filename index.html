@@ -30,6 +30,7 @@
     <button id="shortcuts-btn" class="btn-secondary" title="Keyboard shortcuts (press ? for help)">⌨️</button>
     <button id="stats-btn" class="btn-secondary" title="Chat statistics (Ctrl+I)">📊</button>
     <button id="voice-btn" class="btn-secondary" title="Voice input — speak your prompt (Ctrl+M)" aria-label="Toggle voice input">🎤</button>
+    <button id="persona-btn" class="btn-secondary" title="System prompt presets (Ctrl+P)">🎭</button>
     <button id="theme-btn" class="btn-secondary" title="Switch to light theme (Ctrl+D)" aria-label="Toggle theme">☀️</button>
   </div>
 
@@ -177,6 +178,24 @@
     </div>
   </div>
 
+  <!-- Persona / System Prompt Presets Panel -->
+  <div id="persona-overlay"></div>
+  <div id="persona-panel" aria-label="System prompt presets">
+    <div id="persona-header">
+      <span>🎭 System Prompt Presets</span>
+      <div id="persona-actions">
+        <button id="persona-close-btn" class="btn-sm" title="Close panel">✕</button>
+      </div>
+    </div>
+    <div id="persona-active"></div>
+    <div id="persona-list"></div>
+    <div id="persona-custom-section">
+      <label for="persona-custom-input"><strong>Custom System Prompt</strong></label>
+      <textarea id="persona-custom-input" rows="4" placeholder="Enter a custom system prompt…"></textarea>
+      <button id="persona-custom-apply" class="btn-sm">Apply Custom</button>
+    </div>
+  </div>
+
   <!-- Keyboard Shortcuts Help Modal -->
   <div id="shortcuts-modal" role="dialog" aria-modal="true" aria-labelledby="shortcuts-modal-title">
     <div id="shortcuts-modal-content">
@@ -199,6 +218,7 @@
           <div class="shortcut-row"><kbd>Ctrl</kbd> + <kbd>S</kbd><span>Toggle snippets</span></div>
           <div class="shortcut-row"><kbd>Ctrl</kbd> + <kbd>J</kbd><span>Toggle sessions</span></div>
           <div class="shortcut-row"><kbd>Ctrl</kbd> + <kbd>B</kbd><span>Toggle bookmarks</span></div>
+          <div class="shortcut-row"><kbd>Ctrl</kbd> + <kbd>P</kbd><span>Toggle persona presets</span></div>
           <div class="shortcut-row"><kbd>Ctrl</kbd> + <kbd>I</kbd><span>Chat statistics</span></div>
         </div>
         <div class="shortcut-group">

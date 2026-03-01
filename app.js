@@ -137,6 +137,15 @@ const ConversationManager = (() => {
       charCountDirty = false;
     },
 
+    /** Update the system prompt in-place (keeps conversation history). */
+    setSystemPrompt(prompt) {
+      if (history.length > 0 && history[0].role === 'system') {
+        cachedCharCount -= history[0].content.length;
+        history[0].content = prompt;
+        cachedCharCount += prompt.length;
+      }
+    },
+
     /**
      * Rough token estimate based on character count.
      * Uses a cached character count that is incrementally maintained
@@ -2694,6 +2703,13 @@ const KeyboardShortcuts = (() => {
       return;
     }
 
+    // Ctrl+P — toggle persona presets
+    if (ctrl && e.key === 'p') {
+      e.preventDefault();
+      PersonaPresets.toggle();
+      return;
+    }
+
     // Ctrl+I — toggle chat statistics
     if (ctrl && e.key === 'i') {
       e.preventDefault();
@@ -4031,6 +4047,179 @@ const ChatStats = (() => {
   return { compute, render, open, close, toggle, isOpen: () => isOpen };
 })();
 
+/* ---------- Persona / System Prompt Presets ---------- */
+
+/**
+ * Manages switchable system prompt presets (personas).
+ * Users can pick from built-in presets or define a custom system prompt.
+ * The active persona persists in localStorage.
+ */
+const PersonaPresets = (() => {
+  const STORAGE_KEY = 'agenticchat_persona';
+  let isOpen = false;
+
+  const presets = [
+    {
+      id: 'default',
+      name: '🤖 Code Generator',
+      desc: 'Default — replies with executable JavaScript code blocks.',
+      prompt: ChatConfig.SYSTEM_PROMPT
+    },
+    {
+      id: 'analyst',
+      name: '📊 Data Analyst',
+      desc: 'Generates data analysis, charts, and visualizations in JS.',
+      prompt: 'You are a data analyst agent in a browser. Reply only with JavaScript code in a single code block that processes, analyzes, or visualizes data. Use canvas or DOM manipulation for charts. Always `return` the final value.'
+    },
+    {
+      id: 'creative',
+      name: '🎨 Creative Designer',
+      desc: 'Generates interactive visual art, animations, and creative demos.',
+      prompt: 'You are a creative coding agent in a browser. Reply only with JavaScript code in a single code block that creates beautiful visual art, animations, or interactive demos using canvas, SVG, or DOM manipulation. Be creative and visually impressive. Always `return` the final value.'
+    },
+    {
+      id: 'teacher',
+      name: '📚 Code Teacher',
+      desc: 'Generates well-commented educational code with explanations.',
+      prompt: 'You are a patient code teacher agent in a browser. Reply only with JavaScript code in a single code block. Add detailed comments explaining every step and concept. Include console.log statements showing intermediate values. Code should be educational and easy to follow. Always `return` the final value.'
+    },
+    {
+      id: 'game',
+      name: '🎮 Game Developer',
+      desc: 'Builds interactive browser games using canvas and DOM.',
+      prompt: 'You are a game development agent in a browser. Reply only with JavaScript code in a single code block that creates playable browser games using canvas or DOM elements. Games should be interactive with keyboard/mouse input, scoring, and game states. Always `return` the final value.'
+    },
+    {
+      id: 'scraper',
+      name: '🕷️ Web Utility',
+      desc: 'Builds web utilities — converters, generators, calculators.',
+      prompt: 'You are a utility-building agent in a browser. Reply only with JavaScript code in a single code block that creates useful web utilities: converters, generators, calculators, formatters, validators, etc. Build a complete interactive UI with inputs and outputs. Always `return` the final value.'
+    },
+    {
+      id: 'minimal',
+      name: '⚡ Minimal',
+      desc: 'Concise code with no comments — just clean, working JS.',
+      prompt: 'You are a minimalist coding agent in a browser. Reply only with JavaScript in a single code block. Write the shortest, cleanest code possible. No comments. No explanations. Just working code. Always `return` the final value.'
+    }
+  ];
+
+  function getActiveId() {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return parsed.id || 'default';
+      }
+    } catch (_) {}
+    return 'default';
+  }
+
+  function getActivePrompt() {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.id === 'custom') return parsed.prompt || ChatConfig.SYSTEM_PROMPT;
+        const preset = presets.find(p => p.id === parsed.id);
+        return preset ? preset.prompt : ChatConfig.SYSTEM_PROMPT;
+      }
+    } catch (_) {}
+    return ChatConfig.SYSTEM_PROMPT;
+  }
+
+  function save(id, customPrompt) {
+    const data = { id };
+    if (id === 'custom' && customPrompt) data.prompt = customPrompt;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  }
+
+  function applyPrompt(prompt) {
+    ConversationManager.setSystemPrompt(prompt);
+  }
+
+  function selectPreset(id) {
+    const preset = presets.find(p => p.id === id);
+    if (!preset) return;
+    save(id);
+    applyPrompt(preset.prompt);
+    render();
+  }
+
+  function applyCustom() {
+    const textarea = document.getElementById('persona-custom-input');
+    const prompt = (textarea.value || '').trim();
+    if (!prompt) return;
+    save('custom', prompt);
+    applyPrompt(prompt);
+    render();
+  }
+
+  function render() {
+    const activeId = getActiveId();
+    const activeEl = document.getElementById('persona-active');
+    const listEl = document.getElementById('persona-list');
+
+    if (activeId === 'custom') {
+      activeEl.textContent = 'Active: Custom Prompt';
+    } else {
+      const active = presets.find(p => p.id === activeId);
+      activeEl.textContent = active ? 'Active: ' + active.name : 'Active: Unknown';
+    }
+
+    listEl.innerHTML = presets.map(p => {
+      const isActive = p.id === activeId;
+      return '<div class="persona-card' + (isActive ? ' active' : '') + '" data-persona-id="' + p.id + '">'
+        + '<div class="persona-card-title">' + p.name + (isActive ? ' ✓' : '') + '</div>'
+        + '<div class="persona-card-desc">' + p.desc + '</div>'
+        + '</div>';
+    }).join('');
+
+    // Add custom card
+    const isCustom = activeId === 'custom';
+    listEl.innerHTML += '<div class="persona-card' + (isCustom ? ' active' : '') + '" data-persona-id="custom">'
+      + '<div class="persona-card-title">✏️ Custom' + (isCustom ? ' ✓' : '') + '</div>'
+      + '<div class="persona-card-desc">Use the custom prompt below.</div>'
+      + '</div>';
+
+    // Bind click handlers
+    listEl.querySelectorAll('.persona-card').forEach(card => {
+      card.addEventListener('click', () => {
+        const id = card.getAttribute('data-persona-id');
+        if (id === 'custom') {
+          applyCustom();
+        } else {
+          selectPreset(id);
+        }
+      });
+    });
+  }
+
+  function open() {
+    isOpen = true;
+    document.getElementById('persona-panel').classList.add('open');
+    document.getElementById('persona-overlay').classList.add('open');
+    render();
+  }
+
+  function close() {
+    isOpen = false;
+    document.getElementById('persona-panel').classList.remove('open');
+    document.getElementById('persona-overlay').classList.remove('open');
+  }
+
+  function toggle() {
+    isOpen ? close() : open();
+  }
+
+  /** Restore saved persona on startup. */
+  function init() {
+    const prompt = getActivePrompt();
+    applyPrompt(prompt);
+  }
+
+  return { open, close, toggle, init, render, applyCustom, isOpen: () => isOpen };
+})();
+
 /* ---------- Event Bindings ---------- */
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('send-btn').addEventListener('click', ChatController.send);
@@ -4076,6 +4265,7 @@ document.addEventListener('DOMContentLoaded', () => {
       SessionManager.closeSaveDialog();
       KeyboardShortcuts.hideHelp();
       ChatStats.close();
+      PersonaPresets.close();
     }
   });
 
@@ -4185,6 +4375,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Message reactions
   MessageReactions.init();
+
+  // Persona presets panel
+  document.getElementById('persona-btn').addEventListener('click', PersonaPresets.toggle);
+  document.getElementById('persona-close-btn').addEventListener('click', PersonaPresets.close);
+  document.getElementById('persona-overlay').addEventListener('click', PersonaPresets.close);
+  document.getElementById('persona-custom-apply').addEventListener('click', PersonaPresets.applyCustom);
+  PersonaPresets.init();
 
   // Stats button
   document.getElementById('stats-btn').addEventListener('click', ChatStats.toggle);
