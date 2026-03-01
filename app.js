@@ -294,8 +294,33 @@ const ApiKeyManager = (() => {
 
   function getPendingDomain() { return pendingDomain; }
 
+  /**
+   * Clear all stored service keys. Prevents stale third-party API
+   * credentials from lingering in memory after a session ends.
+   */
+  function clearServiceKeys() {
+    for (var k in serviceKeys) {
+      if (Object.prototype.hasOwnProperty.call(serviceKeys, k)) {
+        delete serviceKeys[k];
+      }
+    }
+  }
+
+  /**
+   * Purge all sensitive key material — OpenAI key, per-service keys,
+   * and any pending code/domain state. Call on conversation clear or
+   * session switch to prevent credential leakage across contexts.
+   */
+  function clearAll() {
+    openaiKey = null;
+    clearServiceKeys();
+    pendingCode = null;
+    pendingDomain = null;
+  }
+
   return {
     getOpenAIKey, setOpenAIKey, clearOpenAIKey,
+    clearServiceKeys, clearAll,
     substituteServiceKey, submitServiceKey,
     getPendingDomain, extractDomain
   };
@@ -1052,12 +1077,22 @@ const SnippetLibrary = (() => {
 
   /** Add a new snippet. Returns {snippets, saved} where saved indicates persistence. */
   function add(name, code, tags) {
-    const snippets = load();
+    var MAX_SNIPPET_NAME = 200;
+    var MAX_SNIPPET_CODE = 500000; // 500 KB
+    var MAX_SNIPPETS = 200;
+
+    var snippets = load();
+
+    // Prevent unbounded growth
+    if (snippets.length >= MAX_SNIPPETS) {
+      return { snippets: snippets, saved: false };
+    }
+
     snippets.unshift({
       id: crypto.randomUUID(),
-      name: name.trim(),
-      code,
-      tags: tags.map(t => t.trim()).filter(t => t.length > 0),
+      name: name.trim().substring(0, MAX_SNIPPET_NAME),
+      code: (code || '').substring(0, MAX_SNIPPET_CODE),
+      tags: tags.map(t => t.trim()).filter(t => t.length > 0).slice(0, 20),
       createdAt: new Date().toISOString()
     });
     const saved = save(snippets);
@@ -2912,7 +2947,7 @@ const SessionManager = (() => {
       existing.messages = messages;
       existing.messageCount = messages.length;
       existing.updatedAt = now;
-      if (name && name.trim()) existing.name = name.trim();
+      if (name && name.trim()) existing.name = name.trim().substring(0, 200);
       // Update preview from last user message
       const lastUser = messages.filter(m => m.role === 'user').pop();
       existing.preview = lastUser
@@ -2924,7 +2959,7 @@ const SessionManager = (() => {
 
     // Create new session
     const sessionName = (name && name.trim())
-      ? name.trim()
+      ? name.trim().substring(0, 200)
       : _generateName(messages);
     const lastUser = messages.filter(m => m.role === 'user').pop();
 
@@ -2985,6 +3020,11 @@ const SessionManager = (() => {
       save();
     }
 
+    // Clear third-party service keys from the previous session context.
+    // Different sessions may interact with different APIs; lingering keys
+    // from session A should not auto-apply when running code in session B.
+    ApiKeyManager.clearServiceKeys();
+
     // Replace conversation history
     ConversationManager.clear();
     session.messages.forEach(msg => {
@@ -3021,7 +3061,8 @@ const SessionManager = (() => {
     const sessions = _loadAll();
     const session = sessions.find(s => s.id === id);
     if (session && newName && newName.trim()) {
-      session.name = newName.trim();
+      // Cap length to prevent oversized localStorage entries
+      session.name = newName.trim().substring(0, 200);
       session.updatedAt = new Date().toISOString();
       _saveAll(sessions);
     }
@@ -3166,6 +3207,9 @@ const SessionManager = (() => {
   function clearAll() {
     _saveAll([]);
     _setActiveId(null);
+    // Purge in-memory API keys to prevent credential leakage
+    // across session boundaries.
+    ApiKeyManager.clearServiceKeys();
   }
 
   /** Toggle sessions panel. */
