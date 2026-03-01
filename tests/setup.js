@@ -208,6 +208,15 @@ function loadApp() {
     );
   }
 
+  // Expose top-level utility functions to globalThis for tests
+  const utilFunctions = ['formatRelativeTime', 'downloadBlob'];
+  for (const fn of utilFunctions) {
+    appCode = appCode.replace(
+      new RegExp(`^function ${fn}\\(`, 'm'),
+      `globalThis.${fn} = function ${fn}(`
+    );
+  }
+
   // Suppress DOMContentLoaded listener (tests call functions directly)
   appCode = appCode.replace(
     /document\.addEventListener\('DOMContentLoaded'/,

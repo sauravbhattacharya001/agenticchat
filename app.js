@@ -34,6 +34,36 @@ Always \`return\` the final value.
   `.trim()
 });
 
+/* ---------- Shared Utilities ---------- */
+
+/** Format an ISO timestamp as relative time (e.g. "2h ago", "3d ago"). */
+function formatRelativeTime(isoString) {
+  var now = Date.now();
+  var then = new Date(isoString).getTime();
+  var diff = now - then;
+  var mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return mins + 'm ago';
+  var hours = Math.floor(mins / 60);
+  if (hours < 24) return hours + 'h ago';
+  var days = Math.floor(hours / 24);
+  if (days < 30) return days + 'd ago';
+  return new Date(isoString).toLocaleDateString();
+}
+
+/** Trigger a browser file download from in-memory content. */
+function downloadBlob(filename, content, mimeType) {
+  var blob = new Blob([content], { type: mimeType });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 /* ---------- Conversation Manager ---------- */
 const ConversationManager = (() => {
   const history = [{ role: 'system', content: ChatConfig.SYSTEM_PROMPT }];
@@ -956,7 +986,7 @@ const HistoryPanel = (() => {
       md += `### ${role}\n\n${msg.content}\n\n---\n\n`;
     });
 
-    downloadFile(`agenticchat-${timestamp}.md`, md, 'text/markdown');
+    downloadBlob(`agenticchat-${timestamp}.md`, md, 'text/markdown');
   }
 
   function exportAsJSON() {
@@ -974,19 +1004,7 @@ const HistoryPanel = (() => {
       messages: messages.map(m => ({ role: m.role, content: m.content }))
     };
 
-    downloadFile(`agenticchat-${timestamp}.json`, JSON.stringify(data, null, 2), 'application/json');
-  }
-
-  function downloadFile(filename, content, mimeType) {
-    const blob = new Blob([content], { type: mimeType });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    downloadBlob(`agenticchat-${timestamp}.json`, JSON.stringify(data, null, 2), 'application/json');
   }
 
   return { toggle, close, refresh, exportAsMarkdown, exportAsJSON };
@@ -1377,21 +1395,6 @@ const SnippetLibrary = (() => {
     const result = await SandboxRunner.run(substituted);
     UIController.setConsoleOutput(result.value, result.ok ? '#4ade80' : '#f87171');
     UIController.resetSandboxUI();
-  }
-
-  /** Format relative time (e.g. "2h ago", "3d ago"). */
-  function formatRelativeTime(isoString) {
-    const now = Date.now();
-    const then = new Date(isoString).getTime();
-    const diff = now - then;
-    const mins = Math.floor(diff / 60000);
-    if (mins < 1) return 'just now';
-    if (mins < 60) return `${mins}m ago`;
-    const hours = Math.floor(mins / 60);
-    if (hours < 24) return `${hours}h ago`;
-    const days = Math.floor(hours / 24);
-    if (days < 30) return `${days}d ago`;
-    return new Date(isoString).toLocaleDateString();
   }
 
   function handleSearchDebounced() {
@@ -3083,16 +3086,8 @@ const SessionManager = (() => {
       }
     };
 
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
     const safeName = session.name.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 50);
-    a.download = `session-${safeName}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    downloadBlob(`session-${safeName}.json`, JSON.stringify(data, null, 2), 'application/json');
   }
 
   /** Import a session from a JSON file. */
@@ -3250,7 +3245,7 @@ const SessionManager = (() => {
       // Meta: message count + time
       const meta = document.createElement('div');
       meta.className = 'session-meta';
-      meta.textContent = `${session.messageCount} msg${session.messageCount !== 1 ? 's' : ''} · ${_formatTime(session.updatedAt)}`;
+      meta.textContent = `${session.messageCount} msg${session.messageCount !== 1 ? 's' : ''} · ${formatRelativeTime(session.updatedAt)}`;
       meta.title = `Created: ${new Date(session.createdAt).toLocaleString()}\nUpdated: ${new Date(session.updatedAt).toLocaleString()}`;
       card.appendChild(meta);
 
@@ -3337,21 +3332,6 @@ const SessionManager = (() => {
     nameEl.appendChild(input);
     input.focus();
     input.select();
-  }
-
-  /** Format relative time for display. */
-  function _formatTime(isoString) {
-    const now = Date.now();
-    const then = new Date(isoString).getTime();
-    const diff = now - then;
-    const mins = Math.floor(diff / 60000);
-    if (mins < 1) return 'just now';
-    if (mins < 60) return `${mins}m ago`;
-    const hours = Math.floor(mins / 60);
-    if (hours < 24) return `${hours}h ago`;
-    const days = Math.floor(hours / 24);
-    if (days < 30) return `${days}d ago`;
-    return new Date(isoString).toLocaleDateString();
   }
 
   /** Open save dialog. */
@@ -3470,7 +3450,7 @@ const SessionManager = (() => {
     getStorageInfo, handleClearOld,
     _isOpen: function () { return isOpen; },
     // Exposed for testing
-    _loadAll, _saveAll, _getActiveId, _setActiveId, _formatTime,
+    _loadAll, _saveAll, _getActiveId, _setActiveId,
     _evictOldest, _enforceSessionLimit, _estimateQuotaUsage, _checkQuota
   };
 })();

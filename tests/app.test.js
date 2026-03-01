@@ -2415,26 +2415,26 @@ describe('SessionManager', () => {
     expect(sessions[0].preview.length).toBeLessThanOrEqual(120);
   });
 
-  // ── _formatTime ────────────────────────────────────────────────
+  // ── formatRelativeTime (shared utility) ─────────────────────────
 
-  test('_formatTime handles just now', () => {
+  test('formatRelativeTime handles just now', () => {
     const now = new Date().toISOString();
-    expect(SessionManager._formatTime(now)).toBe('just now');
+    expect(formatRelativeTime(now)).toBe('just now');
   });
 
-  test('_formatTime handles minutes ago', () => {
+  test('formatRelativeTime handles minutes ago', () => {
     const tenMinsAgo = new Date(Date.now() - 10 * 60000).toISOString();
-    expect(SessionManager._formatTime(tenMinsAgo)).toBe('10m ago');
+    expect(formatRelativeTime(tenMinsAgo)).toBe('10m ago');
   });
 
-  test('_formatTime handles hours ago', () => {
+  test('formatRelativeTime handles hours ago', () => {
     const threeHoursAgo = new Date(Date.now() - 3 * 3600000).toISOString();
-    expect(SessionManager._formatTime(threeHoursAgo)).toBe('3h ago');
+    expect(formatRelativeTime(threeHoursAgo)).toBe('3h ago');
   });
 
-  test('_formatTime handles days ago', () => {
+  test('formatRelativeTime handles days ago', () => {
     const fiveDaysAgo = new Date(Date.now() - 5 * 86400000).toISOString();
-    expect(SessionManager._formatTime(fiveDaysAgo)).toBe('5d ago');
+    expect(formatRelativeTime(fiveDaysAgo)).toBe('5d ago');
   });
 
   // ── Save Dialog ────────────────────────────────────────────────
