@@ -1,13 +1,29 @@
 /* ============================================================
  * Agentic Chat — Application Logic
  *
- * Architecture:
- *   ChatConfig     — constants and configuration
+ * Architecture (17 modules, all revealing-module-pattern IIFEs):
+ *
+ *   Core:
+ *   ChatConfig          — constants and configuration
  *   ConversationManager — history management (add, trim, clear, token estimation)
- *   SandboxRunner  — iframe sandbox creation, execution, cancellation
- *   ApiKeyManager  — OpenAI key + per-service key storage, modal handling
- *   UIController   — DOM updates, button state, character count
- *   ChatController — orchestrates sending messages, processing responses
+ *   SandboxRunner       — iframe sandbox for executing LLM-generated code
+ *   ApiKeyManager       — OpenAI key + per-service key storage, modal handling
+ *   UIController        — DOM updates, button state, character count
+ *   ChatController      — orchestrates sending messages, processing responses
+ *
+ *   Features:
+ *   PromptTemplates     — categorized prompt library with search and one-click insert
+ *   HistoryPanel        — slide-out conversation history with export/import
+ *   SnippetLibrary      — persistent code snippet storage with tagging and search
+ *   MessageSearch       — full-text search across conversation messages
+ *   ChatBookmarks       — bookmark individual messages for quick reference
+ *   SlashCommands       — slash-command dropdown (autocomplete, keyboard nav)
+ *   MessageReactions    — per-message emoji reactions with persistent counts
+ *   KeyboardShortcuts   — global keyboard shortcuts with help modal
+ *   VoiceInput          — browser speech recognition with language selection
+ *   ThemeManager        — dark/light theme with OS preference detection
+ *   SessionManager      — multi-session persistence with auto-save and quota mgmt
+ *   ChatStats           — conversation analytics (word counts, code blocks, timing)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -65,6 +81,16 @@ function downloadBlob(filename, content, mimeType) {
 }
 
 /* ---------- Conversation Manager ---------- */
+/**
+ * Manages the conversation message history sent to the OpenAI API.
+ *
+ * Maintains a rolling window of user/assistant message pairs with automatic
+ * trimming when the estimated token count exceeds `ChatConfig.MAX_TOTAL_TOKENS`.
+ * Tracks character counts (used as a proxy for token estimation at ~4 chars/token)
+ * and exposes getters for history introspection, clearing, and serialization.
+ *
+ * @namespace ConversationManager
+ */
 const ConversationManager = (() => {
   const history = [{ role: 'system', content: ChatConfig.SYSTEM_PROMPT }];
   let cachedCharCount = ChatConfig.SYSTEM_PROMPT.length;
@@ -124,6 +150,17 @@ const ConversationManager = (() => {
 })();
 
 /* ---------- Sandbox Runner ---------- */
+/**
+ * Secure iframe sandbox for executing LLM-generated JavaScript code.
+ *
+ * Creates a disposable `<iframe>` with `sandbox="allow-scripts"` to run
+ * untrusted code in an isolated context. Communication is done via
+ * `postMessage` with nonce-verified origin checking. Supports a configurable
+ * timeout ({@link ChatConfig.SANDBOX_TIMEOUT_MS}) after which execution is
+ * forcefully terminated. Only one sandbox can run at a time.
+ *
+ * @namespace SandboxRunner
+ */
 const SandboxRunner = (() => {
   let cleanupFn = null;
 
@@ -223,6 +260,17 @@ const SandboxRunner = (() => {
 })();
 
 /* ---------- API Key Manager ---------- */
+/**
+ * Manages API keys for OpenAI and per-service third-party integrations.
+ *
+ * Stores the OpenAI key (session-scoped, not persisted) and auto-detects
+ * service-specific API keys when LLM code references external domains.
+ * Handles the key-input modal flow: detects `YOUR_API_KEY` placeholders,
+ * prompts the user, sanitizes keys to prevent injection, and substitutes
+ * them into the code before execution.
+ *
+ * @namespace ApiKeyManager
+ */
 const ApiKeyManager = (() => {
   let openaiKey = null;
   const serviceKeys = {};
@@ -327,6 +375,16 @@ const ApiKeyManager = (() => {
 })();
 
 /* ---------- UI Controller ---------- */
+/**
+ * Centralized DOM manipulation layer for all non-sandbox UI updates.
+ *
+ * Provides cached element lookups, button state toggling, character-count
+ * display, and convenience methods for setting text content in the chat
+ * output, console output, and last-prompt areas. All other modules should
+ * go through UIController rather than touching the DOM directly.
+ *
+ * @namespace UIController
+ */
 const UIController = (() => {
   // Cache DOM references on first access to avoid repeated getElementById lookups.
   // Uses a lazy cache that populates on DOMContentLoaded or first call.
@@ -451,6 +509,17 @@ const UIController = (() => {
 })();
 
 /* ---------- Chat Controller ---------- */
+/**
+ * Orchestrates the send → LLM → sandbox → display pipeline.
+ *
+ * Handles user input submission, calls the OpenAI chat completions API,
+ * extracts code blocks from responses, and dispatches them to
+ * {@link SandboxRunner}. Also manages conversation display (appending
+ * message bubbles with Markdown rendering), history clearing, and the
+ * copy/retry affordances on individual messages.
+ *
+ * @namespace ChatController
+ */
 const ChatController = (() => {
   let isSending = false;
 
@@ -638,6 +707,16 @@ const ChatController = (() => {
 })();
 
 /* ---------- Prompt Templates ---------- */
+/**
+ * Categorized prompt template library with search and one-click insertion.
+ *
+ * Ships with built-in templates across categories (Data & Charts, Web/UI,
+ * Utilities, AI/ML, Fun/Creative). Users can search templates by name or
+ * description and insert them directly into the chat input. The panel
+ * renders as a full-screen modal overlay.
+ *
+ * @namespace PromptTemplates
+ */
 const PromptTemplates = (() => {
   let isOpen = false;
 
@@ -881,6 +960,16 @@ const PromptTemplates = (() => {
 })();
 
 /* ---------- History Panel ---------- */
+/**
+ * Slide-out conversation history panel with export/import capabilities.
+ *
+ * Displays timestamped conversation entries with relative-time labels,
+ * supports exporting the full history as Markdown or JSON, and allows
+ * importing previously exported conversations. The panel slides in from
+ * the right with an overlay backdrop.
+ *
+ * @namespace HistoryPanel
+ */
 const HistoryPanel = (() => {
   let isOpen = false;
 
@@ -1037,6 +1126,18 @@ const HistoryPanel = (() => {
 })();
 
 /* ---------- Snippet Library ---------- */
+/**
+ * Persistent code snippet library with tagging, search, and categories.
+ *
+ * Saves user-curated code snippets to localStorage with metadata (name,
+ * tags, language, category, creation/update timestamps). Supports search
+ * by name/tag, filtering by language, import/export as JSON, and
+ * one-click insertion of snippets back into the chat. Includes an "auto-save
+ * last output" option for capturing sandbox results. Maximum 100 snippets,
+ * 50 KB per snippet.
+ *
+ * @namespace SnippetLibrary
+ */
 const SnippetLibrary = (() => {
   const STORAGE_KEY = 'agenticchat_snippets';
   let isOpen = false;
@@ -1464,6 +1565,16 @@ const SnippetLibrary = (() => {
 })();
 
 /* ---------- Message Search ---------- */
+/**
+ * Full-text search across conversation messages with match navigation.
+ *
+ * Debounced search (200 ms) highlights matching messages in the chat output,
+ * supports next/previous navigation with `Enter`/`Shift+Enter`, and shows a
+ * match counter. Triggered via `Ctrl+F` / `Cmd+F` when not in an input field.
+ * Case-insensitive matching with regex-safe escaping.
+ *
+ * @namespace MessageSearch
+ */
 const MessageSearch = (() => {
   let isOpen = false;
   let matches = [];
@@ -1747,6 +1858,20 @@ const MessageSearch = (() => {
 })();
 
 /* ---------- Chat Bookmarks ---------- */
+/**
+ * Bookmark individual messages for quick reference and recall.
+ *
+ * Persists bookmarks to localStorage, each storing the message's DOM index,
+ * role, text preview, optional user note, and timestamp. Supports up to
+ * {@link MAX_BOOKMARKS} (50) bookmarks. The bookmarks panel lists entries
+ * with click-to-scroll navigation and inline note editing.
+ *
+ * **Caveat:** Bookmarks reference messages by DOM index, which is invalidated
+ * when the conversation is cleared or a different session is loaded. Bookmarks
+ * are cleared automatically on those transitions.
+ *
+ * @namespace ChatBookmarks
+ */
 const ChatBookmarks = (() => {
   const STORAGE_KEY = 'chatBookmarks';
   const MAX_BOOKMARKS = 50;
@@ -1947,6 +2072,17 @@ const ChatBookmarks = (() => {
 })();
 
 /* ---------- Slash Commands ---------- */
+/**
+ * Slash-command autocomplete dropdown for quick actions.
+ *
+ * Activated by typing `/` at the start of the chat input. Presents a
+ * filterable dropdown of available commands (clear, export, templates,
+ * snippets, theme, voice, etc.) with keyboard navigation (↑/↓/Enter/Esc)
+ * and mouse click support. Shows up to {@link MAX_VISIBLE} (8) items at a
+ * time with fuzzy name matching.
+ *
+ * @namespace SlashCommands
+ */
 const SlashCommands = (() => {
     let isOpen = false;
     let selectedIndex = -1;
@@ -2121,6 +2257,17 @@ const SlashCommands = (() => {
 })();
 
 /* ---------- Message Reactions ---------- */
+/**
+ * Per-message emoji reactions with persistent counts.
+ *
+ * Allows users to add/remove emoji reactions (👍 👎 ❤️ 😂 🤔 💡 🎉 ⚠️)
+ * on individual messages, identified by their conversation history index.
+ * Reactions are persisted to localStorage and rendered as clickable badges
+ * below each message. Supports clearing all reactions and re-rendering
+ * after DOM updates.
+ *
+ * @namespace MessageReactions
+ */
 const MessageReactions = (() => {
     const STORAGE_KEY = 'agenticchat_reactions';
     const AVAILABLE_EMOJIS = ['👍', '👎', '❤️', '😂', '🤔', '💡', '🎉', '⚠️'];
@@ -2405,6 +2552,17 @@ const MessageReactions = (() => {
 })();
 
 /* ---------- Keyboard Shortcuts ---------- */
+/**
+ * Global keyboard shortcuts with a help modal.
+ *
+ * Registers document-level keydown handlers for common actions:
+ * `Enter` (send), `Ctrl+L` (clear), `Ctrl+K` (focus input), `Ctrl+F`
+ * (search), `Ctrl+/` (slash commands), `?` (shortcut help), etc.
+ * Shortcuts are suppressed when the user is focused on an input/textarea.
+ * The help modal lists all available bindings.
+ *
+ * @namespace KeyboardShortcuts
+ */
 const KeyboardShortcuts = (() => {
   let isHelpOpen = false;
 
@@ -2563,6 +2721,16 @@ const KeyboardShortcuts = (() => {
 })();
 
 /* ---------- Voice Input ---------- */
+/**
+ * Browser speech-to-text via the Web Speech API (SpeechRecognition).
+ *
+ * Provides continuous voice recognition with configurable language (persisted
+ * to localStorage). Supports interim results for real-time transcription,
+ * optional auto-send on recognition end, and a language-selector dropdown.
+ * Gracefully degrades when the browser doesn't support the Web Speech API.
+ *
+ * @namespace VoiceInput
+ */
 const VoiceInput = (() => {
   let recognition = null;
   let isListening = false;
@@ -2723,6 +2891,16 @@ const VoiceInput = (() => {
 })();
 
 /* ---------- Theme Manager ---------- */
+/**
+ * Dark/light theme manager with OS preference detection.
+ *
+ * Persists the user's theme choice to localStorage. On first load, detects
+ * the OS-level `prefers-color-scheme` media query to pick a default. Applies
+ * the theme by toggling CSS classes on `document.documentElement` and
+ * updates the theme-toggle button icon.
+ *
+ * @namespace ThemeManager
+ */
 const ThemeManager = (() => {
   const STORAGE_KEY = 'agenticchat_theme';
   const THEMES = ['dark', 'light'];
@@ -2802,6 +2980,20 @@ const ThemeManager = (() => {
 })();
 
 /* ---------- Session Manager ---------- */
+/**
+ * Multi-session persistence manager with auto-save and storage quota handling.
+ *
+ * Stores up to {@link MAX_SESSIONS} (50) named conversation sessions in
+ * localStorage, each with full message history, creation/update timestamps,
+ * and character counts. Supports manual save/load/delete, auto-save on every
+ * message, session renaming, and JSON import/export. Handles `QuotaExceededError`
+ * by evicting the oldest sessions. Sessions older than {@link MAX_MESSAGE_AGE_DAYS}
+ * (90 days) are pruned automatically.
+ *
+ * On load, clears {@link ChatBookmarks} to avoid stale DOM index references.
+ *
+ * @namespace SessionManager
+ */
 const SessionManager = (() => {
   const STORAGE_KEY = 'agenticchat_sessions';
   const ACTIVE_KEY = 'agenticchat_active_session';
@@ -3635,6 +3827,16 @@ const ConversationSessions = (function () {
 })();
 
 /* ---------- Chat Statistics Dashboard ---------- */
+/**
+ * Conversation analytics dashboard with real-time statistics.
+ *
+ * Computes metrics from the current conversation: message counts, word counts
+ * (user vs. assistant), average message length, code block count, estimated
+ * token usage, and conversation duration. Renders the stats in a modal panel
+ * with visual indicators for token budget utilization.
+ *
+ * @namespace ChatStats
+ */
 const ChatStats = (() => {
   let isOpen = false;
 
