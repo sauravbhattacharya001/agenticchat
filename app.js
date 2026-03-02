@@ -2365,6 +2365,11 @@ const SlashCommands = (() => {
             });
             input.click();
           } },
+        { name: 'focus', description: 'Toggle focus/zen mode — hide distractions', icon: '🧘',
+          action: () => {
+            const isActive = FocusMode.toggle();
+            UIController.setChatOutput(`Focus mode ${isActive ? 'enabled 🧘' : 'disabled'}`);
+          } },
     ]);
 
     function init() {
@@ -4720,6 +4725,65 @@ const FileDropZone = (() => {
   };
 })();
 
+/* ---------- Focus / Zen Mode ---------- */
+/**
+ * FocusMode — distraction-free chat mode.
+ *
+ * Hides non-essential toolbar buttons, the API key bar, title, char count,
+ * and token usage to let the user focus purely on the conversation.
+ * Toggled via Ctrl+Shift+F, the 🧘 button, or the /focus slash command.
+ * State persists across page reloads via localStorage.
+ *
+ * @namespace FocusMode
+ */
+const FocusMode = (() => {
+  const STORAGE_KEY = 'ac-focus-mode';
+  let active = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'false');
+
+  function apply() {
+    document.body.classList.toggle('zen-mode', active);
+    const btn = document.getElementById('zen-btn');
+    if (btn) {
+      btn.classList.toggle('active', active);
+      btn.title = active
+        ? 'Exit focus mode (Ctrl+Shift+F)'
+        : 'Focus mode — hide distractions (Ctrl+Shift+F)';
+    }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(active));
+  }
+
+  function toggle() {
+    active = !active;
+    apply();
+    return active;
+  }
+
+  function init() {
+    apply();
+    // Global shortcut: Ctrl+Shift+F
+    document.addEventListener('keydown', (e) => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'F') {
+        e.preventDefault();
+        toggle();
+      }
+      // Escape exits focus mode
+      if (e.key === 'Escape' && active) {
+        // Only exit if no modal/panel is open
+        const anyPanelOpen = document.querySelector(
+          '#history-panel[style*="display: flex"], #templates-panel[style*="display: flex"], ' +
+          '#snippets-panel[style*="display: flex"], #sessions-panel[style*="display: flex"], ' +
+          '#shortcuts-modal[style*="display: flex"], #persona-panel[style*="display: flex"]'
+        );
+        if (!anyPanelOpen) {
+          toggle();
+        }
+      }
+    });
+  }
+
+  return { init, toggle, isActive: () => active };
+})();
+
 /* ---------- Event Bindings ---------- */
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('send-btn').addEventListener('click', ChatController.send);
@@ -4898,4 +4962,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Stats button
   document.getElementById('stats-btn').addEventListener('click', ChatStats.toggle);
+
+  // Focus / Zen mode
+  document.getElementById('zen-btn').addEventListener('click', FocusMode.toggle);
+  FocusMode.init();
 });

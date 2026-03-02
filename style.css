@@ -1605,3 +1605,66 @@ kbd {
 #blackbox {
   position: relative;
 }
+
+/* ---- Zen / Focus Mode ---- */
+body.zen-mode h2 {
+  display: none;
+}
+
+body.zen-mode .toolbar:first-of-type {
+  display: none;
+}
+
+body.zen-mode .toolbar button:not(#send-btn):not(#cancel-btn):not(#zen-btn) {
+  display: none;
+}
+
+body.zen-mode .toolbar {
+  max-width: 900px;
+}
+
+body.zen-mode #blackbox {
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+body.zen-mode #char-count,
+body.zen-mode #last-prompt {
+  display: none;
+}
+
+body.zen-mode #token-usage {
+  display: none;
+}
+
+#zen-btn {
+  position: relative;
+}
+
+#zen-btn.active {
+  background: var(--accent);
+  color: #000;
+}
+
+body.zen-mode .zen-indicator {
+  display: block;
+}
+
+.zen-indicator {
+  display: none;
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-bottom: 0.5rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.zen-indicator kbd {
+  font-family: inherit;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0.1em 0.4em;
+  font-size: 0.7rem;
+}

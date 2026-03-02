@@ -33,7 +33,10 @@
     <button id="persona-btn" class="btn-secondary" title="System prompt presets (Ctrl+P)">🎭</button>
     <button id="model-btn" class="btn-secondary" title="Select AI model">🤖 <span id="model-label">GPT-4o</span></button>
     <button id="theme-btn" class="btn-secondary" title="Switch to light theme (Ctrl+D)" aria-label="Toggle theme">☀️</button>
+    <button id="zen-btn" class="btn-secondary" title="Focus mode — hide distractions (Ctrl+Shift+F)">🧘</button>
   </div>
+
+  <div class="zen-indicator">Focus Mode — press <kbd>Ctrl+Shift+F</kbd> or <kbd>Esc</kbd> to exit</div>
 
   <div id="char-count"></div>
   <div id="last-prompt">(no input yet)</div>
@@ -241,6 +244,7 @@
         <div class="shortcut-group">
           <div class="shortcut-group-title">Appearance</div>
           <div class="shortcut-row"><kbd>Ctrl</kbd> + <kbd>D</kbd><span>Toggle dark / light theme</span></div>
+          <div class="shortcut-row"><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd><span>Toggle focus / zen mode</span></div>
         </div>
         <div class="shortcut-group">
           <div class="shortcut-group-title">General</div>
