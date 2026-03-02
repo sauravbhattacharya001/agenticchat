@@ -106,6 +106,29 @@ function downloadBlob(filename, content, mimeType) {
   URL.revokeObjectURL(url);
 }
 
+/* ---------- Storage Sanitizer ---------- */
+/**
+ * Defence-in-depth: strips prototype-pollution keys (__proto__, constructor,
+ * prototype) from objects parsed out of localStorage / imported JSON.
+ * Without this, a tampered localStorage entry like {"__proto__": {"isAdmin": true}}
+ * would pollute Object.prototype when assigned to a plain object variable.
+ */
+const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+function sanitizeStorageObject(obj) {
+  if (obj === null || typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) return obj.map(sanitizeStorageObject);
+  const clean = Object.create(null);
+  for (const key of Object.keys(obj)) {
+    if (DANGEROUS_KEYS.has(key)) continue;
+    const val = obj[key];
+    clean[key] = (val !== null && typeof val === 'object')
+      ? sanitizeStorageObject(val)
+      : val;
+  }
+  return clean;
+}
+
 /* ---------- Conversation Manager ---------- */
 /**
  * Manages the conversation message history sent to the OpenAI API.
@@ -1307,7 +1330,7 @@ const SnippetLibrary = (() => {
   function load() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      return raw ? JSON.parse(raw) : [];
+      return raw ? sanitizeStorageObject(JSON.parse(raw)) : [];
     } catch { return []; }
   }
 
@@ -2037,7 +2060,7 @@ const ChatBookmarks = (() => {
       if (!raw) { bookmarks = []; return; }
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed)) { bookmarks = []; return; }
-      bookmarks = parsed;
+      bookmarks = sanitizeStorageObject(parsed);
     } catch (_) {
       bookmarks = [];
     }
@@ -2674,7 +2697,7 @@ const MessageReactions = (() => {
             if (data) {
                 const parsed = JSON.parse(data);
                 if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-                    reactions = parsed;
+                    reactions = sanitizeStorageObject(parsed);
                 } else {
                     reactions = {};
                 }
@@ -3186,7 +3209,7 @@ const SessionManager = (() => {
   function _loadAll() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      return raw ? JSON.parse(raw) : [];
+      return raw ? sanitizeStorageObject(JSON.parse(raw)) : [];
     } catch { return []; }
   }
 
@@ -3498,7 +3521,7 @@ const SessionManager = (() => {
   /** Import a session from a JSON file. */
   function importSession(jsonString) {
     try {
-      const data = JSON.parse(jsonString);
+      const data = sanitizeStorageObject(JSON.parse(jsonString));
       if (!data.session || !data.session.messages) {
         throw new Error('Invalid session format');
       }
@@ -4266,7 +4289,7 @@ const PersonaPresets = (() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
-        const parsed = JSON.parse(saved);
+        const parsed = sanitizeStorageObject(JSON.parse(saved));
         return parsed.id || 'default';
       }
     } catch (_) {}
@@ -4277,7 +4300,7 @@ const PersonaPresets = (() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
-        const parsed = JSON.parse(saved);
+        const parsed = sanitizeStorageObject(JSON.parse(saved));
         if (parsed.id === 'custom') return parsed.prompt || ChatConfig.SYSTEM_PROMPT;
         const preset = presets.find(p => p.id === parsed.id);
         return preset ? preset.prompt : ChatConfig.SYSTEM_PROMPT;
