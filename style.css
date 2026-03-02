@@ -1556,3 +1556,52 @@ kbd {
 #model-btn #model-label {
   font-size: 0.85rem;
 }
+
+/* --- File Drop Zone --- */
+.file-drop-overlay {
+  display: none;
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  background: rgba(56, 189, 248, 0.08);
+  border: 3px dashed var(--accent);
+  border-radius: 8px;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.file-drop-overlay.visible {
+  display: flex;
+}
+
+.file-drop-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 24px;
+  background: var(--bg-secondary);
+  border-radius: 12px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+}
+
+.file-drop-icon {
+  font-size: 2.5rem;
+}
+
+.file-drop-text {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.file-drop-hint {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+/* Make blackbox position relative for the overlay */
+#blackbox {
+  position: relative;
+}

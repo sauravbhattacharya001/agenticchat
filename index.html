@@ -39,6 +39,13 @@
   <div id="last-prompt">(no input yet)</div>
 
   <div id="blackbox">
+    <div id="file-drop-overlay" class="file-drop-overlay" aria-hidden="true">
+      <div class="file-drop-content">
+        <span class="file-drop-icon">📎</span>
+        <span class="file-drop-text">Drop text files here</span>
+        <span class="file-drop-hint">.js, .py, .json, .csv, .md, .txt, and more</span>
+      </div>
+    </div>
     <div id="search-bar" class="search-bar" role="search" aria-label="Search messages" style="display:none;">
       <input id="search-input" type="text" placeholder="Search messages…" autocomplete="off" aria-label="Search query">
       <span id="search-count" class="search-count" aria-live="polite"></span>

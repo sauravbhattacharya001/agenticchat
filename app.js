@@ -2280,6 +2280,19 @@ const SlashCommands = (() => {
             localStorage.setItem('ac-streaming', JSON.stringify(ChatConfig.STREAMING_ENABLED));
             UIController.setChatOutput(`Streaming ${ChatConfig.STREAMING_ENABLED ? 'enabled ⚡' : 'disabled'}`);
           } },
+        { name: 'file', description: 'Open file picker to attach text files', icon: '📎',
+          action: () => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.multiple = true;
+            input.accept = '.txt,.json,.csv,.js,.jsx,.ts,.tsx,.py,.md,.html,.css,.xml,.yaml,.yml,.toml,.ini,.cfg,.log,.sql,.sh,.bat,.ps1,.rs,.go,.java,.c,.cpp,.h,.rb,.php,.swift,.kt';
+            input.addEventListener('change', () => {
+              if (input.files && input.files.length > 0) {
+                FileDropZone.handleFiles(input.files);
+              }
+            });
+            input.click();
+          } },
     ]);
 
     function init() {
@@ -4426,6 +4439,215 @@ const ModelSelector = (() => {
   return { toggle, close, init };
 })();
 
+/* ---------- File Drop Zone ---------- */
+/**
+ * Drag-and-drop file input for including file contents in chat prompts.
+ *
+ * Users can drag text-based files (.txt, .json, .csv, .js, .py, .md, .html,
+ * .css, .xml, .yaml, .yml, .toml, .ini, .cfg, .log, .sql, .sh, .bat, .ps1,
+ * .ts, .tsx, .jsx, .rs, .go, .java, .c, .cpp, .h, .rb, .php, .swift, .kt)
+ * onto the chat area. The file contents are inserted into the chat input
+ * wrapped in a code block with the filename. Multiple files are supported.
+ *
+ * Maximum file size: 100 KB per file, 5 files per drop.
+ *
+ * @namespace FileDropZone
+ */
+const FileDropZone = (() => {
+  const MAX_FILE_SIZE = 100 * 1024; // 100 KB
+  const MAX_FILES = 5;
+  let dragCounter = 0;
+
+  const TEXT_EXTENSIONS = new Set([
+    'txt', 'json', 'csv', 'js', 'jsx', 'ts', 'tsx', 'py', 'md', 'html',
+    'htm', 'css', 'xml', 'yaml', 'yml', 'toml', 'ini', 'cfg', 'log',
+    'sql', 'sh', 'bat', 'ps1', 'rs', 'go', 'java', 'c', 'cpp', 'h',
+    'hpp', 'rb', 'php', 'swift', 'kt', 'kts', 'scala', 'r', 'lua',
+    'pl', 'pm', 'ex', 'exs', 'erl', 'hs', 'ml', 'mli', 'fs', 'fsx',
+    'clj', 'cljs', 'lisp', 'el', 'vim', 'diff', 'patch', 'env',
+    'gitignore', 'dockerignore', 'editorconfig', 'prettierrc',
+    'eslintrc', 'babelrc', 'tsconfig', 'svg', 'tex', 'bib', 'rst',
+    'adoc', 'org', 'makefile', 'cmake', 'gradle', 'sbt', 'cabal',
+    'lock', 'sum', 'mod', 'csproj', 'sln', 'vcxproj', 'pom',
+    'properties', 'conf', 'rc', 'srv'
+  ]);
+
+  /** Map common extensions to markdown code fence language hints. */
+  function _langHint(ext) {
+    const map = {
+      js: 'javascript', jsx: 'javascript', ts: 'typescript', tsx: 'typescript',
+      py: 'python', rb: 'ruby', rs: 'rust', go: 'go', java: 'java',
+      c: 'c', cpp: 'cpp', h: 'c', hpp: 'cpp', cs: 'csharp',
+      swift: 'swift', kt: 'kotlin', scala: 'scala', r: 'r',
+      sh: 'bash', bat: 'batch', ps1: 'powershell',
+      sql: 'sql', html: 'html', htm: 'html', css: 'css',
+      xml: 'xml', svg: 'xml', json: 'json', yaml: 'yaml', yml: 'yaml',
+      toml: 'toml', md: 'markdown', tex: 'latex',
+      lua: 'lua', pl: 'perl', php: 'php', ex: 'elixir',
+      hs: 'haskell', ml: 'ocaml', fs: 'fsharp', clj: 'clojure',
+      lisp: 'lisp', diff: 'diff', csv: 'csv', srv: 'sauravcode'
+    };
+    return map[ext] || '';
+  }
+
+  /** Check if a filename has a supported text extension. */
+  function isTextFile(filename) {
+    if (!filename) return false;
+    const dotIdx = filename.lastIndexOf('.');
+    if (dotIdx < 0) {
+      // Files without extensions — check common names
+      const lower = filename.toLowerCase();
+      return ['makefile', 'dockerfile', 'rakefile', 'gemfile', 'procfile',
+              'vagrantfile', 'readme', 'license', 'changelog', 'authors',
+              'contributing', 'todo', 'notes'].includes(lower);
+    }
+    const ext = filename.substring(dotIdx + 1).toLowerCase();
+    return TEXT_EXTENSIONS.has(ext);
+  }
+
+  /** Get file extension (lowercase, no dot). */
+  function _getExt(filename) {
+    const dotIdx = filename.lastIndexOf('.');
+    return dotIdx >= 0 ? filename.substring(dotIdx + 1).toLowerCase() : '';
+  }
+
+  /** Show the drop overlay. */
+  function _showOverlay() {
+    const overlay = document.getElementById('file-drop-overlay');
+    if (overlay) overlay.classList.add('visible');
+  }
+
+  /** Hide the drop overlay. */
+  function _hideOverlay() {
+    const overlay = document.getElementById('file-drop-overlay');
+    if (overlay) overlay.classList.remove('visible');
+  }
+
+  /** Read a File as text, with size validation. Returns a Promise. */
+  function _readFile(file) {
+    return new Promise((resolve, reject) => {
+      if (file.size > MAX_FILE_SIZE) {
+        reject(new Error(`File "${file.name}" is too large (${Math.round(file.size / 1024)} KB). Max: ${MAX_FILE_SIZE / 1024} KB.`));
+        return;
+      }
+      if (!isTextFile(file.name)) {
+        reject(new Error(`File "${file.name}" is not a supported text file type.`));
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => resolve({ name: file.name, content: reader.result });
+      reader.onerror = () => reject(new Error(`Failed to read "${file.name}".`));
+      reader.readAsText(file);
+    });
+  }
+
+  /** Process dropped files and insert into chat input. */
+  async function _handleFiles(files) {
+    if (files.length === 0) return;
+
+    const toProcess = Array.from(files).slice(0, MAX_FILES);
+    const results = [];
+    const errors = [];
+
+    for (const file of toProcess) {
+      try {
+        const result = await _readFile(file);
+        results.push(result);
+      } catch (e) {
+        errors.push(e.message);
+      }
+    }
+
+    if (files.length > MAX_FILES) {
+      errors.push(`Only the first ${MAX_FILES} files were processed (${files.length} dropped).`);
+    }
+
+    if (errors.length > 0) {
+      UIController.setConsoleOutput('⚠️ ' + errors.join(' | '), '#f59e0b');
+    }
+
+    if (results.length === 0) return;
+
+    // Build the text to insert into the chat input
+    const input = document.getElementById('chat-input');
+    if (!input) return;
+
+    const existing = input.value;
+    const parts = [];
+
+    for (const { name, content } of results) {
+      const ext = _getExt(name);
+      const lang = _langHint(ext);
+      parts.push(`📎 **${name}**\n\`\`\`${lang}\n${content}\n\`\`\``);
+    }
+
+    const fileText = parts.join('\n\n');
+    const separator = existing.trim() ? '\n\n' : '';
+    input.value = existing + separator + fileText;
+    input.focus();
+    UIController.updateCharCount(input.value.length);
+
+    // Brief confirmation
+    const count = results.length;
+    const msg = `📎 ${count} file${count > 1 ? 's' : ''} added to input`;
+    const consoleOut = document.getElementById('console-output');
+    if (consoleOut && errors.length === 0) {
+      consoleOut.textContent = msg;
+      consoleOut.style.color = '#4ade80';
+    }
+  }
+
+  /** Initialize drag-and-drop event listeners. */
+  function init() {
+    const blackbox = document.getElementById('blackbox');
+    if (!blackbox) return;
+
+    // Use dragCounter to handle nested element drag enter/leave correctly
+    blackbox.addEventListener('dragenter', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dragCounter++;
+      if (dragCounter === 1) _showOverlay();
+    });
+
+    blackbox.addEventListener('dragleave', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dragCounter--;
+      if (dragCounter === 0) _hideOverlay();
+    });
+
+    blackbox.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = 'copy';
+    });
+
+    blackbox.addEventListener('drop', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      dragCounter = 0;
+      _hideOverlay();
+
+      const files = e.dataTransfer.files;
+      if (files && files.length > 0) {
+        _handleFiles(files);
+      }
+    });
+  }
+
+  return {
+    init,
+    isTextFile,
+    handleFiles: _handleFiles,
+    MAX_FILE_SIZE,
+    MAX_FILES,
+    _langHint,
+    _getExt,
+    _handleFiles
+  };
+})();
+
 /* ---------- Event Bindings ---------- */
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('send-btn').addEventListener('click', ChatController.send);
@@ -4576,6 +4798,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Initialize session auto-save preference
   SessionManager.initAutoSave();
+
+  // File drop zone
+  FileDropZone.init();
 
   // Slash commands
   SlashCommands.init();
