@@ -1668,3 +1668,90 @@ body.zen-mode .zen-indicator {
   padding: 0.1em 0.4em;
   font-size: 0.7rem;
 }
+
+/* ---- Scratchpad Panel ---- */
+#scratchpad-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  z-index: 59;
+}
+#scratchpad-overlay.open { display: block; }
+
+#scratchpad-panel {
+  position: fixed;
+  top: 0;
+  right: -500px;
+  width: 480px;
+  max-width: 95vw;
+  height: 100vh;
+  background: var(--bg-secondary);
+  border-left: 2px solid var(--border-box);
+  box-shadow: -4px 0 20px var(--shadow);
+  display: flex;
+  flex-direction: column;
+  z-index: 60;
+  transition: right 0.25s ease;
+}
+#scratchpad-panel.open { right: 0; }
+
+#scratchpad-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border-box);
+  font-weight: 600;
+}
+
+#scratchpad-header .scratchpad-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+#scratchpad-status {
+  font-size: 0.7rem;
+  color: var(--muted);
+  font-weight: 400;
+}
+
+#scratchpad-toolbar {
+  display: flex;
+  gap: 0.35rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--border-box);
+  flex-wrap: wrap;
+}
+
+#scratchpad-textarea {
+  flex: 1;
+  width: 100%;
+  padding: 1rem;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: none;
+  outline: none;
+  resize: none;
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+#scratchpad-textarea::placeholder {
+  color: var(--muted);
+}
+
+#scratchpad-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  border-top: 1px solid var(--border-box);
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+#scratchpad-wordcount {
+  font-variant-numeric: tabular-nums;
+}

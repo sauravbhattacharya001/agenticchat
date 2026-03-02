@@ -2961,6 +2961,13 @@ const KeyboardShortcuts = (() => {
       return;
     }
 
+    // Ctrl+. — toggle scratchpad
+    if (ctrl && e.key === '.') {
+      e.preventDefault();
+      Scratchpad.toggle();
+      return;
+    }
+
     // ? — show shortcuts help (only when not typing in an input)
     if (e.key === '?' && !ctrl && !e.altKey && !isInputFocused()) {
       e.preventDefault();
@@ -4932,6 +4939,147 @@ const InputHistory = (() => {
   };
 })();
 
+/* ---------- Scratchpad ---------- */
+/**
+ * Persistent notepad panel for jotting down ideas while chatting.
+ * Notes auto-save to localStorage on every keystroke (debounced).
+ * Supports copy, insert-to-chat, download, and clear actions.
+ *
+ * @namespace Scratchpad
+ */
+const Scratchpad = (() => {
+  const STORAGE_KEY = 'agenticchat_scratchpad';
+  let isOpen = false;
+  let saveTimer = null;
+
+  /** Load notes from localStorage. */
+  function _load() {
+    try { return localStorage.getItem(STORAGE_KEY) || ''; } catch { return ''; }
+  }
+
+  /** Save notes to localStorage. */
+  function _save(text) {
+    try { localStorage.setItem(STORAGE_KEY, text); } catch {}
+  }
+
+  /** Update the word/char count display. */
+  function _updateCount() {
+    const textarea = document.getElementById('scratchpad-textarea');
+    const countEl = document.getElementById('scratchpad-wordcount');
+    if (!textarea || !countEl) return;
+    const text = textarea.value.trim();
+    const words = text ? text.split(/\s+/).length : 0;
+    const chars = textarea.value.length;
+    countEl.textContent = `${words} word${words !== 1 ? 's' : ''} · ${chars} char${chars !== 1 ? 's' : ''}`;
+  }
+
+  /** Show a brief status message. */
+  function _showStatus(msg) {
+    const el = document.getElementById('scratchpad-status');
+    if (!el) return;
+    el.textContent = msg;
+    setTimeout(() => { if (el.textContent === msg) el.textContent = ''; }, 2000);
+  }
+
+  /** Auto-save with debounce. */
+  function _onInput() {
+    _updateCount();
+    if (saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      const textarea = document.getElementById('scratchpad-textarea');
+      if (textarea) _save(textarea.value);
+    }, 300);
+  }
+
+  /** Copy notes to clipboard. */
+  function copy() {
+    const textarea = document.getElementById('scratchpad-textarea');
+    if (!textarea || !textarea.value.trim()) return;
+    navigator.clipboard.writeText(textarea.value).then(() => {
+      _showStatus('Copied!');
+    }).catch(() => {
+      textarea.select();
+      document.execCommand('copy');
+      _showStatus('Copied!');
+    });
+  }
+
+  /** Insert notes into the chat input. */
+  function insertToChat() {
+    const textarea = document.getElementById('scratchpad-textarea');
+    const chatInput = document.getElementById('chat-input');
+    if (!textarea || !chatInput || !textarea.value.trim()) return;
+    const existing = chatInput.value;
+    const sep = existing.trim() ? '\n' : '';
+    chatInput.value = existing + sep + textarea.value;
+    UIController.updateCharCount(chatInput.value.length);
+    chatInput.focus();
+    _showStatus('Inserted!');
+  }
+
+  /** Download notes as a .txt file. */
+  function download() {
+    const textarea = document.getElementById('scratchpad-textarea');
+    if (!textarea || !textarea.value.trim()) return;
+    const blob = new Blob([textarea.value], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'scratchpad-notes.txt';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    _showStatus('Downloaded!');
+  }
+
+  /** Clear all notes. */
+  function clear() {
+    const textarea = document.getElementById('scratchpad-textarea');
+    if (!textarea) return;
+    if (!textarea.value.trim()) return;
+    if (!confirm('Clear all scratchpad notes?')) return;
+    textarea.value = '';
+    _save('');
+    _updateCount();
+    _showStatus('Cleared');
+  }
+
+  /** Open the panel. */
+  function open() {
+    isOpen = true;
+    const panel = document.getElementById('scratchpad-panel');
+    const overlay = document.getElementById('scratchpad-overlay');
+    const textarea = document.getElementById('scratchpad-textarea');
+    if (panel) panel.classList.add('open');
+    if (overlay) overlay.classList.add('open');
+    if (textarea) {
+      textarea.value = _load();
+      textarea.focus();
+      _updateCount();
+    }
+  }
+
+  /** Close the panel. */
+  function close() {
+    isOpen = false;
+    const panel = document.getElementById('scratchpad-panel');
+    const overlay = document.getElementById('scratchpad-overlay');
+    if (panel) panel.classList.remove('open');
+    if (overlay) overlay.classList.remove('open');
+    // Save on close
+    const textarea = document.getElementById('scratchpad-textarea');
+    if (textarea) _save(textarea.value);
+  }
+
+  /** Toggle the panel. */
+  function toggle() {
+    isOpen ? close() : open();
+  }
+
+  return { open, close, toggle, copy, insertToChat, download, clear, _onInput, isOpen: () => isOpen };
+})();
+
 /* ---------- Event Bindings ---------- */
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('send-btn').addEventListener('click', ChatController.send);
@@ -4986,6 +5134,7 @@ document.addEventListener('DOMContentLoaded', () => {
       ChatStats.close();
       PersonaPresets.close();
       ModelSelector.close();
+      Scratchpad.close();
     }
   });
 
@@ -5118,4 +5267,14 @@ document.addEventListener('DOMContentLoaded', () => {
   // Focus / Zen mode
   document.getElementById('zen-btn').addEventListener('click', FocusMode.toggle);
   FocusMode.init();
+
+  // Scratchpad
+  document.getElementById('scratchpad-btn').addEventListener('click', Scratchpad.toggle);
+  document.getElementById('scratchpad-close-btn').addEventListener('click', Scratchpad.close);
+  document.getElementById('scratchpad-overlay').addEventListener('click', Scratchpad.close);
+  document.getElementById('scratchpad-textarea').addEventListener('input', Scratchpad._onInput);
+  document.getElementById('scratchpad-copy-btn').addEventListener('click', Scratchpad.copy);
+  document.getElementById('scratchpad-insert-btn').addEventListener('click', Scratchpad.insertToChat);
+  document.getElementById('scratchpad-download-btn').addEventListener('click', Scratchpad.download);
+  document.getElementById('scratchpad-clear-btn').addEventListener('click', Scratchpad.clear);
 });

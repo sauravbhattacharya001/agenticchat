@@ -33,6 +33,7 @@
     <button id="persona-btn" class="btn-secondary" title="System prompt presets (Ctrl+P)">🎭</button>
     <button id="model-btn" class="btn-secondary" title="Select AI model">🤖 <span id="model-label">GPT-4o</span></button>
     <button id="theme-btn" class="btn-secondary" title="Switch to light theme (Ctrl+D)" aria-label="Toggle theme">☀️</button>
+    <button id="scratchpad-btn" class="btn-secondary" title="Scratchpad — jot down notes (Ctrl+.)">📝</button>
     <button id="zen-btn" class="btn-secondary" title="Focus mode — hide distractions (Ctrl+Shift+F)">🧘</button>
   </div>
 
@@ -232,6 +233,7 @@
           <div class="shortcut-row"><kbd>Ctrl</kbd> + <kbd>B</kbd><span>Toggle bookmarks</span></div>
           <div class="shortcut-row"><kbd>Ctrl</kbd> + <kbd>P</kbd><span>Toggle persona presets</span></div>
           <div class="shortcut-row"><kbd>Ctrl</kbd> + <kbd>I</kbd><span>Chat statistics</span></div>
+          <div class="shortcut-row"><kbd>Ctrl</kbd> + <kbd>.</kbd><span>Toggle scratchpad</span></div>
         </div>
         <div class="shortcut-group">
           <div class="shortcut-group-title">Sessions</div>
@@ -253,6 +255,28 @@
           <div class="shortcut-row"><kbd>Escape</kbd><span>Close any panel / modal</span></div>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- Scratchpad Panel -->
+  <div id="scratchpad-overlay"></div>
+  <div id="scratchpad-panel" aria-label="Scratchpad notes">
+    <div id="scratchpad-header">
+      <span class="scratchpad-title">📝 Scratchpad <span id="scratchpad-status"></span></span>
+      <div>
+        <button id="scratchpad-close-btn" class="btn-sm" title="Close panel">✕</button>
+      </div>
+    </div>
+    <div id="scratchpad-toolbar">
+      <button id="scratchpad-copy-btn" class="btn-sm" title="Copy notes to clipboard">📋 Copy</button>
+      <button id="scratchpad-insert-btn" class="btn-sm" title="Insert notes into chat input">💬 To Chat</button>
+      <button id="scratchpad-download-btn" class="btn-sm" title="Download notes as .txt">⬇️ Download</button>
+      <button id="scratchpad-clear-btn" class="btn-sm btn-danger-sm" title="Clear all notes">Clear</button>
+    </div>
+    <textarea id="scratchpad-textarea" placeholder="Jot down ideas, notes, code snippets, URLs…&#10;&#10;Your notes are saved automatically."></textarea>
+    <div id="scratchpad-footer">
+      <span id="scratchpad-wordcount">0 words</span>
+      <span>Auto-saved to browser</span>
     </div>
   </div>
 
