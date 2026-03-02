@@ -582,8 +582,33 @@ const UIController = (() => {
  */
 const ChatController = (() => {
   let isSending = false;
+  let currentAbortController = null;
+
+  /** Abort any in-flight API request. */
+  function abortCurrentRequest() {
+    if (currentAbortController) {
+      currentAbortController.abort();
+      currentAbortController = null;
+    }
+  }
+
+  /** Create an AbortSignal that fires on user cancel OR after a timeout (ms). */
+  function createRequestSignal(timeoutMs = 60000) {
+    currentAbortController = new AbortController();
+    // Combine user-cancel with auto-timeout
+    if (typeof AbortSignal.timeout === 'function') {
+      const timeoutSignal = AbortSignal.timeout(timeoutMs);
+      return AbortSignal.any
+        ? AbortSignal.any([currentAbortController.signal, timeoutSignal])
+        : currentAbortController.signal; // fallback for older browsers
+    }
+    return currentAbortController.signal;
+  }
 
   async function callOpenAI(key, messages) {
+    abortCurrentRequest();
+    const signal = createRequestSignal();
+
     const rsp = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -594,7 +619,8 @@ const ChatController = (() => {
         model: ChatConfig.MODEL,
         messages,
         max_tokens: ChatConfig.MAX_TOKENS_RESPONSE
-      })
+      }),
+      signal
     });
 
     if (!rsp.ok) {
@@ -611,6 +637,7 @@ const ChatController = (() => {
       return { ok: false, status: rsp.status, error: errMsg };
     }
 
+    currentAbortController = null;
     return { ok: true, data: await rsp.json() };
   }
 
@@ -619,6 +646,9 @@ const ChatController = (() => {
    * Returns the full reply text and estimated token usage.
    */
   async function callOpenAIStreaming(key, messages, onToken) {
+    abortCurrentRequest();
+    const signal = createRequestSignal();
+
     const rsp = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -630,7 +660,8 @@ const ChatController = (() => {
         messages,
         max_tokens: ChatConfig.MAX_TOKENS_RESPONSE,
         stream: true
-      })
+      }),
+      signal
     });
 
     if (!rsp.ok) {
@@ -682,6 +713,8 @@ const ChatController = (() => {
       messages.reduce((sum, m) => sum + m.content.length, 0) / ChatConfig.CHARS_PER_TOKEN
     );
     const completionTokens = Math.ceil(fullText.length / ChatConfig.CHARS_PER_TOKEN);
+
+    currentAbortController = null;
 
     return {
       ok: true,
@@ -844,12 +877,28 @@ const ChatController = (() => {
       // Auto-save session if enabled
       SessionManager.autoSaveIfEnabled();
     } catch (err) {
+      if (err.name === 'AbortError') {
+        UIController.setChatOutput('(request cancelled)');
+        UIController.setConsoleOutput('(cancelled)');
+        if (ConversationManager.getHistory().length > 1 &&
+            ConversationManager.getHistory().at(-1).role === 'user') {
+          ConversationManager.popLast();
+        }
+      } else if (err.name === 'TimeoutError') {
+        UIController.setChatOutput('Request timed out — try again.');
+        UIController.setConsoleOutput('(timed out)');
+        if (ConversationManager.getHistory().length > 1 &&
+            ConversationManager.getHistory().at(-1).role === 'user') {
+          ConversationManager.popLast();
+        }
+      } else {
       if (ConversationManager.getHistory().length > 1 &&
           ConversationManager.getHistory().at(-1).role === 'user') {
         ConversationManager.popLast();
       }
       UIController.setChatOutput('Network error: ' + err.message);
       UIController.setConsoleOutput('(request failed)');
+      }
     } finally {
       isSending = false;
       UIController.setSendingState(false);
@@ -875,7 +924,7 @@ const ChatController = (() => {
     if (code) await runInSandbox(code);
   }
 
-  return { send, clearHistory, submitServiceKey };
+  return { send, clearHistory, submitServiceKey, cancelRequest: abortCurrentRequest };
 })();
 
 /* ---------- Prompt Templates ---------- */
@@ -4674,7 +4723,10 @@ const FileDropZone = (() => {
 /* ---------- Event Bindings ---------- */
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('send-btn').addEventListener('click', ChatController.send);
-  document.getElementById('cancel-btn').addEventListener('click', SandboxRunner.cancel);
+  document.getElementById('cancel-btn').addEventListener('click', () => {
+    ChatController.cancelRequest();
+    SandboxRunner.cancel();
+  });
   document.getElementById('clear-btn').addEventListener('click', ChatController.clearHistory);
 
   document.getElementById('chat-input').addEventListener('keydown', (e) => {
