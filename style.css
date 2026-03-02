@@ -1755,3 +1755,51 @@ body.zen-mode .zen-indicator {
 #scratchpad-wordcount {
   font-variant-numeric: tabular-nums;
 }
+
+/* ---------- Quick Reply Suggestions ---------- */
+.quick-replies {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border-box);
+  animation: quickRepliesFadeIn 0.3s ease;
+}
+
+@keyframes quickRepliesFadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.quick-reply-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 14px;
+  border: 1px solid var(--border-box);
+  border-radius: 20px;
+  background: var(--bg-card, rgba(255, 255, 255, 0.05));
+  color: var(--fg);
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+  white-space: nowrap;
+}
+
+.quick-reply-chip:hover {
+  background: var(--bg-hover, rgba(255, 255, 255, 0.12));
+  border-color: var(--accent, #60a5fa);
+  transform: translateY(-1px);
+}
+
+.quick-reply-chip:active {
+  transform: scale(0.97);
+}
+
+/* Light theme adjustments */
+html.light .quick-reply-chip {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+html.light .quick-reply-chip:hover {
+  background: rgba(0, 0, 0, 0.08);
+}

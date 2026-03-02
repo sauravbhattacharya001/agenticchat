@@ -728,15 +728,15 @@ const ChatController = (() => {
     };
   }
 
-  /** Execute sandbox code, handling service-key substitution. */
+  /** Execute sandbox code, handling service-key substitution. Returns false on error. */
   async function executeCode(code) {
     const substituted = ApiKeyManager.substituteServiceKey(code);
     if (substituted === null) {
       // Need a service key from user — modal is shown via UI
       UIController.showServiceKeyModal(ApiKeyManager.getPendingDomain());
-      return;
+      return false;
     }
-    await runInSandbox(substituted);
+    return await runInSandbox(substituted);
   }
 
   async function runInSandbox(code) {
@@ -747,6 +747,7 @@ const ChatController = (() => {
 
     UIController.setConsoleOutput(result.value, result.ok ? '#4ade80' : '#f87171');
     UIController.resetSandboxUI();
+    return result.ok;
   }
 
   async function send() {
@@ -797,6 +798,7 @@ const ChatController = (() => {
     UIController.setLastPrompt(`Last input: ${prompt}`);
     UIController.setChatOutput('');
     UIController.setConsoleOutput('(processing)');
+    QuickReplies.hide();
 
     try {
       ConversationManager.addMessage('user', prompt);
@@ -866,11 +868,13 @@ const ChatController = (() => {
       if (codeMatch) {
         UIController.displayCode(codeMatch[1]);
         SnippetLibrary.setCurrentCode(codeMatch[1]);
-        await executeCode(codeMatch[1]);
+        const sandboxResult = await executeCode(codeMatch[1]);
+        QuickReplies.show(reply, true, sandboxResult === false);
       } else {
         UIController.setChatOutput(reply);
         UIController.setConsoleOutput('(no code to run)');
         SnippetLibrary.setCurrentCode(null);
+        QuickReplies.show(reply, false, false);
       }
 
       // Update history panel if open
@@ -916,6 +920,7 @@ const ChatController = (() => {
     SnippetLibrary.setCurrentCode(null);
     ChatBookmarks.clearAll();
     HistoryPanel.refresh();
+    QuickReplies.hide();
   }
 
   /** Handle service-key modal submission. */
@@ -5078,6 +5083,127 @@ const Scratchpad = (() => {
   }
 
   return { open, close, toggle, copy, insertToChat, download, clear, _onInput, isOpen: () => isOpen };
+})();
+
+/* ---------- Quick Replies ---------- */
+/**
+ * Contextual quick-reply suggestion chips shown after AI responses.
+ *
+ * Analyzes the assistant's reply to determine whether it contains code,
+ * explanations, errors, or other patterns and presents relevant follow-up
+ * suggestions as clickable chips below the console output. Clicking a chip
+ * inserts the suggestion into the chat input and optionally auto-sends it.
+ *
+ * @namespace QuickReplies
+ */
+const QuickReplies = (() => {
+  const CODE_SUGGESTIONS = [
+    { label: '🔍 Explain this code', prompt: 'Explain the code you just wrote step by step. What does each part do?' },
+    { label: '⚡ Make it faster', prompt: 'Optimize the code you just wrote for better performance. Keep the same functionality.' },
+    { label: '🛡️ Add error handling', prompt: 'Add proper error handling and edge-case checks to the code you just wrote.' },
+    { label: '🎨 Improve the UI', prompt: 'Improve the visual design of the output — better colors, spacing, typography, and polish.' },
+    { label: '➕ Add more features', prompt: 'Extend the code with additional useful features. Keep it clean and well-structured.' },
+    { label: '📱 Make responsive', prompt: 'Make the output responsive so it looks good on mobile, tablet, and desktop.' },
+    { label: '♿ Add accessibility', prompt: 'Add ARIA labels, keyboard navigation, and screen reader support to the code.' },
+    { label: '💾 Add export', prompt: 'Add the ability to export or download the output as a file (e.g. PNG, CSV, JSON).' },
+  ];
+
+  const TEXT_SUGGESTIONS = [
+    { label: '📝 Go deeper', prompt: 'Elaborate on your last response with more detail and examples.' },
+    { label: '🔄 Try a different approach', prompt: 'Give me a completely different approach or perspective on this.' },
+    { label: '💻 Show me the code', prompt: 'Write working code that demonstrates what you just described.' },
+    { label: '📊 Compare alternatives', prompt: 'Compare the top alternatives or approaches with pros and cons.' },
+  ];
+
+  const ERROR_SUGGESTIONS = [
+    { label: '🔧 Fix the error', prompt: 'The code had an error. Please fix it and explain what went wrong.' },
+    { label: '🔄 Try a simpler approach', prompt: 'That approach had issues. Try a simpler, more reliable implementation.' },
+    { label: '📖 Explain the error', prompt: 'Explain what caused the error and how to prevent it in the future.' },
+  ];
+
+  /**
+   * Analyze the AI response and show relevant suggestion chips.
+   * @param {string} reply      The full assistant reply text.
+   * @param {boolean} hasCode   Whether the reply contained a code block.
+   * @param {boolean} hadError  Whether the sandbox execution failed.
+   */
+  function show(reply, hasCode, hadError) {
+    const container = document.getElementById('quick-replies');
+    if (!container) return;
+
+    let suggestions;
+    if (hadError) {
+      suggestions = ERROR_SUGGESTIONS;
+    } else if (hasCode) {
+      // Pick 4 random code suggestions to avoid overwhelming
+      suggestions = _pickRandom(CODE_SUGGESTIONS, 4);
+    } else {
+      suggestions = TEXT_SUGGESTIONS;
+    }
+
+    _render(container, suggestions);
+  }
+
+  /** Hide the suggestion chips. */
+  function hide() {
+    const container = document.getElementById('quick-replies');
+    if (container) {
+      container.innerHTML = '';
+      container.style.display = 'none';
+    }
+  }
+
+  /**
+   * Pick n random items from an array (Fisher-Yates partial shuffle).
+   * @param {Array} arr  Source array.
+   * @param {number} n   Number of items to pick.
+   * @returns {Array}    Randomly selected items.
+   */
+  function _pickRandom(arr, n) {
+    const copy = arr.slice();
+    const result = [];
+    const count = Math.min(n, copy.length);
+    for (let i = 0; i < count; i++) {
+      const idx = Math.floor(Math.random() * copy.length);
+      result.push(copy.splice(idx, 1)[0]);
+    }
+    return result;
+  }
+
+  /**
+   * Render suggestion chips into the container.
+   * @param {HTMLElement} container  The quick-replies container element.
+   * @param {Array} suggestions     Array of { label, prompt } objects.
+   */
+  function _render(container, suggestions) {
+    container.innerHTML = '';
+    container.style.display = 'flex';
+
+    suggestions.forEach(suggestion => {
+      const chip = document.createElement('button');
+      chip.className = 'quick-reply-chip';
+      chip.textContent = suggestion.label;
+      chip.title = suggestion.prompt;
+      chip.addEventListener('click', () => _selectSuggestion(suggestion));
+      container.appendChild(chip);
+    });
+  }
+
+  /**
+   * Handle chip click — insert prompt into chat input and focus.
+   * @param {Object} suggestion  The selected { label, prompt } object.
+   */
+  function _selectSuggestion(suggestion) {
+    const input = document.getElementById('chat-input');
+    if (input) {
+      input.value = suggestion.prompt;
+      input.focus();
+      UIController.updateCharCount(suggestion.prompt.length);
+    }
+    hide();
+  }
+
+  return { show, hide };
 })();
 
 /* ---------- Event Bindings ---------- */
