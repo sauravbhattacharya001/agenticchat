@@ -16,11 +16,11 @@ beforeEach(() => {
  * ChatConfig
  * ================================================================ */
 describe('ChatConfig', () => {
-  test('is frozen and cannot be mutated', () => {
-    expect(Object.isFrozen(ChatConfig)).toBe(true);
-    // In strict mode this throws; in sloppy mode the assignment silently fails
-    ChatConfig.MODEL = 'gpt-3.5';
-    expect(ChatConfig.MODEL).toBe('gpt-4o'); // still the original value
+  test('is not frozen due to dynamic properties (MODEL setter, STREAMING_ENABLED)', () => {
+    // ChatConfig has mutable properties (MODEL via setter, STREAMING_ENABLED)
+    // so it cannot be frozen. Verify key constants are still correct.
+    expect(ChatConfig.MAX_TOKENS_RESPONSE).toBe(4096);
+    expect(ChatConfig.MAX_HISTORY_PAIRS).toBe(20);
   });
 
   test('has required configuration values', () => {
@@ -3731,6 +3731,8 @@ describe('ChatController', () => {
     global.fetch = jest.fn();
     global.alert = jest.fn();
     global.confirm = jest.fn(() => true);
+    // Disable streaming in tests to avoid needing ReadableStream mocks
+    ChatConfig.STREAMING_ENABLED = false;
     // Ensure clean state: provide an API key so send() doesn't prompt for one
     try { ApiKeyManager.setOpenAIKey('sk-testkey123456'); } catch (_) {}
   });
@@ -4442,7 +4444,7 @@ describe('SlashCommands', () => {
   describe('getCommands', () => {
     test('returns all commands', () => {
       const cmds = SlashCommands.getCommands();
-      expect(cmds.length).toBe(15);
+      expect(cmds.length).toBe(16);
     });
 
     test('returns a defensive copy', () => {

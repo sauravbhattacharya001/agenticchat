@@ -42,6 +42,7 @@ const ChatConfig = (() => {
     CHARS_PER_TOKEN: 4,
     TOKEN_WARNING_THRESHOLD: 80000,
     SANDBOX_TIMEOUT_MS: 30000,
+    STREAMING_ENABLED: JSON.parse(localStorage.getItem('ac-streaming') ?? 'true'),
     SYSTEM_PROMPT: `
 You are an autonomous agent in a browser.
 Only reply with JavaScript in a single code block.
@@ -433,6 +434,7 @@ const UIController = (() => {
   }
 
   function setChatOutput(text)    { el('chat-output').textContent = text; }
+  function appendChatOutput(text)  { el('chat-output').textContent += text; }
   function setConsoleOutput(text, color) {
     const out = el('console-output');
     out.textContent = text;
@@ -534,7 +536,7 @@ const UIController = (() => {
   }
 
   return {
-    setChatOutput, setConsoleOutput, setLastPrompt,
+    setChatOutput, appendChatOutput, setConsoleOutput, setLastPrompt,
     setSendingState, setSandboxRunning, resetSandboxUI,
     showTokenUsage, showApiKeyInput, removeApiKeyInput,
     showServiceKeyModal, hideServiceKeyModal,
@@ -587,6 +589,86 @@ const ChatController = (() => {
     }
 
     return { ok: true, data: await rsp.json() };
+  }
+
+  /**
+   * Stream a chat completion from OpenAI, calling onToken(text) for each chunk.
+   * Returns the full reply text and estimated token usage.
+   */
+  async function callOpenAIStreaming(key, messages, onToken) {
+    const rsp = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${key}`
+      },
+      body: JSON.stringify({
+        model: ChatConfig.MODEL,
+        messages,
+        max_tokens: ChatConfig.MAX_TOKENS_RESPONSE,
+        stream: true
+      })
+    });
+
+    if (!rsp.ok) {
+      let errMsg = `OpenAI error ${rsp.status}`;
+      try {
+        const body = await rsp.json();
+        if (body?.error?.message) errMsg += `: ${body.error.message}`;
+      } catch (_) {}
+
+      if (rsp.status === 401) errMsg += ' — check your API key';
+      else if (rsp.status === 429) errMsg += ' — rate limited, try again shortly';
+      else if (rsp.status === 503) errMsg += ' — service temporarily unavailable';
+
+      return { ok: false, status: rsp.status, error: errMsg };
+    }
+
+    const reader = rsp.body.getReader();
+    const decoder = new TextDecoder();
+    let fullText = '';
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop(); // keep incomplete line in buffer
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.startsWith('data: ')) continue;
+        const payload = trimmed.slice(6);
+        if (payload === '[DONE]') continue;
+
+        try {
+          const parsed = JSON.parse(payload);
+          const delta = parsed.choices?.[0]?.delta?.content;
+          if (delta) {
+            fullText += delta;
+            onToken(delta);
+          }
+        } catch (_) { /* skip malformed chunks */ }
+      }
+    }
+
+    // Estimate tokens since streaming doesn't return usage
+    const promptTokens = Math.ceil(
+      messages.reduce((sum, m) => sum + m.content.length, 0) / ChatConfig.CHARS_PER_TOKEN
+    );
+    const completionTokens = Math.ceil(fullText.length / ChatConfig.CHARS_PER_TOKEN);
+
+    return {
+      ok: true,
+      text: fullText,
+      usage: {
+        prompt_tokens: promptTokens,
+        completion_tokens: completionTokens,
+        total_tokens: promptTokens + completionTokens
+      }
+    };
   }
 
   /** Execute sandbox code, handling service-key substitution. */
@@ -656,33 +738,65 @@ const ChatController = (() => {
     isSending = true;
     UIController.setSendingState(true);
     UIController.setLastPrompt(`Last input: ${prompt}`);
-    UIController.setChatOutput('Thinking…');
+    UIController.setChatOutput('');
     UIController.setConsoleOutput('(processing)');
 
     try {
       ConversationManager.addMessage('user', prompt);
 
-      const result = await callOpenAI(
-        ApiKeyManager.getOpenAIKey(),
-        ConversationManager.getMessages()
-      );
+      let reply;
+      let usage;
 
-      if (!result.ok) {
-        ConversationManager.popLast();
-        UIController.setChatOutput(result.error);
-        UIController.setConsoleOutput('(request failed)');
+      if (ChatConfig.STREAMING_ENABLED) {
+        // Streaming path — show tokens as they arrive
+        UIController.setChatOutput('');
+        const result = await callOpenAIStreaming(
+          ApiKeyManager.getOpenAIKey(),
+          ConversationManager.getMessages(),
+          (token) => UIController.appendChatOutput(token)
+        );
 
-        if (result.status === 401) {
-          ApiKeyManager.clearOpenAIKey();
-          UIController.showApiKeyInput();
+        if (!result.ok) {
+          ConversationManager.popLast();
+          UIController.setChatOutput(result.error);
+          UIController.setConsoleOutput('(request failed)');
+
+          if (result.status === 401) {
+            ApiKeyManager.clearOpenAIKey();
+            UIController.showApiKeyInput();
+          }
+          return;
         }
-        return;
+
+        reply = result.text || 'No response';
+        usage = result.usage;
+      } else {
+        // Non-streaming path — original behavior
+        UIController.setChatOutput('Thinking…');
+        const result = await callOpenAI(
+          ApiKeyManager.getOpenAIKey(),
+          ConversationManager.getMessages()
+        );
+
+        if (!result.ok) {
+          ConversationManager.popLast();
+          UIController.setChatOutput(result.error);
+          UIController.setConsoleOutput('(request failed)');
+
+          if (result.status === 401) {
+            ApiKeyManager.clearOpenAIKey();
+            UIController.showApiKeyInput();
+          }
+          return;
+        }
+
+        reply = result.data.choices?.[0]?.message?.content || 'No response';
+        usage = result.data.usage;
       }
 
-      const reply = result.data.choices?.[0]?.message?.content || 'No response';
       ConversationManager.addMessage('assistant', reply);
       ConversationManager.trim();
-      UIController.showTokenUsage(result.data.usage);
+      UIController.showTokenUsage(usage);
 
       // Warn if history is getting large
       if (ConversationManager.estimateTokens() > ChatConfig.TOKEN_WARNING_THRESHOLD) {
@@ -2160,6 +2274,12 @@ const SlashCommands = (() => {
           action: () => ChatStats.toggle() },
         { name: 'sessions', description: 'Toggle sessions panel', icon: '📋',
           action: () => SessionManager.toggle() },
+        { name: 'stream', description: 'Toggle streaming responses on/off', icon: '⚡',
+          action: () => {
+            ChatConfig.STREAMING_ENABLED = !ChatConfig.STREAMING_ENABLED;
+            localStorage.setItem('ac-streaming', JSON.stringify(ChatConfig.STREAMING_ENABLED));
+            UIController.setChatOutput(`Streaming ${ChatConfig.STREAMING_ENABLED ? 'enabled ⚡' : 'disabled'}`);
+          } },
     ]);
 
     function init() {
