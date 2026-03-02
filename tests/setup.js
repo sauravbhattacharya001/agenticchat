@@ -197,7 +197,12 @@ function loadApp() {
     'ConversationSessions',
     'SlashCommands',
     'MessageReactions',
-    'ChatStats'
+    'ChatStats',
+    'PersonaPresets',
+    'ModelSelector',
+    'FileDropZone',
+    'FocusMode',
+    'InputHistory'
   ];
 
   for (const mod of modules) {

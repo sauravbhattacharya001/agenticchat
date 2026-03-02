@@ -24,6 +24,7 @@
  *   ThemeManager        — dark/light theme with OS preference detection
  *   SessionManager      — multi-session persistence with auto-save and quota mgmt
  *   ChatStats           — conversation analytics (word counts, code blocks, timing)
+ *   InputHistory        — navigate previous prompts with ↑/↓ arrow keys
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -799,6 +800,7 @@ const ChatController = (() => {
 
     try {
       ConversationManager.addMessage('user', prompt);
+      InputHistory.push(prompt);
 
       let reply;
       let usage;
@@ -2369,6 +2371,12 @@ const SlashCommands = (() => {
           action: () => {
             const isActive = FocusMode.toggle();
             UIController.setChatOutput(`Focus mode ${isActive ? 'enabled 🧘' : 'disabled'}`);
+          } },
+        { name: 'input-history', description: 'Clear prompt history (↑/↓ navigation)', icon: '🕐',
+          action: () => {
+            const count = InputHistory.getCount();
+            InputHistory.clearAll();
+            UIController.setChatOutput(`Cleared ${count} prompt${count !== 1 ? 's' : ''} from input history.`);
           } },
     ]);
 
@@ -4784,6 +4792,146 @@ const FocusMode = (() => {
   return { init, toggle, isActive: () => active };
 })();
 
+/* ============================================================
+ * InputHistory — navigate previous prompts with ↑/↓ arrows.
+ *
+ * Records every user prompt sent via ChatController.send().
+ * Persists in localStorage so history survives page reloads.
+ * Up/Down arrows cycle through history when the chat input
+ * is focused and the cursor is at position 0 (Up) or at
+ * the end (Down).  Typing resets navigation to the draft.
+ *
+ * @namespace InputHistory
+ * ============================================================ */
+const InputHistory = (() => {
+  const STORAGE_KEY = 'ac-input-history';
+  const MAX_ENTRIES = 100;
+
+  let entries = [];        // oldest-first: entries[0] = oldest
+  let cursor  = -1;        // -1 = not navigating (typing new text)
+  let draft   = '';        // saved current input while navigating
+
+  /** Load history from localStorage. */
+  function load() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          entries = parsed.slice(-MAX_ENTRIES);
+        }
+      }
+    } catch { /* ignore corrupt data */ }
+  }
+
+  /** Save history to localStorage. */
+  function save() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(entries.slice(-MAX_ENTRIES)));
+    } catch { /* quota exceeded — silently drop */ }
+  }
+
+  /**
+   * Record a prompt.  Deduplicates consecutive identical entries.
+   * @param {string} text
+   */
+  function push(text) {
+    if (!text) return;
+    // Avoid consecutive dupes
+    if (entries.length > 0 && entries[entries.length - 1] === text) {
+      resetCursor();
+      return;
+    }
+    entries.push(text);
+    if (entries.length > MAX_ENTRIES) entries.shift();
+    save();
+    resetCursor();
+  }
+
+  /** Reset navigation state (called after send or when user types). */
+  function resetCursor() {
+    cursor = -1;
+    draft = '';
+  }
+
+  /**
+   * Handle keydown on the chat input for Up/Down navigation.
+   * Returns true if the event was consumed (caller should preventDefault).
+   * @param {KeyboardEvent} e
+   * @param {HTMLInputElement} input
+   * @returns {boolean}
+   */
+  function handleKeydown(e, input) {
+    if (entries.length === 0) return false;
+
+    if (e.key === 'ArrowUp') {
+      // Only activate when cursor is at position 0 (or input is empty)
+      if (input.selectionStart !== 0 && input.value.length > 0) return false;
+
+      if (cursor === -1) {
+        // Starting navigation — save current draft
+        draft = input.value;
+        cursor = entries.length - 1;
+      } else if (cursor > 0) {
+        cursor--;
+      } else {
+        // Already at oldest — do nothing
+        return true;
+      }
+      input.value = entries[cursor];
+      UIController.updateCharCount(input.value.length);
+      // Move cursor to end of input
+      setTimeout(() => { input.selectionStart = input.selectionEnd = input.value.length; }, 0);
+      return true;
+    }
+
+    if (e.key === 'ArrowDown') {
+      if (cursor === -1) return false; // Not navigating
+
+      if (cursor < entries.length - 1) {
+        cursor++;
+        input.value = entries[cursor];
+      } else {
+        // Past newest — restore draft
+        cursor = -1;
+        input.value = draft;
+        draft = '';
+      }
+      UIController.updateCharCount(input.value.length);
+      setTimeout(() => { input.selectionStart = input.selectionEnd = input.value.length; }, 0);
+      return true;
+    }
+
+    return false;
+  }
+
+  /** Get all history entries (for testing/export). */
+  function getAll() { return entries.slice(); }
+
+  /** Get current entry count. */
+  function getCount() { return entries.length; }
+
+  /** Clear all history. */
+  function clearAll() {
+    entries = [];
+    cursor = -1;
+    draft = '';
+    try { localStorage.removeItem(STORAGE_KEY); } catch { /* */ }
+  }
+
+  // Load on module init
+  load();
+
+  return {
+    push,
+    resetCursor,
+    handleKeydown,
+    getAll,
+    getCount,
+    clearAll
+  };
+})();
+
 /* ---------- Event Bindings ---------- */
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('send-btn').addEventListener('click', ChatController.send);
@@ -4794,10 +4942,14 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('clear-btn').addEventListener('click', ChatController.clearHistory);
 
   document.getElementById('chat-input').addEventListener('keydown', (e) => {
+    // Input history navigation (Up/Down)
+    const input = document.getElementById('chat-input');
+    if (InputHistory.handleKeydown(e, input)) { e.preventDefault(); return; }
     if (e.key === 'Enter') { e.preventDefault(); ChatController.send(); }
   });
 
   document.getElementById('chat-input').addEventListener('input', function () {
+    InputHistory.resetCursor(); // typing resets history navigation
     UIController.updateCharCount(this.value.length);
   });
 

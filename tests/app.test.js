@@ -4444,7 +4444,7 @@ describe('SlashCommands', () => {
   describe('getCommands', () => {
     test('returns all commands', () => {
       const cmds = SlashCommands.getCommands();
-      expect(cmds.length).toBe(16);
+      expect(cmds.length).toBe(19);
     });
 
     test('returns a defensive copy', () => {
@@ -5817,6 +5817,157 @@ describe('ConversationSessions', () => {
       var event = new KeyboardEvent('keydown', { key: 's', ctrlKey: true, shiftKey: false, bubbles: true });
       KeyboardShortcuts.handleKeydown(event);
       // Should not throw
+    });
+  });
+});
+
+/* ============================================================
+ * InputHistory Tests
+ * ============================================================ */
+describe('InputHistory', () => {
+  beforeEach(() => {
+    InputHistory.clearAll();
+  });
+
+  describe('push', () => {
+    test('records a prompt', () => {
+      InputHistory.push('hello');
+      expect(InputHistory.getCount()).toBe(1);
+      expect(InputHistory.getAll()).toEqual(['hello']);
+    });
+
+    test('records multiple prompts in order', () => {
+      InputHistory.push('first');
+      InputHistory.push('second');
+      InputHistory.push('third');
+      expect(InputHistory.getAll()).toEqual(['first', 'second', 'third']);
+    });
+
+    test('deduplicates consecutive identical entries', () => {
+      InputHistory.push('hello');
+      InputHistory.push('hello');
+      expect(InputHistory.getCount()).toBe(1);
+    });
+
+    test('allows non-consecutive duplicates', () => {
+      InputHistory.push('hello');
+      InputHistory.push('world');
+      InputHistory.push('hello');
+      expect(InputHistory.getCount()).toBe(3);
+    });
+
+    test('ignores empty strings', () => {
+      InputHistory.push('');
+      expect(InputHistory.getCount()).toBe(0);
+    });
+  });
+
+  describe('handleKeydown', () => {
+    function makeInput(value) {
+      const input = document.createElement('input');
+      input.value = value;
+      Object.defineProperty(input, 'selectionStart', {
+        get: () => 0,
+        set: () => {},
+        configurable: true
+      });
+      Object.defineProperty(input, 'selectionEnd', {
+        get: () => value.length,
+        set: () => {},
+        configurable: true
+      });
+      return input;
+    }
+
+    test('returns false when history is empty', () => {
+      const input = makeInput('');
+      const e = new KeyboardEvent('keydown', { key: 'ArrowUp' });
+      expect(InputHistory.handleKeydown(e, input)).toBe(false);
+    });
+
+    test('ArrowUp loads most recent prompt', () => {
+      InputHistory.push('alpha');
+      InputHistory.push('beta');
+      const input = makeInput('');
+      const e = new KeyboardEvent('keydown', { key: 'ArrowUp' });
+      const consumed = InputHistory.handleKeydown(e, input);
+      expect(consumed).toBe(true);
+      expect(input.value).toBe('beta');
+    });
+
+    test('ArrowUp twice loads second most recent', () => {
+      InputHistory.push('alpha');
+      InputHistory.push('beta');
+      const input = makeInput('');
+      InputHistory.handleKeydown(new KeyboardEvent('keydown', { key: 'ArrowUp' }), input);
+      InputHistory.handleKeydown(new KeyboardEvent('keydown', { key: 'ArrowUp' }), input);
+      expect(input.value).toBe('alpha');
+    });
+
+    test('ArrowDown after ArrowUp goes forward', () => {
+      InputHistory.push('alpha');
+      InputHistory.push('beta');
+      const input = makeInput('');
+      InputHistory.handleKeydown(new KeyboardEvent('keydown', { key: 'ArrowUp' }), input);
+      InputHistory.handleKeydown(new KeyboardEvent('keydown', { key: 'ArrowDown' }), input);
+      expect(input.value).toBe('');
+    });
+
+    test('ArrowDown without navigation returns false', () => {
+      InputHistory.push('alpha');
+      const input = makeInput('test');
+      const e = new KeyboardEvent('keydown', { key: 'ArrowDown' });
+      expect(InputHistory.handleKeydown(e, input)).toBe(false);
+    });
+
+    test('ignores non-arrow keys', () => {
+      InputHistory.push('alpha');
+      const input = makeInput('');
+      const e = new KeyboardEvent('keydown', { key: 'Enter' });
+      expect(InputHistory.handleKeydown(e, input)).toBe(false);
+    });
+
+    test('preserves draft when navigating', () => {
+      InputHistory.push('old prompt');
+      const input = makeInput('my draft');
+      InputHistory.handleKeydown(new KeyboardEvent('keydown', { key: 'ArrowUp' }), input);
+      expect(input.value).toBe('old prompt');
+      InputHistory.handleKeydown(new KeyboardEvent('keydown', { key: 'ArrowDown' }), input);
+      expect(input.value).toBe('my draft');
+    });
+  });
+
+  describe('clearAll', () => {
+    test('clears all entries', () => {
+      InputHistory.push('a');
+      InputHistory.push('b');
+      InputHistory.clearAll();
+      expect(InputHistory.getCount()).toBe(0);
+      expect(InputHistory.getAll()).toEqual([]);
+    });
+  });
+
+  describe('persistence', () => {
+    test('saves to localStorage', () => {
+      InputHistory.push('saved');
+      const stored = localStorage.getItem('ac-input-history');
+      expect(stored).not.toBeNull();
+      expect(JSON.parse(stored)).toContain('saved');
+    });
+
+    test('clearAll removes from localStorage', () => {
+      InputHistory.push('temp');
+      InputHistory.clearAll();
+      expect(localStorage.getItem('ac-input-history')).toBeNull();
+    });
+  });
+
+  describe('slash command', () => {
+    test('/input-history command is registered', () => {
+      const cmds = SlashCommands.getCommands();
+      const cmd = cmds.find(c => c.name === 'input-history');
+      expect(cmd).toBeDefined();
+      expect(cmd.icon).toBe('🕐');
     });
   });
 });
