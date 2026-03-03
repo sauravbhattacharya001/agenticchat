@@ -148,6 +148,7 @@ const ConversationManager = (() => {
   let cachedCharCount = ChatConfig.SYSTEM_PROMPT.length;
   let charCountDirty = false;
 
+  /** Recompute cached character count from the full message history. */
   function recomputeCharCount() {
     cachedCharCount = history.reduce((sum, m) => sum + m.content.length, 0);
     charCountDirty = false;
@@ -327,10 +328,12 @@ const SandboxRunner = (() => {
     });
   }
 
+  /** Cancel the currently running sandbox execution, if any. */
   function cancel() {
     if (cleanupFn) cleanupFn();
   }
 
+  /** Return whether a sandbox execution is currently in progress. */
   function isRunning() {
     return cleanupFn !== null;
   }
@@ -356,7 +359,13 @@ const ApiKeyManager = (() => {
   let pendingCode = null;
   let pendingDomain = null;
 
+  /** Get the current OpenAI API key (session-scoped, not persisted). */
   function getOpenAIKey()       { return openaiKey; }
+  /**
+   * Set the OpenAI API key after validating its format.
+   * @param {string} key - Must start with "sk-" followed by 6+ alphanumeric chars.
+   * @throws {Error} If the key format is invalid.
+   */
   function setOpenAIKey(key)    {
     // Validate key format: OpenAI keys start with "sk-" followed by alphanumerics
     if (!/^sk-[A-Za-z0-9_-]{6,}$/.test(key)) {
@@ -364,8 +373,15 @@ const ApiKeyManager = (() => {
     }
     openaiKey = key;
   }
+  /** Clear the stored OpenAI API key. */
   function clearOpenAIKey()     { openaiKey = null; }
 
+  /**
+   * Extract the hostname from the first URL found in code.
+   * Used to identify which third-party service needs an API key.
+   * @param {string} code - Source code that may contain URLs.
+   * @returns {string} The hostname, or "Unknown Service" if no URL found.
+   */
   function extractDomain(code) {
     const m = code.match(/https?:\/\/([^/'"]+)/);
     return m ? m[1] : 'Unknown Service';
@@ -419,6 +435,7 @@ const ApiKeyManager = (() => {
     return code;
   }
 
+  /** Get the domain awaiting a service key from the user, or null. */
   function getPendingDomain() { return pendingDomain; }
 
   /**
@@ -468,6 +485,12 @@ const UIController = (() => {
   // Cache DOM references on first access to avoid repeated getElementById lookups.
   // Uses a lazy cache that populates on DOMContentLoaded or first call.
   const _cache = {};
+  /**
+   * Cached getElementById lookup. Memoizes DOM references to avoid
+   * repeated lookups on every UI update.
+   * @param {string} id - DOM element ID.
+   * @returns {HTMLElement|null}
+   */
   function el(id) {
     let node = _cache[id];
     if (!node) {
@@ -477,15 +500,28 @@ const UIController = (() => {
     return node;
   }
 
+  /** Set the chat output area to the given text (replaces content). */
   function setChatOutput(text)    { el('chat-output').textContent = text; }
+  /** Append text to the chat output area (used during streaming). */
   function appendChatOutput(text)  { el('chat-output').textContent += text; }
+  /**
+   * Set the console/sandbox output area text and optional color.
+   * @param {string} text - Output text to display.
+   * @param {string} [color] - CSS color value for the text.
+   */
   function setConsoleOutput(text, color) {
     const out = el('console-output');
     out.textContent = text;
     if (color) out.style.color = color;
   }
+  /** Display the last user prompt in the prompt echo area. */
   function setLastPrompt(text)    { el('last-prompt').textContent = text; }
 
+  /**
+   * Toggle the UI between sending and idle states.
+   * Disables the send button and input field while a request is in flight.
+   * @param {boolean} sending - True to enter sending state.
+   */
   function setSendingState(sending) {
     const btn = el('send-btn');
     const input = el('chat-input');
@@ -494,6 +530,11 @@ const UIController = (() => {
     input.disabled = sending;
   }
 
+  /**
+   * Show or hide the cancel button and update the send button label
+   * while sandbox code is executing.
+   * @param {boolean} running - True if sandbox is currently executing.
+   */
   function setSandboxRunning(running) {
     el('cancel-btn').style.display = running ? 'inline-block' : 'none';
     if (running) {
@@ -503,6 +544,7 @@ const UIController = (() => {
     }
   }
 
+  /** Reset sandbox UI to idle state after execution completes. */
   function resetSandboxUI() {
     setSandboxRunning(false);
     const btn = el('send-btn');
@@ -510,6 +552,11 @@ const UIController = (() => {
     btn.textContent = 'Send';
   }
 
+  /**
+   * Display token usage and estimated cost in the token-usage bar.
+   * Computes cost using per-model pricing from ChatConfig.MODEL_PRICING.
+   * @param {Object} usage - OpenAI usage object with prompt_tokens and completion_tokens.
+   */
   function showTokenUsage(usage) {
     if (!usage) return;
     const prompt = usage.prompt_tokens || 0;
@@ -521,6 +568,7 @@ const UIController = (() => {
       `Tokens: ${prompt} in / ${completion} out (${total} total) · ~$${cost.toFixed(4)}`;
   }
 
+  /** Show the API key input field in the toolbar if not already visible. */
   function showApiKeyInput() {
     if (el('api-key')) return;
     const toolbar = document.querySelector('.toolbar[aria-label="API key entry"]');
@@ -536,6 +584,7 @@ const UIController = (() => {
     inp.focus();
   }
 
+  /** Remove the API key input field from the toolbar and clear its value. */
   function removeApiKeyInput() {
     const inp = el('api-key');
     if (inp) {
@@ -545,22 +594,35 @@ const UIController = (() => {
     }
   }
 
+  /**
+   * Show the service API key modal for the given domain.
+   * @param {string} domain - The third-party service hostname requiring a key.
+   */
   function showServiceKeyModal(domain) {
     el('api-service-name').textContent = domain;
     el('apikey-modal').style.display = 'flex';
     el('user-api-key').focus();
   }
 
+  /** Hide the service API key modal and clear its input. */
   function hideServiceKeyModal() {
     el('apikey-modal').style.display = 'none';
     el('user-api-key').value = '';
   }
 
+  /** Get the trimmed value of the chat input field. */
   function getChatInput()   { return el('chat-input').value.trim(); }
+  /** Clear the chat input field and return focus to it. */
   function clearChatInput() { const inp = el('chat-input'); inp.value = ''; inp.focus(); }
+  /** Get the trimmed API key input value, or empty string if field is absent. */
   function getApiKeyInput() { const inp = el('api-key'); return inp ? inp.value.trim() : ''; }
+  /** Get the trimmed service key input value from the modal. */
   function getServiceKeyInput() { return el('user-api-key').value.trim(); }
 
+  /**
+   * Display a code snippet in the chat output area inside a <pre> block.
+   * @param {string} code - The code to display.
+   */
   function displayCode(code) {
     const container = el('chat-output');
     container.textContent = '';
@@ -569,6 +631,11 @@ const UIController = (() => {
     container.appendChild(pre);
   }
 
+  /**
+   * Update the character count display. Shows a warning when the
+   * input exceeds 80% of MAX_INPUT_CHARS, red when over the limit.
+   * @param {number} len - Current character count.
+   */
   function updateCharCount(len) {
     const counter = el('char-count');
     if (len > ChatConfig.MAX_INPUT_CHARS * 0.8) {
@@ -626,6 +693,13 @@ const ChatController = (() => {
     return currentAbortController.signal;
   }
 
+  /**
+   * Send a non-streaming chat completion request to the OpenAI API.
+   * Aborts any in-flight request before starting a new one.
+   * @param {string} key - OpenAI API key.
+   * @param {Array<{role: string, content: string}>} messages - Conversation history.
+   * @returns {Promise<{ok: boolean, data?: Object, status?: number, error?: string}>}
+   */
   async function callOpenAI(key, messages) {
     abortCurrentRequest();
     const signal = createRequestSignal();
@@ -759,6 +833,12 @@ const ChatController = (() => {
     return await runInSandbox(substituted);
   }
 
+  /**
+   * Execute code in the sandboxed iframe and display the result.
+   * Updates console output with the result and resets sandbox UI on completion.
+   * @param {string} code - JavaScript code to execute in the sandbox.
+   * @returns {Promise<boolean>} True if execution succeeded.
+   */
   async function runInSandbox(code) {
     UIController.setConsoleOutput('(running in sandbox…)');
     UIController.setSandboxRunning(true);
@@ -770,6 +850,14 @@ const ChatController = (() => {
     return result.ok;
   }
 
+  /**
+   * Main send handler: validates input, calls OpenAI (streaming or not),
+   * extracts and executes code blocks, updates conversation history,
+   * shows token usage, and triggers auto-save.
+   *
+   * On first call, captures the API key from the key input field.
+   * Handles abort, timeout, and network errors with rollback.
+   */
   async function send() {
     if (isSending) return;
 
@@ -937,6 +1025,7 @@ const ChatController = (() => {
     }
   }
 
+  /** Clear conversation history, bookmarks, snippet state, and reset all UI areas. */
   function clearHistory() {
     ConversationManager.clear();
     UIController.setChatOutput('');
