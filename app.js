@@ -1380,7 +1380,96 @@ const HistoryPanel = (() => {
     downloadBlob(`agenticchat-${timestamp}.json`, JSON.stringify(data, null, 2), 'application/json');
   }
 
-  return { toggle, close, refresh, exportAsMarkdown, exportAsJSON };
+  function exportAsHTML() {
+    const messages = ConversationManager.getMessages().filter(m => m.role !== 'system');
+    if (messages.length === 0) {
+      alert('No conversation to export.');
+      return;
+    }
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const dateStr = new Date().toLocaleString();
+
+    function escapeHTML(str) {
+      return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function renderMessageHTML(msg) {
+      const isUser = msg.role === 'user';
+      const roleLabel = isUser ? '👤 You' : '🤖 Assistant';
+      const bgColor = isUser ? '#1e3a5f' : '#1a2e1a';
+      const borderColor = isUser ? '#38bdf8' : '#4ade80';
+
+      // Check for code blocks
+      const codeMatch = msg.content.match(/```(?:js|javascript)?\n([\s\S]*?)```/i);
+      let bodyHTML;
+      if (codeMatch) {
+        const before = escapeHTML(msg.content.substring(0, msg.content.indexOf('```')).trim());
+        const code = escapeHTML(codeMatch[1]);
+        const afterIdx = msg.content.indexOf('```', msg.content.indexOf('```') + 3);
+        const after = afterIdx >= 0 ? escapeHTML(msg.content.substring(afterIdx + 3).trim()) : '';
+        bodyHTML =
+          (before ? `<div style="white-space:pre-wrap;margin-bottom:8px">${before}</div>` : '') +
+          `<pre style="background:#0d0d0d;padding:12px;border-radius:6px;overflow-x:auto;font-size:13px;line-height:1.4">${code}</pre>` +
+          (after ? `<div style="white-space:pre-wrap;margin-top:8px">${after}</div>` : '');
+      } else {
+        bodyHTML = `<div style="white-space:pre-wrap">${escapeHTML(msg.content)}</div>`;
+      }
+
+      const timingHTML = (!isUser && msg.responseTimeMs !== undefined)
+        ? ` <span style="font-size:11px;opacity:0.6">⏱️ ${ResponseTimeBadge.formatTime(msg.responseTimeMs)}</span>`
+        : '';
+
+      return `<div style="background:${bgColor};border-left:3px solid ${borderColor};border-radius:6px;padding:12px 16px;margin-bottom:12px;word-break:break-word">
+  <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:#aaa;margin-bottom:6px">${roleLabel}${timingHTML}</div>
+  ${bodyHTML}
+</div>`;
+    }
+
+    const messagesHTML = messages.map(renderMessageHTML).join('\n');
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Agentic Chat Export — ${escapeHTML(dateStr)}</title>
+<style>
+*{box-sizing:border-box}
+body{font-family:system-ui,-apple-system,sans-serif;background:#111;color:#eee;margin:0;padding:0}
+.container{max-width:720px;margin:0 auto;padding:24px 16px}
+h1{font-size:1.4rem;text-align:center;margin:0 0 4px}
+.meta{text-align:center;color:#888;font-size:0.82rem;margin-bottom:24px}
+.meta span{margin:0 8px}
+pre{margin:0}
+code{font-family:ui-monospace,'Cascadia Code','Fira Code',monospace}
+@media(prefers-color-scheme:light){
+  body{background:#f5f5f5;color:#1a1a1a}
+  .meta{color:#666}
+}
+</style>
+</head>
+<body>
+<div class="container">
+<h1>Agentic Chat</h1>
+<div class="meta">
+  <span>📅 ${escapeHTML(dateStr)}</span>
+  <span>🤖 ${escapeHTML(ChatConfig.MODEL)}</span>
+  <span>💬 ${messages.length} message${messages.length !== 1 ? 's' : ''}</span>
+</div>
+${messagesHTML}
+</div>
+</body>
+</html>`;
+
+    downloadBlob(`agenticchat-${timestamp}.html`, html, 'text/html');
+  }
+
+  return { toggle, close, refresh, exportAsMarkdown, exportAsJSON, exportAsHTML };
 })();
 
 /* ---------- Snippet Library ---------- */
@@ -2357,6 +2446,8 @@ const SlashCommands = (() => {
           action: () => ChatController.clearHistory() },
         { name: 'export', description: 'Export chat as Markdown', icon: '📤',
           action: () => HistoryPanel.exportAsMarkdown() },
+        { name: 'export-html', description: 'Export chat as styled HTML page', icon: '🌐',
+          action: () => HistoryPanel.exportAsHTML() },
         { name: 'history', description: 'Toggle history panel', icon: '📜',
           action: () => HistoryPanel.toggle() },
         { name: 'templates', description: 'Open prompt templates', icon: '📋',
@@ -5510,6 +5601,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('history-overlay').addEventListener('click', HistoryPanel.close);
   document.getElementById('export-md-btn').addEventListener('click', HistoryPanel.exportAsMarkdown);
   document.getElementById('export-json-btn').addEventListener('click', HistoryPanel.exportAsJSON);
+  document.getElementById('export-html-btn').addEventListener('click', HistoryPanel.exportAsHTML);
 
   // Templates panel
   document.getElementById('templates-btn').addEventListener('click', PromptTemplates.toggle);
