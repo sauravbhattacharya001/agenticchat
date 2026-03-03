@@ -25,6 +25,7 @@
  *   SessionManager      — multi-session persistence with auto-save and quota mgmt
  *   ChatStats           — conversation analytics (word counts, code blocks, timing)
  *   InputHistory        — navigate previous prompts with ↑/↓ arrow keys
+ *   ConversationFork    — branch conversations from any message into new sessions
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -1340,6 +1341,7 @@ const HistoryPanel = (() => {
 
     // Decorate messages with reaction bars
     MessageReactions.decorateMessages();
+    ConversationFork.decorateMessages();
   }
 
   function exportAsMarkdown() {
@@ -3987,6 +3989,7 @@ const SessionManager = (() => {
     openSaveDialog, confirmSave, closeSaveDialog,
     handleImport, handleClearAll,
     getStorageInfo, handleClearOld,
+    getActiveId: _getActiveId,
     _isOpen: function () { return isOpen; },
     // Exposed for testing
     _loadAll, _saveAll, _getActiveId, _setActiveId,
@@ -5190,6 +5193,166 @@ const ResponseTimeBadge = (() => {
   }
 
   return { show, hide, formatTime };
+})();
+
+/* ---------- Conversation Fork ---------- */
+/**
+ * Conversation forking — branch a chat from any message point.
+ *
+ * Adds a "Fork" button to each message in the history panel. Clicking it
+ * creates a new session containing all messages up to (and including) the
+ * selected message, then loads the fork so the user can continue the
+ * conversation along a different path. Useful for exploring alternative
+ * approaches without losing the original thread.
+ *
+ * The forked session is named "Fork of <original> @ msg #N" and can be
+ * managed like any other session (rename, delete, export).
+ *
+ * @namespace ConversationFork
+ */
+const ConversationFork = (() => {
+
+  /**
+   * Fork the conversation at a given message index.
+   *
+   * @param {number} historyIndex — index into ConversationManager.getHistory()
+   *   (includes the system message at index 0)
+   * @returns {object|null} the newly created session, or null on failure
+   */
+  function forkAt(historyIndex) {
+    const history = ConversationManager.getHistory();
+    if (historyIndex < 1 || historyIndex >= history.length) return null;
+
+    // Collect messages from index 1 (skip system) through historyIndex
+    const forkedMessages = [];
+    for (let i = 1; i <= historyIndex; i++) {
+      const m = history[i];
+      if (m.role === 'user' || m.role === 'assistant') {
+        forkedMessages.push({ role: m.role, content: m.content });
+      }
+    }
+    if (forkedMessages.length === 0) return null;
+
+    // Save current session first (auto-save)
+    SessionManager.autoSaveIfEnabled();
+
+    // Determine fork name
+    const sessions = SessionManager.getAll();
+    const activeId = SessionManager.getActiveId();
+    const parentSession = activeId ? sessions.find(s => s.id === activeId) : null;
+    const parentName = parentSession ? parentSession.name : 'Chat';
+    // Count non-system messages up to historyIndex for human-friendly numbering
+    let msgNumber = 0;
+    for (let i = 1; i <= historyIndex; i++) {
+      if (history[i].role !== 'system') msgNumber++;
+    }
+    const forkName = `Fork of ${_truncate(parentName, 30)} @ msg #${msgNumber}`;
+
+    // Clear current conversation and load forked messages
+    ConversationManager.clear();
+    forkedMessages.forEach(m => ConversationManager.addMessage(m.role, m.content));
+
+    // Save as a new session
+    const newSession = SessionManager.save(forkName);
+
+    // Update the UI
+    UIController.setChatOutput('');
+    UIController.setConsoleOutput('(results appear here)');
+    UIController.setLastPrompt(`Forked: ${forkName}`);
+    SnippetLibrary.setCurrentCode(null);
+    ChatBookmarks.clearAll();
+    HistoryPanel.refresh();
+
+    // Show a brief notification
+    _showForkNotification(forkName, forkedMessages.length);
+
+    return newSession;
+  }
+
+  /**
+   * Truncate a string with ellipsis.
+   */
+  function _truncate(str, max) {
+    if (!str || str.length <= max) return str || '';
+    return str.substring(0, max - 1) + '\u2026';
+  }
+
+  /**
+   * Show a temporary notification when a fork is created.
+   */
+  function _showForkNotification(name, msgCount) {
+    const note = document.createElement('div');
+    note.className = 'fork-notification';
+    note.setAttribute('role', 'status');
+    note.setAttribute('aria-live', 'polite');
+    note.innerHTML =
+      '<span class="fork-notification-icon">\u2702\uFE0F</span> ' +
+      '<span>Forked! <strong>' + _escapeHtml(name) + '</strong> ' +
+      '(' + msgCount + ' message' + (msgCount !== 1 ? 's' : '') + ')</span>';
+    document.body.appendChild(note);
+
+    // Animate in
+    requestAnimationFrame(() => note.classList.add('visible'));
+
+    // Remove after 3 seconds
+    setTimeout(() => {
+      note.classList.remove('visible');
+      setTimeout(() => note.remove(), 300);
+    }, 3000);
+  }
+
+  function _escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  /**
+   * Decorate history panel messages with fork buttons.
+   * Called after HistoryPanel.refresh() renders messages.
+   */
+  function decorateMessages() {
+    const container = document.getElementById('history-messages');
+    if (!container) return;
+    const msgs = container.querySelectorAll('.history-msg');
+    const history = ConversationManager.getHistory();
+
+    let nonSystemIdx = 0;
+    for (let i = 0; i < history.length; i++) {
+      if (history[i].role === 'system') continue;
+      if (nonSystemIdx < msgs.length) {
+        _addForkButton(msgs[nonSystemIdx], i);
+      }
+      nonSystemIdx++;
+    }
+  }
+
+  /**
+   * Add a fork button to a message element.
+   */
+  function _addForkButton(messageElement, historyIndex) {
+    // Don't add if already present
+    if (messageElement.querySelector('.fork-btn')) return;
+
+    const btn = document.createElement('button');
+    btn.className = 'fork-btn';
+    btn.textContent = '\u2702\uFE0F Fork';
+    btn.title = 'Fork conversation from this point \u2014 creates a new session with all messages up to here';
+    btn.setAttribute('aria-label', 'Fork conversation from this message');
+
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const result = forkAt(historyIndex);
+      if (result) {
+        // Close history panel to show the forked conversation
+        HistoryPanel.close();
+      }
+    });
+
+    messageElement.appendChild(btn);
+  }
+
+  return { forkAt, decorateMessages };
 })();
 
 /* ---------- Quick Replies ---------- */

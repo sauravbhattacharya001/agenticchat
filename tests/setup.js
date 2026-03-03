@@ -204,7 +204,8 @@ function loadApp() {
     'FocusMode',
     'InputHistory',
     'ResponseTimeBadge',
-    'QuickReplies'
+    'QuickReplies',
+    'ConversationFork'
   ];
 
   for (const mod of modules) {

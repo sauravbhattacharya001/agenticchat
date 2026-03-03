@@ -6080,3 +6080,197 @@ describe('Response Time Tracking', () => {
     });
   });
 });
+
+/* ================================================================
+ * ConversationFork
+ * ================================================================ */
+describe('ConversationFork', () => {
+  beforeEach(() => {
+    ConversationManager.clear();
+    localStorage.clear();
+  });
+
+  describe('forkAt', () => {
+    test('returns null for index 0 (system message)', () => {
+      ConversationManager.addMessage('user', 'hello');
+      expect(ConversationFork.forkAt(0)).toBeNull();
+    });
+
+    test('returns null for negative index', () => {
+      expect(ConversationFork.forkAt(-1)).toBeNull();
+    });
+
+    test('returns null for index beyond history length', () => {
+      ConversationManager.addMessage('user', 'hello');
+      expect(ConversationFork.forkAt(999)).toBeNull();
+    });
+
+    test('forks at first user message', () => {
+      ConversationManager.addMessage('user', 'hello');
+      ConversationManager.addMessage('assistant', 'hi there');
+      ConversationManager.addMessage('user', 'how are you');
+      ConversationManager.addMessage('assistant', 'good');
+
+      const result = ConversationFork.forkAt(1);
+      expect(result).not.toBeNull();
+      expect(result.name).toMatch(/Fork of/);
+
+      // Conversation should now only have system + first user message
+      const msgs = ConversationManager.getMessages();
+      expect(msgs.length).toBe(2); // system + user
+      expect(msgs[1].content).toBe('hello');
+    });
+
+    test('forks at assistant message includes all up to that point', () => {
+      ConversationManager.addMessage('user', 'hello');
+      ConversationManager.addMessage('assistant', 'hi there');
+      ConversationManager.addMessage('user', 'how are you');
+      ConversationManager.addMessage('assistant', 'good');
+
+      const result = ConversationFork.forkAt(2);
+      expect(result).not.toBeNull();
+
+      // Should have system + user + assistant (first pair)
+      const msgs = ConversationManager.getMessages();
+      expect(msgs.length).toBe(3);
+      expect(msgs[1].content).toBe('hello');
+      expect(msgs[2].content).toBe('hi there');
+    });
+
+    test('forks at last message includes entire conversation', () => {
+      ConversationManager.addMessage('user', 'hello');
+      ConversationManager.addMessage('assistant', 'hi');
+
+      const result = ConversationFork.forkAt(2);
+      expect(result).not.toBeNull();
+
+      const msgs = ConversationManager.getMessages();
+      expect(msgs.length).toBe(3); // system + user + assistant
+    });
+
+    test('forked session is saved in SessionManager', () => {
+      ConversationManager.addMessage('user', 'hello');
+      ConversationManager.addMessage('assistant', 'hi');
+
+      ConversationFork.forkAt(1);
+
+      const sessions = SessionManager.getAll();
+      expect(sessions.length).toBeGreaterThanOrEqual(1);
+      expect(sessions[0].name).toMatch(/Fork of/);
+    });
+
+    test('fork name includes message number', () => {
+      ConversationManager.addMessage('user', 'msg 1');
+      ConversationManager.addMessage('assistant', 'reply 1');
+      ConversationManager.addMessage('user', 'msg 2');
+
+      const result = ConversationFork.forkAt(3);
+      expect(result.name).toContain('msg #3');
+    });
+
+    test('fork preserves message content exactly', () => {
+      const userMsg = 'Tell me about quantum computing in detail';
+      const assistantMsg = 'Quantum computing uses qubits...';
+      ConversationManager.addMessage('user', userMsg);
+      ConversationManager.addMessage('assistant', assistantMsg);
+      ConversationManager.addMessage('user', 'follow up');
+
+      ConversationFork.forkAt(2);
+
+      const msgs = ConversationManager.getMessages();
+      expect(msgs[1].role).toBe('user');
+      expect(msgs[1].content).toBe(userMsg);
+      expect(msgs[2].role).toBe('assistant');
+      expect(msgs[2].content).toBe(assistantMsg);
+    });
+
+    test('fork only includes user and assistant messages', () => {
+      ConversationManager.addMessage('user', 'hello');
+      ConversationManager.addMessage('assistant', 'hi');
+
+      ConversationFork.forkAt(2);
+
+      const msgs = ConversationManager.getMessages();
+      // system is always index 0
+      expect(msgs[0].role).toBe('system');
+      for (let i = 1; i < msgs.length; i++) {
+        expect(['user', 'assistant']).toContain(msgs[i].role);
+      }
+    });
+
+    test('system prompt is preserved after fork', () => {
+      ConversationManager.addMessage('user', 'hello');
+
+      ConversationFork.forkAt(1);
+
+      const msgs = ConversationManager.getMessages();
+      expect(msgs[0].role).toBe('system');
+      expect(msgs[0].content).toBe(ChatConfig.SYSTEM_PROMPT);
+    });
+
+    test('updates last-prompt text to show fork info', () => {
+      ConversationManager.addMessage('user', 'hello');
+      ConversationFork.forkAt(1);
+      const lastPrompt = document.getElementById('last-prompt');
+      expect(lastPrompt.textContent).toMatch(/Forked/);
+    });
+
+    test('clears chat output after fork', () => {
+      ConversationManager.addMessage('user', 'hello');
+      const chatOutput = document.getElementById('chat-output');
+      chatOutput.textContent = 'some old content';
+      ConversationFork.forkAt(1);
+      expect(chatOutput.textContent).toBe('');
+    });
+  });
+
+  describe('decorateMessages', () => {
+    test('does not throw when history panel is empty', () => {
+      expect(() => ConversationFork.decorateMessages()).not.toThrow();
+    });
+
+    test('adds fork buttons to history messages', () => {
+      ConversationManager.addMessage('user', 'hello');
+      ConversationManager.addMessage('assistant', 'hi');
+      HistoryPanel.refresh();
+
+      ConversationFork.decorateMessages();
+
+      const container = document.getElementById('history-messages');
+      const forkBtns = container.querySelectorAll('.fork-btn');
+      expect(forkBtns.length).toBe(2);
+    });
+
+    test('fork buttons have correct label', () => {
+      ConversationManager.addMessage('user', 'hello');
+      HistoryPanel.refresh();
+
+      ConversationFork.decorateMessages();
+
+      const btn = document.querySelector('.fork-btn');
+      expect(btn).not.toBeNull();
+      expect(btn.getAttribute('aria-label')).toContain('Fork');
+    });
+
+    test('is idempotent (no duplicate buttons)', () => {
+      ConversationManager.addMessage('user', 'hello');
+      HistoryPanel.refresh();
+
+      ConversationFork.decorateMessages();
+      ConversationFork.decorateMessages();
+
+      const container = document.getElementById('history-messages');
+      const forkBtns = container.querySelectorAll('.fork-btn');
+      expect(forkBtns.length).toBe(1);
+    });
+
+    test('does not add buttons when no messages', () => {
+      HistoryPanel.refresh();
+      ConversationFork.decorateMessages();
+
+      const container = document.getElementById('history-messages');
+      const forkBtns = container.querySelectorAll('.fork-btn');
+      expect(forkBtns.length).toBe(0);
+    });
+  });
+});
