@@ -202,7 +202,9 @@ function loadApp() {
     'ModelSelector',
     'FileDropZone',
     'FocusMode',
-    'InputHistory'
+    'InputHistory',
+    'ResponseTimeBadge',
+    'QuickReplies'
   ];
 
   for (const mod of modules) {

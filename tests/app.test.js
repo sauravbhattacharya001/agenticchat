@@ -4444,7 +4444,7 @@ describe('SlashCommands', () => {
   describe('getCommands', () => {
     test('returns all commands', () => {
       const cmds = SlashCommands.getCommands();
-      expect(cmds.length).toBe(19);
+      expect(cmds.length).toBe(20);
     });
 
     test('returns a defensive copy', () => {
@@ -5968,6 +5968,115 @@ describe('InputHistory', () => {
       const cmd = cmds.find(c => c.name === 'input-history');
       expect(cmd).toBeDefined();
       expect(cmd.icon).toBe('🕐');
+    });
+  });
+});
+
+/* ---------- Response Time Tracking ---------- */
+describe('Response Time Tracking', () => {
+  beforeEach(() => {
+    ConversationManager.clear();
+  });
+
+  describe('ConversationManager timing', () => {
+    test('addMessage without meta works normally', () => {
+      ConversationManager.addMessage('user', 'hello');
+      const msgs = ConversationManager.getMessages();
+      expect(msgs.at(-1).role).toBe('user');
+      expect(msgs.at(-1).responseTimeMs).toBeUndefined();
+    });
+
+    test('addMessage with meta stores responseTimeMs', () => {
+      ConversationManager.addMessage('assistant', 'hi', { responseTimeMs: 1234, timestamp: Date.now() });
+      const msgs = ConversationManager.getMessages();
+      expect(msgs.at(-1).responseTimeMs).toBe(1234);
+    });
+
+    test('getResponseTimes returns tracked times', () => {
+      ConversationManager.addMessage('assistant', 'a', { responseTimeMs: 500 });
+      ConversationManager.addMessage('assistant', 'b', { responseTimeMs: 1500 });
+      const times = ConversationManager.getResponseTimes();
+      expect(times).toHaveLength(2);
+      expect(times[0].responseTimeMs).toBe(500);
+      expect(times[1].responseTimeMs).toBe(1500);
+    });
+
+    test('clear resets response times', () => {
+      ConversationManager.addMessage('assistant', 'a', { responseTimeMs: 500 });
+      ConversationManager.clear();
+      expect(ConversationManager.getResponseTimes()).toHaveLength(0);
+    });
+
+    test('toggleTiming toggles visibility', () => {
+      const initial = ConversationManager.isTimingVisible();
+      const toggled = ConversationManager.toggleTiming();
+      expect(toggled).toBe(!initial);
+      // Reset
+      ConversationManager.toggleTiming();
+    });
+  });
+
+  describe('ResponseTimeBadge', () => {
+    test('formatTime returns ms for < 1000', () => {
+      expect(ResponseTimeBadge.formatTime(500)).toBe('500ms');
+      expect(ResponseTimeBadge.formatTime(0)).toBe('0ms');
+    });
+
+    test('formatTime returns seconds for >= 1000', () => {
+      expect(ResponseTimeBadge.formatTime(1000)).toBe('1.0s');
+      expect(ResponseTimeBadge.formatTime(2500)).toBe('2.5s');
+      expect(ResponseTimeBadge.formatTime(10000)).toBe('10.0s');
+    });
+
+    test('show creates badge element', () => {
+      ResponseTimeBadge.show(1234);
+      const badge = document.getElementById('response-time-badge');
+      expect(badge).toBeTruthy();
+      expect(badge.textContent).toContain('1.2s');
+    });
+
+    test('hide removes badge element', () => {
+      ResponseTimeBadge.show(500);
+      ResponseTimeBadge.hide();
+      expect(document.getElementById('response-time-badge')).toBeNull();
+    });
+
+    test('show replaces existing badge', () => {
+      ResponseTimeBadge.show(100);
+      ResponseTimeBadge.show(200);
+      const badges = document.querySelectorAll('#response-time-badge');
+      expect(badges).toHaveLength(1);
+      expect(badges[0].textContent).toContain('200ms');
+    });
+  });
+
+  describe('slash command', () => {
+    test('/timing command is registered', () => {
+      const cmds = SlashCommands.getCommands();
+      const cmd = cmds.find(c => c.name === 'timing');
+      expect(cmd).toBeDefined();
+      expect(cmd.icon).toBe('⏱️');
+    });
+  });
+
+  describe('ChatStats timing integration', () => {
+    test('stats include responseTiming when data exists', () => {
+      ConversationManager.addMessage('user', 'q1');
+      ConversationManager.addMessage('assistant', 'a1', { responseTimeMs: 1000 });
+      ConversationManager.addMessage('user', 'q2');
+      ConversationManager.addMessage('assistant', 'a2', { responseTimeMs: 3000 });
+      const stats = ChatStats.compute();
+      expect(stats.responseTiming).toBeTruthy();
+      expect(stats.responseTiming.count).toBe(2);
+      expect(stats.responseTiming.avg).toBe(2000);
+      expect(stats.responseTiming.min).toBe(1000);
+      expect(stats.responseTiming.max).toBe(3000);
+      expect(stats.responseTiming.total).toBe(4000);
+    });
+
+    test('stats responseTiming is null with no data', () => {
+      const stats = ChatStats.compute();
+      expect(stats.responseTiming).toBeNull();
     });
   });
 });

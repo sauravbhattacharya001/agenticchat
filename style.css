@@ -1803,3 +1803,53 @@ html.light .quick-reply-chip {
 html.light .quick-reply-chip:hover {
   background: rgba(0, 0, 0, 0.08);
 }
+
+/* --- Response Time Badge --- */
+.response-time-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  margin: 4px 0 0 0;
+  font-size: 0.78rem;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #aaa;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  user-select: none;
+}
+.response-time-badge.rt-visible {
+  opacity: 1;
+}
+.rt-icon {
+  font-size: 0.85rem;
+}
+.rt-fast {
+  color: #4ade80;
+}
+.rt-medium {
+  color: #facc15;
+}
+.rt-slow {
+  color: #f87171;
+}
+
+/* Timing in history panel msg-role */
+.msg-timing {
+  font-size: 0.72rem;
+  opacity: 0.7;
+  margin-left: 6px;
+}
+.msg-timing .rt-fast { color: #4ade80; }
+.msg-timing .rt-medium { color: #facc15; }
+.msg-timing .rt-slow { color: #f87171; }
+
+/* Light theme overrides */
+html.light .response-time-badge {
+  background: rgba(0, 0, 0, 0.05);
+  color: #666;
+}
+html.light .rt-fast { color: #16a34a; }
+html.light .rt-medium { color: #ca8a04; }
+html.light .rt-slow { color: #dc2626; }

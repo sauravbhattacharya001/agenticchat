@@ -151,12 +151,29 @@ const ConversationManager = (() => {
     charCountDirty = false;
   }
 
+  /** Response time tracking: array of { responseTimeMs, timestamp } for each assistant reply. */
+  const responseTimes = [];
+  let showTimingBadges = JSON.parse(localStorage.getItem('ac-show-timing') || 'true');
+
   return {
     getHistory()   { return history; },
     getMessages()  { return [...history]; },
+    getResponseTimes() { return [...responseTimes]; },
+    isTimingVisible() { return showTimingBadges; },
+    toggleTiming() {
+      showTimingBadges = !showTimingBadges;
+      localStorage.setItem('ac-show-timing', JSON.stringify(showTimingBadges));
+      return showTimingBadges;
+    },
 
-    addMessage(role, content) {
-      history.push({ role, content });
+    addMessage(role, content, meta) {
+      const entry = { role, content };
+      if (meta && meta.responseTimeMs !== undefined) {
+        entry.responseTimeMs = meta.responseTimeMs;
+        entry.timestamp = meta.timestamp || Date.now();
+        responseTimes.push({ responseTimeMs: meta.responseTimeMs, timestamp: entry.timestamp });
+      }
+      history.push(entry);
       cachedCharCount += content.length;
     },
 
@@ -185,6 +202,7 @@ const ConversationManager = (() => {
       history.push({ role: 'system', content: ChatConfig.SYSTEM_PROMPT });
       cachedCharCount = ChatConfig.SYSTEM_PROMPT.length;
       charCountDirty = false;
+      responseTimes.length = 0;
     },
 
     /** Update the system prompt in-place (keeps conversation history). */
@@ -806,6 +824,7 @@ const ChatController = (() => {
 
       let reply;
       let usage;
+      const sendStartTime = performance.now();
 
       if (ChatConfig.STREAMING_ENABLED) {
         // Streaming path — show tokens as they arrive
@@ -854,7 +873,8 @@ const ChatController = (() => {
         usage = result.data.usage;
       }
 
-      ConversationManager.addMessage('assistant', reply);
+      const responseTimeMs = Math.round(performance.now() - sendStartTime);
+      ConversationManager.addMessage('assistant', reply, { responseTimeMs, timestamp: Date.now() });
       ConversationManager.trim();
       UIController.showTokenUsage(usage);
 
@@ -879,6 +899,9 @@ const ChatController = (() => {
 
       // Update history panel if open
       HistoryPanel.refresh();
+
+      // Show response time badge
+      ResponseTimeBadge.show(responseTimeMs);
 
       // Auto-save session if enabled
       SessionManager.autoSaveIfEnabled();
@@ -1262,7 +1285,12 @@ const HistoryPanel = (() => {
 
       const roleLabel = document.createElement('div');
       roleLabel.className = 'msg-role';
-      roleLabel.textContent = msg.role === 'user' ? '👤 You' : '🤖 Assistant';
+      const roleText = msg.role === 'user' ? '👤 You' : '🤖 Assistant';
+      if (msg.role === 'assistant' && msg.responseTimeMs !== undefined && ConversationManager.isTimingVisible()) {
+        roleLabel.innerHTML = `${roleText} <span class="msg-timing">⏱️ ${ResponseTimeBadge.formatTime(msg.responseTimeMs)}</span>`;
+      } else {
+        roleLabel.textContent = roleText;
+      }
       div.appendChild(roleLabel);
 
       // For assistant messages, check for code blocks
@@ -2376,6 +2404,12 @@ const SlashCommands = (() => {
           action: () => {
             const isActive = FocusMode.toggle();
             UIController.setChatOutput(`Focus mode ${isActive ? 'enabled 🧘' : 'disabled'}`);
+          } },
+        { name: 'timing', description: 'Toggle response time badges on/off', icon: '⏱️',
+          action: () => {
+            const visible = ConversationManager.toggleTiming();
+            if (!visible) ResponseTimeBadge.hide();
+            UIController.setChatOutput(`Response timing badges ${visible ? 'enabled ⏱️' : 'hidden'}`);
           } },
         { name: 'input-history', description: 'Clear prompt history (↑/↓ navigation)', icon: '🕐',
           action: () => {
@@ -4194,6 +4228,16 @@ const ChatStats = (() => {
       questionCount,
       topWords,
       responseRatio: ratio,
+      responseTiming: (() => {
+        const times = ConversationManager.getResponseTimes();
+        if (times.length === 0) return null;
+        const values = times.map(t => t.responseTimeMs);
+        const avg = Math.round(values.reduce((a, b) => a + b, 0) / values.length);
+        const min = Math.min(...values);
+        const max = Math.max(...values);
+        const total = values.reduce((a, b) => a + b, 0);
+        return { count: values.length, avg, min, max, total };
+      })(),
     };
   }
 
@@ -4266,6 +4310,15 @@ const ChatStats = (() => {
           <h4>🔤 Your Top Words</h4>
           <div class="stats-words">${topWordsHtml}</div>
         </div>
+        ${stats.responseTiming ? `
+        <div class="stats-section">
+          <h4>⏱️ Response Times</h4>
+          <div class="stats-row"><span>Responses tracked:</span><span>${stats.responseTiming.count}</span></div>
+          <div class="stats-row"><span>Average:</span><span>${ResponseTimeBadge.formatTime(stats.responseTiming.avg)}</span></div>
+          <div class="stats-row"><span>Fastest:</span><span class="rt-fast">${ResponseTimeBadge.formatTime(stats.responseTiming.min)}</span></div>
+          <div class="stats-row"><span>Slowest:</span><span class="rt-slow">${ResponseTimeBadge.formatTime(stats.responseTiming.max)}</span></div>
+          <div class="stats-row"><span>Total wait time:</span><span>${ResponseTimeBadge.formatTime(stats.responseTiming.total)}</span></div>
+        </div>` : ''}
       </div>
     `;
 
@@ -5083,6 +5136,60 @@ const Scratchpad = (() => {
   }
 
   return { open, close, toggle, copy, insertToChat, download, clear, _onInput, isOpen: () => isOpen };
+})();
+
+/* ---------- Response Time Badge ---------- */
+/**
+ * Displays response time badge after each AI response.
+ * Shows a small, non-intrusive timing indicator below the token usage area.
+ * Formats time as ms or seconds depending on magnitude.
+ *
+ * @namespace ResponseTimeBadge
+ */
+const ResponseTimeBadge = (() => {
+  function formatTime(ms) {
+    if (ms < 1000) return `${ms}ms`;
+    return `${(ms / 1000).toFixed(1)}s`;
+  }
+
+  function show(responseTimeMs) {
+    if (!ConversationManager.isTimingVisible()) return;
+
+    // Remove any existing badge
+    const existing = document.getElementById('response-time-badge');
+    if (existing) existing.remove();
+
+    const badge = document.createElement('div');
+    badge.id = 'response-time-badge';
+    badge.className = 'response-time-badge';
+    badge.title = `Response completed in ${responseTimeMs.toLocaleString()}ms`;
+
+    // Color code: green < 3s, yellow < 8s, red >= 8s
+    let colorClass = 'rt-fast';
+    if (responseTimeMs >= 8000) colorClass = 'rt-slow';
+    else if (responseTimeMs >= 3000) colorClass = 'rt-medium';
+
+    badge.innerHTML = `<span class="rt-icon">⏱️</span> <span class="rt-value ${colorClass}">${formatTime(responseTimeMs)}</span>`;
+
+    // Insert after token-usage div
+    const tokenUsage = document.getElementById('token-usage');
+    if (tokenUsage) {
+      tokenUsage.parentNode.insertBefore(badge, tokenUsage.nextSibling);
+    } else {
+      const blackbox = document.getElementById('blackbox');
+      if (blackbox) blackbox.appendChild(badge);
+    }
+
+    // Fade in
+    requestAnimationFrame(() => badge.classList.add('rt-visible'));
+  }
+
+  function hide() {
+    const existing = document.getElementById('response-time-badge');
+    if (existing) existing.remove();
+  }
+
+  return { show, hide, formatTime };
 })();
 
 /* ---------- Quick Replies ---------- */
