@@ -220,7 +220,30 @@
           <h3>📊 Chat Statistics</h3>
           <p>Conversation analytics: message counts, word frequencies, code blocks, question ratio, and more.</p>
         </div>
-      </div>
+        <div class="card">
+          <h3>✂️ Conversation Forking</h3>
+          <p>Fork conversations at any message to explore alternative branches, with full session tracking.</p>
+        </div>
+        <div class="card">
+          <h3>📌 Message Pinning</h3>
+          <p>Pin important messages to keep them visible at the top of the chat panel for easy reference.</p>
+        </div>
+        <div class="card">
+          <h3>🔊 Read Aloud</h3>
+          <p>Text-to-speech for assistant messages using the Web Speech Synthesis API with voice selection.</p>
+        </div>
+        <div class="card">
+          <h3>⚡ Quick Replies</h3>
+          <p>Suggested follow-up prompts displayed after assistant responses for faster interaction flow.</p>
+        </div>
+        <div class="card">
+          <h3>📝 Scratchpad</h3>
+          <p>Persistent notepad panel for jotting down ideas, code snippets, or notes while chatting.</p>
+        </div>
+        <div class="card">
+          <h3>⏱️ Response Timing</h3>
+          <p>Track and display API response times on messages for latency awareness and performance monitoring.</p>
+        </div>      </div>
     </section>
 
     <!-- Quick Start -->
@@ -249,7 +272,7 @@ open index.html</code></pre>
     <!-- Architecture -->
     <section id="architecture">
       <h2>Architecture</h2>
-      <p>The application is organized into seventeen clearly separated modules, each implemented as an IIFE (Immediately Invoked Function Expression) exposing a clean public API:</p>
+      <p>The application is organized into twenty-nine clearly separated modules, each implemented as an IIFE (Immediately Invoked Function Expression) exposing a clean public API:</p>
 
       <table>
         <thead>
@@ -324,7 +347,54 @@ open index.html</code></pre>
             <td><code>KeyboardShortcuts</code></td>
             <td>Global keyboard shortcut handler with help modal</td>
           </tr>
-        </tbody>
+          <tr>
+            <td><code>ChatStats</code></td>
+            <td>Conversation analytics — word counts, code blocks, question frequency, top words, response ratios</td>
+          </tr>
+          <tr>
+            <td><code>PersonaPresets</code></td>
+            <td>Switchable AI personality presets (Coding Expert, Creative Writer, etc.) that modify the system prompt</td>
+          </tr>
+          <tr>
+            <td><code>ModelSelector</code></td>
+            <td>Model picker UI with pricing display and localStorage persistence</td>
+          </tr>
+          <tr>
+            <td><code>FileDropZone</code></td>
+            <td>Drag-and-drop and file picker for attaching text files to chat context</td>
+          </tr>
+          <tr>
+            <td><code>FocusMode</code></td>
+            <td>Zen/distraction-free mode that hides non-essential UI panels</td>
+          </tr>
+          <tr>
+            <td><code>InputHistory</code></td>
+            <td>Arrow-key navigation through previously sent prompts (shell-style history)</td>
+          </tr>
+          <tr>
+            <td><code>Scratchpad</code></td>
+            <td>Persistent notepad panel for jotting ideas while chatting, with auto-save</td>
+          </tr>
+          <tr>
+            <td><code>ResponseTimeBadge</code></td>
+            <td>Display API response time badges on messages for latency awareness</td>
+          </tr>
+          <tr>
+            <td><code>ConversationFork</code></td>
+            <td>Fork conversations at any message to explore alternative discussion branches</td>
+          </tr>
+          <tr>
+            <td><code>QuickReplies</code></td>
+            <td>Suggested follow-up prompts displayed after assistant responses for faster interaction</td>
+          </tr>
+          <tr>
+            <td><code>MessagePinning</code></td>
+            <td>Pin important messages to keep them visible at the top of the chat panel</td>
+          </tr>
+          <tr>
+            <td><code>ReadAloud</code></td>
+            <td>Text-to-speech for assistant messages using the Web Speech Synthesis API</td>
+          </tr>        </tbody>
       </table>
 
       <h3>Data Flow</h3>
