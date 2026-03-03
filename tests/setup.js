@@ -207,7 +207,8 @@ function loadApp() {
     'QuickReplies',
     'ConversationFork',
     'Scratchpad',
-    'MessagePinning'
+    'MessagePinning',
+    'ReadAloud'
   ];
 
   for (const mod of modules) {

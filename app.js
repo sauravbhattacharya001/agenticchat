@@ -26,6 +26,7 @@
  *   ChatStats           — conversation analytics (word counts, code blocks, timing)
  *   InputHistory        — navigate previous prompts with ↑/↓ arrow keys
  *   ConversationFork    — branch conversations from any message into new sessions
+ *   ReadAloud           — text-to-speech for messages with voice/speed controls
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -1342,6 +1343,7 @@ const HistoryPanel = (() => {
     // Decorate messages with reaction bars
     MessageReactions.decorateMessages();
     ConversationFork.decorateMessages();
+    ReadAloud.decorateMessages();
   }
 
   function exportAsMarkdown() {
@@ -5878,6 +5880,486 @@ const MessagePinning = (() => {
   };
 })();
 
+/* ---------- ReadAloud ---------- */
+/**
+ * Text-to-speech for conversation messages using the Web Speech
+ * Synthesis API.  Adds a speaker button to each assistant message in
+ * the history panel.  Supports voice selection, speed/pitch control,
+ * pause/resume/stop, and per-sentence highlighting.
+ *
+ * Preferences (voice URI, rate, pitch) are persisted in localStorage.
+ *
+ * @namespace ReadAloud
+ */
+const ReadAloud = (() => {
+  var STORAGE_KEY = 'agenticchat_readaloud';
+  var DEFAULT_RATE = 1.0;
+  var DEFAULT_PITCH = 1.0;
+  var MIN_RATE = 0.5;
+  var MAX_RATE = 3.0;
+  var MIN_PITCH = 0.5;
+  var MAX_PITCH = 2.0;
+
+  var prefs = { voiceURI: '', rate: DEFAULT_RATE, pitch: DEFAULT_PITCH };
+  var speaking = false;
+  var paused = false;
+  var currentMsgIndex = -1;
+  var controlsEl = null;
+
+  function init() {
+    load();
+  }
+
+  /** Check if the browser supports speech synthesis. */
+  function isSupported() {
+    return typeof window !== 'undefined' &&
+      'speechSynthesis' in window &&
+      typeof SpeechSynthesisUtterance === 'function';
+  }
+
+  /** Get available voices, optionally filtered to a language prefix. */
+  function getVoices(langPrefix) {
+    if (!isSupported()) return [];
+    var voices = window.speechSynthesis.getVoices();
+    if (langPrefix) {
+      var prefix = langPrefix.toLowerCase();
+      return voices.filter(function (v) {
+        return v.lang.toLowerCase().indexOf(prefix) === 0;
+      });
+    }
+    return voices.slice();
+  }
+
+  /** Return the user's preferred voice, or the first English one. */
+  function resolveVoice() {
+    var voices = getVoices();
+    if (prefs.voiceURI) {
+      for (var i = 0; i < voices.length; i++) {
+        if (voices[i].voiceURI === prefs.voiceURI) return voices[i];
+      }
+    }
+    // Fallback: first en- voice
+    for (var j = 0; j < voices.length; j++) {
+      if (voices[j].lang.indexOf('en') === 0) return voices[j];
+    }
+    return voices[0] || null;
+  }
+
+  /** Set the preferred voice by URI. */
+  function setVoice(uri) {
+    prefs.voiceURI = uri;
+    save();
+  }
+
+  /** Set speech rate (0.5–3.0). */
+  function setRate(r) {
+    r = parseFloat(r);
+    if (isNaN(r)) return;
+    prefs.rate = Math.max(MIN_RATE, Math.min(MAX_RATE, r));
+    save();
+  }
+
+  /** Set pitch (0.5–2.0). */
+  function setPitch(p) {
+    p = parseFloat(p);
+    if (isNaN(p)) return;
+    prefs.pitch = Math.max(MIN_PITCH, Math.min(MAX_PITCH, p));
+    save();
+  }
+
+  /** Get current preferences (rate, pitch, voiceURI). */
+  function getPrefs() {
+    return { voiceURI: prefs.voiceURI, rate: prefs.rate, pitch: prefs.pitch };
+  }
+
+  /**
+   * Strip markdown/code fences from text for cleaner speech.
+   * Removes code blocks, inline code, and markdown formatting.
+   */
+  function cleanTextForSpeech(text) {
+    if (!text) return '';
+    // Remove code blocks
+    var cleaned = text.replace(/```[\s\S]*?```/g, ' code block omitted ');
+    // Remove inline code
+    cleaned = cleaned.replace(/`[^`]+`/g, function (m) {
+      return m.slice(1, -1);
+    });
+    // Remove markdown emphasis
+    cleaned = cleaned.replace(/\*\*([^*]+)\*\*/g, '$1');
+    cleaned = cleaned.replace(/\*([^*]+)\*/g, '$1');
+    cleaned = cleaned.replace(/__([^_]+)__/g, '$1');
+    cleaned = cleaned.replace(/_([^_]+)_/g, '$1');
+    // Remove markdown headers
+    cleaned = cleaned.replace(/^#{1,6}\s+/gm, '');
+    // Remove markdown links [text](url) → text
+    cleaned = cleaned.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+    // Collapse whitespace
+    cleaned = cleaned.replace(/\s+/g, ' ').trim();
+    return cleaned;
+  }
+
+  /**
+   * Speak the given text using Web Speech Synthesis.
+   * @param {string} text - Raw text to speak.
+   * @param {number} [messageIndex] - Conversation index (for highlighting).
+   * @returns {{ok: boolean, error: string|undefined}}
+   */
+  function speak(text, messageIndex) {
+    if (!isSupported()) return { ok: false, error: 'Speech synthesis not supported' };
+    if (!text || !text.trim()) return { ok: false, error: 'No text to speak' };
+
+    stop(); // cancel any current speech
+
+    var cleaned = cleanTextForSpeech(text);
+    if (!cleaned) return { ok: false, error: 'No speakable text after cleanup' };
+
+    var utterance = new SpeechSynthesisUtterance(cleaned);
+    var voice = resolveVoice();
+    if (voice) utterance.voice = voice;
+    utterance.rate = prefs.rate;
+    utterance.pitch = prefs.pitch;
+
+    currentMsgIndex = typeof messageIndex === 'number' ? messageIndex : -1;
+    speaking = true;
+    paused = false;
+
+    utterance.onstart = function () {
+      speaking = true;
+      highlightMessage(currentMsgIndex, true);
+      updateControls();
+    };
+
+    utterance.onend = function () {
+      speaking = false;
+      paused = false;
+      highlightMessage(currentMsgIndex, false);
+      currentMsgIndex = -1;
+      updateControls();
+    };
+
+    utterance.onerror = function (e) {
+      // 'canceled' is not a real error (user stopped it)
+      if (e.error !== 'canceled') {
+        speaking = false;
+        paused = false;
+        highlightMessage(currentMsgIndex, false);
+        currentMsgIndex = -1;
+        updateControls();
+      }
+    };
+
+    window.speechSynthesis.speak(utterance);
+    return { ok: true };
+  }
+
+  /** Speak a message from conversation history by index. */
+  function speakMessage(messageIndex) {
+    var history = ConversationManager.getHistory();
+    if (messageIndex < 0 || messageIndex >= history.length) {
+      return { ok: false, error: 'Invalid message index' };
+    }
+    return speak(history[messageIndex].content, messageIndex);
+  }
+
+  /** Pause speech. */
+  function pause() {
+    if (!isSupported() || !speaking) return false;
+    window.speechSynthesis.pause();
+    paused = true;
+    updateControls();
+    return true;
+  }
+
+  /** Resume paused speech. */
+  function resume() {
+    if (!isSupported() || !paused) return false;
+    window.speechSynthesis.resume();
+    paused = false;
+    updateControls();
+    return true;
+  }
+
+  /** Toggle pause/resume. */
+  function togglePause() {
+    if (paused) return resume();
+    if (speaking) return pause();
+    return false;
+  }
+
+  /** Stop all speech. */
+  function stop() {
+    if (!isSupported()) return false;
+    window.speechSynthesis.cancel();
+    speaking = false;
+    paused = false;
+    if (currentMsgIndex >= 0) {
+      highlightMessage(currentMsgIndex, false);
+    }
+    currentMsgIndex = -1;
+    updateControls();
+    return true;
+  }
+
+  /** Is speech currently playing? */
+  function isSpeaking() { return speaking; }
+
+  /** Is speech currently paused? */
+  function isPaused() { return paused; }
+
+  /** Get the message index currently being read. */
+  function getCurrentIndex() { return currentMsgIndex; }
+
+  /** Highlight or un-highlight a message in the history panel. */
+  function highlightMessage(msgIndex, on) {
+    var container = document.getElementById('history-messages');
+    if (!container) return;
+    var msgs = container.querySelectorAll('.history-msg');
+    var history = ConversationManager.getHistory();
+    var nonSystemIdx = 0;
+    for (var i = 0; i < history.length; i++) {
+      if (history[i].role === 'system') continue;
+      if (i === msgIndex && nonSystemIdx < msgs.length) {
+        if (on) {
+          msgs[nonSystemIdx].classList.add('readaloud-active');
+        } else {
+          msgs[nonSystemIdx].classList.remove('readaloud-active');
+        }
+        break;
+      }
+      nonSystemIdx++;
+    }
+  }
+
+  /**
+   * Render the inline controls bar on a message element.
+   * Shows a 🔊 button; when speaking, shows pause/stop buttons too.
+   */
+  function renderSpeakButton(messageElement, messageIndex) {
+    // Remove existing speak button if any
+    var existing = messageElement.querySelector('.readaloud-btn');
+    if (existing) existing.remove();
+
+    var btn = document.createElement('button');
+    btn.className = 'readaloud-btn';
+    btn.setAttribute('aria-label', 'Read aloud');
+    btn.setAttribute('title', 'Read aloud');
+
+    if (speaking && currentMsgIndex === messageIndex) {
+      btn.textContent = paused ? '\u25B6\uFE0F' : '\u23F8\uFE0F';
+      btn.setAttribute('aria-label', paused ? 'Resume reading' : 'Pause reading');
+      btn.setAttribute('title', paused ? 'Resume' : 'Pause');
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        togglePause();
+        decorateMessages();
+      });
+
+      // Add stop button
+      var stopBtn = document.createElement('button');
+      stopBtn.className = 'readaloud-btn readaloud-stop';
+      stopBtn.textContent = '\u23F9\uFE0F';
+      stopBtn.setAttribute('aria-label', 'Stop reading');
+      stopBtn.setAttribute('title', 'Stop');
+      stopBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        stop();
+        decorateMessages();
+      });
+
+      var roleEl = messageElement.querySelector('.msg-role');
+      if (roleEl) {
+        roleEl.appendChild(btn);
+        roleEl.appendChild(stopBtn);
+      } else {
+        messageElement.insertBefore(stopBtn, messageElement.firstChild);
+        messageElement.insertBefore(btn, messageElement.firstChild);
+      }
+    } else {
+      btn.textContent = '\uD83D\uDD0A';
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        speakMessage(messageIndex);
+        decorateMessages();
+      });
+
+      var roleEl2 = messageElement.querySelector('.msg-role');
+      if (roleEl2) {
+        roleEl2.appendChild(btn);
+      } else {
+        messageElement.insertBefore(btn, messageElement.firstChild);
+      }
+    }
+  }
+
+  /** Render a floating controls panel when speech is active. */
+  function updateControls() {
+    if (!controlsEl) {
+      controlsEl = document.getElementById('readaloud-controls');
+    }
+    if (!controlsEl) return;
+
+    if (!speaking) {
+      controlsEl.style.display = 'none';
+      return;
+    }
+
+    controlsEl.style.display = '';
+    var stateSpan = controlsEl.querySelector('.readaloud-state');
+    if (stateSpan) {
+      stateSpan.textContent = paused ? 'Paused' : 'Speaking\u2026';
+    }
+
+    var pauseBtn = controlsEl.querySelector('.readaloud-ctrl-pause');
+    if (pauseBtn) {
+      pauseBtn.textContent = paused ? '\u25B6\uFE0F Resume' : '\u23F8\uFE0F Pause';
+    }
+  }
+
+  /** Build the floating controls panel (once, on init). */
+  function buildControls() {
+    if (document.getElementById('readaloud-controls')) return;
+
+    var panel = document.createElement('div');
+    panel.id = 'readaloud-controls';
+    panel.setAttribute('role', 'region');
+    panel.setAttribute('aria-label', 'Read aloud controls');
+    panel.style.display = 'none';
+
+    var state = document.createElement('span');
+    state.className = 'readaloud-state';
+    state.textContent = '';
+    panel.appendChild(state);
+
+    var pauseBtn = document.createElement('button');
+    pauseBtn.className = 'readaloud-ctrl-pause btn-sm';
+    pauseBtn.textContent = '\u23F8\uFE0F Pause';
+    pauseBtn.addEventListener('click', function () {
+      togglePause();
+    });
+    panel.appendChild(pauseBtn);
+
+    var stopBtn = document.createElement('button');
+    stopBtn.className = 'readaloud-ctrl-stop btn-sm';
+    stopBtn.textContent = '\u23F9\uFE0F Stop';
+    stopBtn.addEventListener('click', function () {
+      stop();
+    });
+    panel.appendChild(stopBtn);
+
+    // Speed slider
+    var speedLabel = document.createElement('label');
+    speedLabel.className = 'readaloud-speed-label';
+    speedLabel.textContent = 'Speed: ' + prefs.rate.toFixed(1) + 'x';
+
+    var speedSlider = document.createElement('input');
+    speedSlider.type = 'range';
+    speedSlider.className = 'readaloud-speed';
+    speedSlider.min = String(MIN_RATE);
+    speedSlider.max = String(MAX_RATE);
+    speedSlider.step = '0.1';
+    speedSlider.value = String(prefs.rate);
+    speedSlider.setAttribute('aria-label', 'Speech speed');
+    speedSlider.addEventListener('input', function () {
+      setRate(this.value);
+      speedLabel.textContent = 'Speed: ' + prefs.rate.toFixed(1) + 'x';
+    });
+
+    panel.appendChild(speedLabel);
+    panel.appendChild(speedSlider);
+
+    var output = document.getElementById('chat-output');
+    if (output && output.parentNode) {
+      output.parentNode.insertBefore(panel, output);
+    } else {
+      document.body.appendChild(panel);
+    }
+    controlsEl = panel;
+  }
+
+  /** Decorate assistant messages in the history panel with speak buttons. */
+  function decorateMessages() {
+    var container = document.getElementById('history-messages');
+    if (!container) return;
+    var msgs = container.querySelectorAll('.history-msg');
+    var history = ConversationManager.getHistory();
+    var nonSystemIdx = 0;
+    for (var i = 0; i < history.length; i++) {
+      if (history[i].role === 'system') continue;
+      // Only add speak buttons to assistant messages
+      if (history[i].role === 'assistant' && nonSystemIdx < msgs.length) {
+        renderSpeakButton(msgs[nonSystemIdx], i);
+      }
+      nonSystemIdx++;
+    }
+  }
+
+  function save() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs));
+    } catch (e) { /* storage full */ }
+  }
+
+  function load() {
+    try {
+      var data = localStorage.getItem(STORAGE_KEY);
+      if (data) {
+        var parsed = JSON.parse(data);
+        if (parsed && typeof parsed === 'object') {
+          if (parsed.voiceURI) prefs.voiceURI = String(parsed.voiceURI);
+          if (typeof parsed.rate === 'number') prefs.rate = Math.max(MIN_RATE, Math.min(MAX_RATE, parsed.rate));
+          if (typeof parsed.pitch === 'number') prefs.pitch = Math.max(MIN_PITCH, Math.min(MAX_PITCH, parsed.pitch));
+        }
+      }
+    } catch (e) {
+      prefs = { voiceURI: '', rate: DEFAULT_RATE, pitch: DEFAULT_PITCH };
+    }
+  }
+
+  function reset() {
+    stop();
+    prefs = { voiceURI: '', rate: DEFAULT_RATE, pitch: DEFAULT_PITCH };
+    localStorage.removeItem(STORAGE_KEY);
+  }
+
+  function _getState() {
+    return {
+      speaking: speaking,
+      paused: paused,
+      currentMsgIndex: currentMsgIndex,
+      prefs: getPrefs()
+    };
+  }
+
+  return {
+    init: init,
+    isSupported: isSupported,
+    getVoices: getVoices,
+    resolveVoice: resolveVoice,
+    setVoice: setVoice,
+    setRate: setRate,
+    setPitch: setPitch,
+    getPrefs: getPrefs,
+    cleanTextForSpeech: cleanTextForSpeech,
+    speak: speak,
+    speakMessage: speakMessage,
+    pause: pause,
+    resume: resume,
+    togglePause: togglePause,
+    stop: stop,
+    isSpeaking: isSpeaking,
+    isPaused: isPaused,
+    getCurrentIndex: getCurrentIndex,
+    highlightMessage: highlightMessage,
+    renderSpeakButton: renderSpeakButton,
+    updateControls: updateControls,
+    buildControls: buildControls,
+    decorateMessages: decorateMessages,
+    reset: reset,
+    _getState: _getState
+  };
+})();
+
+
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('send-btn').addEventListener('click', ChatController.send);
   document.getElementById('cancel-btn').addEventListener('click', () => {
@@ -6078,4 +6560,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Message pinning
   MessagePinning.init();
+
+  // ReadAloud (text-to-speech for messages)
+  ReadAloud.init();
 });
