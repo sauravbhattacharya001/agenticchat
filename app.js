@@ -3423,12 +3423,24 @@ const SessionManager = (() => {
         return true;
     } catch (e) {
         if (e.name === 'QuotaExceededError' || e.code === 22 || e.code === 1014) {
-            // Try to recover: evict oldest sessions and retry
-            const recovered = _evictOldest(sessions, 5);
+            // Incrementally evict oldest sessions one at a time until it fits,
+            // but always keep at least one session to prevent total data loss.
+            let remaining = [...sessions];
+            while (remaining.length > 1) {
+                remaining = _evictOldest(remaining, 1);
+                try {
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(remaining));
+                    console.warn(`[SessionManager] Evicted session to fit quota. ${remaining.length} sessions remain.`);
+                    return true;
+                } catch { /* continue evicting */ }
+            }
+            // Last resort: try saving the single remaining session
             try {
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(recovered));
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(remaining));
+                console.warn('[SessionManager] Evicted all but one session to fit quota.');
                 return true;
             } catch {
+                console.error('[SessionManager] Cannot save even a single session. Storage may be full.');
                 return false;
             }
         }
@@ -3436,13 +3448,14 @@ const SessionManager = (() => {
     }
   }
 
-  /** Evict the N oldest sessions (by updatedAt). */
+  /** Evict the N oldest sessions (by updatedAt), always keeping at least one. */
   function _evictOldest(sessions, count) {
-    if (sessions.length <= count) return [];
+    if (sessions.length <= 1) return sessions;
+    const toEvict = Math.min(count, sessions.length - 1);
     const sorted = [...sessions].sort((a, b) =>
         new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime()
     );
-    return sorted.slice(count);
+    return sorted.slice(toEvict);
   }
 
   /** Enforce maximum session count, evicting oldest when exceeded. */
