@@ -158,6 +158,26 @@ function setupDOM() {
       </div>
       <div id="bookmarks-list" class="bookmarks-list"></div>
     </div>
+    <div id="quick-replies" style="display:none;"></div>
+    <div id="persona-overlay"></div>
+    <div id="persona-panel">
+      <div id="persona-active"></div>
+      <div id="persona-list"></div>
+      <textarea id="persona-custom-input"></textarea>
+    </div>
+    <div id="scratchpad-overlay"></div>
+    <div id="scratchpad-panel">
+      <textarea id="scratchpad-textarea"></textarea>
+      <span id="scratchpad-wordcount"></span>
+      <span id="scratchpad-status"></span>
+    </div>
+    <div id="model-overlay" style="display:none;"></div>
+    <div id="model-panel" style="display:none;">
+      <div id="model-list"></div>
+    </div>
+    <span id="model-label"></span>
+    <button id="zen-btn"></button>
+    <div id="file-drop-overlay"></div>
   `;
 }
 
