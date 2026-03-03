@@ -205,7 +205,9 @@ function loadApp() {
     'InputHistory',
     'ResponseTimeBadge',
     'QuickReplies',
-    'ConversationFork'
+    'ConversationFork',
+    'Scratchpad',
+    'MessagePinning'
   ];
 
   for (const mod of modules) {

@@ -5568,6 +5568,316 @@ const QuickReplies = (() => {
 })();
 
 /* ---------- Event Bindings ---------- */
+/* ── Message Pinning ── */
+/**
+ * Pin important messages to a floating bar at the top of the chat area.
+ * Pinned messages persist in localStorage and provide quick-jump navigation.
+ * Messages are identified by their index in the conversation history.
+ *
+ * @namespace MessagePinning
+ */
+const MessagePinning = (() => {
+  const STORAGE_KEY = 'agenticchat_pins';
+  const MAX_PINS = 20;
+
+  // pins: array of { messageIndex, preview, role, pinnedAt }
+  let pins = [];
+  let barEl = null;
+  let listEl = null;
+  let collapsed = false;
+
+  function init() {
+    load();
+    buildBar();
+  }
+
+  /** Build the floating pin bar (injected above chat-output). */
+  function buildBar() {
+    const output = document.getElementById('chat-output');
+    if (!output || !output.parentNode) return;
+
+    // Don't double-create
+    if (document.getElementById('pin-bar')) return;
+
+    barEl = document.createElement('div');
+    barEl.id = 'pin-bar';
+    barEl.setAttribute('role', 'region');
+    barEl.setAttribute('aria-label', 'Pinned messages');
+    barEl.style.cssText = 'display:none;background:#1a2332;border:1px solid #2d4a6f;border-radius:8px;padding:0;margin-bottom:8px;font-size:13px;max-height:200px;overflow:hidden;transition:max-height 0.2s ease';
+
+    // Header with toggle + count + clear
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:6px 10px;cursor:pointer;user-select:none';
+    header.setAttribute('role', 'button');
+    header.setAttribute('aria-expanded', 'true');
+    header.tabIndex = 0;
+
+    const titleSpan = document.createElement('span');
+    titleSpan.style.cssText = 'color:#38bdf8;font-weight:600';
+    titleSpan.id = 'pin-bar-title';
+    titleSpan.textContent = '\uD83D\uDCCC Pinned';
+    header.appendChild(titleSpan);
+
+    const actions = document.createElement('span');
+
+    const clearBtn = document.createElement('button');
+    clearBtn.textContent = 'Clear all';
+    clearBtn.title = 'Unpin all messages';
+    clearBtn.style.cssText = 'background:none;border:none;color:#888;cursor:pointer;font-size:11px;padding:2px 6px;margin-left:4px';
+    clearBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      clearAll();
+    });
+    actions.appendChild(clearBtn);
+
+    const collapseBtn = document.createElement('button');
+    collapseBtn.textContent = '\u25B2';
+    collapseBtn.title = 'Collapse pinned messages';
+    collapseBtn.id = 'pin-collapse-btn';
+    collapseBtn.style.cssText = 'background:none;border:none;color:#888;cursor:pointer;font-size:11px;padding:2px 6px';
+    collapseBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleCollapse();
+    });
+    actions.appendChild(collapseBtn);
+    header.appendChild(actions);
+
+    header.addEventListener('click', toggleCollapse);
+    header.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        toggleCollapse();
+      }
+    });
+
+    barEl.appendChild(header);
+
+    // Pin list
+    listEl = document.createElement('ul');
+    listEl.id = 'pin-list';
+    listEl.style.cssText = 'list-style:none;padding:0;margin:0;max-height:150px;overflow-y:auto';
+    barEl.appendChild(listEl);
+
+    output.parentNode.insertBefore(barEl, output);
+    renderBar();
+  }
+
+  /** Toggle collapsed state of the pin bar. */
+  function toggleCollapse() {
+    collapsed = !collapsed;
+    const btn = document.getElementById('pin-collapse-btn');
+    if (btn) btn.textContent = collapsed ? '\u25BC' : '\u25B2';
+    if (listEl) listEl.style.display = collapsed ? 'none' : '';
+    if (barEl) {
+      const header = barEl.querySelector('[role="button"]');
+      if (header) header.setAttribute('aria-expanded', String(!collapsed));
+    }
+  }
+
+  /** Pin a message by its conversation index. */
+  function pin(messageIndex) {
+    if (typeof messageIndex !== 'number' || messageIndex < 0) return false;
+    if (pins.length >= MAX_PINS) return false;
+    if (isPinned(messageIndex)) return false;
+
+    const messages = ConversationManager.getMessages();
+    if (messageIndex >= messages.length) return false;
+
+    const msg = messages[messageIndex];
+    if (msg.role === 'system') return false;
+
+    const preview = msg.content.substring(0, 100).replace(/\n/g, ' ');
+
+    pins.push({
+      messageIndex: messageIndex,
+      preview: preview,
+      role: msg.role,
+      pinnedAt: Date.now()
+    });
+
+    save();
+    renderBar();
+    return true;
+  }
+
+  /** Unpin a message. */
+  function unpin(messageIndex) {
+    const idx = pins.findIndex(p => p.messageIndex === messageIndex);
+    if (idx === -1) return false;
+
+    pins.splice(idx, 1);
+    save();
+    renderBar();
+    return true;
+  }
+
+  /** Toggle pin state. */
+  function togglePin(messageIndex) {
+    if (isPinned(messageIndex)) {
+      return unpin(messageIndex);
+    } else {
+      return pin(messageIndex);
+    }
+  }
+
+  /** Check if a message is pinned. */
+  function isPinned(messageIndex) {
+    return pins.some(p => p.messageIndex === messageIndex);
+  }
+
+  /** Get all pinned messages. */
+  function getPins() {
+    return pins.map(p => Object.assign({}, p));
+  }
+
+  /** Get count of pinned messages. */
+  function getCount() {
+    return pins.length;
+  }
+
+  /** Clear all pins. */
+  function clearAll() {
+    const count = pins.length;
+    pins = [];
+    save();
+    renderBar();
+    return count;
+  }
+
+  /** Jump to a pinned message in the chat output. */
+  function jumpTo(messageIndex) {
+    const output = document.getElementById('chat-output');
+    if (!output) return;
+
+    // Find the message element — messages are child divs of chat-output
+    const allMsgs = output.querySelectorAll('.chat-msg');
+    // Message index in conversation includes system prompt at [0],
+    // but system msgs aren't rendered, so DOM index = messageIndex - 1
+    const domIndex = messageIndex - 1;
+    if (domIndex >= 0 && domIndex < allMsgs.length) {
+      const target = allMsgs[domIndex];
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // Brief highlight
+      const orig = target.style.outline;
+      target.style.outline = '2px solid #38bdf8';
+      target.style.outlineOffset = '2px';
+      setTimeout(() => {
+        target.style.outline = orig;
+        target.style.outlineOffset = '';
+      }, 1500);
+    }
+  }
+
+  /** Render the floating pin bar. */
+  function renderBar() {
+    if (!barEl || !listEl) return;
+
+    if (pins.length === 0) {
+      barEl.style.display = 'none';
+      return;
+    }
+
+    barEl.style.display = '';
+    const title = document.getElementById('pin-bar-title');
+    if (title) title.textContent = '\uD83D\uDCCC Pinned (' + pins.length + ')';
+
+    // Clear and rebuild list
+    listEl.textContent = '';
+
+    pins.forEach(p => {
+      const li = document.createElement('li');
+      li.style.cssText = 'display:flex;align-items:center;padding:4px 10px;border-top:1px solid #1e2d3d;cursor:pointer;transition:background 0.15s';
+
+      li.addEventListener('mouseenter', () => { li.style.background = '#1e2d3d'; });
+      li.addEventListener('mouseleave', () => { li.style.background = ''; });
+
+      // Role icon
+      const icon = document.createElement('span');
+      icon.textContent = p.role === 'user' ? '\uD83D\uDC64' : '\uD83E\uDD16';
+      icon.style.cssText = 'margin-right:6px;flex-shrink:0;font-size:12px';
+      li.appendChild(icon);
+
+      // Preview text
+      const text = document.createElement('span');
+      text.textContent = p.preview.length > 60 ? p.preview.substring(0, 60) + '\u2026' : p.preview;
+      text.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#ccc;font-size:12px';
+      li.appendChild(text);
+
+      // Unpin button
+      const unpinBtn = document.createElement('button');
+      unpinBtn.textContent = '\u2716';
+      unpinBtn.title = 'Unpin';
+      unpinBtn.style.cssText = 'background:none;border:none;color:#666;cursor:pointer;font-size:11px;padding:2px 4px;margin-left:4px;flex-shrink:0';
+      unpinBtn.setAttribute('aria-label', 'Unpin message');
+      unpinBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        unpin(p.messageIndex);
+      });
+      li.appendChild(unpinBtn);
+
+      // Click to jump
+      li.addEventListener('click', () => jumpTo(p.messageIndex));
+      li.setAttribute('role', 'button');
+      li.setAttribute('aria-label', 'Jump to pinned message: ' + p.preview.substring(0, 40));
+      li.tabIndex = 0;
+      li.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          jumpTo(p.messageIndex);
+        }
+      });
+
+      listEl.appendChild(li);
+    });
+  }
+
+  /** Persist pins to localStorage. */
+  function save() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(pins));
+    } catch (_) {
+      // Storage full — degrade silently
+    }
+  }
+
+  /** Load pins from localStorage. */
+  function load() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          pins = parsed.filter(p =>
+            typeof p.messageIndex === 'number' &&
+            typeof p.preview === 'string' &&
+            typeof p.role === 'string'
+          );
+        }
+      }
+    } catch (_) {
+      pins = [];
+    }
+  }
+
+  /** Reset (for tests). */
+  function reset() {
+    pins = [];
+    collapsed = false;
+    if (barEl && barEl.parentNode) {
+      barEl.parentNode.removeChild(barEl);
+    }
+    barEl = null;
+    listEl = null;
+    try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
+  }
+
+  return {
+    init, pin, unpin, togglePin, isPinned,
+    getPins, getCount, clearAll, jumpTo,
+    renderBar, reset, toggleCollapse
+  };
+})();
+
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('send-btn').addEventListener('click', ChatController.send);
   document.getElementById('cancel-btn').addEventListener('click', () => {
@@ -5765,4 +6075,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('scratchpad-insert-btn').addEventListener('click', Scratchpad.insertToChat);
   document.getElementById('scratchpad-download-btn').addEventListener('click', Scratchpad.download);
   document.getElementById('scratchpad-clear-btn').addEventListener('click', Scratchpad.clear);
+
+  // Message pinning
+  MessagePinning.init();
 });
