@@ -1,7 +1,7 @@
 /* ============================================================
  * Agentic Chat — Application Logic
  *
- * Architecture (17 modules, all revealing-module-pattern IIFEs):
+ * Architecture (18 modules, all revealing-module-pattern IIFEs):
  *
  *   Core:
  *   ChatConfig          — constants and configuration
@@ -27,6 +27,7 @@
  *   InputHistory        — navigate previous prompts with ↑/↓ arrow keys
  *   ConversationFork    — branch conversations from any message into new sessions
  *   ReadAloud           — text-to-speech for messages with voice/speed controls
+ *   MessageDiff         — compare any two messages with visual line-level diff
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -6462,6 +6463,457 @@ const ReadAloud = (() => {
 })();
 
 
+
+/* ---------- MessageDiff ---------- */
+/**
+ * Message Diff Viewer — compare any two conversation messages with a
+ * visual line-by-line diff.  Useful for seeing how an AI response
+ * changes when a prompt is rephrased, or comparing two code snippets.
+ *
+ * Workflow:
+ *   1. User clicks "Compare" on a message → that message is selected
+ *      as the first diff target (highlighted with a border).
+ *   2. User clicks "Compare" on a second message → a diff modal opens
+ *      showing both messages side-by-side with additions (green) and
+ *      deletions (red) highlighted.
+ *   3. The diff uses a longest-common-subsequence (LCS) algorithm to
+ *      produce a minimal line-level diff.
+ *
+ * The module decorates assistant and user messages in the chat output
+ * with a small "Compare" button.
+ *
+ * @namespace MessageDiff
+ */
+const MessageDiff = (() => {
+  var firstSelection = null; // { index, role, content }
+  var modalEl = null;
+
+  function init() {
+    buildModal();
+  }
+
+  // ── LCS-based line diff ──────────────────────────────────────
+
+  /**
+   * Compute a line-level diff between two texts using the LCS algorithm.
+   * Returns an array of { type: 'same'|'add'|'del', text: string }.
+   */
+  function diffLines(textA, textB) {
+    var linesA = (textA || '').split('\n');
+    var linesB = (textB || '').split('\n');
+    var m = linesA.length;
+    var n = linesB.length;
+
+    // Build LCS table
+    var dp = [];
+    for (var i = 0; i <= m; i++) {
+      dp[i] = [];
+      for (var j = 0; j <= n; j++) {
+        if (i === 0 || j === 0) {
+          dp[i][j] = 0;
+        } else if (linesA[i - 1] === linesB[j - 1]) {
+          dp[i][j] = dp[i - 1][j - 1] + 1;
+        } else {
+          dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+        }
+      }
+    }
+
+    // Backtrack to build diff
+    var result = [];
+    var ii = m;
+    var jj = n;
+    while (ii > 0 || jj > 0) {
+      if (ii > 0 && jj > 0 && linesA[ii - 1] === linesB[jj - 1]) {
+        result.unshift({ type: 'same', text: linesA[ii - 1] });
+        ii--;
+        jj--;
+      } else if (jj > 0 && (ii === 0 || dp[ii][jj - 1] >= dp[ii - 1][jj])) {
+        result.unshift({ type: 'add', text: linesB[jj - 1] });
+        jj--;
+      } else {
+        result.unshift({ type: 'del', text: linesA[ii - 1] });
+        ii--;
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Compute diff statistics from a diff result.
+   */
+  function diffStats(diff) {
+    var added = 0;
+    var removed = 0;
+    var unchanged = 0;
+    for (var i = 0; i < diff.length; i++) {
+      if (diff[i].type === 'add') added++;
+      else if (diff[i].type === 'del') removed++;
+      else unchanged++;
+    }
+    return { added: added, removed: removed, unchanged: unchanged, total: diff.length };
+  }
+
+  // ── Selection handling ───────────────────────────────────────
+
+  /**
+   * Select a message for comparison.
+   * First call selects the "left" side; second call opens the diff.
+   */
+  function selectMessage(index) {
+    var history = ConversationManager.getHistory();
+    if (index < 0 || index >= history.length) return;
+
+    var msg = history[index];
+
+    if (firstSelection === null) {
+      // First selection
+      firstSelection = { index: index, role: msg.role, content: msg.content };
+      highlightSelected(index, true);
+      decorateMessages(); // update buttons to show "comparing..."
+    } else {
+      if (firstSelection.index === index) {
+        // Deselect
+        clearSelection();
+        return;
+      }
+      // Second selection — show diff
+      var second = { index: index, role: msg.role, content: msg.content };
+      showDiff(firstSelection, second);
+      highlightSelected(firstSelection.index, false);
+      firstSelection = null;
+      decorateMessages();
+    }
+  }
+
+  /** Clear the current selection. */
+  function clearSelection() {
+    if (firstSelection !== null) {
+      highlightSelected(firstSelection.index, false);
+      firstSelection = null;
+      decorateMessages();
+    }
+  }
+
+  /** Get the currently selected message (or null). */
+  function getSelection() {
+    return firstSelection ? { index: firstSelection.index, role: firstSelection.role } : null;
+  }
+
+  /** Highlight/unhighlight a message element. */
+  function highlightSelected(msgIndex, on) {
+    var chatOutput = document.getElementById('chat-output');
+    if (!chatOutput) return;
+    var msgs = chatOutput.querySelectorAll('.msg');
+    var history = ConversationManager.getHistory();
+    var domIdx = 0;
+    for (var i = 0; i < history.length; i++) {
+      if (history[i].role === 'system') continue;
+      if (i === msgIndex && domIdx < msgs.length) {
+        if (on) {
+          msgs[domIdx].style.outline = '2px solid #38bdf8';
+          msgs[domIdx].style.outlineOffset = '3px';
+        } else {
+          msgs[domIdx].style.outline = '';
+          msgs[domIdx].style.outlineOffset = '';
+        }
+        break;
+      }
+      domIdx++;
+    }
+  }
+
+  // ── Modal ────────────────────────────────────────────────────
+
+  function buildModal() {
+    if (document.getElementById('diff-modal')) return;
+
+    var modal = document.createElement('div');
+    modal.id = 'diff-modal';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-label', 'Message diff viewer');
+    modal.style.cssText =
+      'display:none;position:fixed;top:0;left:0;width:100%;height:100%;' +
+      'background:rgba(0,0,0,0.7);z-index:10000;align-items:center;justify-content:center';
+
+    modal.addEventListener('click', function (e) {
+      if (e.target === modal) closeModal();
+    });
+
+    var content = document.createElement('div');
+    content.id = 'diff-modal-content';
+    content.style.cssText =
+      'background:#0d1117;color:#c9d1d9;border-radius:12px;width:90%;max-width:900px;' +
+      'max-height:85vh;overflow:hidden;display:flex;flex-direction:column;' +
+      'box-shadow:0 8px 32px rgba(0,0,0,0.5);border:1px solid #30363d';
+
+    // Header
+    var header = document.createElement('div');
+    header.style.cssText =
+      'display:flex;align-items:center;justify-content:space-between;' +
+      'padding:16px 20px;border-bottom:1px solid #30363d;flex-shrink:0';
+
+    var title = document.createElement('div');
+    title.id = 'diff-modal-title';
+    title.style.cssText = 'font-size:16px;font-weight:600';
+    title.textContent = '\uD83D\uDD0D Message Diff';
+    header.appendChild(title);
+
+    var statsEl = document.createElement('span');
+    statsEl.id = 'diff-stats';
+    statsEl.style.cssText = 'font-size:13px;color:#8b949e;margin-left:12px';
+    header.appendChild(statsEl);
+
+    var closeBtn = document.createElement('button');
+    closeBtn.textContent = '\u2715';
+    closeBtn.setAttribute('aria-label', 'Close diff viewer');
+    closeBtn.style.cssText =
+      'background:none;border:none;color:#8b949e;font-size:20px;cursor:pointer;' +
+      'padding:4px 8px;border-radius:4px;transition:background 0.15s';
+    closeBtn.addEventListener('mouseenter', function () { this.style.background = '#21262d'; });
+    closeBtn.addEventListener('mouseleave', function () { this.style.background = 'none'; });
+    closeBtn.addEventListener('click', closeModal);
+    header.appendChild(closeBtn);
+
+    content.appendChild(header);
+
+    // Diff body
+    var body = document.createElement('div');
+    body.id = 'diff-body';
+    body.style.cssText =
+      'overflow-y:auto;padding:0;flex:1;font-family:\'SF Mono\',Consolas,monospace;font-size:13px;line-height:1.6';
+    content.appendChild(body);
+
+    modal.appendChild(content);
+    document.body.appendChild(modal);
+    modalEl = modal;
+
+    // ESC to close
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && modalEl && modalEl.style.display === 'flex') {
+        closeModal();
+      }
+    });
+  }
+
+  function showDiff(msgA, msgB) {
+    buildModal();
+    var diff = diffLines(msgA.content, msgB.content);
+    var stats = diffStats(diff);
+
+    // Update title
+    var titleEl = document.getElementById('diff-modal-title');
+    if (titleEl) {
+      var roleA = msgA.role === 'user' ? '\uD83D\uDC64' : '\uD83E\uDD16';
+      var roleB = msgB.role === 'user' ? '\uD83D\uDC64' : '\uD83E\uDD16';
+      titleEl.textContent = '\uD83D\uDD0D Diff: ' + roleA + ' #' + (msgA.index + 1) +
+        ' \u2194 ' + roleB + ' #' + (msgB.index + 1);
+    }
+
+    // Update stats
+    var statsEl = document.getElementById('diff-stats');
+    if (statsEl) {
+      var parts = [];
+      if (stats.added > 0) parts.push('+' + stats.added + ' added');
+      if (stats.removed > 0) parts.push('-' + stats.removed + ' removed');
+      parts.push(stats.unchanged + ' unchanged');
+      statsEl.textContent = parts.join(', ');
+    }
+
+    // Render diff lines
+    var body = document.getElementById('diff-body');
+    if (!body) return;
+    body.textContent = '';
+
+    var table = document.createElement('table');
+    table.style.cssText = 'width:100%;border-collapse:collapse';
+
+    var lineNumA = 0;
+    var lineNumB = 0;
+
+    for (var i = 0; i < diff.length; i++) {
+      var entry = diff[i];
+      var tr = document.createElement('tr');
+
+      var tdNumA = document.createElement('td');
+      tdNumA.style.cssText =
+        'width:40px;text-align:right;padding:0 8px;color:#484f58;' +
+        'user-select:none;font-size:12px;border-right:1px solid #21262d;vertical-align:top';
+
+      var tdNumB = document.createElement('td');
+      tdNumB.style.cssText =
+        'width:40px;text-align:right;padding:0 8px;color:#484f58;' +
+        'user-select:none;font-size:12px;border-right:1px solid #21262d;vertical-align:top';
+
+      var tdMarker = document.createElement('td');
+      tdMarker.style.cssText =
+        'width:20px;text-align:center;padding:0 4px;font-weight:700;' +
+        'user-select:none;vertical-align:top';
+
+      var tdContent = document.createElement('td');
+      tdContent.style.cssText =
+        'padding:0 12px;white-space:pre-wrap;word-break:break-word;vertical-align:top';
+
+      if (entry.type === 'same') {
+        lineNumA++;
+        lineNumB++;
+        tdNumA.textContent = lineNumA;
+        tdNumB.textContent = lineNumB;
+        tdMarker.textContent = '';
+        tdContent.textContent = entry.text;
+        tr.style.background = 'transparent';
+      } else if (entry.type === 'del') {
+        lineNumA++;
+        tdNumA.textContent = lineNumA;
+        tdNumB.textContent = '';
+        tdMarker.textContent = '\u2212';
+        tdMarker.style.color = '#f85149';
+        tdContent.textContent = entry.text;
+        tr.style.background = 'rgba(248,81,73,0.1)';
+        tdContent.style.color = '#ffa198';
+      } else if (entry.type === 'add') {
+        lineNumB++;
+        tdNumA.textContent = '';
+        tdNumB.textContent = lineNumB;
+        tdMarker.textContent = '+';
+        tdMarker.style.color = '#3fb950';
+        tdContent.textContent = entry.text;
+        tr.style.background = 'rgba(63,185,80,0.1)';
+        tdContent.style.color = '#7ee787';
+      }
+
+      tr.appendChild(tdNumA);
+      tr.appendChild(tdNumB);
+      tr.appendChild(tdMarker);
+      tr.appendChild(tdContent);
+      table.appendChild(tr);
+    }
+
+    body.appendChild(table);
+
+    // Show modal
+    modalEl.style.display = 'flex';
+  }
+
+  function closeModal() {
+    if (modalEl) modalEl.style.display = 'none';
+  }
+
+  /** Check if the modal is currently visible. */
+  function isOpen() {
+    return modalEl !== null && modalEl.style.display === 'flex';
+  }
+
+  // ── Message decoration ───────────────────────────────────────
+
+  /**
+   * Decorate chat messages with a "Compare" button.
+   * Called after messages are rendered or selection changes.
+   */
+  function decorateMessages() {
+    var chatOutput = document.getElementById('chat-output');
+    if (!chatOutput) return;
+
+    var msgs = chatOutput.querySelectorAll('.msg');
+    var history = ConversationManager.getHistory();
+    var domIdx = 0;
+
+    for (var i = 0; i < history.length; i++) {
+      if (history[i].role === 'system') continue;
+      if (domIdx < msgs.length) {
+        addCompareButton(msgs[domIdx], i);
+      }
+      domIdx++;
+    }
+  }
+
+  function addCompareButton(msgEl, msgIndex) {
+    // Remove existing compare button
+    var existing = msgEl.querySelector('.diff-compare-btn');
+    if (existing) existing.remove();
+
+    var btn = document.createElement('button');
+    btn.className = 'diff-compare-btn';
+    btn.style.cssText =
+      'background:none;border:1px solid #30363d;color:#8b949e;font-size:11px;' +
+      'padding:2px 8px;border-radius:4px;cursor:pointer;margin-left:6px;' +
+      'transition:all 0.15s;vertical-align:middle';
+
+    btn.addEventListener('mouseenter', function () {
+      this.style.borderColor = '#58a6ff';
+      this.style.color = '#58a6ff';
+    });
+    btn.addEventListener('mouseleave', function () {
+      this.style.borderColor = '#30363d';
+      this.style.color = '#8b949e';
+    });
+
+    if (firstSelection !== null && firstSelection.index === msgIndex) {
+      // This message is selected
+      btn.textContent = '\u2716 Cancel';
+      btn.style.borderColor = '#f85149';
+      btn.style.color = '#f85149';
+      btn.addEventListener('mouseenter', function () {
+        this.style.borderColor = '#f85149';
+        this.style.color = '#f85149';
+      });
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        clearSelection();
+      });
+    } else if (firstSelection !== null) {
+      // Another message is selected — this is a potential second target
+      btn.textContent = '\uD83D\uDD0D Diff with #' + (firstSelection.index + 1);
+      btn.style.borderColor = '#3fb950';
+      btn.style.color = '#3fb950';
+      btn.addEventListener('mouseenter', function () {
+        this.style.borderColor = '#3fb950';
+        this.style.color = '#3fb950';
+      });
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        selectMessage(msgIndex);
+      });
+    } else {
+      // No selection yet
+      btn.textContent = '\u2194 Compare';
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        selectMessage(msgIndex);
+      });
+    }
+
+    // Append to role area or message itself
+    var roleEl = msgEl.querySelector('.msg-role');
+    if (roleEl) {
+      roleEl.appendChild(btn);
+    } else {
+      msgEl.appendChild(btn);
+    }
+  }
+
+  /** Reset all state. */
+  function reset() {
+    clearSelection();
+    closeModal();
+  }
+
+  return {
+    init: init,
+    diffLines: diffLines,
+    diffStats: diffStats,
+    selectMessage: selectMessage,
+    clearSelection: clearSelection,
+    getSelection: getSelection,
+    showDiff: showDiff,
+    closeModal: closeModal,
+    isOpen: isOpen,
+    decorateMessages: decorateMessages,
+    reset: reset
+  };
+})();
+
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('send-btn').addEventListener('click', ChatController.send);
   document.getElementById('cancel-btn').addEventListener('click', () => {
@@ -6506,6 +6958,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Keyboard shortcut: Escape closes history panel
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
+      MessageDiff.closeModal();
       HistoryPanel.close();
       PromptTemplates.close();
       SnippetLibrary.close();
@@ -6665,4 +7118,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ReadAloud (text-to-speech for messages)
   ReadAloud.init();
+
+  // Message diff viewer
+  MessageDiff.init();
 });

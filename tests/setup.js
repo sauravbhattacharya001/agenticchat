@@ -228,7 +228,8 @@ function loadApp() {
     'ConversationFork',
     'Scratchpad',
     'MessagePinning',
-    'ReadAloud'
+    'ReadAloud',
+    'MessageDiff'
   ];
 
   for (const mod of modules) {
