@@ -229,7 +229,8 @@ function loadApp() {
     'Scratchpad',
     'MessagePinning',
     'ReadAloud',
-    'MessageDiff'
+    'MessageDiff',
+    'ConversationTimeline'
   ];
 
   for (const mod of modules) {

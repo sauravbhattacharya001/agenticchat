@@ -1,7 +1,7 @@
 /* ============================================================
  * Agentic Chat — Application Logic
  *
- * Architecture (18 modules, all revealing-module-pattern IIFEs):
+ * Architecture (19 modules, all revealing-module-pattern IIFEs):
  *
  *   Core:
  *   ChatConfig          — constants and configuration
@@ -28,6 +28,7 @@
  *   ConversationFork    — branch conversations from any message into new sessions
  *   ReadAloud           — text-to-speech for messages with voice/speed controls
  *   MessageDiff         — compare any two messages with visual line-level diff
+ *   ConversationTimeline — visual minimap sidebar for conversation navigation
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -6914,6 +6915,414 @@ const MessageDiff = (() => {
   };
 })();
 
+
+/* ---------- ConversationTimeline ---------- */
+/**
+ * Conversation Timeline — a visual minimap/navigator showing the
+ * conversation structure as a vertical strip. Each message is rendered
+ * as a colored segment whose height is proportional to its length.
+ * Users can:
+ *   - See the overall conversation shape at a glance
+ *   - Click any segment to scroll to that message
+ *   - Hover for a preview tooltip (role + first line)
+ *   - See markers for bookmarks, pinned messages, and code blocks
+ *   - Track the current viewport position via an overlay indicator
+ *
+ * The timeline lives in a toggleable sidebar on the right edge.
+ *
+ * @namespace ConversationTimeline
+ */
+const ConversationTimeline = (() => {
+  'use strict';
+
+  var containerEl = null;
+  var stripEl = null;
+  var viewportEl = null;
+  var toggleBtn = null;
+  var tooltipEl = null;
+  var isVisible = false;
+  var segments = [];
+  var scrollRAF = null;
+
+  /** CSS injected once. */
+  var styleInjected = false;
+  function injectStyles() {
+    if (styleInjected) return;
+    styleInjected = true;
+    var css = [
+      '#timeline-container {',
+      '  position: fixed; right: 0; top: 0; width: 48px; height: 100vh;',
+      '  background: var(--tl-bg, #0d1117); border-left: 1px solid var(--tl-border, #30363d);',
+      '  z-index: 800; display: flex; flex-direction: column; transition: transform 0.2s ease;',
+      '  transform: translateX(100%);',
+      '}',
+      '#timeline-container.tl-open { transform: translateX(0); }',
+      '#timeline-strip {',
+      '  flex: 1; overflow: hidden; position: relative; cursor: pointer;',
+      '  margin: 4px 6px;',
+      '}',
+      '.tl-segment {',
+      '  width: 100%; border-radius: 2px; position: absolute; left: 0;',
+      '  transition: opacity 0.15s;',
+      '}',
+      '.tl-segment:hover { opacity: 0.8; }',
+      '.tl-segment-user { background: var(--tl-user, #58a6ff); }',
+      '.tl-segment-assistant { background: var(--tl-asst, #3fb950); }',
+      '.tl-segment-system { background: var(--tl-sys, #484f58); }',
+      '.tl-marker {',
+      '  position: absolute; right: 0; width: 6px; height: 6px;',
+      '  border-radius: 50%; z-index: 2; pointer-events: none;',
+      '}',
+      '.tl-marker-bookmark { background: #f0883e; }',
+      '.tl-marker-pin { background: #f85149; }',
+      '.tl-marker-code { background: #d2a8ff; }',
+      '#timeline-viewport {',
+      '  position: absolute; left: 2px; right: 2px; border: 1px solid rgba(255,255,255,0.3);',
+      '  background: rgba(255,255,255,0.06); border-radius: 2px; pointer-events: none;',
+      '  transition: top 0.1s ease, height 0.1s ease;',
+      '}',
+      '#timeline-toggle {',
+      '  position: fixed; right: 4px; top: 50%; transform: translateY(-50%);',
+      '  z-index: 801; background: var(--tl-btn-bg, #21262d); border: 1px solid var(--tl-border, #30363d);',
+      '  color: var(--tl-btn-fg, #8b949e); font-size: 14px; width: 24px; height: 48px;',
+      '  border-radius: 4px 0 0 4px; cursor: pointer; display: flex; align-items: center;',
+      '  justify-content: center; transition: right 0.2s ease, background 0.15s;',
+      '  padding: 0; line-height: 1;',
+      '}',
+      '#timeline-toggle:hover { background: var(--tl-btn-hover, #30363d); }',
+      '#timeline-toggle.tl-shifted { right: 52px; }',
+      '#timeline-tooltip {',
+      '  position: fixed; z-index: 900; background: #1c2128; color: #c9d1d9;',
+      '  border: 1px solid #30363d; border-radius: 6px; padding: 6px 10px;',
+      '  font-size: 12px; max-width: 220px; pointer-events: none;',
+      '  box-shadow: 0 4px 12px rgba(0,0,0,0.4); display: none;',
+      '  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;',
+      '}',
+      '.tl-tooltip-role { font-weight: 600; margin-right: 4px; }',
+      '.tl-tooltip-preview { color: #8b949e; }'
+    ].join('\n');
+    var style = document.createElement('style');
+    style.textContent = css;
+    document.head.appendChild(style);
+  }
+
+  function init() {
+    injectStyles();
+    buildDOM();
+    // Listen for chat output changes via MutationObserver
+    var chatOutput = document.getElementById('chat-output');
+    if (chatOutput) {
+      var observer = new MutationObserver(function () { refresh(); });
+      observer.observe(chatOutput, { childList: true, subtree: true });
+    }
+    // Track scroll position
+    var chatArea = getChatScrollParent();
+    if (chatArea) {
+      chatArea.addEventListener('scroll', scheduleViewportUpdate);
+    }
+    window.addEventListener('resize', scheduleViewportUpdate);
+  }
+
+  function buildDOM() {
+    // Container
+    containerEl = document.createElement('div');
+    containerEl.id = 'timeline-container';
+    containerEl.setAttribute('role', 'navigation');
+    containerEl.setAttribute('aria-label', 'Conversation timeline');
+
+    // Strip (where segments go)
+    stripEl = document.createElement('div');
+    stripEl.id = 'timeline-strip';
+    stripEl.addEventListener('click', handleStripClick);
+    stripEl.addEventListener('mousemove', handleStripHover);
+    stripEl.addEventListener('mouseleave', hideTooltip);
+
+    // Viewport indicator
+    viewportEl = document.createElement('div');
+    viewportEl.id = 'timeline-viewport';
+    stripEl.appendChild(viewportEl);
+
+    containerEl.appendChild(stripEl);
+    document.body.appendChild(containerEl);
+
+    // Tooltip
+    tooltipEl = document.createElement('div');
+    tooltipEl.id = 'timeline-tooltip';
+    document.body.appendChild(tooltipEl);
+
+    // Toggle button
+    toggleBtn = document.createElement('button');
+    toggleBtn.id = 'timeline-toggle';
+    toggleBtn.textContent = '\u25C0';
+    toggleBtn.title = 'Toggle conversation timeline (Alt+T)';
+    toggleBtn.setAttribute('aria-label', 'Toggle conversation timeline');
+    toggleBtn.addEventListener('click', toggle);
+    document.body.appendChild(toggleBtn);
+  }
+
+  // ── Toggle ───────────────────────────────────────────────
+
+  function toggle() {
+    isVisible = !isVisible;
+    containerEl.classList.toggle('tl-open', isVisible);
+    toggleBtn.classList.toggle('tl-shifted', isVisible);
+    toggleBtn.textContent = isVisible ? '\u25B6' : '\u25C0';
+    if (isVisible) {
+      refresh();
+    }
+  }
+
+  function show() { if (!isVisible) toggle(); }
+  function hide() { if (isVisible) toggle(); }
+
+  function getVisible() { return isVisible; }
+
+  // ── Refresh ──────────────────────────────────────────────
+
+  function refresh() {
+    if (!isVisible || !stripEl) return;
+
+    var history = ConversationManager.getHistory();
+    var nonSystem = [];
+    for (var i = 0; i < history.length; i++) {
+      if (history[i].role === 'system') continue;
+      nonSystem.push({ index: i, msg: history[i] });
+    }
+
+    // Calculate segment sizes proportional to content length
+    var totalLen = 0;
+    var lengths = [];
+    for (var j = 0; j < nonSystem.length; j++) {
+      var len = Math.max(1, (nonSystem[j].msg.content || '').length);
+      lengths.push(len);
+      totalLen += len;
+    }
+
+    // Clear old segments
+    var children = stripEl.querySelectorAll('.tl-segment, .tl-marker');
+    for (var c = 0; c < children.length; c++) {
+      children[c].remove();
+    }
+    segments = [];
+
+    var stripHeight = stripEl.clientHeight;
+    if (stripHeight <= 0) stripHeight = 400; // fallback
+    var minSegHeight = 3;
+    var gap = 1;
+    var totalGap = Math.max(0, nonSystem.length - 1) * gap;
+    var availHeight = stripHeight - totalGap;
+
+    var yPos = 0;
+    for (var k = 0; k < nonSystem.length; k++) {
+      var fraction = lengths[k] / totalLen;
+      var segH = Math.max(minSegHeight, Math.round(fraction * availHeight));
+
+      var seg = document.createElement('div');
+      seg.className = 'tl-segment tl-segment-' + nonSystem[k].msg.role;
+      seg.style.top = yPos + 'px';
+      seg.style.height = segH + 'px';
+      seg.dataset.msgIndex = nonSystem[k].index;
+      seg.dataset.domIndex = k;
+      stripEl.appendChild(seg);
+
+      segments.push({
+        el: seg,
+        msgIndex: nonSystem[k].index,
+        domIndex: k,
+        top: yPos,
+        height: segH,
+        role: nonSystem[k].msg.role,
+        preview: getPreview(nonSystem[k].msg)
+      });
+
+      // Markers
+      addMarkers(seg, nonSystem[k], yPos, segH);
+
+      yPos += segH + gap;
+    }
+
+    updateViewportIndicator();
+  }
+
+  function getPreview(msg) {
+    var text = (msg.content || '').trim();
+    var firstLine = text.split('\n')[0] || '';
+    if (firstLine.length > 60) firstLine = firstLine.substring(0, 57) + '...';
+    return firstLine;
+  }
+
+  function addMarkers(segEl, entry, yPos, segH) {
+    var content = entry.msg.content || '';
+
+    // Code block marker
+    if (content.indexOf('```') !== -1) {
+      var m = document.createElement('div');
+      m.className = 'tl-marker tl-marker-code';
+      m.style.top = (yPos + 2) + 'px';
+      stripEl.appendChild(m);
+    }
+
+    // Bookmark marker (check ChatBookmarks if available)
+    if (typeof ChatBookmarks !== 'undefined' && ChatBookmarks.isBookmarked &&
+        ChatBookmarks.isBookmarked(entry.index)) {
+      var bm = document.createElement('div');
+      bm.className = 'tl-marker tl-marker-bookmark';
+      bm.style.top = (yPos + segH - 8) + 'px';
+      stripEl.appendChild(bm);
+    }
+
+    // Pin marker (check MessagePinning if available)
+    if (typeof MessagePinning !== 'undefined' && MessagePinning.isPinned &&
+        MessagePinning.isPinned(entry.index)) {
+      var pm = document.createElement('div');
+      pm.className = 'tl-marker tl-marker-pin';
+      pm.style.top = (yPos + Math.floor(segH / 2) - 3) + 'px';
+      stripEl.appendChild(pm);
+    }
+  }
+
+  // ── Viewport indicator ───────────────────────────────────
+
+  function getChatScrollParent() {
+    var chatOutput = document.getElementById('chat-output');
+    if (!chatOutput) return null;
+    // chat-output itself is typically the scroll container
+    return chatOutput;
+  }
+
+  function scheduleViewportUpdate() {
+    if (scrollRAF) return;
+    scrollRAF = requestAnimationFrame(function () {
+      scrollRAF = null;
+      updateViewportIndicator();
+    });
+  }
+
+  function updateViewportIndicator() {
+    if (!isVisible || !viewportEl || !stripEl) return;
+    var chatOutput = getChatScrollParent();
+    if (!chatOutput) return;
+
+    var scrollH = chatOutput.scrollHeight;
+    var clientH = chatOutput.clientHeight;
+    var scrollT = chatOutput.scrollTop;
+    var stripH = stripEl.clientHeight;
+
+    if (scrollH <= 0 || stripH <= 0) return;
+
+    var vpTop = (scrollT / scrollH) * stripH;
+    var vpHeight = (clientH / scrollH) * stripH;
+    vpHeight = Math.max(vpHeight, 8); // minimum visible size
+
+    viewportEl.style.top = Math.round(vpTop) + 'px';
+    viewportEl.style.height = Math.round(vpHeight) + 'px';
+  }
+
+  // ── Interaction ──────────────────────────────────────────
+
+  function handleStripClick(e) {
+    var seg = findSegmentAt(e);
+    if (!seg) return;
+    scrollToMessage(seg.domIndex);
+  }
+
+  function handleStripHover(e) {
+    var seg = findSegmentAt(e);
+    if (!seg) {
+      hideTooltip();
+      return;
+    }
+    showTooltip(seg, e);
+  }
+
+  function findSegmentAt(e) {
+    var rect = stripEl.getBoundingClientRect();
+    var y = e.clientY - rect.top;
+    for (var i = 0; i < segments.length; i++) {
+      if (y >= segments[i].top && y <= segments[i].top + segments[i].height) {
+        return segments[i];
+      }
+    }
+    return null;
+  }
+
+  function scrollToMessage(domIndex) {
+    var chatOutput = document.getElementById('chat-output');
+    if (!chatOutput) return;
+    var msgs = chatOutput.querySelectorAll('.msg');
+    if (domIndex >= 0 && domIndex < msgs.length) {
+      if (typeof msgs[domIndex].scrollIntoView === 'function') {
+        msgs[domIndex].scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+      // Brief highlight
+      msgs[domIndex].style.transition = 'box-shadow 0.3s';
+      msgs[domIndex].style.boxShadow = '0 0 0 2px #58a6ff';
+      setTimeout(function () {
+        msgs[domIndex].style.boxShadow = '';
+      }, 1200);
+    }
+  }
+
+  function showTooltip(seg, e) {
+    if (!tooltipEl) return;
+    var roleEmoji = seg.role === 'user' ? '\uD83D\uDC64' : '\uD83E\uDD16';
+    tooltipEl.innerHTML = '<span class="tl-tooltip-role">' + roleEmoji + '</span>' +
+      '<span class="tl-tooltip-preview">' + escapeHtml(seg.preview) + '</span>';
+    tooltipEl.style.display = 'block';
+    tooltipEl.style.top = e.clientY + 'px';
+    tooltipEl.style.left = (e.clientX - tooltipEl.offsetWidth - 12) + 'px';
+  }
+
+  function hideTooltip() {
+    if (tooltipEl) tooltipEl.style.display = 'none';
+  }
+
+  function escapeHtml(text) {
+    var div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  // ── Stats ────────────────────────────────────────────────
+
+  /**
+   * Get timeline statistics for the current conversation.
+   * @returns {{ total: number, user: number, assistant: number, hasCode: number }}
+   */
+  function getStats() {
+    var history = ConversationManager.getHistory();
+    var total = 0, user = 0, assistant = 0, hasCode = 0;
+    for (var i = 0; i < history.length; i++) {
+      if (history[i].role === 'system') continue;
+      total++;
+      if (history[i].role === 'user') user++;
+      else if (history[i].role === 'assistant') assistant++;
+      if ((history[i].content || '').indexOf('```') !== -1) hasCode++;
+    }
+    return { total: total, user: user, assistant: assistant, hasCode: hasCode };
+  }
+
+  /**
+   * Get the segment data array (for testing).
+   * @returns {Array}
+   */
+  function getSegments() {
+    return segments.slice();
+  }
+
+  return {
+    init: init,
+    toggle: toggle,
+    show: show,
+    hide: hide,
+    isVisible: getVisible,
+    refresh: refresh,
+    getStats: getStats,
+    getSegments: getSegments,
+    scrollToMessage: scrollToMessage
+  };
+})();
+
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('send-btn').addEventListener('click', ChatController.send);
   document.getElementById('cancel-btn').addEventListener('click', () => {
@@ -7121,4 +7530,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Message diff viewer
   MessageDiff.init();
+
+  // Conversation timeline minimap
+  ConversationTimeline.init();
 });
