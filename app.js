@@ -3498,6 +3498,131 @@ const SessionManager = (() => {
   const QUOTA_WARNING_THRESHOLD = 0.8;  // 80% of estimated quota
   let isOpen = false;
   let autoSave = false;
+  let _tabId = crypto.randomUUID();
+  let _suppressStorageEvent = false;
+
+  /* ── Cross-tab synchronization ─────────────────────────────────────── */
+
+  /**
+   * Listen for `storage` events fired by OTHER tabs when they modify
+   * localStorage.  This prevents the silent data-corruption scenarios
+   * described in issue #30 (race-conditions between auto-save in
+   * multiple tabs, session-switch conflicts, fork collisions, and
+   * quota-eviction desync).
+   *
+   * Strategy:
+   *  • When another tab writes to STORAGE_KEY we reload from storage
+   *    and, if a session the current tab is editing was changed, show a
+   *    non-intrusive conflict banner.
+   *  • When another tab writes to ACTIVE_KEY we show a notification
+   *    but do NOT forcibly switch — the user decides.
+   */
+  function _initCrossTabSync() {
+    if (typeof window === 'undefined') return;
+    window.addEventListener('storage', _handleStorageEvent);
+  }
+
+  function _handleStorageEvent(e) {
+    if (_suppressStorageEvent) return;
+
+    if (e.key === STORAGE_KEY) {
+      const activeId = _getActiveId();
+      let freshSessions;
+      try {
+        freshSessions = e.newValue ? sanitizeStorageObject(JSON.parse(e.newValue)) : [];
+      } catch { return; }
+
+      if (!activeId) return;
+
+      // Check whether the session we are currently editing was modified
+      // by the other tab.
+      const freshActive = freshSessions.find(s => s.id === activeId);
+      if (!freshActive) {
+        // Our active session was deleted / evicted by the other tab.
+        _showSyncBanner(
+          '⚠️ Another tab removed the session you are viewing.',
+          [
+            { label: 'Reload list', action: () => { if (isOpen) refresh(); _hideSyncBanner(); } },
+            { label: 'Keep editing', action: _hideSyncBanner }
+          ]
+        );
+        return;
+      }
+
+      // Compare message counts as a quick conflict heuristic.
+      const localSessions = _loadAll();
+      const localActive = localSessions.find(s => s.id === activeId);
+      if (localActive && freshActive.updatedAt !== localActive.updatedAt) {
+        _showSyncBanner(
+          '⚠️ Another tab modified this session.',
+          [
+            { label: 'Reload', action: () => { load(activeId); _hideSyncBanner(); } },
+            { label: 'Keep mine', action: _hideSyncBanner }
+          ]
+        );
+      }
+
+      // Always refresh the panel if it is open so the list is current.
+      if (isOpen) refresh();
+    }
+
+    if (e.key === ACTIVE_KEY && e.newValue !== _getActiveId()) {
+      _showSyncBanner(
+        '⚠️ Another tab switched the active session.',
+        [
+          { label: 'Switch here too', action: () => { load(e.newValue); _hideSyncBanner(); } },
+          { label: 'Ignore', action: _hideSyncBanner }
+        ]
+      );
+    }
+  }
+
+  /** Wrap a localStorage write so this tab's own `storage` event is ignored. */
+  function _guardedSave(key, value) {
+    _suppressStorageEvent = true;
+    try {
+      localStorage.setItem(key, value);
+    } finally {
+      // Reset on next microtick so any synchronous handler still sees the flag.
+      queueMicrotask(() => { _suppressStorageEvent = false; });
+    }
+  }
+
+  /* ── Sync banner UI ────────────────────────────────────────────────── */
+
+  function _showSyncBanner(text, buttons) {
+    _hideSyncBanner(); // remove any existing banner
+    const banner = document.createElement('div');
+    banner.id = 'ac-sync-banner';
+    banner.setAttribute('role', 'alert');
+    Object.assign(banner.style, {
+      position: 'fixed', top: '0', left: '0', right: '0', zIndex: '10000',
+      background: '#fbbf24', color: '#1e1e1e', padding: '8px 16px',
+      display: 'flex', alignItems: 'center', gap: '12px',
+      fontFamily: 'system-ui, sans-serif', fontSize: '14px',
+      boxShadow: '0 2px 8px rgba(0,0,0,.15)'
+    });
+    const msg = document.createElement('span');
+    msg.textContent = text;
+    msg.style.flex = '1';
+    banner.appendChild(msg);
+    for (const btn of buttons) {
+      const b = document.createElement('button');
+      b.textContent = btn.label;
+      Object.assign(b.style, {
+        padding: '4px 10px', border: '1px solid #1e1e1e', borderRadius: '4px',
+        background: 'transparent', cursor: 'pointer', fontSize: '13px'
+      });
+      b.addEventListener('click', btn.action);
+      banner.appendChild(b);
+    }
+    document.body.appendChild(banner);
+  }
+
+  function _hideSyncBanner() {
+    const el = document.getElementById('ac-sync-banner');
+    if (el) el.remove();
+  }
 
   /** Load all sessions from localStorage. */
   function _loadAll() {
@@ -3510,7 +3635,7 @@ const SessionManager = (() => {
   /** Save all sessions to localStorage with quota protection. */
   function _saveAll(sessions) {
     try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
+        _guardedSave(STORAGE_KEY, JSON.stringify(sessions));
         return true;
     } catch (e) {
         if (e.name === 'QuotaExceededError' || e.code === 22 || e.code === 1014) {
@@ -3520,14 +3645,14 @@ const SessionManager = (() => {
             while (remaining.length > 1) {
                 remaining = _evictOldest(remaining, 1);
                 try {
-                    localStorage.setItem(STORAGE_KEY, JSON.stringify(remaining));
+                    _guardedSave(STORAGE_KEY, JSON.stringify(remaining));
                     console.warn(`[SessionManager] Evicted session to fit quota. ${remaining.length} sessions remain.`);
                     return true;
                 } catch { /* continue evicting */ }
             }
             // Last resort: try saving the single remaining session
             try {
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(remaining));
+                _guardedSave(STORAGE_KEY, JSON.stringify(remaining));
                 console.warn('[SessionManager] Evicted all but one session to fit quota.');
                 return true;
             } catch {
@@ -3587,7 +3712,7 @@ const SessionManager = (() => {
   }
   function _setActiveId(id) {
     try {
-      if (id) localStorage.setItem(ACTIVE_KEY, id);
+      if (id) _guardedSave(ACTIVE_KEY, id);
       else localStorage.removeItem(ACTIVE_KEY);
     } catch {}
   }
@@ -3598,6 +3723,7 @@ const SessionManager = (() => {
       autoSave = localStorage.getItem(AUTO_SAVE_KEY) === 'true';
     } catch { autoSave = false; }
     _updateAutoSaveUI();
+    _initCrossTabSync();
   }
 
   function isAutoSaveEnabled() { return autoSave; }
