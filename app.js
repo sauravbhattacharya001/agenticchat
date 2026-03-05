@@ -36,10 +36,44 @@
 
 'use strict';
 
+/* ---------- Safe localStorage helper ---------- */
+/**
+ * Wraps localStorage access so the app works in private-browsing or
+ * restricted-storage environments where localStorage may throw.
+ */
+const SafeStorage = (() => {
+  let available = false;
+  try {
+    const k = '__ac_storage_test__';
+    SafeStorage.set(k, '1');
+    SafeStorage.remove(k);
+    available = true;
+  } catch (_) { /* storage unavailable */ }
+
+  return {
+    get(key) {
+      try { return available ? SafeStorage.get(key) : null; } catch (_) { return null; }
+    },
+    set(key, value) {
+      try { if (available) SafeStorage.set(key, value); } catch (_) { /* quota or access error */ }
+    },
+    remove(key) {
+      try { if (available) SafeStorage.remove(key); } catch (_) { /* ignore */ }
+    },
+    get length() {
+      try { return available ? SafeStorage.length : 0; } catch (_) { return 0; }
+    },
+    key(i) {
+      try { return available ? SafeStorage.key(i) : null; } catch (_) { return null; }
+    },
+    isAvailable() { return available; },
+  };
+})();
+
 /* ---------- Configuration ---------- */
 const ChatConfig = (() => {
   const _cfg = {
-    _model: localStorage.getItem('ac-selected-model') || 'gpt-4o',
+    _model: SafeStorage.get('ac-selected-model') || 'gpt-4o',
     MAX_TOKENS_RESPONSE: 4096,
     MAX_HISTORY_PAIRS: 20,
     MAX_INPUT_CHARS: 50000,
@@ -47,7 +81,7 @@ const ChatConfig = (() => {
     CHARS_PER_TOKEN: 4,
     TOKEN_WARNING_THRESHOLD: 80000,
     SANDBOX_TIMEOUT_MS: 30000,
-    STREAMING_ENABLED: JSON.parse(localStorage.getItem('ac-streaming') ?? 'true'),
+    STREAMING_ENABLED: JSON.parse(SafeStorage.get('ac-streaming') ?? 'true'),
     SYSTEM_PROMPT: `
 You are an autonomous agent in a browser.
 Only reply with JavaScript in a single code block.
@@ -76,7 +110,7 @@ Always \`return\` the final value.
       'o3-mini':        [1.10,   4.40]
     },
     get MODEL() { return _cfg._model; },
-    set MODEL(v) { _cfg._model = v; localStorage.setItem('ac-selected-model', v); }
+    set MODEL(v) { _cfg._model = v; SafeStorage.set('ac-selected-model', v); }
   };
   return _cfg;
 })();
@@ -158,7 +192,7 @@ const ConversationManager = (() => {
 
   /** Response time tracking: array of { responseTimeMs, timestamp } for each assistant reply. */
   const responseTimes = [];
-  let showTimingBadges = JSON.parse(localStorage.getItem('ac-show-timing') || 'true');
+  let showTimingBadges = JSON.parse(SafeStorage.get('ac-show-timing') || 'true');
 
   return {
     getHistory()   { return history; },
@@ -167,7 +201,7 @@ const ConversationManager = (() => {
     isTimingVisible() { return showTimingBadges; },
     toggleTiming() {
       showTimingBadges = !showTimingBadges;
-      localStorage.setItem('ac-show-timing', JSON.stringify(showTimingBadges));
+      SafeStorage.set('ac-show-timing', JSON.stringify(showTimingBadges));
       return showTimingBadges;
     },
 
@@ -1597,7 +1631,7 @@ const SnippetLibrary = (() => {
   /** Load snippets from localStorage. */
   function load() {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = SafeStorage.get(STORAGE_KEY);
       return raw ? sanitizeStorageObject(JSON.parse(raw)) : [];
     } catch { return []; }
   }
@@ -1605,7 +1639,7 @@ const SnippetLibrary = (() => {
   /** Save snippets to localStorage. Returns true on success, false on failure. */
   function save(snippets) {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(snippets));
+      SafeStorage.set(STORAGE_KEY, JSON.stringify(snippets));
       return true;
     } catch (e) {
       console.error('[SnippetLibrary] Failed to persist snippets:', e.message);
@@ -2324,7 +2358,7 @@ const ChatBookmarks = (() => {
 
   function load() {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = SafeStorage.get(STORAGE_KEY);
       if (!raw) { bookmarks = []; return; }
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed)) { bookmarks = []; return; }
@@ -2336,7 +2370,7 @@ const ChatBookmarks = (() => {
 
   function save() {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(bookmarks));
+      SafeStorage.set(STORAGE_KEY, JSON.stringify(bookmarks));
     } catch (_) { /* storage full */ }
   }
 
@@ -2570,7 +2604,7 @@ const SlashCommands = (() => {
         { name: 'stream', description: 'Toggle streaming responses on/off', icon: '⚡',
           action: () => {
             ChatConfig.STREAMING_ENABLED = !ChatConfig.STREAMING_ENABLED;
-            localStorage.setItem('ac-streaming', JSON.stringify(ChatConfig.STREAMING_ENABLED));
+            SafeStorage.set('ac-streaming', JSON.stringify(ChatConfig.STREAMING_ENABLED));
             UIController.setChatOutput(`Streaming ${ChatConfig.STREAMING_ENABLED ? 'enabled ⚡' : 'disabled'}`);
           } },
         { name: 'file', description: 'Open file picker to attach text files', icon: '📎',
@@ -2972,7 +3006,7 @@ const MessageReactions = (() => {
     
     function save() {
         try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(reactions));
+            SafeStorage.set(STORAGE_KEY, JSON.stringify(reactions));
         } catch (e) {
             // Storage full — silent fail
         }
@@ -2980,7 +3014,7 @@ const MessageReactions = (() => {
     
     function load() {
         try {
-            const data = localStorage.getItem(STORAGE_KEY);
+            const data = SafeStorage.get(STORAGE_KEY);
             if (data) {
                 const parsed = JSON.parse(data);
                 if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
@@ -3007,7 +3041,7 @@ const MessageReactions = (() => {
     
     function reset() {
         reactions = {};
-        localStorage.removeItem(STORAGE_KEY);
+        SafeStorage.remove(STORAGE_KEY);
     }
     
     return {
@@ -3241,7 +3275,7 @@ const VoiceInput = (() => {
   /** Load saved language preference from localStorage, fallback to default. */
   function _loadLanguage() {
     try {
-      const saved = localStorage.getItem(LANG_STORAGE_KEY);
+      const saved = SafeStorage.get(LANG_STORAGE_KEY);
       if (saved && typeof saved === 'string' && saved.length >= 2 && saved.length <= 10) {
         return saved;
       }
@@ -3252,7 +3286,7 @@ const VoiceInput = (() => {
   /** Persist language preference to localStorage. */
   function _saveLanguage(lang) {
     try {
-      localStorage.setItem(LANG_STORAGE_KEY, lang);
+      SafeStorage.set(LANG_STORAGE_KEY, lang);
     } catch (_) { /* localStorage unavailable */ }
   }
 
@@ -3451,11 +3485,11 @@ const ThemeManager = (() => {
   }
 
   function _save(theme) {
-    try { localStorage.setItem(STORAGE_KEY, theme); } catch (_) {}
+    try { SafeStorage.set(STORAGE_KEY, theme); } catch (_) {}
   }
 
   function _loadSaved() {
-    try { return localStorage.getItem(STORAGE_KEY); } catch (_) { return null; }
+    try { return SafeStorage.get(STORAGE_KEY); } catch (_) { return null; }
   }
 
   function _updateButton() {
@@ -3502,7 +3536,7 @@ const SessionManager = (() => {
   /** Load all sessions from localStorage. */
   function _loadAll() {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = SafeStorage.get(STORAGE_KEY);
       return raw ? sanitizeStorageObject(JSON.parse(raw)) : [];
     } catch { return []; }
   }
@@ -3510,7 +3544,7 @@ const SessionManager = (() => {
   /** Save all sessions to localStorage with quota protection. */
   function _saveAll(sessions) {
     try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
+        SafeStorage.set(STORAGE_KEY, JSON.stringify(sessions));
         return true;
     } catch (e) {
         if (e.name === 'QuotaExceededError' || e.code === 22 || e.code === 1014) {
@@ -3520,14 +3554,14 @@ const SessionManager = (() => {
             while (remaining.length > 1) {
                 remaining = _evictOldest(remaining, 1);
                 try {
-                    localStorage.setItem(STORAGE_KEY, JSON.stringify(remaining));
+                    SafeStorage.set(STORAGE_KEY, JSON.stringify(remaining));
                     console.warn(`[SessionManager] Evicted session to fit quota. ${remaining.length} sessions remain.`);
                     return true;
                 } catch { /* continue evicting */ }
             }
             // Last resort: try saving the single remaining session
             try {
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(remaining));
+                SafeStorage.set(STORAGE_KEY, JSON.stringify(remaining));
                 console.warn('[SessionManager] Evicted all but one session to fit quota.');
                 return true;
             } catch {
@@ -3562,9 +3596,9 @@ const SessionManager = (() => {
   function _estimateQuotaUsage() {
     try {
         let total = 0;
-        for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i);
-            total += key.length + (localStorage.getItem(key) || '').length;
+        for (let i = 0; i < SafeStorage.length; i++) {
+            const key = SafeStorage.key(i);
+            total += key.length + (SafeStorage.get(key) || '').length;
         }
         // 5MB ≈ 5,242,880 chars (UTF-16 = 2 bytes per char, but length counts chars)
         return total / (5 * 1024 * 1024);
@@ -3583,19 +3617,19 @@ const SessionManager = (() => {
 
   /** Get or set the active session ID. */
   function _getActiveId() {
-    try { return localStorage.getItem(ACTIVE_KEY) || null; } catch { return null; }
+    try { return SafeStorage.get(ACTIVE_KEY) || null; } catch { return null; }
   }
   function _setActiveId(id) {
     try {
-      if (id) localStorage.setItem(ACTIVE_KEY, id);
-      else localStorage.removeItem(ACTIVE_KEY);
+      if (id) SafeStorage.set(ACTIVE_KEY, id);
+      else SafeStorage.remove(ACTIVE_KEY);
     } catch {}
   }
 
   /** Initialize auto-save preference. */
   function initAutoSave() {
     try {
-      autoSave = localStorage.getItem(AUTO_SAVE_KEY) === 'true';
+      autoSave = SafeStorage.get(AUTO_SAVE_KEY) === 'true';
     } catch { autoSave = false; }
     _updateAutoSaveUI();
   }
@@ -3604,7 +3638,7 @@ const SessionManager = (() => {
 
   function toggleAutoSave() {
     autoSave = !autoSave;
-    try { localStorage.setItem(AUTO_SAVE_KEY, String(autoSave)); } catch {}
+    try { SafeStorage.set(AUTO_SAVE_KEY, String(autoSave)); } catch {}
     _updateAutoSaveUI();
     return autoSave;
   }
@@ -4226,7 +4260,7 @@ const CrossTabSync = (() => {
   function init() {
     // Snapshot current state so we can detect external changes
     try {
-      lastKnownSessionsJSON = localStorage.getItem(SESSION_STORAGE_KEY);
+      lastKnownSessionsJSON = SafeStorage.get(SESSION_STORAGE_KEY);
     } catch { /* ignore */ }
 
     // Listen for localStorage changes from OTHER tabs
@@ -4264,13 +4298,13 @@ const CrossTabSync = (() => {
     SessionManager._saveAll = function(sessions) {
       // Stamp our tab ID before writing
       try {
-        localStorage.setItem(WRITE_STAMP_KEY, tabId);
+        SafeStorage.set(WRITE_STAMP_KEY, tabId);
       } catch { /* ignore */ }
       suppressNextStorageEvent = true;
       const result = originalSaveAll(sessions);
       // Update our snapshot after our own write
       try {
-        lastKnownSessionsJSON = localStorage.getItem(SESSION_STORAGE_KEY);
+        lastKnownSessionsJSON = SafeStorage.get(SESSION_STORAGE_KEY);
       } catch { /* ignore */ }
       // Broadcast to other tabs
       _broadcast({ type: 'sessions-updated', tabId });
@@ -4281,7 +4315,7 @@ const CrossTabSync = (() => {
     const originalSetActive = SessionManager._setActiveId;
     SessionManager._setActiveId = function(id) {
       try {
-        localStorage.setItem(WRITE_STAMP_KEY, tabId);
+        SafeStorage.set(WRITE_STAMP_KEY, tabId);
       } catch { /* ignore */ }
       originalSetActive(id);
       _broadcast({ type: 'active-session-changed', tabId, sessionId: id });
@@ -4361,7 +4395,7 @@ const CrossTabSync = (() => {
   function _handleReload() {
     _hideBanner();
     try {
-      lastKnownSessionsJSON = localStorage.getItem(SESSION_STORAGE_KEY);
+      lastKnownSessionsJSON = SafeStorage.get(SESSION_STORAGE_KEY);
     } catch { /* ignore */ }
 
     // Reload the active session from storage
@@ -4835,7 +4869,7 @@ const PersonaPresets = (() => {
 
   function getActiveId() {
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
+      const saved = SafeStorage.get(STORAGE_KEY);
       if (saved) {
         const parsed = sanitizeStorageObject(JSON.parse(saved));
         return parsed.id || 'default';
@@ -4846,7 +4880,7 @@ const PersonaPresets = (() => {
 
   function getActivePrompt() {
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
+      const saved = SafeStorage.get(STORAGE_KEY);
       if (saved) {
         const parsed = sanitizeStorageObject(JSON.parse(saved));
         if (parsed.id === 'custom') return parsed.prompt || ChatConfig.SYSTEM_PROMPT;
@@ -4860,7 +4894,7 @@ const PersonaPresets = (() => {
   function save(id, customPrompt) {
     const data = { id };
     if (id === 'custom' && customPrompt) data.prompt = customPrompt;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    SafeStorage.set(STORAGE_KEY, JSON.stringify(data));
   }
 
   function applyPrompt(prompt) {
@@ -5232,7 +5266,7 @@ const FileDropZone = (() => {
  */
 const FocusMode = (() => {
   const STORAGE_KEY = 'ac-focus-mode';
-  let active = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'false');
+  let active = JSON.parse(SafeStorage.get(STORAGE_KEY) || 'false');
 
   function apply() {
     document.body.classList.toggle('zen-mode', active);
@@ -5243,7 +5277,7 @@ const FocusMode = (() => {
         ? 'Exit focus mode (Ctrl+Shift+F)'
         : 'Focus mode — hide distractions (Ctrl+Shift+F)';
     }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(active));
+    SafeStorage.set(STORAGE_KEY, JSON.stringify(active));
   }
 
   function toggle() {
@@ -5300,7 +5334,7 @@ const InputHistory = (() => {
   /** Load history from localStorage. */
   function load() {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = SafeStorage.get(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) {
@@ -5313,7 +5347,7 @@ const InputHistory = (() => {
   /** Save history to localStorage. */
   function save() {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(entries.slice(-MAX_ENTRIES)));
+      SafeStorage.set(STORAGE_KEY, JSON.stringify(entries.slice(-MAX_ENTRIES)));
     } catch { /* quota exceeded — silently drop */ }
   }
 
@@ -5402,7 +5436,7 @@ const InputHistory = (() => {
     entries = [];
     cursor = -1;
     draft = '';
-    try { localStorage.removeItem(STORAGE_KEY); } catch { /* */ }
+    try { SafeStorage.remove(STORAGE_KEY); } catch { /* */ }
   }
 
   // Load on module init
@@ -5433,12 +5467,12 @@ const Scratchpad = (() => {
 
   /** Load notes from localStorage. */
   function _load() {
-    try { return localStorage.getItem(STORAGE_KEY) || ''; } catch { return ''; }
+    try { return SafeStorage.get(STORAGE_KEY) || ''; } catch { return ''; }
   }
 
   /** Save notes to localStorage. */
   function _save(text) {
-    try { localStorage.setItem(STORAGE_KEY, text); } catch {}
+    try { SafeStorage.set(STORAGE_KEY, text); } catch {}
   }
 
   /** Update the word/char count display. */
@@ -6161,7 +6195,7 @@ const MessagePinning = (() => {
   /** Persist pins to localStorage. */
   function save() {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(pins));
+      SafeStorage.set(STORAGE_KEY, JSON.stringify(pins));
     } catch (_) {
       // Storage full — degrade silently
     }
@@ -6170,7 +6204,7 @@ const MessagePinning = (() => {
   /** Load pins from localStorage. */
   function load() {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = SafeStorage.get(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) {
@@ -6195,7 +6229,7 @@ const MessagePinning = (() => {
     }
     barEl = null;
     listEl = null;
-    try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
+    try { SafeStorage.remove(STORAGE_KEY); } catch (_) {}
   }
 
   return {
@@ -6620,13 +6654,13 @@ const ReadAloud = (() => {
 
   function save() {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs));
+      SafeStorage.set(STORAGE_KEY, JSON.stringify(prefs));
     } catch (e) { /* storage full */ }
   }
 
   function load() {
     try {
-      let data = localStorage.getItem(STORAGE_KEY);
+      let data = SafeStorage.get(STORAGE_KEY);
       if (data) {
         let parsed = JSON.parse(data);
         if (parsed && typeof parsed === 'object') {
@@ -6643,7 +6677,7 @@ const ReadAloud = (() => {
   function reset() {
     stop();
     prefs = { voiceURI: '', rate: DEFAULT_RATE, pitch: DEFAULT_PITCH };
-    localStorage.removeItem(STORAGE_KEY);
+    SafeStorage.remove(STORAGE_KEY);
   }
 
   function _getState() {
