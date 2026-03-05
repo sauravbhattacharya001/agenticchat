@@ -30,6 +30,7 @@
  *   MessageDiff         — compare any two messages with visual line-level diff
  *   ConversationTimeline — visual minimap sidebar for conversation navigation
  *   MessageAnnotations  — private notes/annotations on messages with labels
+ *   ConversationChapters — named section dividers with TOC navigation
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -7635,6 +7636,7 @@ document.addEventListener('DOMContentLoaded', () => {
       PersonaPresets.close();
       ModelSelector.close();
       Scratchpad.close();
+      ConversationChapters.closePanel();
     }
   });
 
@@ -7793,6 +7795,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // Message annotations
   document.getElementById('annotations-btn').addEventListener('click', MessageAnnotations.togglePanel);
   MessageAnnotations.init();
+
+  // Conversation chapters
+  document.getElementById('chapters-btn').addEventListener('click', ConversationChapters.togglePanel);
+  ConversationChapters.init();
 
   // Cross-tab sync (must come after SessionManager.initAutoSave)
   CrossTabSync.init();
@@ -8472,3 +8478,613 @@ const MessageAnnotations = (() => {
   };
 })();
 
+
+/* ---------- Conversation Chapters ---------- */
+/**
+ * Named chapter markers that divide long conversations into navigable
+ * sections. Chapters are stored as { messageIndex, title, createdAt }
+ * entries keyed by session. A floating table-of-contents panel lets the
+ * user jump between chapters; visual dividers are injected into the
+ * history panel.
+ *
+ * Public API:
+ *   init()                    - inject styles, load state, render
+ *   addChapter(idx, title)    - insert a chapter marker before messageIndex
+ *   removeChapter(idx)        - remove the chapter at messageIndex
+ *   renameChapter(idx, title) - rename an existing chapter
+ *   getChapters()             - sorted array of chapter objects
+ *   getChapterAt(idx)         - chapter at exact messageIndex or null
+ *   getChapterFor(idx)        - chapter whose range contains messageIndex
+ *   clearAll()                - remove all chapters
+ *   openPanel() / closePanel() / togglePanel()
+ *   exportChapters()          - JSON string
+ *   importChapters(json)      - merge from JSON
+ *   renderDividers()          - inject divider elements into history panel
+ *   getCount()                - number of chapters
+ */
+const ConversationChapters = (() => {
+  'use strict';
+
+  const STORAGE_KEY = 'agenticchat_chapters';
+  const MAX_CHAPTERS = 100;
+  const MAX_TITLE_LENGTH = 80;
+
+  // chapters: { [messageIndex: number]: { title, createdAt } }
+  let chapters = {};
+  let panelEl = null;
+  let overlayEl = null;
+  let styleInjected = false;
+
+  // -- Persistence --
+
+  function save() {
+    SafeStorage.set(STORAGE_KEY, JSON.stringify(chapters));
+  }
+
+  function load() {
+    try {
+      const raw = SafeStorage.get(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          chapters = parsed;
+        }
+      }
+    } catch (_) { chapters = {}; }
+  }
+
+  // -- Styles --
+
+  function injectStyles() {
+    if (styleInjected) return;
+    styleInjected = true;
+    const style = document.createElement('style');
+    style.textContent = [
+      '#chapters-panel {',
+      '  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);',
+      '  width: 420px; max-width: 90vw; max-height: 70vh; z-index: 1100;',
+      '  background: var(--ch-bg, #0d1117); border: 1px solid var(--ch-border, #30363d);',
+      '  border-radius: 10px; display: none; flex-direction: column; overflow: hidden;',
+      '  box-shadow: 0 8px 32px rgba(0,0,0,0.5);',
+      '}',
+      '#chapters-panel.ch-open { display: flex; }',
+      '#chapters-header {',
+      '  display: flex; align-items: center; justify-content: space-between;',
+      '  padding: 12px 16px; border-bottom: 1px solid var(--ch-border, #30363d);',
+      '}',
+      '#chapters-header h3 { margin: 0; color: #f0883e; font-size: 15px; }',
+      '#chapters-header-actions { display: flex; gap: 6px; }',
+      '#chapters-header-actions button {',
+      '  background: #21262d; border: 1px solid #30363d; color: #c9d1d9;',
+      '  padding: 3px 8px; border-radius: 4px; cursor: pointer; font-size: 11px;',
+      '}',
+      '#chapters-header-actions button:hover { background: #30363d; }',
+      '#chapters-body {',
+      '  flex: 1; overflow-y: auto; padding: 8px 12px;',
+      '}',
+      '#chapters-body:empty::after {',
+      '  content: "No chapters yet. Add one from the history panel or press Alt+C.";',
+      '  display: block; color: #6e7681; font-size: 13px; text-align: center;',
+      '  padding: 24px 12px;',
+      '}',
+      '.ch-item {',
+      '  display: flex; gap: 8px; padding: 8px 10px; border-radius: 6px;',
+      '  margin-bottom: 4px; background: var(--ch-item-bg, #161b22); cursor: pointer;',
+      '  align-items: center; transition: background 0.12s;',
+      '}',
+      '.ch-item:hover { background: var(--ch-item-hover, #1c2333); }',
+      '.ch-item-num {',
+      '  font-size: 11px; font-weight: 700; color: #f0883e;',
+      '  min-width: 22px; text-align: center;',
+      '}',
+      '.ch-item-title {',
+      '  flex: 1; font-size: 13px; color: #c9d1d9; white-space: nowrap;',
+      '  overflow: hidden; text-overflow: ellipsis;',
+      '}',
+      '.ch-item-meta {',
+      '  font-size: 10px; color: #6e7681; white-space: nowrap;',
+      '}',
+      '.ch-item-actions { display: flex; gap: 2px; }',
+      '.ch-item-actions button {',
+      '  background: none; border: none; color: #6e7681; cursor: pointer;',
+      '  font-size: 11px; padding: 2px 4px;',
+      '}',
+      '.ch-item-actions button:hover { color: #c9d1d9; }',
+      '#chapters-overlay {',
+      '  position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 1050;',
+      '  display: none;',
+      '}',
+      '#chapters-overlay.ch-open { display: block; }',
+      '.ch-divider {',
+      '  display: flex; align-items: center; gap: 10px; margin: 12px 0;',
+      '  user-select: none;',
+      '}',
+      '.ch-divider-line {',
+      '  flex: 1; height: 1px; background: #f0883e40;',
+      '}',
+      '.ch-divider-label {',
+      '  font-size: 11px; font-weight: 600; color: #f0883e;',
+      '  letter-spacing: 0.04em; text-transform: uppercase;',
+      '  padding: 2px 10px; background: #f0883e15; border-radius: 10px;',
+      '  white-space: nowrap;',
+      '}',
+      '.ch-add-btn {',
+      '  position: absolute; top: 4px; right: 56px; width: 22px; height: 22px;',
+      '  border-radius: 50%; display: flex; align-items: center; justify-content: center;',
+      '  font-size: 11px; cursor: pointer; opacity: 0; transition: opacity 0.15s;',
+      '  z-index: 5; background: rgba(240,136,62,0.2); border: 1px solid rgba(240,136,62,0.3);',
+      '  color: #f0883e; font-weight: bold;',
+      '}',
+      '.history-msg { position: relative; }',
+      '.history-msg:hover .ch-add-btn { opacity: 0.6; }',
+      '.history-msg:hover .ch-add-btn:hover { opacity: 1; }',
+    ].join('\n');
+    document.head.appendChild(style);
+  }
+
+  // -- CRUD --
+
+  function addChapter(messageIndex, title) {
+    if (typeof messageIndex !== 'number' || messageIndex < 0) return null;
+    if (!title || typeof title !== 'string') return null;
+    title = title.trim().substring(0, MAX_TITLE_LENGTH);
+    if (!title) return null;
+    if (Object.keys(chapters).length >= MAX_CHAPTERS && !(messageIndex in chapters)) return null;
+
+    var existing = chapters[messageIndex];
+    chapters[messageIndex] = {
+      title: title,
+      createdAt: existing ? existing.createdAt : Date.now(),
+    };
+    save();
+    return chapters[messageIndex];
+  }
+
+  function removeChapter(messageIndex) {
+    if (!(messageIndex in chapters)) return false;
+    delete chapters[messageIndex];
+    save();
+    return true;
+  }
+
+  function renameChapter(messageIndex, newTitle) {
+    if (!(messageIndex in chapters)) return false;
+    if (!newTitle || typeof newTitle !== 'string') return false;
+    newTitle = newTitle.trim().substring(0, MAX_TITLE_LENGTH);
+    if (!newTitle) return false;
+    chapters[messageIndex].title = newTitle;
+    save();
+    return true;
+  }
+
+  function getChapters() {
+    return Object.keys(chapters)
+      .map(Number)
+      .sort(function(a, b) { return a - b; })
+      .map(function(idx, i) {
+        return {
+          messageIndex: idx,
+          number: i + 1,
+          title: chapters[idx].title,
+          createdAt: chapters[idx].createdAt,
+        };
+      });
+  }
+
+  function getChapterAt(messageIndex) {
+    var ch = chapters[messageIndex];
+    if (!ch) return null;
+    var sorted = getChapters();
+    var found = null;
+    for (var i = 0; i < sorted.length; i++) {
+      if (sorted[i].messageIndex === messageIndex) { found = sorted[i]; break; }
+    }
+    return found;
+  }
+
+  function getChapterFor(messageIndex) {
+    var sorted = getChapters();
+    var result = null;
+    for (var i = 0; i < sorted.length; i++) {
+      if (sorted[i].messageIndex <= messageIndex) {
+        result = sorted[i];
+      } else {
+        break;
+      }
+    }
+    return result;
+  }
+
+  function getCount() {
+    return Object.keys(chapters).length;
+  }
+
+  function clearAll() {
+    chapters = {};
+    save();
+  }
+
+  // -- Export/Import --
+
+  function exportChapters() {
+    return JSON.stringify(getChapters(), null, 2);
+  }
+
+  function importChapters(json) {
+    try {
+      var arr = typeof json === 'string' ? JSON.parse(json) : json;
+      if (!Array.isArray(arr)) return 0;
+      var imported = 0;
+      for (var j = 0; j < arr.length; j++) {
+        var item = arr[j];
+        if (typeof item.messageIndex === 'number' && typeof item.title === 'string') {
+          if (Object.keys(chapters).length < MAX_CHAPTERS || (item.messageIndex in chapters)) {
+            chapters[item.messageIndex] = {
+              title: item.title.substring(0, MAX_TITLE_LENGTH),
+              createdAt: item.createdAt || Date.now(),
+            };
+            imported++;
+          }
+        }
+      }
+      if (imported > 0) save();
+      return imported;
+    } catch (_) { return 0; }
+  }
+
+  // -- Panel UI --
+
+  function buildPanel() {
+    if (panelEl) return;
+
+    overlayEl = document.createElement('div');
+    overlayEl.id = 'chapters-overlay';
+    overlayEl.addEventListener('click', closePanel);
+    document.body.appendChild(overlayEl);
+
+    panelEl = document.createElement('div');
+    panelEl.id = 'chapters-panel';
+    panelEl.setAttribute('role', 'dialog');
+    panelEl.setAttribute('aria-label', 'Conversation Chapters');
+
+    // Header
+    var header = document.createElement('div');
+    header.id = 'chapters-header';
+    var h3 = document.createElement('h3');
+    h3.textContent = '\uD83D\uDCD1 Chapters';
+    header.appendChild(h3);
+
+    var actions = document.createElement('div');
+    actions.id = 'chapters-header-actions';
+
+    var exportBtn = document.createElement('button');
+    exportBtn.textContent = '\uD83D\uDCCB Export';
+    exportBtn.title = 'Copy chapters as JSON';
+    exportBtn.addEventListener('click', function() {
+      try {
+        navigator.clipboard.writeText(exportChapters());
+        exportBtn.textContent = '\u2713 Copied';
+        setTimeout(function() { exportBtn.textContent = '\uD83D\uDCCB Export'; }, 1500);
+      } catch (_) { /* ignore */ }
+    });
+    actions.appendChild(exportBtn);
+
+    var clearBtn = document.createElement('button');
+    clearBtn.textContent = '\uD83D\uDDD1\uFE0F Clear';
+    clearBtn.title = 'Remove all chapters';
+    clearBtn.addEventListener('click', function() {
+      if (Object.keys(chapters).length === 0) return;
+      clearAll();
+      renderPanel();
+    });
+    actions.appendChild(clearBtn);
+
+    var closeBtn = document.createElement('button');
+    closeBtn.textContent = '\u2715';
+    closeBtn.title = 'Close';
+    closeBtn.addEventListener('click', closePanel);
+    actions.appendChild(closeBtn);
+
+    header.appendChild(actions);
+    panelEl.appendChild(header);
+
+    // Body
+    var body = document.createElement('div');
+    body.id = 'chapters-body';
+    panelEl.appendChild(body);
+
+    document.body.appendChild(panelEl);
+  }
+
+  function renderPanel() {
+    var body = document.getElementById('chapters-body');
+    if (!body) return;
+    body.innerHTML = '';
+
+    var sorted = getChapters();
+    if (sorted.length === 0) return;
+
+    var history = ConversationManager.getHistory();
+
+    for (var c = 0; c < sorted.length; c++) {
+      var ch = sorted[c];
+      var item = document.createElement('div');
+      item.className = 'ch-item';
+      item.title = 'Click to scroll to this chapter';
+
+      var num = document.createElement('span');
+      num.className = 'ch-item-num';
+      num.textContent = String(ch.number);
+      item.appendChild(num);
+
+      var titleEl = document.createElement('span');
+      titleEl.className = 'ch-item-title';
+      titleEl.textContent = ch.title;
+      item.appendChild(titleEl);
+
+      // Message count in this chapter
+      var nextCh = sorted[c + 1];
+      var endIdx = nextCh ? nextCh.messageIndex : history.length;
+      var msgCount = endIdx - ch.messageIndex;
+      var meta = document.createElement('span');
+      meta.className = 'ch-item-meta';
+      meta.textContent = msgCount + ' msg' + (msgCount !== 1 ? 's' : '');
+      item.appendChild(meta);
+
+      var actionsDiv = document.createElement('span');
+      actionsDiv.className = 'ch-item-actions';
+
+      (function(chRef) {
+        var renameBtn = document.createElement('button');
+        renameBtn.textContent = '\u270F\uFE0F';
+        renameBtn.title = 'Rename chapter';
+        renameBtn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          var newTitle = window.prompt('Rename chapter:', chRef.title);
+          if (newTitle) {
+            renameChapter(chRef.messageIndex, newTitle);
+            renderPanel();
+          }
+        });
+        actionsDiv.appendChild(renameBtn);
+
+        var delBtn = document.createElement('button');
+        delBtn.textContent = '\uD83D\uDDD1\uFE0F';
+        delBtn.title = 'Remove chapter';
+        delBtn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          removeChapter(chRef.messageIndex);
+          renderPanel();
+          renderDividers();
+        });
+        actionsDiv.appendChild(delBtn);
+
+        item.addEventListener('click', function() {
+          scrollToMessageIndex(chRef.messageIndex);
+          closePanel();
+        });
+      })(ch);
+
+      item.appendChild(actionsDiv);
+      body.appendChild(item);
+    }
+  }
+
+  function scrollToMessageIndex(targetIndex) {
+    // Try history panel messages first
+    var historyPanel = document.getElementById('history-messages');
+    if (historyPanel) {
+      var msgs = historyPanel.querySelectorAll('.history-msg');
+      var history = ConversationManager.getHistory();
+      var domIndex = 0;
+      for (var i = 0; i < history.length; i++) {
+        if (history[i].role === 'system') continue;
+        if (i === targetIndex) break;
+        domIndex++;
+      }
+      var target = msgs[domIndex];
+      if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        target.style.outline = '2px solid #f0883e';
+        setTimeout(function() { target.style.outline = ''; }, 2000);
+        return;
+      }
+    }
+
+    // Fallback: try ConversationTimeline
+    if (typeof ConversationTimeline !== 'undefined' && ConversationTimeline.scrollToMessage) {
+      ConversationTimeline.scrollToMessage(targetIndex);
+    }
+  }
+
+  function openPanel() {
+    buildPanel();
+    renderPanel();
+    panelEl.classList.add('ch-open');
+    overlayEl.classList.add('ch-open');
+  }
+
+  function closePanel() {
+    if (panelEl) panelEl.classList.remove('ch-open');
+    if (overlayEl) overlayEl.classList.remove('ch-open');
+  }
+
+  function togglePanel() {
+    if (panelEl && panelEl.classList.contains('ch-open')) {
+      closePanel();
+    } else {
+      openPanel();
+    }
+  }
+
+  // -- History Panel Dividers --
+
+  function renderDividers() {
+    var historyPanel = document.getElementById('history-messages');
+    if (!historyPanel) return;
+
+    // Remove existing dividers
+    var existing = historyPanel.querySelectorAll('.ch-divider');
+    for (var i = 0; i < existing.length; i++) {
+      existing[i].remove();
+    }
+
+    var sorted = getChapters();
+    if (sorted.length === 0) return;
+
+    var msgs = historyPanel.querySelectorAll('.history-msg');
+    var history = ConversationManager.getHistory();
+
+    // Build index map: history index -> DOM index (skipping system messages)
+    var indexMap = {};
+    var domIdx = 0;
+    for (var k = 0; k < history.length; k++) {
+      if (history[k].role === 'system') continue;
+      indexMap[k] = domIdx;
+      domIdx++;
+    }
+
+    for (var s = 0; s < sorted.length; s++) {
+      var ch = sorted[s];
+      var di = indexMap[ch.messageIndex];
+      if (di === undefined) continue;
+      var msgEl = msgs[di];
+      if (!msgEl) continue;
+
+      var divider = document.createElement('div');
+      divider.className = 'ch-divider';
+      divider.setAttribute('data-chapter-index', ch.messageIndex);
+
+      var line1 = document.createElement('span');
+      line1.className = 'ch-divider-line';
+      divider.appendChild(line1);
+
+      var label = document.createElement('span');
+      label.className = 'ch-divider-label';
+      label.textContent = '\u00A7' + ch.number + ' ' + ch.title;
+      divider.appendChild(label);
+
+      var line2 = document.createElement('span');
+      line2.className = 'ch-divider-line';
+      divider.appendChild(line2);
+
+      msgEl.parentNode.insertBefore(divider, msgEl);
+    }
+  }
+
+  // -- Add-chapter buttons on history messages --
+
+  function renderAddButtons() {
+    var historyPanel = document.getElementById('history-messages');
+    if (!historyPanel) return;
+
+    // Remove old buttons
+    var old = historyPanel.querySelectorAll('.ch-add-btn');
+    for (var i = 0; i < old.length; i++) old[i].remove();
+
+    var msgs = historyPanel.querySelectorAll('.history-msg');
+    var history = ConversationManager.getHistory();
+
+    // Build reverse map: DOM index -> history index
+    var reverseMap = [];
+    for (var r = 0; r < history.length; r++) {
+      if (history[r].role !== 'system') reverseMap.push(r);
+    }
+
+    for (var d = 0; d < msgs.length; d++) {
+      var histIdx = reverseMap[d];
+      if (histIdx === undefined) continue;
+      if (histIdx in chapters) continue;
+
+      (function(idx) {
+        var btn = document.createElement('button');
+        btn.className = 'ch-add-btn';
+        btn.textContent = '\u00A7';
+        btn.title = 'Add chapter marker here';
+        btn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          var title = window.prompt('Chapter title:');
+          if (title) {
+            addChapter(idx, title);
+            renderDividers();
+            renderAddButtons();
+          }
+        });
+        msgs[d].appendChild(btn);
+      })(histIdx);
+    }
+  }
+
+  // -- Quick-add: latest message --
+
+  function addChapterAtCurrent(title) {
+    var history = ConversationManager.getHistory();
+    var lastNonSystem = history.length - 1;
+    if (lastNonSystem < 1) return null;
+    return addChapter(lastNonSystem, title || 'Chapter ' + (getCount() + 1));
+  }
+
+  // Eagerly load persisted state so chapters are available before init()
+  load();
+
+  // -- Init --
+
+  function init() {
+    injectStyles();
+
+    // Watch for history panel open to inject dividers + add-buttons
+    var historyPanel = document.getElementById('history-panel');
+    if (historyPanel) {
+      var observer = new MutationObserver(function(mutations) {
+        for (var m = 0; m < mutations.length; m++) {
+          if (mutations[m].type === 'attributes' && mutations[m].attributeName === 'class') {
+            if (historyPanel.classList.contains('open')) {
+              setTimeout(function() {
+                renderDividers();
+                renderAddButtons();
+              }, 50);
+            }
+          }
+        }
+      });
+      observer.observe(historyPanel, { attributes: true, attributeFilter: ['class'] });
+    }
+
+    // Keyboard shortcut: Alt+C to add chapter at current position
+    document.addEventListener('keydown', function(e) {
+      if (e.altKey && e.key === 'c' && !e.ctrlKey && !e.shiftKey && !e.metaKey) {
+        e.preventDefault();
+        var title = window.prompt('Chapter title:');
+        if (title) {
+          addChapterAtCurrent(title);
+        }
+      }
+      // Alt+Shift+C to open chapters panel
+      if (e.altKey && e.shiftKey && e.key === 'C' && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        togglePanel();
+      }
+    });
+  }
+
+  return {
+    init: init,
+    addChapter: addChapter,
+    removeChapter: removeChapter,
+    renameChapter: renameChapter,
+    getChapters: getChapters,
+    getChapterAt: getChapterAt,
+    getChapterFor: getChapterFor,
+    getCount: getCount,
+    clearAll: clearAll,
+    openPanel: openPanel,
+    closePanel: closePanel,
+    togglePanel: togglePanel,
+    exportChapters: exportChapters,
+    importChapters: importChapters,
+    renderDividers: renderDividers,
+    renderAddButtons: renderAddButtons,
+    addChapterAtCurrent: addChapterAtCurrent,
+    scrollToMessageIndex: scrollToMessageIndex,
+  };
+})();
