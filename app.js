@@ -57,7 +57,15 @@ const SafeStorage = (() => {
       try { return available ? localStorage.getItem(key) : null; } catch (_) { return null; }
     },
     set(key, value) {
-      try { if (available) localStorage.setItem(key, value); } catch (_) { /* quota or access error */ }
+      if (!available) return;
+      try {
+        localStorage.setItem(key, value);
+      } catch (e) {
+        // Propagate quota errors so callers can detect write failures.
+        // Swallow SecurityError (storage revoked after initial check).
+        if (e instanceof DOMException && e.name === 'SecurityError') return;
+        throw e;
+      }
     },
     remove(key) {
       try { if (available) localStorage.removeItem(key); } catch (_) { /* ignore */ }
@@ -112,7 +120,7 @@ Always \`return\` the final value.
       'o3-mini':        [1.10,   4.40]
     },
     get MODEL() { return _cfg._model; },
-    set MODEL(v) { _cfg._model = v; SafeStorage.set('ac-selected-model', v); }
+    set MODEL(v) { _cfg._model = v; try { SafeStorage.set('ac-selected-model', v); } catch (_) {} }
   };
   return _cfg;
 })();
@@ -203,7 +211,7 @@ const ConversationManager = (() => {
     isTimingVisible() { return showTimingBadges; },
     toggleTiming() {
       showTimingBadges = !showTimingBadges;
-      SafeStorage.set('ac-show-timing', JSON.stringify(showTimingBadges));
+      try { SafeStorage.set('ac-show-timing', JSON.stringify(showTimingBadges)); } catch (_) {}
       return showTimingBadges;
     },
 
@@ -2606,7 +2614,7 @@ const SlashCommands = (() => {
         { name: 'stream', description: 'Toggle streaming responses on/off', icon: '⚡',
           action: () => {
             ChatConfig.STREAMING_ENABLED = !ChatConfig.STREAMING_ENABLED;
-            SafeStorage.set('ac-streaming', JSON.stringify(ChatConfig.STREAMING_ENABLED));
+            try { SafeStorage.set('ac-streaming', JSON.stringify(ChatConfig.STREAMING_ENABLED)); } catch (_) {}
             UIController.setChatOutput(`Streaming ${ChatConfig.STREAMING_ENABLED ? 'enabled ⚡' : 'disabled'}`);
           } },
         { name: 'file', description: 'Open file picker to attach text files', icon: '📎',
@@ -4896,7 +4904,7 @@ const PersonaPresets = (() => {
   function save(id, customPrompt) {
     const data = { id };
     if (id === 'custom' && customPrompt) data.prompt = customPrompt;
-    SafeStorage.set(STORAGE_KEY, JSON.stringify(data));
+    try { SafeStorage.set(STORAGE_KEY, JSON.stringify(data)); } catch (_) {}
   }
 
   function applyPrompt(prompt) {
@@ -5279,7 +5287,7 @@ const FocusMode = (() => {
         ? 'Exit focus mode (Ctrl+Shift+F)'
         : 'Focus mode — hide distractions (Ctrl+Shift+F)';
     }
-    SafeStorage.set(STORAGE_KEY, JSON.stringify(active));
+    try { SafeStorage.set(STORAGE_KEY, JSON.stringify(active)); } catch (_) {}
   }
 
   function toggle() {
@@ -8518,7 +8526,7 @@ const ConversationChapters = (() => {
   // -- Persistence --
 
   function save() {
-    SafeStorage.set(STORAGE_KEY, JSON.stringify(chapters));
+    try { SafeStorage.set(STORAGE_KEY, JSON.stringify(chapters)); } catch (_) {}
   }
 
   function load() {
