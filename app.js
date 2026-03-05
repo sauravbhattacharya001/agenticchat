@@ -4559,6 +4559,12 @@ const ChatStats = (() => {
     return node;
   }
 
+  /** Escape HTML special characters to prevent XSS in rendered stats. */
+  function _esc(str) {
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
   /**
    * Compute statistics from current conversation messages.
    * Returns an object with computed stats.
@@ -4667,7 +4673,7 @@ const ChatStats = (() => {
     const topWordsHtml = stats.topWords.length
       ? stats.topWords.map(tw =>
           `<div class="stats-word-row">
-            <span class="stats-word-label">${tw.word}</span>
+            <span class="stats-word-label">${_esc(tw.word)}</span>
             <div class="stats-word-bar" style="width:${Math.max(8, (tw.count / maxCount) * 100)}%">${tw.count}</div>
           </div>`
         ).join('')
@@ -4775,6 +4781,12 @@ const ChatStats = (() => {
 const PersonaPresets = (() => {
   const STORAGE_KEY = 'agenticchat_persona';
   let isOpen = false;
+
+  /** Escape HTML special characters to prevent XSS in rendered presets. */
+  function _esc(str) {
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
 
   const presets = [
     {
@@ -4886,9 +4898,9 @@ const PersonaPresets = (() => {
 
     listEl.innerHTML = presets.map(p => {
       const isActive = p.id === activeId;
-      return '<div class="persona-card' + (isActive ? ' active' : '') + '" data-persona-id="' + p.id + '">'
-        + '<div class="persona-card-title">' + p.name + (isActive ? ' ✓' : '') + '</div>'
-        + '<div class="persona-card-desc">' + p.desc + '</div>'
+      return '<div class="persona-card' + (isActive ? ' active' : '') + '" data-persona-id="' + _esc(p.id) + '">'
+        + '<div class="persona-card-title">' + _esc(p.name) + (isActive ? ' ✓' : '') + '</div>'
+        + '<div class="persona-card-desc">' + _esc(p.desc) + '</div>'
         + '</div>';
     }).join('');
 
