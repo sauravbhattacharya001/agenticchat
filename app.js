@@ -4618,7 +4618,7 @@ const ChatStats = (() => {
   /** Escape HTML special characters to prevent XSS in rendered stats. */
   function _esc(str) {
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
   /**
@@ -4841,7 +4841,7 @@ const PersonaPresets = (() => {
   /** Escape HTML special characters to prevent XSS in rendered presets. */
   function _esc(str) {
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
   const presets = [
@@ -7958,7 +7958,7 @@ const MessageAnnotations = (() => {
 
   function load() {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = SafeStorage.get(STORAGE_KEY);
       if (raw) {
         annotations = JSON.parse(raw);
       }
@@ -7969,8 +7969,8 @@ const MessageAnnotations = (() => {
 
   function save() {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(annotations));
-    } catch (_) { /* quota exceeded */ }
+      SafeStorage.set(STORAGE_KEY, JSON.stringify(annotations));
+    } catch (_) { /* quota exceeded or storage revoked */ }
   }
 
   // ── Core API ──
