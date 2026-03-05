@@ -85,24 +85,24 @@ Always \`return\` the final value.
 
 /** Format an ISO timestamp as relative time (e.g. "2h ago", "3d ago"). */
 function formatRelativeTime(isoString) {
-  var now = Date.now();
-  var then = new Date(isoString).getTime();
-  var diff = now - then;
-  var mins = Math.floor(diff / 60000);
+  let now = Date.now();
+  const then = new Date(isoString).getTime();
+  let diff = now - then;
+  const mins = Math.floor(diff / 60000);
   if (mins < 1) return 'just now';
   if (mins < 60) return mins + 'm ago';
-  var hours = Math.floor(mins / 60);
+  const hours = Math.floor(mins / 60);
   if (hours < 24) return hours + 'h ago';
-  var days = Math.floor(hours / 24);
+  const days = Math.floor(hours / 24);
   if (days < 30) return days + 'd ago';
   return new Date(isoString).toLocaleDateString();
 }
 
 /** Trigger a browser file download from in-memory content. */
 function downloadBlob(filename, content, mimeType) {
-  var blob = new Blob([content], { type: mimeType });
-  var url = URL.createObjectURL(blob);
-  var a = document.createElement('a');
+  let blob = new Blob([content], { type: mimeType });
+  let url = URL.createObjectURL(blob);
+  let a = document.createElement('a');
   a.href = url;
   a.download = filename;
   document.body.appendChild(a);
@@ -268,11 +268,11 @@ const SandboxRunner = (() => {
         window.addEventListener('message', async function handler(evt) {
           if (!evt.data || evt.data.type !== 'sandbox-exec') return;
           window.removeEventListener('message', handler);
-          var code = evt.data.code;
-          var nonce = evt.data.nonce;
+          let code = evt.data.code;
+          let nonce = evt.data.nonce;
           try {
-            var fn = new Function('return (async () => {' + code + '})()');
-            var __result = await fn();
+            const fn = new Function('return (async () => {' + code + '})()');
+            const __result = await fn();
             parent.postMessage({ type:'sandbox-result', nonce:nonce, ok:true, value:String(__result) }, '*');
           } catch(e) {
             parent.postMessage({ type:'sandbox-result', nonce:nonce, ok:false, value:'Error: '+e.message }, '*');
@@ -564,7 +564,7 @@ const UIController = (() => {
     const prompt = usage.prompt_tokens || 0;
     const completion = usage.completion_tokens || 0;
     const total = usage.total_tokens || (prompt + completion);
-    var pricing = ChatConfig.MODEL_PRICING[ChatConfig.MODEL] || [2.50, 10.00];
+    const pricing = ChatConfig.MODEL_PRICING[ChatConfig.MODEL] || [2.50, 10.00];
     const cost = (prompt * pricing[0] + completion * pricing[1]) / 1_000_000;
     el('token-usage').textContent =
       `Tokens: ${prompt} in / ${completion} out (${total} total) · ~$${cost.toFixed(4)}`;
@@ -1619,11 +1619,11 @@ const SnippetLibrary = (() => {
 
   /** Add a new snippet. Returns {snippets, saved} where saved indicates persistence. */
   function add(name, code, tags) {
-    var MAX_SNIPPET_NAME = 200;
-    var MAX_SNIPPET_CODE = 500000; // 500 KB
-    var MAX_SNIPPETS = 200;
+    const MAX_SNIPPET_NAME = 200;
+    const MAX_SNIPPET_CODE = 500000; // 500 KB
+    const MAX_SNIPPETS = 200;
 
-    var snippets = load();
+    let snippets = load();
 
     // Prevent unbounded growth
     if (snippets.length >= MAX_SNIPPETS) {
@@ -4405,7 +4405,7 @@ const CrossTabSync = (() => {
 
 /* ---------- Conversation Sessions (facade) ---------- */
 const ConversationSessions = (function () {
-  var _confirmPending = false;
+  let _confirmPending = false;
 
   function save(name) {
     return SessionManager.save(name || undefined);
@@ -4432,8 +4432,8 @@ const ConversationSessions = (function () {
   }
 
   function exportSession(id) {
-    var sessions = SessionManager._loadAll();
-    var session = sessions.find(function (s) { return s.id === id; });
+    let sessions = SessionManager._loadAll();
+    let session = sessions.find(function (s) { return s.id === id; });
     if (!session) return null;
     return JSON.stringify({
       exported: new Date().toISOString(),
@@ -4453,8 +4453,8 @@ const ConversationSessions = (function () {
 
   function search(query) {
     if (!query || typeof query !== 'string') return [];
-    var q = query.toLowerCase();
-    var sessions = SessionManager.getAll();
+    let q = query.toLowerCase();
+    let sessions = SessionManager.getAll();
     return sessions.filter(function (s) {
       if (s.name && s.name.toLowerCase().indexOf(q) !== -1) return true;
       if (Array.isArray(s.messages)) {
@@ -4467,11 +4467,11 @@ const ConversationSessions = (function () {
   }
 
   function getStats(id) {
-    var sessions = SessionManager._loadAll();
-    var session = sessions.find(function (s) { return s.id === id; });
+    let sessions = SessionManager._loadAll();
+    let session = sessions.find(function (s) { return s.id === id; });
     if (!session) return null;
-    var msgs = session.messages || [];
-    var wordCount = 0;
+    let msgs = session.messages || [];
+    let wordCount = 0;
     msgs.forEach(function (m) {
       if (m.content && m.content.trim()) {
         wordCount += m.content.trim().split(/\s+/).length;
@@ -6217,19 +6217,19 @@ const MessagePinning = (() => {
  * @namespace ReadAloud
  */
 const ReadAloud = (() => {
-  var STORAGE_KEY = 'agenticchat_readaloud';
-  var DEFAULT_RATE = 1.0;
-  var DEFAULT_PITCH = 1.0;
-  var MIN_RATE = 0.5;
-  var MAX_RATE = 3.0;
-  var MIN_PITCH = 0.5;
-  var MAX_PITCH = 2.0;
+  let STORAGE_KEY = 'agenticchat_readaloud';
+  const DEFAULT_RATE = 1.0;
+  const DEFAULT_PITCH = 1.0;
+  const MIN_RATE = 0.5;
+  const MAX_RATE = 3.0;
+  const MIN_PITCH = 0.5;
+  const MAX_PITCH = 2.0;
 
-  var prefs = { voiceURI: '', rate: DEFAULT_RATE, pitch: DEFAULT_PITCH };
-  var speaking = false;
-  var paused = false;
-  var currentMsgIndex = -1;
-  var controlsEl = null;
+  let prefs = { voiceURI: '', rate: DEFAULT_RATE, pitch: DEFAULT_PITCH };
+  let speaking = false;
+  let paused = false;
+  let currentMsgIndex = -1;
+  let controlsEl = null;
 
   function init() {
     load();
@@ -6245,9 +6245,9 @@ const ReadAloud = (() => {
   /** Get available voices, optionally filtered to a language prefix. */
   function getVoices(langPrefix) {
     if (!isSupported()) return [];
-    var voices = window.speechSynthesis.getVoices();
+    let voices = window.speechSynthesis.getVoices();
     if (langPrefix) {
-      var prefix = langPrefix.toLowerCase();
+      const prefix = langPrefix.toLowerCase();
       return voices.filter(function (v) {
         return v.lang.toLowerCase().indexOf(prefix) === 0;
       });
@@ -6257,7 +6257,7 @@ const ReadAloud = (() => {
 
   /** Return the user's preferred voice, or the first English one. */
   function resolveVoice() {
-    var voices = getVoices();
+    let voices = getVoices();
     if (prefs.voiceURI) {
       for (var i = 0; i < voices.length; i++) {
         if (voices[i].voiceURI === prefs.voiceURI) return voices[i];
@@ -6304,7 +6304,7 @@ const ReadAloud = (() => {
   function cleanTextForSpeech(text) {
     if (!text) return '';
     // Remove code blocks
-    var cleaned = text.replace(/```[\s\S]*?```/g, ' code block omitted ');
+    let cleaned = text.replace(/```[\s\S]*?```/g, ' code block omitted ');
     // Remove inline code
     cleaned = cleaned.replace(/`[^`]+`/g, function (m) {
       return m.slice(1, -1);
@@ -6335,11 +6335,11 @@ const ReadAloud = (() => {
 
     stop(); // cancel any current speech
 
-    var cleaned = cleanTextForSpeech(text);
+    let cleaned = cleanTextForSpeech(text);
     if (!cleaned) return { ok: false, error: 'No speakable text after cleanup' };
 
-    var utterance = new SpeechSynthesisUtterance(cleaned);
-    var voice = resolveVoice();
+    const utterance = new SpeechSynthesisUtterance(cleaned);
+    let voice = resolveVoice();
     if (voice) utterance.voice = voice;
     utterance.rate = prefs.rate;
     utterance.pitch = prefs.pitch;
@@ -6379,7 +6379,7 @@ const ReadAloud = (() => {
 
   /** Speak a message from conversation history by index. */
   function speakMessage(messageIndex) {
-    var history = ConversationManager.getHistory();
+    let history = ConversationManager.getHistory();
     if (messageIndex < 0 || messageIndex >= history.length) {
       return { ok: false, error: 'Invalid message index' };
     }
@@ -6436,11 +6436,11 @@ const ReadAloud = (() => {
 
   /** Highlight or un-highlight a message in the history panel. */
   function highlightMessage(msgIndex, on) {
-    var container = document.getElementById('history-messages');
+    let container = document.getElementById('history-messages');
     if (!container) return;
-    var msgs = container.querySelectorAll('.history-msg');
-    var history = ConversationManager.getHistory();
-    var nonSystemIdx = 0;
+    let msgs = container.querySelectorAll('.history-msg');
+    let history = ConversationManager.getHistory();
+    let nonSystemIdx = 0;
     for (var i = 0; i < history.length; i++) {
       if (history[i].role === 'system') continue;
       if (i === msgIndex && nonSystemIdx < msgs.length) {
@@ -6461,10 +6461,10 @@ const ReadAloud = (() => {
    */
   function renderSpeakButton(messageElement, messageIndex) {
     // Remove existing speak button if any
-    var existing = messageElement.querySelector('.readaloud-btn');
+    let existing = messageElement.querySelector('.readaloud-btn');
     if (existing) existing.remove();
 
-    var btn = document.createElement('button');
+    let btn = document.createElement('button');
     btn.className = 'readaloud-btn';
     btn.setAttribute('aria-label', 'Read aloud');
     btn.setAttribute('title', 'Read aloud');
@@ -6480,7 +6480,7 @@ const ReadAloud = (() => {
       });
 
       // Add stop button
-      var stopBtn = document.createElement('button');
+      let stopBtn = document.createElement('button');
       stopBtn.className = 'readaloud-btn readaloud-stop';
       stopBtn.textContent = '\u23F9\uFE0F';
       stopBtn.setAttribute('aria-label', 'Stop reading');
@@ -6491,7 +6491,7 @@ const ReadAloud = (() => {
         decorateMessages();
       });
 
-      var roleEl = messageElement.querySelector('.msg-role');
+      let roleEl = messageElement.querySelector('.msg-role');
       if (roleEl) {
         roleEl.appendChild(btn);
         roleEl.appendChild(stopBtn);
@@ -6507,7 +6507,7 @@ const ReadAloud = (() => {
         decorateMessages();
       });
 
-      var roleEl2 = messageElement.querySelector('.msg-role');
+      const roleEl2 = messageElement.querySelector('.msg-role');
       if (roleEl2) {
         roleEl2.appendChild(btn);
       } else {
@@ -6529,12 +6529,12 @@ const ReadAloud = (() => {
     }
 
     controlsEl.style.display = '';
-    var stateSpan = controlsEl.querySelector('.readaloud-state');
+    const stateSpan = controlsEl.querySelector('.readaloud-state');
     if (stateSpan) {
       stateSpan.textContent = paused ? 'Paused' : 'Speaking\u2026';
     }
 
-    var pauseBtn = controlsEl.querySelector('.readaloud-ctrl-pause');
+    let pauseBtn = controlsEl.querySelector('.readaloud-ctrl-pause');
     if (pauseBtn) {
       pauseBtn.textContent = paused ? '\u25B6\uFE0F Resume' : '\u23F8\uFE0F Pause';
     }
@@ -6544,18 +6544,18 @@ const ReadAloud = (() => {
   function buildControls() {
     if (document.getElementById('readaloud-controls')) return;
 
-    var panel = document.createElement('div');
+    let panel = document.createElement('div');
     panel.id = 'readaloud-controls';
     panel.setAttribute('role', 'region');
     panel.setAttribute('aria-label', 'Read aloud controls');
     panel.style.display = 'none';
 
-    var state = document.createElement('span');
+    const state = document.createElement('span');
     state.className = 'readaloud-state';
     state.textContent = '';
     panel.appendChild(state);
 
-    var pauseBtn = document.createElement('button');
+    let pauseBtn = document.createElement('button');
     pauseBtn.className = 'readaloud-ctrl-pause btn-sm';
     pauseBtn.textContent = '\u23F8\uFE0F Pause';
     pauseBtn.addEventListener('click', function () {
@@ -6563,7 +6563,7 @@ const ReadAloud = (() => {
     });
     panel.appendChild(pauseBtn);
 
-    var stopBtn = document.createElement('button');
+    let stopBtn = document.createElement('button');
     stopBtn.className = 'readaloud-ctrl-stop btn-sm';
     stopBtn.textContent = '\u23F9\uFE0F Stop';
     stopBtn.addEventListener('click', function () {
@@ -6572,11 +6572,11 @@ const ReadAloud = (() => {
     panel.appendChild(stopBtn);
 
     // Speed slider
-    var speedLabel = document.createElement('label');
+    const speedLabel = document.createElement('label');
     speedLabel.className = 'readaloud-speed-label';
     speedLabel.textContent = 'Speed: ' + prefs.rate.toFixed(1) + 'x';
 
-    var speedSlider = document.createElement('input');
+    const speedSlider = document.createElement('input');
     speedSlider.type = 'range';
     speedSlider.className = 'readaloud-speed';
     speedSlider.min = String(MIN_RATE);
@@ -6592,7 +6592,7 @@ const ReadAloud = (() => {
     panel.appendChild(speedLabel);
     panel.appendChild(speedSlider);
 
-    var output = document.getElementById('chat-output');
+    let output = document.getElementById('chat-output');
     if (output && output.parentNode) {
       output.parentNode.insertBefore(panel, output);
     } else {
@@ -6603,11 +6603,11 @@ const ReadAloud = (() => {
 
   /** Decorate assistant messages in the history panel with speak buttons. */
   function decorateMessages() {
-    var container = document.getElementById('history-messages');
+    let container = document.getElementById('history-messages');
     if (!container) return;
-    var msgs = container.querySelectorAll('.history-msg');
-    var history = ConversationManager.getHistory();
-    var nonSystemIdx = 0;
+    let msgs = container.querySelectorAll('.history-msg');
+    let history = ConversationManager.getHistory();
+    let nonSystemIdx = 0;
     for (var i = 0; i < history.length; i++) {
       if (history[i].role === 'system') continue;
       // Only add speak buttons to assistant messages
@@ -6626,9 +6626,9 @@ const ReadAloud = (() => {
 
   function load() {
     try {
-      var data = localStorage.getItem(STORAGE_KEY);
+      let data = localStorage.getItem(STORAGE_KEY);
       if (data) {
-        var parsed = JSON.parse(data);
+        let parsed = JSON.parse(data);
         if (parsed && typeof parsed === 'object') {
           if (parsed.voiceURI) prefs.voiceURI = String(parsed.voiceURI);
           if (typeof parsed.rate === 'number') prefs.rate = Math.max(MIN_RATE, Math.min(MAX_RATE, parsed.rate));
@@ -6707,8 +6707,8 @@ const ReadAloud = (() => {
  * @namespace MessageDiff
  */
 const MessageDiff = (() => {
-  var firstSelection = null; // { index, role, content }
-  var modalEl = null;
+  let firstSelection = null; // { index, role, content }
+  let modalEl = null;
 
   function init() {
     buildModal();
@@ -6721,13 +6721,13 @@ const MessageDiff = (() => {
    * Returns an array of { type: 'same'|'add'|'del', text: string }.
    */
   function diffLines(textA, textB) {
-    var linesA = (textA || '').split('\n');
-    var linesB = (textB || '').split('\n');
-    var m = linesA.length;
-    var n = linesB.length;
+    const linesA = (textA || '').split('\n');
+    const linesB = (textB || '').split('\n');
+    let m = linesA.length;
+    let n = linesB.length;
 
     // Build LCS table
-    var dp = [];
+    const dp = [];
     for (var i = 0; i <= m; i++) {
       dp[i] = [];
       for (var j = 0; j <= n; j++) {
@@ -6742,9 +6742,9 @@ const MessageDiff = (() => {
     }
 
     // Backtrack to build diff
-    var result = [];
-    var ii = m;
-    var jj = n;
+    let result = [];
+    let ii = m;
+    let jj = n;
     while (ii > 0 || jj > 0) {
       if (ii > 0 && jj > 0 && linesA[ii - 1] === linesB[jj - 1]) {
         result.unshift({ type: 'same', text: linesA[ii - 1] });
@@ -6766,9 +6766,9 @@ const MessageDiff = (() => {
    * Compute diff statistics from a diff result.
    */
   function diffStats(diff) {
-    var added = 0;
-    var removed = 0;
-    var unchanged = 0;
+    let added = 0;
+    let removed = 0;
+    let unchanged = 0;
     for (var i = 0; i < diff.length; i++) {
       if (diff[i].type === 'add') added++;
       else if (diff[i].type === 'del') removed++;
@@ -6784,10 +6784,10 @@ const MessageDiff = (() => {
    * First call selects the "left" side; second call opens the diff.
    */
   function selectMessage(index) {
-    var history = ConversationManager.getHistory();
+    let history = ConversationManager.getHistory();
     if (index < 0 || index >= history.length) return;
 
-    var msg = history[index];
+    let msg = history[index];
 
     if (firstSelection === null) {
       // First selection
@@ -6801,7 +6801,7 @@ const MessageDiff = (() => {
         return;
       }
       // Second selection — show diff
-      var second = { index: index, role: msg.role, content: msg.content };
+      const second = { index: index, role: msg.role, content: msg.content };
       showDiff(firstSelection, second);
       highlightSelected(firstSelection.index, false);
       firstSelection = null;
@@ -6825,11 +6825,11 @@ const MessageDiff = (() => {
 
   /** Highlight/unhighlight a message element. */
   function highlightSelected(msgIndex, on) {
-    var chatOutput = document.getElementById('chat-output');
+    let chatOutput = document.getElementById('chat-output');
     if (!chatOutput) return;
-    var msgs = chatOutput.querySelectorAll('.msg');
-    var history = ConversationManager.getHistory();
-    var domIdx = 0;
+    let msgs = chatOutput.querySelectorAll('.msg');
+    let history = ConversationManager.getHistory();
+    let domIdx = 0;
     for (var i = 0; i < history.length; i++) {
       if (history[i].role === 'system') continue;
       if (i === msgIndex && domIdx < msgs.length) {
@@ -6851,7 +6851,7 @@ const MessageDiff = (() => {
   function buildModal() {
     if (document.getElementById('diff-modal')) return;
 
-    var modal = document.createElement('div');
+    let modal = document.createElement('div');
     modal.id = 'diff-modal';
     modal.setAttribute('role', 'dialog');
     modal.setAttribute('aria-label', 'Message diff viewer');
@@ -6863,7 +6863,7 @@ const MessageDiff = (() => {
       if (e.target === modal) closeModal();
     });
 
-    var content = document.createElement('div');
+    let content = document.createElement('div');
     content.id = 'diff-modal-content';
     content.style.cssText =
       'background:#0d1117;color:#c9d1d9;border-radius:12px;width:90%;max-width:900px;' +
@@ -6871,23 +6871,23 @@ const MessageDiff = (() => {
       'box-shadow:0 8px 32px rgba(0,0,0,0.5);border:1px solid #30363d';
 
     // Header
-    var header = document.createElement('div');
+    let header = document.createElement('div');
     header.style.cssText =
       'display:flex;align-items:center;justify-content:space-between;' +
       'padding:16px 20px;border-bottom:1px solid #30363d;flex-shrink:0';
 
-    var title = document.createElement('div');
+    let title = document.createElement('div');
     title.id = 'diff-modal-title';
     title.style.cssText = 'font-size:16px;font-weight:600';
     title.textContent = '\uD83D\uDD0D Message Diff';
     header.appendChild(title);
 
-    var statsEl = document.createElement('span');
+    let statsEl = document.createElement('span');
     statsEl.id = 'diff-stats';
     statsEl.style.cssText = 'font-size:13px;color:#8b949e;margin-left:12px';
     header.appendChild(statsEl);
 
-    var closeBtn = document.createElement('button');
+    const closeBtn = document.createElement('button');
     closeBtn.textContent = '\u2715';
     closeBtn.setAttribute('aria-label', 'Close diff viewer');
     closeBtn.style.cssText =
@@ -6901,7 +6901,7 @@ const MessageDiff = (() => {
     content.appendChild(header);
 
     // Diff body
-    var body = document.createElement('div');
+    let body = document.createElement('div');
     body.id = 'diff-body';
     body.style.cssText =
       'overflow-y:auto;padding:0;flex:1;font-family:\'SF Mono\',Consolas,monospace;font-size:13px;line-height:1.6';
@@ -6921,22 +6921,22 @@ const MessageDiff = (() => {
 
   function showDiff(msgA, msgB) {
     buildModal();
-    var diff = diffLines(msgA.content, msgB.content);
-    var stats = diffStats(diff);
+    let diff = diffLines(msgA.content, msgB.content);
+    let stats = diffStats(diff);
 
     // Update title
-    var titleEl = document.getElementById('diff-modal-title');
+    const titleEl = document.getElementById('diff-modal-title');
     if (titleEl) {
-      var roleA = msgA.role === 'user' ? '\uD83D\uDC64' : '\uD83E\uDD16';
-      var roleB = msgB.role === 'user' ? '\uD83D\uDC64' : '\uD83E\uDD16';
+      const roleA = msgA.role === 'user' ? '\uD83D\uDC64' : '\uD83E\uDD16';
+      const roleB = msgB.role === 'user' ? '\uD83D\uDC64' : '\uD83E\uDD16';
       titleEl.textContent = '\uD83D\uDD0D Diff: ' + roleA + ' #' + (msgA.index + 1) +
         ' \u2194 ' + roleB + ' #' + (msgB.index + 1);
     }
 
     // Update stats
-    var statsEl = document.getElementById('diff-stats');
+    let statsEl = document.getElementById('diff-stats');
     if (statsEl) {
-      var parts = [];
+      let parts = [];
       if (stats.added > 0) parts.push('+' + stats.added + ' added');
       if (stats.removed > 0) parts.push('-' + stats.removed + ' removed');
       parts.push(stats.unchanged + ' unchanged');
@@ -6944,36 +6944,36 @@ const MessageDiff = (() => {
     }
 
     // Render diff lines
-    var body = document.getElementById('diff-body');
+    let body = document.getElementById('diff-body');
     if (!body) return;
     body.textContent = '';
 
-    var table = document.createElement('table');
+    const table = document.createElement('table');
     table.style.cssText = 'width:100%;border-collapse:collapse';
 
-    var lineNumA = 0;
-    var lineNumB = 0;
+    let lineNumA = 0;
+    let lineNumB = 0;
 
     for (var i = 0; i < diff.length; i++) {
-      var entry = diff[i];
-      var tr = document.createElement('tr');
+      let entry = diff[i];
+      const tr = document.createElement('tr');
 
-      var tdNumA = document.createElement('td');
+      const tdNumA = document.createElement('td');
       tdNumA.style.cssText =
         'width:40px;text-align:right;padding:0 8px;color:#484f58;' +
         'user-select:none;font-size:12px;border-right:1px solid #21262d;vertical-align:top';
 
-      var tdNumB = document.createElement('td');
+      const tdNumB = document.createElement('td');
       tdNumB.style.cssText =
         'width:40px;text-align:right;padding:0 8px;color:#484f58;' +
         'user-select:none;font-size:12px;border-right:1px solid #21262d;vertical-align:top';
 
-      var tdMarker = document.createElement('td');
+      const tdMarker = document.createElement('td');
       tdMarker.style.cssText =
         'width:20px;text-align:center;padding:0 4px;font-weight:700;' +
         'user-select:none;vertical-align:top';
 
-      var tdContent = document.createElement('td');
+      const tdContent = document.createElement('td');
       tdContent.style.cssText =
         'padding:0 12px;white-space:pre-wrap;word-break:break-word;vertical-align:top';
 
@@ -7034,12 +7034,12 @@ const MessageDiff = (() => {
    * Called after messages are rendered or selection changes.
    */
   function decorateMessages() {
-    var chatOutput = document.getElementById('chat-output');
+    let chatOutput = document.getElementById('chat-output');
     if (!chatOutput) return;
 
-    var msgs = chatOutput.querySelectorAll('.msg');
-    var history = ConversationManager.getHistory();
-    var domIdx = 0;
+    let msgs = chatOutput.querySelectorAll('.msg');
+    let history = ConversationManager.getHistory();
+    let domIdx = 0;
 
     for (var i = 0; i < history.length; i++) {
       if (history[i].role === 'system') continue;
@@ -7052,10 +7052,10 @@ const MessageDiff = (() => {
 
   function addCompareButton(msgEl, msgIndex) {
     // Remove existing compare button
-    var existing = msgEl.querySelector('.diff-compare-btn');
+    let existing = msgEl.querySelector('.diff-compare-btn');
     if (existing) existing.remove();
 
-    var btn = document.createElement('button');
+    let btn = document.createElement('button');
     btn.className = 'diff-compare-btn';
     btn.style.cssText =
       'background:none;border:1px solid #30363d;color:#8b949e;font-size:11px;' +
@@ -7107,7 +7107,7 @@ const MessageDiff = (() => {
     }
 
     // Append to role area or message itself
-    var roleEl = msgEl.querySelector('.msg-role');
+    let roleEl = msgEl.querySelector('.msg-role');
     if (roleEl) {
       roleEl.appendChild(btn);
     } else {
@@ -7156,21 +7156,21 @@ const MessageDiff = (() => {
 const ConversationTimeline = (() => {
   'use strict';
 
-  var containerEl = null;
-  var stripEl = null;
-  var viewportEl = null;
-  var toggleBtn = null;
-  var tooltipEl = null;
-  var isVisible = false;
-  var segments = [];
-  var scrollRAF = null;
+  let containerEl = null;
+  let stripEl = null;
+  let viewportEl = null;
+  let toggleBtn = null;
+  let tooltipEl = null;
+  let isVisible = false;
+  let segments = [];
+  let scrollRAF = null;
 
   /** CSS injected once. */
-  var styleInjected = false;
+  let styleInjected = false;
   function injectStyles() {
     if (styleInjected) return;
     styleInjected = true;
-    var css = [
+    const css = [
       '#timeline-container {',
       '  position: fixed; right: 0; top: 0; width: 48px; height: 100vh;',
       '  background: var(--tl-bg, #0d1117); border-left: 1px solid var(--tl-border, #30363d);',
@@ -7222,7 +7222,7 @@ const ConversationTimeline = (() => {
       '.tl-tooltip-role { font-weight: 600; margin-right: 4px; }',
       '.tl-tooltip-preview { color: #8b949e; }'
     ].join('\n');
-    var style = document.createElement('style');
+    let style = document.createElement('style');
     style.textContent = css;
     document.head.appendChild(style);
   }
@@ -7231,13 +7231,13 @@ const ConversationTimeline = (() => {
     injectStyles();
     buildDOM();
     // Listen for chat output changes via MutationObserver
-    var chatOutput = document.getElementById('chat-output');
+    let chatOutput = document.getElementById('chat-output');
     if (chatOutput) {
-      var observer = new MutationObserver(function () { refresh(); });
+      const observer = new MutationObserver(function () { refresh(); });
       observer.observe(chatOutput, { childList: true, subtree: true });
     }
     // Track scroll position
-    var chatArea = getChatScrollParent();
+    const chatArea = getChatScrollParent();
     if (chatArea) {
       chatArea.addEventListener('scroll', scheduleViewportUpdate);
     }
@@ -7303,42 +7303,42 @@ const ConversationTimeline = (() => {
   function refresh() {
     if (!isVisible || !stripEl) return;
 
-    var history = ConversationManager.getHistory();
-    var nonSystem = [];
+    let history = ConversationManager.getHistory();
+    const nonSystem = [];
     for (var i = 0; i < history.length; i++) {
       if (history[i].role === 'system') continue;
       nonSystem.push({ index: i, msg: history[i] });
     }
 
     // Calculate segment sizes proportional to content length
-    var totalLen = 0;
-    var lengths = [];
+    let totalLen = 0;
+    const lengths = [];
     for (var j = 0; j < nonSystem.length; j++) {
-      var len = Math.max(1, (nonSystem[j].msg.content || '').length);
+      const len = Math.max(1, (nonSystem[j].msg.content || '').length);
       lengths.push(len);
       totalLen += len;
     }
 
     // Clear old segments
-    var children = stripEl.querySelectorAll('.tl-segment, .tl-marker');
+    let children = stripEl.querySelectorAll('.tl-segment, .tl-marker');
     for (var c = 0; c < children.length; c++) {
       children[c].remove();
     }
     segments = [];
 
-    var stripHeight = stripEl.clientHeight;
+    let stripHeight = stripEl.clientHeight;
     if (stripHeight <= 0) stripHeight = 400; // fallback
-    var minSegHeight = 3;
-    var gap = 1;
-    var totalGap = Math.max(0, nonSystem.length - 1) * gap;
-    var availHeight = stripHeight - totalGap;
+    const minSegHeight = 3;
+    const gap = 1;
+    const totalGap = Math.max(0, nonSystem.length - 1) * gap;
+    const availHeight = stripHeight - totalGap;
 
-    var yPos = 0;
+    let yPos = 0;
     for (var k = 0; k < nonSystem.length; k++) {
-      var fraction = lengths[k] / totalLen;
-      var segH = Math.max(minSegHeight, Math.round(fraction * availHeight));
+      const fraction = lengths[k] / totalLen;
+      const segH = Math.max(minSegHeight, Math.round(fraction * availHeight));
 
-      var seg = document.createElement('div');
+      let seg = document.createElement('div');
       seg.className = 'tl-segment tl-segment-' + nonSystem[k].msg.role;
       seg.style.top = yPos + 'px';
       seg.style.height = segH + 'px';
@@ -7366,18 +7366,18 @@ const ConversationTimeline = (() => {
   }
 
   function getPreview(msg) {
-    var text = (msg.content || '').trim();
-    var firstLine = text.split('\n')[0] || '';
+    let text = (msg.content || '').trim();
+    let firstLine = text.split('\n')[0] || '';
     if (firstLine.length > 60) firstLine = firstLine.substring(0, 57) + '...';
     return firstLine;
   }
 
   function addMarkers(segEl, entry, yPos, segH) {
-    var content = entry.msg.content || '';
+    let content = entry.msg.content || '';
 
     // Code block marker
     if (content.indexOf('```') !== -1) {
-      var m = document.createElement('div');
+      let m = document.createElement('div');
       m.className = 'tl-marker tl-marker-code';
       m.style.top = (yPos + 2) + 'px';
       stripEl.appendChild(m);
@@ -7386,7 +7386,7 @@ const ConversationTimeline = (() => {
     // Bookmark marker (check ChatBookmarks if available)
     if (typeof ChatBookmarks !== 'undefined' && ChatBookmarks.isBookmarked &&
         ChatBookmarks.isBookmarked(entry.index)) {
-      var bm = document.createElement('div');
+      let bm = document.createElement('div');
       bm.className = 'tl-marker tl-marker-bookmark';
       bm.style.top = (yPos + segH - 8) + 'px';
       stripEl.appendChild(bm);
@@ -7395,7 +7395,7 @@ const ConversationTimeline = (() => {
     // Pin marker (check MessagePinning if available)
     if (typeof MessagePinning !== 'undefined' && MessagePinning.isPinned &&
         MessagePinning.isPinned(entry.index)) {
-      var pm = document.createElement('div');
+      const pm = document.createElement('div');
       pm.className = 'tl-marker tl-marker-pin';
       pm.style.top = (yPos + Math.floor(segH / 2) - 3) + 'px';
       stripEl.appendChild(pm);
@@ -7405,7 +7405,7 @@ const ConversationTimeline = (() => {
   // ── Viewport indicator ───────────────────────────────────
 
   function getChatScrollParent() {
-    var chatOutput = document.getElementById('chat-output');
+    let chatOutput = document.getElementById('chat-output');
     if (!chatOutput) return null;
     // chat-output itself is typically the scroll container
     return chatOutput;
@@ -7421,18 +7421,18 @@ const ConversationTimeline = (() => {
 
   function updateViewportIndicator() {
     if (!isVisible || !viewportEl || !stripEl) return;
-    var chatOutput = getChatScrollParent();
+    let chatOutput = getChatScrollParent();
     if (!chatOutput) return;
 
-    var scrollH = chatOutput.scrollHeight;
-    var clientH = chatOutput.clientHeight;
-    var scrollT = chatOutput.scrollTop;
-    var stripH = stripEl.clientHeight;
+    const scrollH = chatOutput.scrollHeight;
+    const clientH = chatOutput.clientHeight;
+    const scrollT = chatOutput.scrollTop;
+    const stripH = stripEl.clientHeight;
 
     if (scrollH <= 0 || stripH <= 0) return;
 
-    var vpTop = (scrollT / scrollH) * stripH;
-    var vpHeight = (clientH / scrollH) * stripH;
+    const vpTop = (scrollT / scrollH) * stripH;
+    let vpHeight = (clientH / scrollH) * stripH;
     vpHeight = Math.max(vpHeight, 8); // minimum visible size
 
     viewportEl.style.top = Math.round(vpTop) + 'px';
@@ -7442,13 +7442,13 @@ const ConversationTimeline = (() => {
   // ── Interaction ──────────────────────────────────────────
 
   function handleStripClick(e) {
-    var seg = findSegmentAt(e);
+    let seg = findSegmentAt(e);
     if (!seg) return;
     scrollToMessage(seg.domIndex);
   }
 
   function handleStripHover(e) {
-    var seg = findSegmentAt(e);
+    let seg = findSegmentAt(e);
     if (!seg) {
       hideTooltip();
       return;
@@ -7457,8 +7457,8 @@ const ConversationTimeline = (() => {
   }
 
   function findSegmentAt(e) {
-    var rect = stripEl.getBoundingClientRect();
-    var y = e.clientY - rect.top;
+    const rect = stripEl.getBoundingClientRect();
+    const y = e.clientY - rect.top;
     for (var i = 0; i < segments.length; i++) {
       if (y >= segments[i].top && y <= segments[i].top + segments[i].height) {
         return segments[i];
@@ -7468,9 +7468,9 @@ const ConversationTimeline = (() => {
   }
 
   function scrollToMessage(domIndex) {
-    var chatOutput = document.getElementById('chat-output');
+    let chatOutput = document.getElementById('chat-output');
     if (!chatOutput) return;
-    var msgs = chatOutput.querySelectorAll('.msg');
+    let msgs = chatOutput.querySelectorAll('.msg');
     if (domIndex >= 0 && domIndex < msgs.length) {
       if (typeof msgs[domIndex].scrollIntoView === 'function') {
         msgs[domIndex].scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -7486,7 +7486,7 @@ const ConversationTimeline = (() => {
 
   function showTooltip(seg, e) {
     if (!tooltipEl) return;
-    var roleEmoji = seg.role === 'user' ? '\uD83D\uDC64' : '\uD83E\uDD16';
+    const roleEmoji = seg.role === 'user' ? '\uD83D\uDC64' : '\uD83E\uDD16';
     tooltipEl.innerHTML = '<span class="tl-tooltip-role">' + roleEmoji + '</span>' +
       '<span class="tl-tooltip-preview">' + escapeHtml(seg.preview) + '</span>';
     tooltipEl.style.display = 'block';
@@ -7499,7 +7499,7 @@ const ConversationTimeline = (() => {
   }
 
   function escapeHtml(text) {
-    var div = document.createElement('div');
+    let div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
   }
@@ -7511,8 +7511,8 @@ const ConversationTimeline = (() => {
    * @returns {{ total: number, user: number, assistant: number, hasCode: number }}
    */
   function getStats() {
-    var history = ConversationManager.getHistory();
-    var total = 0, user = 0, assistant = 0, hasCode = 0;
+    let history = ConversationManager.getHistory();
+    let total = 0, user = 0, assistant = 0, hasCode = 0;
     for (var i = 0; i < history.length; i++) {
       if (history[i].role === 'system') continue;
       total++;

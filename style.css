@@ -158,6 +158,7 @@ button:disabled {
   border-radius: 8px;
   padding: 1rem;
   box-shadow: 0 0 10px var(--shadow);
+  position: relative;
 }
 
 #chat-output {
@@ -1599,11 +1600,6 @@ kbd {
 .file-drop-hint {
   font-size: 0.8rem;
   color: var(--text-muted);
-}
-
-/* Make blackbox position relative for the overlay */
-#blackbox {
-  position: relative;
 }
 
 /* ---- Zen / Focus Mode ---- */
