@@ -45,26 +45,26 @@ const SafeStorage = (() => {
   let available = false;
   try {
     const k = '__ac_storage_test__';
-    SafeStorage.set(k, '1');
-    SafeStorage.remove(k);
+    localStorage.setItem(k, '1');
+    localStorage.removeItem(k);
     available = true;
   } catch (_) { /* storage unavailable */ }
 
   return {
     get(key) {
-      try { return available ? SafeStorage.get(key) : null; } catch (_) { return null; }
+      try { return available ? localStorage.getItem(key) : null; } catch (_) { return null; }
     },
     set(key, value) {
-      try { if (available) SafeStorage.set(key, value); } catch (_) { /* quota or access error */ }
+      try { if (available) localStorage.setItem(key, value); } catch (_) { /* quota or access error */ }
     },
     remove(key) {
-      try { if (available) SafeStorage.remove(key); } catch (_) { /* ignore */ }
+      try { if (available) localStorage.removeItem(key); } catch (_) { /* ignore */ }
     },
     get length() {
-      try { return available ? SafeStorage.length : 0; } catch (_) { return 0; }
+      try { return available ? localStorage.length : 0; } catch (_) { return 0; }
     },
     key(i) {
-      try { return available ? SafeStorage.key(i) : null; } catch (_) { return null; }
+      try { return available ? localStorage.key(i) : null; } catch (_) { return null; }
     },
     isAvailable() { return available; },
   };
