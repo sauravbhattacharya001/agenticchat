@@ -1934,3 +1934,42 @@ html.light .fork-notification {
   border-color: rgba(99, 102, 241, 0.3);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
 }
+
+/* ---------- Cross-Tab Sync Banner ---------- */
+.cross-tab-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  background: linear-gradient(135deg, #7c3aed, #6d28d9);
+  color: #fff;
+  font-size: 0.85rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  animation: slideDown 0.3s ease-out;
+}
+@keyframes slideDown {
+  from { transform: translateY(-100%); }
+  to   { transform: translateY(0); }
+}
+.cross-tab-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.cross-tab-banner .btn-sm {
+  background: rgba(255,255,255,0.2);
+  border: 1px solid rgba(255,255,255,0.3);
+  color: #fff;
+  cursor: pointer;
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 0.8rem;
+}
+.cross-tab-banner .btn-sm:hover {
+  background: rgba(255,255,255,0.35);
+}

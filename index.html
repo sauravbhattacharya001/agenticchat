@@ -9,6 +9,16 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <!-- Cross-tab sync conflict banner -->
+  <div id="cross-tab-banner" class="cross-tab-banner" style="display:none" role="alert">
+    <span id="cross-tab-message">⚠️ Another tab modified your sessions.</span>
+    <div class="cross-tab-actions">
+      <button id="cross-tab-reload" class="btn-sm" title="Reload sessions from storage">Reload</button>
+      <button id="cross-tab-keep" class="btn-sm" title="Keep this tab's version">Keep mine</button>
+      <button id="cross-tab-dismiss" class="btn-sm" title="Dismiss this warning">✕</button>
+    </div>
+  </div>
+
   <h2>Agentic Chat</h2>
 
   <div class="toolbar" role="form" aria-label="API key entry">

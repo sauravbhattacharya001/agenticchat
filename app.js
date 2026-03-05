@@ -4194,6 +4194,215 @@ const SessionManager = (() => {
   };
 })();
 
+/* ---------- Cross-Tab Sync ---------- */
+/**
+ * Prevents multi-tab data corruption by detecting cross-tab localStorage
+ * changes via the `storage` event and coordinating writes via BroadcastChannel.
+ *
+ * When another tab modifies session data, this tab detects it and shows a
+ * non-intrusive banner offering Reload / Keep mine options. Uses a tab ID
+ * to distinguish own writes from external ones.
+ *
+ * Fixes: https://github.com/sauravbhattacharya001/agenticchat/issues/30
+ *
+ * @namespace CrossTabSync
+ */
+const CrossTabSync = (() => {
+  const SESSION_STORAGE_KEY = 'agenticchat_sessions';
+  const ACTIVE_STORAGE_KEY = 'agenticchat_active_session';
+  const TAB_ID_KEY = 'agenticchat_tab_id';
+  const WRITE_STAMP_KEY = 'agenticchat_last_writer';
+
+  const tabId = crypto.randomUUID();
+  let channel = null;
+  let bannerVisible = false;
+  let lastKnownSessionsJSON = null;
+  let suppressNextStorageEvent = false;
+
+  /**
+   * Initialize cross-tab sync listeners.
+   * Call once on DOMContentLoaded.
+   */
+  function init() {
+    // Snapshot current state so we can detect external changes
+    try {
+      lastKnownSessionsJSON = localStorage.getItem(SESSION_STORAGE_KEY);
+    } catch { /* ignore */ }
+
+    // Listen for localStorage changes from OTHER tabs
+    // (the `storage` event only fires in tabs that did NOT make the change)
+    window.addEventListener('storage', _onStorageEvent);
+
+    // Set up BroadcastChannel for real-time cross-tab messaging
+    if (typeof BroadcastChannel !== 'undefined') {
+      try {
+        channel = new BroadcastChannel('agenticchat_sync');
+        channel.onmessage = _onBroadcastMessage;
+      } catch { /* BroadcastChannel not available */ }
+    }
+
+    // Wire up banner buttons
+    const reloadBtn = document.getElementById('cross-tab-reload');
+    const keepBtn = document.getElementById('cross-tab-keep');
+    const dismissBtn = document.getElementById('cross-tab-dismiss');
+    if (reloadBtn) reloadBtn.addEventListener('click', _handleReload);
+    if (keepBtn) keepBtn.addEventListener('click', _handleKeepMine);
+    if (dismissBtn) dismissBtn.addEventListener('click', _hideBanner);
+
+    // Mark our writes: patch SessionManager._saveAll to stamp our tab ID
+    _patchSessionManagerWrites();
+  }
+
+  /**
+   * Patch SessionManager's save operations to stamp the writer tab ID.
+   * This lets us distinguish our own writes from other tabs' writes
+   * when the storage event fires (belt-and-suspenders with the native
+   * behavior where storage events only fire in other tabs).
+   */
+  function _patchSessionManagerWrites() {
+    const originalSaveAll = SessionManager._saveAll;
+    SessionManager._saveAll = function(sessions) {
+      // Stamp our tab ID before writing
+      try {
+        localStorage.setItem(WRITE_STAMP_KEY, tabId);
+      } catch { /* ignore */ }
+      suppressNextStorageEvent = true;
+      const result = originalSaveAll(sessions);
+      // Update our snapshot after our own write
+      try {
+        lastKnownSessionsJSON = localStorage.getItem(SESSION_STORAGE_KEY);
+      } catch { /* ignore */ }
+      // Broadcast to other tabs
+      _broadcast({ type: 'sessions-updated', tabId });
+      return result;
+    };
+
+    // Also patch _setActiveId
+    const originalSetActive = SessionManager._setActiveId;
+    SessionManager._setActiveId = function(id) {
+      try {
+        localStorage.setItem(WRITE_STAMP_KEY, tabId);
+      } catch { /* ignore */ }
+      originalSetActive(id);
+      _broadcast({ type: 'active-session-changed', tabId, sessionId: id });
+    };
+  }
+
+  /**
+   * Handle the native `storage` event (fires in other tabs only).
+   */
+  function _onStorageEvent(e) {
+    if (suppressNextStorageEvent) {
+      suppressNextStorageEvent = false;
+      return;
+    }
+
+    if (e.key === SESSION_STORAGE_KEY) {
+      // Another tab modified sessions
+      // Check if it's actually different from what we know
+      if (e.newValue !== lastKnownSessionsJSON) {
+        _showBanner('⚠️ Another tab modified your sessions.');
+      }
+    }
+
+    if (e.key === ACTIVE_STORAGE_KEY) {
+      // Another tab switched sessions
+      _showBanner('⚠️ Another tab switched the active session.');
+    }
+  }
+
+  /**
+   * Handle BroadcastChannel messages from other tabs.
+   */
+  function _onBroadcastMessage(e) {
+    if (!e.data || e.data.tabId === tabId) return; // Ignore our own
+
+    if (e.data.type === 'sessions-updated') {
+      _showBanner('⚠️ Another tab modified your sessions.');
+    } else if (e.data.type === 'active-session-changed') {
+      _showBanner('⚠️ Another tab switched the active session.');
+    }
+  }
+
+  /**
+   * Send a message to all other tabs via BroadcastChannel.
+   */
+  function _broadcast(message) {
+    if (channel) {
+      try { channel.postMessage(message); } catch { /* ignore */ }
+    }
+  }
+
+  /**
+   * Show the conflict banner with a given message.
+   */
+  function _showBanner(message) {
+    const banner = document.getElementById('cross-tab-banner');
+    const msgEl = document.getElementById('cross-tab-message');
+    if (!banner || !msgEl) return;
+
+    msgEl.textContent = message;
+    banner.style.display = 'flex';
+    bannerVisible = true;
+  }
+
+  /**
+   * Hide the conflict banner.
+   */
+  function _hideBanner() {
+    const banner = document.getElementById('cross-tab-banner');
+    if (banner) banner.style.display = 'none';
+    bannerVisible = false;
+  }
+
+  /**
+   * Reload: pull fresh data from localStorage into this tab's state.
+   */
+  function _handleReload() {
+    _hideBanner();
+    try {
+      lastKnownSessionsJSON = localStorage.getItem(SESSION_STORAGE_KEY);
+    } catch { /* ignore */ }
+
+    // Reload the active session from storage
+    const activeId = SessionManager._getActiveId();
+    if (activeId) {
+      SessionManager.load(activeId);
+    } else {
+      // No active session — just refresh the sessions panel if open
+      SessionManager.refresh();
+    }
+    // Refresh panels
+    HistoryPanel.refresh();
+  }
+
+  /**
+   * Keep mine: overwrite localStorage with this tab's current state.
+   */
+  function _handleKeepMine() {
+    _hideBanner();
+    // Re-save current session to assert this tab's version
+    SessionManager.autoSaveIfEnabled();
+    // If auto-save is off, force a save anyway
+    if (!SessionManager.isAutoSaveEnabled()) {
+      SessionManager.save();
+    }
+  }
+
+  /**
+   * Clean up on page unload.
+   */
+  function destroy() {
+    window.removeEventListener('storage', _onStorageEvent);
+    if (channel) {
+      try { channel.close(); } catch { /* ignore */ }
+      channel = null;
+    }
+  }
+
+  return { init, destroy, _showBanner, _hideBanner, getTabId: () => tabId };
+})();
+
 /* ---------- Conversation Sessions (facade) ---------- */
 const ConversationSessions = (function () {
   var _confirmPending = false;
@@ -7533,4 +7742,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Conversation timeline minimap
   ConversationTimeline.init();
+
+  // Cross-tab sync (must come after SessionManager.initAutoSave)
+  CrossTabSync.init();
 });
