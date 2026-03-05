@@ -1395,6 +1395,50 @@ const HistoryPanel = (() => {
    * Rebuild the history panel DOM.
    * Uses DocumentFragment for batch DOM insertion (single reflow/repaint).
    */
+  /**
+   * Render message content into a container element, splitting code
+   * blocks (```...```) into <pre> elements and surrounding text into
+   * <div class="msg-text"> elements.
+   *
+   * Handles multiple code blocks per message (not just the first).
+   *
+   * @param {HTMLElement} container  The element to append content to.
+   * @param {string}      content    Raw message text.
+   */
+  function _renderContent(container, content) {
+    // Split on fenced code blocks: ```[lang]\n...\n```
+    var codeBlockRegex = /```(?:\w*)\n([\s\S]*?)```/g;
+    var lastIndex = 0;
+    var match;
+
+    while ((match = codeBlockRegex.exec(content)) !== null) {
+      // Text before this code block
+      var before = content.substring(lastIndex, match.index).trim();
+      if (before) {
+        var textEl = document.createElement('div');
+        textEl.className = 'msg-text';
+        textEl.textContent = before;
+        container.appendChild(textEl);
+      }
+
+      // The code block itself
+      var pre = document.createElement('pre');
+      pre.textContent = match[1];
+      container.appendChild(pre);
+
+      lastIndex = match.index + match[0].length;
+    }
+
+    // Remaining text after last code block (or entire content if no blocks)
+    var remaining = content.substring(lastIndex).trim();
+    if (remaining) {
+      var textEl2 = document.createElement('div');
+      textEl2.className = 'msg-text';
+      textEl2.textContent = remaining;
+      container.appendChild(textEl2);
+    }
+  }
+
   function refresh() {
     const container = el('history-messages');
     const history = ConversationManager.getHistory();
@@ -1430,40 +1474,8 @@ const HistoryPanel = (() => {
       }
       div.appendChild(roleLabel);
 
-      // For assistant messages, check for code blocks
-      if (msg.role === 'assistant') {
-        const codeMatch = msg.content.match(/```(?:js|javascript)?\n([\s\S]*?)```/i);
-        if (codeMatch) {
-          const beforeCode = msg.content.substring(0, msg.content.indexOf('```')).trim();
-          if (beforeCode) {
-            const textEl = document.createElement('div');
-            textEl.className = 'msg-text';
-            textEl.textContent = beforeCode;
-            div.appendChild(textEl);
-          }
-          const pre = document.createElement('pre');
-          pre.textContent = codeMatch[1];
-          div.appendChild(pre);
-          const afterIdx = msg.content.indexOf('```', msg.content.indexOf('```') + 3);
-          const afterCode = afterIdx >= 0 ? msg.content.substring(afterIdx + 3).trim() : '';
-          if (afterCode) {
-            const textEl = document.createElement('div');
-            textEl.className = 'msg-text';
-            textEl.textContent = afterCode;
-            div.appendChild(textEl);
-          }
-        } else {
-          const textEl = document.createElement('div');
-          textEl.className = 'msg-text';
-          textEl.textContent = msg.content;
-          div.appendChild(textEl);
-        }
-      } else {
-        const textEl = document.createElement('div');
-        textEl.className = 'msg-text';
-        textEl.textContent = msg.content;
-        div.appendChild(textEl);
-      }
+      // Render message content — handles multiple code blocks
+      _renderContent(div, msg.content);
 
       fragment.appendChild(div);
     }
