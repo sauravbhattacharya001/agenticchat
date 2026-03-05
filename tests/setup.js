@@ -178,6 +178,7 @@ function setupDOM() {
     <span id="model-label"></span>
     <button id="zen-btn"></button>
     <button id="annotations-btn"></button>
+    <button id="summary-btn"></button>
     <button id="chapters-btn"></button>
     <div id="file-drop-overlay"></div>
   `;
@@ -233,6 +234,7 @@ function loadApp() {
     'ReadAloud',
     'MessageDiff',
     'ConversationTimeline',
+    'ConversationSummarizer',
     'MessageAnnotations',
     'ConversationChapters'
   ];

@@ -31,6 +31,7 @@
  *   ConversationTimeline — visual minimap sidebar for conversation navigation
  *   MessageAnnotations  — private notes/annotations on messages with labels
  *   ConversationChapters — named section dividers with TOC navigation
+ *   ConversationSummarizer — heuristic conversation summary with topics, decisions, action items
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -7820,9 +7821,766 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('chapters-btn').addEventListener('click', ConversationChapters.togglePanel);
   ConversationChapters.init();
 
+  // Conversation summarizer
+  document.getElementById('summary-btn').addEventListener('click', ConversationSummarizer.togglePanel);
+  ConversationSummarizer.init();
+
   // Cross-tab sync (must come after SessionManager.initAutoSave)
   CrossTabSync.init();
 });
+
+
+/* ---------- Conversation Summarizer ---------- */
+/**
+ * Extracts a structured summary from the current conversation using
+ * text-analysis heuristics (no LLM call required). Identifies key topics,
+ * decisions, questions asked, code snippets discussed, and action items.
+ *
+ * Public API:
+ *   init()                   - inject styles, observe chat
+ *   generateSummary()        - analyze conversation and return summary object
+ *   openPanel() / closePanel() / togglePanel()
+ *   getSummaryText()         - plain-text summary
+ *   exportSummary(format)    - export as JSON or Markdown
+ *   getTopics()              - extracted topic keywords
+ *   getDecisions()           - detected decisions/conclusions
+ *   getQuestions()           - questions asked during conversation
+ *   getCodeBlocks()          - code snippets with language info
+ *   getActionItems()         - detected action items / todos
+ *   getStats()               - conversation statistics
+ */
+const ConversationSummarizer = (() => {
+  'use strict';
+
+  let panelEl = null;
+  let overlayEl = null;
+  let styleInjected = false;
+  let lastSummary = null;
+
+  // ── Stop words for topic extraction ──
+
+  const STOP_WORDS = new Set([
+    'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
+    'of', 'with', 'by', 'from', 'is', 'it', 'its', 'this', 'that', 'was',
+    'are', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does',
+    'did', 'will', 'would', 'could', 'should', 'may', 'might', 'can', 'shall',
+    'not', 'no', 'nor', 'as', 'if', 'then', 'than', 'so', 'up', 'out',
+    'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below',
+    'between', 'under', 'again', 'further', 'once', 'here', 'there', 'when',
+    'where', 'why', 'how', 'all', 'each', 'every', 'both', 'few', 'more',
+    'most', 'other', 'some', 'such', 'only', 'own', 'same', 'too', 'very',
+    'just', 'because', 'also', 'any', 'much', 'what', 'which', 'who', 'whom',
+    'these', 'those', 'am', 'we', 'they', 'you', 'he', 'she', 'me', 'him',
+    'her', 'us', 'them', 'my', 'your', 'his', 'our', 'their', 'i', 'don',
+    'doesn', 'didn', 'won', 'wouldn', 'couldn', 'shouldn', 'isn', 'aren',
+    'wasn', 'weren', 'hasn', 'haven', 'hadn', 'let', 'get', 'got', 'like',
+    'make', 'made', 'know', 'think', 'want', 'need', 'use', 'using', 'used',
+    'one', 'two', 'new', 'way', 'well', 'still', 'even', 'back', 'over',
+  ]);
+
+  // ── Decision indicator patterns ──
+
+  const DECISION_PATTERNS = [
+    /\blet'?s\s+(go\s+with|use|choose|pick|stick\s+with|do)\b/i,
+    /\b(decided|decision|conclusion|agreed|settled\s+on|going\s+with)\b/i,
+    /\bwe('ll|\s+will|\s+should)\s+(use|go\s+with|implement|adopt)\b/i,
+    /\b(best\s+(approach|option|choice|solution)|recommended)\b/i,
+    /\b(in\s+summary|to\s+summarize|bottom\s+line|takeaway)\b/i,
+  ];
+
+  // ── Action item patterns ──
+
+  const ACTION_PATTERNS = [
+    /\b(todo|to-do|action\s+item|next\s+step|follow[\s-]up)\b/i,
+    /\b(need\s+to|should|must|have\s+to|remember\s+to)\s+(\w+)/i,
+    /\b(don'?t\s+forget\s+to|make\s+sure\s+to)\s+(\w+)/i,
+    /\bstep\s+\d+[.:]\s*/i,
+  ];
+
+  // ── Styles ──
+
+  function injectStyles() {
+    if (styleInjected) return;
+    styleInjected = true;
+    const style = document.createElement('style');
+    style.textContent = [
+      '#summary-overlay {',
+      '  position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 1050;',
+      '  display: none;',
+      '}',
+      '#summary-overlay.sum-open { display: block; }',
+      '#summary-panel {',
+      '  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);',
+      '  width: 520px; max-width: 92vw; max-height: 80vh; z-index: 1100;',
+      '  background: var(--sum-bg, #0d1117); border: 1px solid var(--sum-border, #30363d);',
+      '  border-radius: 12px; display: none; flex-direction: column; overflow: hidden;',
+      '  box-shadow: 0 8px 32px rgba(0,0,0,0.5);',
+      '}',
+      '#summary-panel.sum-open { display: flex; }',
+      '#summary-header {',
+      '  display: flex; align-items: center; justify-content: space-between;',
+      '  padding: 14px 18px; border-bottom: 1px solid var(--sum-border, #30363d);',
+      '}',
+      '#summary-header h3 { margin: 0; color: #58a6ff; font-size: 15px; }',
+      '#summary-header-actions { display: flex; gap: 6px; }',
+      '#summary-header-actions button {',
+      '  background: #21262d; border: 1px solid #30363d; color: #c9d1d9;',
+      '  padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 11px;',
+      '}',
+      '#summary-header-actions button:hover { background: #30363d; }',
+      '#summary-body {',
+      '  flex: 1; overflow-y: auto; padding: 12px 18px;',
+      '}',
+      '.sum-section { margin-bottom: 16px; }',
+      '.sum-section-title {',
+      '  font-size: 12px; font-weight: 700; color: #8b949e; text-transform: uppercase;',
+      '  letter-spacing: 0.05em; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;',
+      '}',
+      '.sum-section-title .sum-icon { font-size: 14px; }',
+      '.sum-topic-chips { display: flex; flex-wrap: wrap; gap: 6px; }',
+      '.sum-chip {',
+      '  display: inline-flex; align-items: center; gap: 4px;',
+      '  padding: 3px 10px; border-radius: 12px; font-size: 12px;',
+      '  background: #1c2333; border: 1px solid #30363d; color: #c9d1d9;',
+      '}',
+      '.sum-chip-count {',
+      '  font-size: 10px; color: #6e7681; font-weight: 600;',
+      '}',
+      '.sum-list { list-style: none; padding: 0; margin: 0; }',
+      '.sum-list li {',
+      '  padding: 6px 10px; margin-bottom: 4px; border-radius: 6px;',
+      '  background: #161b22; font-size: 13px; color: #c9d1d9; line-height: 1.5;',
+      '}',
+      '.sum-list li .sum-role {',
+      '  font-size: 10px; font-weight: 600; color: #6e7681; margin-right: 6px;',
+      '}',
+      '.sum-stats {',
+      '  display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));',
+      '  gap: 8px;',
+      '}',
+      '.sum-stat {',
+      '  background: #161b22; border-radius: 8px; padding: 10px 12px; text-align: center;',
+      '}',
+      '.sum-stat-value { font-size: 20px; font-weight: 700; color: #58a6ff; }',
+      '.sum-stat-label { font-size: 11px; color: #6e7681; margin-top: 2px; }',
+      '.sum-code-item {',
+      '  padding: 8px 10px; margin-bottom: 6px; border-radius: 6px;',
+      '  background: #161b22; border-left: 3px solid #f0883e;',
+      '}',
+      '.sum-code-lang {',
+      '  font-size: 10px; font-weight: 700; color: #f0883e; text-transform: uppercase;',
+      '  margin-bottom: 4px;',
+      '}',
+      '.sum-code-preview {',
+      '  font-family: monospace; font-size: 11px; color: #8b949e;',
+      '  white-space: pre; overflow: hidden; text-overflow: ellipsis; max-height: 40px;',
+      '}',
+      '.sum-empty {',
+      '  color: #6e7681; font-size: 13px; text-align: center; padding: 32px 16px;',
+      '}',
+    ].join('\n');
+    document.head.appendChild(style);
+  }
+
+  // ── Analysis helpers ──
+
+  function getMessages() {
+    if (typeof ConversationManager !== 'undefined') {
+      return ConversationManager.getMessages().filter(function(m) {
+        return m.role !== 'system';
+      });
+    }
+    return [];
+  }
+
+  /**
+   * Extract top keywords from text using term frequency.
+   * @param {string} text       Combined text to analyze.
+   * @param {number} [maxTopics]  Maximum topics to return.
+   * @returns {Array<{word: string, count: number}>}
+   */
+  function extractTopics(text, maxTopics) {
+    maxTopics = maxTopics || 10;
+    var words = text.toLowerCase().replace(/[^a-z0-9\s\-_]/g, ' ').split(/\s+/);
+    var freq = {};
+    for (var i = 0; i < words.length; i++) {
+      var w = words[i];
+      if (w.length < 3 || STOP_WORDS.has(w)) continue;
+      freq[w] = (freq[w] || 0) + 1;
+    }
+    return Object.keys(freq)
+      .filter(function(k) { return freq[k] >= 2; })
+      .sort(function(a, b) { return freq[b] - freq[a]; })
+      .slice(0, maxTopics)
+      .map(function(k) { return { word: k, count: freq[k] }; });
+  }
+
+  /**
+   * Extract questions from messages.
+   * @param {Array} messages  Conversation messages.
+   * @returns {Array<{role: string, text: string}>}
+   */
+  function extractQuestions(messages) {
+    var questions = [];
+    for (var i = 0; i < messages.length; i++) {
+      var lines = (messages[i].content || '').split('\n');
+      for (var j = 0; j < lines.length; j++) {
+        var line = lines[j].trim();
+        if (line.endsWith('?') && line.length > 5 && line.length < 200) {
+          // Strip markdown formatting
+          var clean = line.replace(/^[#*>\-\s]+/, '').replace(/[*_`~\[\]]/g, '').trim();
+          if (clean.length > 5) {
+            questions.push({ role: messages[i].role, text: clean });
+          }
+        }
+      }
+    }
+    return questions.slice(0, 20);
+  }
+
+  /**
+   * Extract code blocks from messages.
+   * @param {Array} messages  Conversation messages.
+   * @returns {Array<{language: string, preview: string, role: string, lines: number}>}
+   */
+  function extractCodeBlocks(messages) {
+    var blocks = [];
+    var codeRegex = /```(\w*)\n?([\s\S]*?)```/g;
+    for (var i = 0; i < messages.length; i++) {
+      var content = messages[i].content || '';
+      var match;
+      while ((match = codeRegex.exec(content)) !== null) {
+        var lang = match[1] || 'text';
+        var code = match[2].trim();
+        var codeLines = code.split('\n');
+        blocks.push({
+          language: lang,
+          preview: codeLines.slice(0, 3).join('\n'),
+          role: messages[i].role,
+          lines: codeLines.length,
+        });
+      }
+    }
+    return blocks.slice(0, 15);
+  }
+
+  /**
+   * Detect sentences that look like decisions or conclusions.
+   * @param {Array} messages  Conversation messages.
+   * @returns {Array<{role: string, text: string}>}
+   */
+  function extractDecisions(messages) {
+    var decisions = [];
+    for (var i = 0; i < messages.length; i++) {
+      var sentences = (messages[i].content || '')
+        .replace(/```[\s\S]*?```/g, '')
+        .split(/[.!]\s+|\n/);
+      for (var s = 0; s < sentences.length; s++) {
+        var sent = sentences[s].trim();
+        if (sent.length < 10 || sent.length > 200) continue;
+        for (var p = 0; p < DECISION_PATTERNS.length; p++) {
+          if (DECISION_PATTERNS[p].test(sent)) {
+            var clean = sent.replace(/[#*_`~\[\]]/g, '').trim();
+            if (clean.length > 10) {
+              decisions.push({ role: messages[i].role, text: clean });
+            }
+            break;
+          }
+        }
+      }
+    }
+    return decisions.slice(0, 10);
+  }
+
+  /**
+   * Detect action items and todos.
+   * @param {Array} messages  Conversation messages.
+   * @returns {Array<{role: string, text: string}>}
+   */
+  function extractActionItems(messages) {
+    var items = [];
+    for (var i = 0; i < messages.length; i++) {
+      var lines = (messages[i].content || '')
+        .replace(/```[\s\S]*?```/g, '')
+        .split('\n');
+      for (var j = 0; j < lines.length; j++) {
+        var line = lines[j].trim();
+        if (line.length < 8 || line.length > 200) continue;
+        for (var p = 0; p < ACTION_PATTERNS.length; p++) {
+          if (ACTION_PATTERNS[p].test(line)) {
+            var clean = line.replace(/^[\s\-*>#\d.]+/, '').replace(/[*_`~\[\]]/g, '').trim();
+            if (clean.length > 5) {
+              items.push({ role: messages[i].role, text: clean });
+            }
+            break;
+          }
+        }
+      }
+    }
+    // Deduplicate by text similarity
+    var seen = {};
+    var unique = [];
+    for (var u = 0; u < items.length; u++) {
+      var key = items[u].text.toLowerCase().substring(0, 50);
+      if (!seen[key]) {
+        seen[key] = true;
+        unique.push(items[u]);
+      }
+    }
+    return unique.slice(0, 15);
+  }
+
+  /**
+   * Compute conversation statistics.
+   * @param {Array} messages  Conversation messages.
+   * @returns {object}
+   */
+  function computeStats(messages) {
+    var totalWords = 0;
+    var userWords = 0;
+    var assistantWords = 0;
+    var userMsgCount = 0;
+    var assistantMsgCount = 0;
+    var codeBlockCount = 0;
+    var longestMsg = 0;
+
+    for (var i = 0; i < messages.length; i++) {
+      var content = messages[i].content || '';
+      var words = content.split(/\s+/).filter(function(w) { return w.length > 0; }).length;
+      totalWords += words;
+      if (words > longestMsg) longestMsg = words;
+
+      if (messages[i].role === 'user') {
+        userWords += words;
+        userMsgCount++;
+      } else if (messages[i].role === 'assistant') {
+        assistantWords += words;
+        assistantMsgCount++;
+      }
+
+      var codeMatches = content.match(/```/g);
+      if (codeMatches) codeBlockCount += Math.floor(codeMatches.length / 2);
+    }
+
+    return {
+      totalMessages: messages.length,
+      userMessages: userMsgCount,
+      assistantMessages: assistantMsgCount,
+      totalWords: totalWords,
+      userWords: userWords,
+      assistantWords: assistantWords,
+      codeBlocks: codeBlockCount,
+      longestMessage: longestMsg,
+      avgWordsPerMessage: messages.length > 0 ? Math.round(totalWords / messages.length) : 0,
+      readingTimeMin: Math.max(1, Math.round(totalWords / 238)),
+    };
+  }
+
+  // ── Core: Generate Summary ──
+
+  function generateSummary() {
+    var messages = getMessages();
+    if (messages.length === 0) {
+      lastSummary = null;
+      return null;
+    }
+
+    var allText = messages.map(function(m) { return m.content || ''; }).join(' ');
+
+    lastSummary = {
+      generatedAt: Date.now(),
+      messageCount: messages.length,
+      topics: extractTopics(allText),
+      questions: extractQuestions(messages),
+      codeBlocks: extractCodeBlocks(messages),
+      decisions: extractDecisions(messages),
+      actionItems: extractActionItems(messages),
+      stats: computeStats(messages),
+    };
+
+    return lastSummary;
+  }
+
+  // ── Getters ──
+
+  function getTopics() {
+    if (!lastSummary) generateSummary();
+    return lastSummary ? lastSummary.topics : [];
+  }
+
+  function getDecisions() {
+    if (!lastSummary) generateSummary();
+    return lastSummary ? lastSummary.decisions : [];
+  }
+
+  function getQuestions() {
+    if (!lastSummary) generateSummary();
+    return lastSummary ? lastSummary.questions : [];
+  }
+
+  function getCodeBlocks() {
+    if (!lastSummary) generateSummary();
+    return lastSummary ? lastSummary.codeBlocks : [];
+  }
+
+  function getActionItems() {
+    if (!lastSummary) generateSummary();
+    return lastSummary ? lastSummary.actionItems : [];
+  }
+
+  function getStats() {
+    if (!lastSummary) generateSummary();
+    return lastSummary ? lastSummary.stats : null;
+  }
+
+  // ── Export ──
+
+  function getSummaryText() {
+    var sum = lastSummary || generateSummary();
+    if (!sum) return 'No conversation to summarize.';
+
+    var lines = ['# Conversation Summary', ''];
+
+    // Stats
+    var s = sum.stats;
+    lines.push('## Overview');
+    lines.push('- **Messages:** ' + s.totalMessages + ' (' + s.userMessages + ' user, ' + s.assistantMessages + ' assistant)');
+    lines.push('- **Words:** ' + s.totalWords.toLocaleString() + ' (~' + s.readingTimeMin + ' min read)');
+    lines.push('- **Code blocks:** ' + s.codeBlocks);
+    lines.push('');
+
+    // Topics
+    if (sum.topics.length > 0) {
+      lines.push('## Key Topics');
+      for (var t = 0; t < sum.topics.length; t++) {
+        lines.push('- **' + sum.topics[t].word + '** (' + sum.topics[t].count + ' mentions)');
+      }
+      lines.push('');
+    }
+
+    // Questions
+    if (sum.questions.length > 0) {
+      lines.push('## Questions Asked');
+      for (var q = 0; q < sum.questions.length; q++) {
+        lines.push('- [' + sum.questions[q].role + '] ' + sum.questions[q].text);
+      }
+      lines.push('');
+    }
+
+    // Decisions
+    if (sum.decisions.length > 0) {
+      lines.push('## Decisions & Conclusions');
+      for (var d = 0; d < sum.decisions.length; d++) {
+        lines.push('- ' + sum.decisions[d].text);
+      }
+      lines.push('');
+    }
+
+    // Action Items
+    if (sum.actionItems.length > 0) {
+      lines.push('## Action Items');
+      for (var a = 0; a < sum.actionItems.length; a++) {
+        lines.push('- [ ] ' + sum.actionItems[a].text);
+      }
+      lines.push('');
+    }
+
+    // Code
+    if (sum.codeBlocks.length > 0) {
+      lines.push('## Code Discussed');
+      for (var c = 0; c < sum.codeBlocks.length; c++) {
+        var block = sum.codeBlocks[c];
+        lines.push('- **' + block.language + '** (' + block.lines + ' lines, by ' + block.role + ')');
+      }
+      lines.push('');
+    }
+
+    return lines.join('\n');
+  }
+
+  function exportSummary(format) {
+    var sum = lastSummary || generateSummary();
+    if (!sum) return '';
+    if (format === 'json') return JSON.stringify(sum, null, 2);
+    return getSummaryText();
+  }
+
+  // ── Panel UI ──
+
+  function buildPanel() {
+    if (panelEl) return;
+
+    overlayEl = document.createElement('div');
+    overlayEl.id = 'summary-overlay';
+    overlayEl.addEventListener('click', closePanel);
+    document.body.appendChild(overlayEl);
+
+    panelEl = document.createElement('div');
+    panelEl.id = 'summary-panel';
+    panelEl.setAttribute('role', 'dialog');
+    panelEl.setAttribute('aria-label', 'Conversation Summary');
+
+    // Header
+    var header = document.createElement('div');
+    header.id = 'summary-header';
+    var h3 = document.createElement('h3');
+    h3.textContent = '📋 Summary';
+    header.appendChild(h3);
+
+    var actions = document.createElement('div');
+    actions.id = 'summary-header-actions';
+
+    var refreshBtn = document.createElement('button');
+    refreshBtn.textContent = '🔄 Refresh';
+    refreshBtn.title = 'Regenerate summary';
+    refreshBtn.addEventListener('click', function() {
+      generateSummary();
+      renderPanel();
+    });
+    actions.appendChild(refreshBtn);
+
+    var copyBtn = document.createElement('button');
+    copyBtn.textContent = '📋 Copy';
+    copyBtn.title = 'Copy summary as Markdown';
+    copyBtn.addEventListener('click', function() {
+      try {
+        navigator.clipboard.writeText(getSummaryText());
+        copyBtn.textContent = '✓ Copied';
+        setTimeout(function() { copyBtn.textContent = '📋 Copy'; }, 1500);
+      } catch (_) { /* ignore */ }
+    });
+    actions.appendChild(copyBtn);
+
+    var jsonBtn = document.createElement('button');
+    jsonBtn.textContent = '{ } JSON';
+    jsonBtn.title = 'Download summary as JSON';
+    jsonBtn.addEventListener('click', function() {
+      var json = exportSummary('json');
+      var blob = new Blob([json], { type: 'application/json' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = 'conversation-summary.json';
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+    actions.appendChild(jsonBtn);
+
+    var closeBtn = document.createElement('button');
+    closeBtn.textContent = '✕';
+    closeBtn.title = 'Close';
+    closeBtn.addEventListener('click', closePanel);
+    actions.appendChild(closeBtn);
+
+    header.appendChild(actions);
+    panelEl.appendChild(header);
+
+    // Body
+    var body = document.createElement('div');
+    body.id = 'summary-body';
+    panelEl.appendChild(body);
+
+    document.body.appendChild(panelEl);
+  }
+
+  function renderPanel() {
+    var body = document.getElementById('summary-body');
+    if (!body) return;
+    body.innerHTML = '';
+
+    var sum = lastSummary || generateSummary();
+    if (!sum) {
+      body.innerHTML = '<div class="sum-empty">Start a conversation to see its summary here.</div>';
+      return;
+    }
+
+    // Stats section
+    var statsSection = _createSection('📊', 'Statistics');
+    var statsGrid = document.createElement('div');
+    statsGrid.className = 'sum-stats';
+    var statItems = [
+      { value: sum.stats.totalMessages, label: 'Messages' },
+      { value: sum.stats.totalWords.toLocaleString(), label: 'Words' },
+      { value: sum.stats.codeBlocks, label: 'Code Blocks' },
+      { value: sum.stats.readingTimeMin + 'm', label: 'Reading Time' },
+      { value: sum.stats.avgWordsPerMessage, label: 'Avg Words/Msg' },
+      { value: sum.stats.longestMessage.toLocaleString(), label: 'Longest Msg' },
+    ];
+    for (var i = 0; i < statItems.length; i++) {
+      var stat = document.createElement('div');
+      stat.className = 'sum-stat';
+      var val = document.createElement('div');
+      val.className = 'sum-stat-value';
+      val.textContent = statItems[i].value;
+      stat.appendChild(val);
+      var lbl = document.createElement('div');
+      lbl.className = 'sum-stat-label';
+      lbl.textContent = statItems[i].label;
+      stat.appendChild(lbl);
+      statsGrid.appendChild(stat);
+    }
+    statsSection.appendChild(statsGrid);
+    body.appendChild(statsSection);
+
+    // Topics section
+    if (sum.topics.length > 0) {
+      var topicSection = _createSection('🏷️', 'Key Topics');
+      var chips = document.createElement('div');
+      chips.className = 'sum-topic-chips';
+      for (var t = 0; t < sum.topics.length; t++) {
+        var chip = document.createElement('span');
+        chip.className = 'sum-chip';
+        chip.textContent = sum.topics[t].word;
+        var cnt = document.createElement('span');
+        cnt.className = 'sum-chip-count';
+        cnt.textContent = '×' + sum.topics[t].count;
+        chip.appendChild(cnt);
+        chips.appendChild(chip);
+      }
+      topicSection.appendChild(chips);
+      body.appendChild(topicSection);
+    }
+
+    // Questions section
+    if (sum.questions.length > 0) {
+      var qSection = _createSection('❓', 'Questions (' + sum.questions.length + ')');
+      var qList = document.createElement('ul');
+      qList.className = 'sum-list';
+      for (var q = 0; q < sum.questions.length; q++) {
+        var li = document.createElement('li');
+        var role = document.createElement('span');
+        role.className = 'sum-role';
+        role.textContent = sum.questions[q].role;
+        li.appendChild(role);
+        li.appendChild(document.createTextNode(sum.questions[q].text));
+        qList.appendChild(li);
+      }
+      qSection.appendChild(qList);
+      body.appendChild(qSection);
+    }
+
+    // Decisions section
+    if (sum.decisions.length > 0) {
+      var dSection = _createSection('✅', 'Decisions (' + sum.decisions.length + ')');
+      var dList = document.createElement('ul');
+      dList.className = 'sum-list';
+      for (var d = 0; d < sum.decisions.length; d++) {
+        var dli = document.createElement('li');
+        dli.textContent = sum.decisions[d].text;
+        dList.appendChild(dli);
+      }
+      dSection.appendChild(dList);
+      body.appendChild(dSection);
+    }
+
+    // Action Items section
+    if (sum.actionItems.length > 0) {
+      var aSection = _createSection('☑️', 'Action Items (' + sum.actionItems.length + ')');
+      var aList = document.createElement('ul');
+      aList.className = 'sum-list';
+      for (var a = 0; a < sum.actionItems.length; a++) {
+        var ali = document.createElement('li');
+        ali.textContent = sum.actionItems[a].text;
+        aList.appendChild(ali);
+      }
+      aSection.appendChild(aList);
+      body.appendChild(aSection);
+    }
+
+    // Code blocks section
+    if (sum.codeBlocks.length > 0) {
+      var cSection = _createSection('💻', 'Code Discussed (' + sum.codeBlocks.length + ')');
+      for (var c = 0; c < sum.codeBlocks.length; c++) {
+        var block = sum.codeBlocks[c];
+        var item = document.createElement('div');
+        item.className = 'sum-code-item';
+        var langLabel = document.createElement('div');
+        langLabel.className = 'sum-code-lang';
+        langLabel.textContent = block.language + ' · ' + block.lines + ' lines · ' + block.role;
+        item.appendChild(langLabel);
+        var preview = document.createElement('div');
+        preview.className = 'sum-code-preview';
+        preview.textContent = block.preview;
+        item.appendChild(preview);
+        cSection.appendChild(item);
+      }
+      body.appendChild(cSection);
+    }
+  }
+
+  function _createSection(icon, title) {
+    var section = document.createElement('div');
+    section.className = 'sum-section';
+    var titleEl = document.createElement('div');
+    titleEl.className = 'sum-section-title';
+    var iconSpan = document.createElement('span');
+    iconSpan.className = 'sum-icon';
+    iconSpan.textContent = icon;
+    titleEl.appendChild(iconSpan);
+    titleEl.appendChild(document.createTextNode(title));
+    section.appendChild(titleEl);
+    return section;
+  }
+
+  function openPanel() {
+    buildPanel();
+    generateSummary();
+    renderPanel();
+    panelEl.classList.add('sum-open');
+    overlayEl.classList.add('sum-open');
+  }
+
+  function closePanel() {
+    if (panelEl) panelEl.classList.remove('sum-open');
+    if (overlayEl) overlayEl.classList.remove('sum-open');
+  }
+
+  function togglePanel() {
+    if (panelEl && panelEl.classList.contains('sum-open')) {
+      closePanel();
+    } else {
+      openPanel();
+    }
+  }
+
+  // ── Init ──
+
+  function init() {
+    injectStyles();
+
+    // Keyboard shortcut: Alt+S to toggle summary
+    document.addEventListener('keydown', function(e) {
+      if (e.altKey && e.key === 's' && !e.ctrlKey && !e.shiftKey && !e.metaKey) {
+        e.preventDefault();
+        togglePanel();
+      }
+    });
+  }
+
+  return {
+    init: init,
+    generateSummary: generateSummary,
+    openPanel: openPanel,
+    closePanel: closePanel,
+    togglePanel: togglePanel,
+    getSummaryText: getSummaryText,
+    exportSummary: exportSummary,
+    getTopics: getTopics,
+    getDecisions: getDecisions,
+    getQuestions: getQuestions,
+    getCodeBlocks: getCodeBlocks,
+    getActionItems: getActionItems,
+    getStats: getStats,
+    // Expose internals for testing
+    _extractTopics: extractTopics,
+    _extractQuestions: extractQuestions,
+    _extractCodeBlocks: extractCodeBlocks,
+    _extractDecisions: extractDecisions,
+    _extractActionItems: extractActionItems,
+    _computeStats: computeStats,
+  };
+})();
+
 
 const MessageAnnotations = (() => {
   'use strict';
