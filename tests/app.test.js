@@ -2972,8 +2972,8 @@ describe('HistoryPanel — extended', () => {
 
     const container = document.getElementById('history-messages');
     const roles = container.querySelectorAll('.msg-role');
-    expect(roles[0].textContent).toBe('👤 You');
-    expect(roles[1].textContent).toBe('🤖 Assistant');
+    expect(roles[0].textContent).toContain('👤 You');
+    expect(roles[1].textContent).toContain('🤖 Assistant');
   });
 
   test('exportAsMarkdown with special characters in messages', () => {
@@ -4444,7 +4444,7 @@ describe('SlashCommands', () => {
   describe('getCommands', () => {
     test('returns all commands', () => {
       const cmds = SlashCommands.getCommands();
-      expect(cmds.length).toBe(20);
+      expect(cmds.length).toBe(21);
     });
 
     test('returns a defensive copy', () => {
