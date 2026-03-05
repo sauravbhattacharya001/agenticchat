@@ -337,7 +337,8 @@ describe('addChapterAtCurrent', () => {
   test('generates default title if none provided', () => {
     ConversationManager.addMessage('user', 'test');
     const result = ConversationChapters.addChapterAtCurrent();
-    expect(result.title).toBe('Chapter 1');
+    // suggestTitle detects 'test' keyword and suggests 'Testing'
+    expect(result.title).toBe('Testing');
   });
 
   test('returns null when history is too short', () => {
@@ -534,5 +535,60 @@ describe('edge cases', () => {
     expect(ConversationChapters.getCount()).toBe(2);
     expect(ConversationChapters.getChapterAt(1).title).toBe('First');
     expect(ConversationChapters.getChapterAt(5).title).toBe('Second');
+  });
+});
+
+describe('suggestTitle', () => {
+  beforeEach(() => {
+    ConversationChapters.clearAll();
+    const h = ConversationManager.getHistory();
+    h.length = 1;
+  });
+
+  test('detects code blocks with language', () => {
+    ConversationManager.addMessage('user', 'Here is my code:\n```javascript\nconsole.log("hi");\n```');
+    const title = ConversationChapters.suggestTitle(1);
+    expect(title).toBe('Code: Here is my code:');
+  });
+
+  test('detects code blocks without language', () => {
+    ConversationManager.addMessage('user', '```\nsome code\n```');
+    const title = ConversationChapters.suggestTitle(1);
+    expect(title).toBe('Code Discussion');
+  });
+
+  test('detects questions', () => {
+    ConversationManager.addMessage('user', 'How do I set up a React project?');
+    const title = ConversationChapters.suggestTitle(1);
+    expect(title).toBe('How do I set up a React project?');
+  });
+
+  test('detects topic keywords', () => {
+    ConversationManager.addMessage('user', 'I need to deploy this application to production');
+    const title = ConversationChapters.suggestTitle(1);
+    expect(title).toBe('Deployment');
+  });
+
+  test('detects multiple topic keywords', () => {
+    ConversationManager.addMessage('user', 'Can you help debug the security issue');
+    const title = ConversationChapters.suggestTitle(1);
+    expect(title).toBe('Security & Debugging');
+  });
+
+  test('falls back to first line for no keywords', () => {
+    ConversationManager.addMessage('user', 'Hello world, nice to meet you');
+    const title = ConversationChapters.suggestTitle(1);
+    expect(title).toBe('Hello world, nice to meet you');
+  });
+
+  test('returns fallback for out-of-range index', () => {
+    const title = ConversationChapters.suggestTitle(999);
+    expect(title).toMatch(/^Chapter \d+$/);
+  });
+
+  test('skips system messages', () => {
+    ConversationManager.addMessage('user', 'Let me explain the setup process');
+    const title = ConversationChapters.suggestTitle(0);
+    expect(title).toBe('Setup Discussion & Explanation');
   });
 });

@@ -9011,7 +9011,8 @@ const ConversationChapters = (() => {
         btn.title = 'Add chapter marker here';
         btn.addEventListener('click', function(e) {
           e.stopPropagation();
-          var title = window.prompt('Chapter title:');
+          var suggested = suggestTitle(idx);
+          var title = window.prompt('Chapter title:', suggested);
           if (title) {
             addChapter(idx, title);
             renderDividers();
@@ -9025,11 +9026,117 @@ const ConversationChapters = (() => {
 
   // -- Quick-add: latest message --
 
+  /**
+   * Suggest a context-aware chapter title based on messages starting at the given index.
+   * Analyzes the message for code blocks, questions, and topic keywords.
+   *
+   * @param {number} messageIndex  Index into ConversationManager.getHistory()
+   * @returns {string} Suggested title
+   */
+  function suggestTitle(messageIndex) {
+    var history = ConversationManager.getHistory();
+    var idx = typeof messageIndex === 'number' ? messageIndex : history.length - 1;
+    if (idx < 0 || idx >= history.length) return 'Chapter ' + (getCount() + 1);
+
+    // Gather up to 5 messages from the start index (skip system messages)
+    var msgs = [];
+    for (var i = idx; i < history.length && msgs.length < 5; i++) {
+      if (history[i].role !== 'system') msgs.push(history[i]);
+    }
+    if (msgs.length === 0) return 'Chapter ' + (getCount() + 1);
+
+    var firstMsg = msgs[0];
+    var content = (firstMsg.content || '').trim();
+
+    // 1. Code block detection
+    var codeFenceMatch = content.match(/```(\w*)/);
+    if (codeFenceMatch) {
+      var lang = codeFenceMatch[1];
+      var textBefore = content.split('```')[0].trim();
+      if (lang && textBefore.length > 5 && textBefore.length < 60) {
+        return 'Code: ' + _capitalize(textBefore);
+      }
+      if (lang) return 'Code: ' + lang.charAt(0).toUpperCase() + lang.slice(1);
+      return 'Code Discussion';
+    }
+
+    // 2. Question detection
+    if (content.indexOf('?') !== -1) {
+      var questionLine = '';
+      var lines = content.split('\n');
+      for (var q = 0; q < lines.length; q++) {
+        if (lines[q].indexOf('?') !== -1) {
+          questionLine = lines[q].trim();
+          break;
+        }
+      }
+      if (questionLine.length > 0) {
+        questionLine = questionLine.replace(/[#*_`~\[\]]/g, '').trim();
+        if (questionLine.length > MAX_TITLE_LENGTH) {
+          questionLine = questionLine.substring(0, MAX_TITLE_LENGTH - 3) + '...';
+        }
+        return questionLine;
+      }
+    }
+
+    // 3. Topic extraction via keyword matching
+    var topicKeywords = {
+      'bug': 'Bug Fix', 'error': 'Error Resolution', 'fix': 'Bug Fix',
+      'setup': 'Setup Discussion', 'install': 'Installation',
+      'config': 'Configuration', 'deploy': 'Deployment',
+      'test': 'Testing', 'refactor': 'Refactoring',
+      'design': 'Design Discussion', 'review': 'Code Review',
+      'performance': 'Performance', 'optimize': 'Optimization',
+      'security': 'Security', 'auth': 'Authentication',
+      'api': 'API Discussion', 'database': 'Database',
+      'ui': 'UI Discussion', 'style': 'Styling',
+      'debug': 'Debugging', 'help': 'Help Request',
+      'explain': 'Explanation', 'implement': 'Implementation',
+      'feature': 'Feature Discussion', 'update': 'Update',
+      'migration': 'Migration', 'documentation': 'Documentation',
+    };
+
+    var lowerContent = content.toLowerCase();
+    var matchedTopics = [];
+    var keywords = Object.keys(topicKeywords);
+    for (var k = 0; k < keywords.length; k++) {
+      var re = new RegExp('\\b' + keywords[k] + '\\b', 'i');
+      if (re.test(lowerContent)) {
+        matchedTopics.push(topicKeywords[keywords[k]]);
+        if (matchedTopics.length >= 2) break;
+      }
+    }
+    if (matchedTopics.length > 0) {
+      var seen = {};
+      var unique = [];
+      for (var u = 0; u < matchedTopics.length; u++) {
+        if (!seen[matchedTopics[u]]) { seen[matchedTopics[u]] = true; unique.push(matchedTopics[u]); }
+      }
+      return unique.join(' & ');
+    }
+
+    // 4. Fallback: use first line
+    var firstLine = content.split('\n')[0].replace(/[#*_`~\[\]]/g, '').trim();
+    if (firstLine.length > 5 && firstLine.length <= MAX_TITLE_LENGTH) {
+      return _capitalize(firstLine);
+    }
+    if (firstLine.length > MAX_TITLE_LENGTH) {
+      return _capitalize(firstLine.substring(0, MAX_TITLE_LENGTH - 3)) + '...';
+    }
+
+    return 'Chapter ' + (getCount() + 1);
+  }
+
+  function _capitalize(str) {
+    if (!str) return str;
+    return str.charAt(0).toUpperCase() + str.slice(1);
+  }
+
   function addChapterAtCurrent(title) {
     var history = ConversationManager.getHistory();
     var lastNonSystem = history.length - 1;
     if (lastNonSystem < 1) return null;
-    return addChapter(lastNonSystem, title || 'Chapter ' + (getCount() + 1));
+    return addChapter(lastNonSystem, title || suggestTitle(lastNonSystem));
   }
 
   // Eagerly load persisted state so chapters are available before init()
@@ -9062,7 +9169,8 @@ const ConversationChapters = (() => {
     document.addEventListener('keydown', function(e) {
       if (e.altKey && e.key === 'c' && !e.ctrlKey && !e.shiftKey && !e.metaKey) {
         e.preventDefault();
-        var title = window.prompt('Chapter title:');
+        var suggested = suggestTitle(ConversationManager.getHistory().length - 1);
+        var title = window.prompt('Chapter title:', suggested);
         if (title) {
           addChapterAtCurrent(title);
         }
@@ -9093,6 +9201,7 @@ const ConversationChapters = (() => {
     renderDividers: renderDividers,
     renderAddButtons: renderAddButtons,
     addChapterAtCurrent: addChapterAtCurrent,
+    suggestTitle: suggestTitle,
     scrollToMessageIndex: scrollToMessageIndex,
   };
 })();
