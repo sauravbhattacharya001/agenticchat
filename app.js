@@ -29,6 +29,7 @@
  *   ReadAloud           — text-to-speech for messages with voice/speed controls
  *   MessageDiff         — compare any two messages with visual line-level diff
  *   ConversationTimeline — visual minimap sidebar for conversation navigation
+ *   MessageAnnotations  — private notes/annotations on messages with labels
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -7789,6 +7790,685 @@ document.addEventListener('DOMContentLoaded', () => {
   // Conversation timeline minimap
   ConversationTimeline.init();
 
+  // Message annotations
+  document.getElementById('annotations-btn').addEventListener('click', MessageAnnotations.togglePanel);
+  MessageAnnotations.init();
+
   // Cross-tab sync (must come after SessionManager.initAutoSave)
   CrossTabSync.init();
 });
+
+const MessageAnnotations = (() => {
+  'use strict';
+
+  const STORAGE_KEY = 'agenticchat_annotations';
+  const MAX_NOTE_LENGTH = 500;
+  const MAX_ANNOTATIONS = 200;
+
+  const LABELS = [
+    { id: 'note',      name: 'Note',       color: '#38bdf8', icon: '📝' },
+    { id: 'important', name: 'Important',   color: '#f59e0b', icon: '⭐' },
+    { id: 'correction',name: 'Correction',  color: '#ef4444', icon: '✏️' },
+    { id: 'question',  name: 'Question',    color: '#a78bfa', icon: '❓' },
+    { id: 'todo',      name: 'To-Do',       color: '#22c55e', icon: '☑️' },
+    { id: 'reference', name: 'Reference',   color: '#64748b', icon: '🔗' },
+  ];
+
+  // annotations: { [messageIndex]: { text, label, createdAt, updatedAt } }
+  let annotations = {};
+  let panelEl = null;
+  let overlayEl = null;
+  let styleInjected = false;
+
+  // ── Styles ──
+
+  function injectStyles() {
+    if (styleInjected) return;
+    styleInjected = true;
+    const style = document.createElement('style');
+    style.textContent = [
+      '.ann-badge {',
+      '  position: absolute; top: 4px; right: 4px; width: 22px; height: 22px;',
+      '  border-radius: 50%; display: flex; align-items: center; justify-content: center;',
+      '  font-size: 12px; cursor: pointer; opacity: 0.7; transition: opacity 0.15s;',
+      '  z-index: 5; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1);',
+      '}',
+      '.ann-badge:hover { opacity: 1; }',
+      '.ann-tooltip {',
+      '  position: absolute; top: 28px; right: 0; z-index: 100;',
+      '  background: #1a2332; border: 1px solid #2d4a6f; border-radius: 6px;',
+      '  padding: 8px 10px; font-size: 12px; color: #c9d1d9; max-width: 260px;',
+      '  word-wrap: break-word; box-shadow: 0 4px 12px rgba(0,0,0,0.4);',
+      '  display: none;',
+      '}',
+      '.ann-tooltip.visible { display: block; }',
+      '.ann-label-dot {',
+      '  display: inline-block; width: 8px; height: 8px; border-radius: 50%;',
+      '  margin-right: 5px; vertical-align: middle;',
+      '}',
+      '.ann-add-btn {',
+      '  position: absolute; top: 4px; right: 30px; width: 22px; height: 22px;',
+      '  border-radius: 50%; display: flex; align-items: center; justify-content: center;',
+      '  font-size: 11px; cursor: pointer; opacity: 0; transition: opacity 0.15s;',
+      '  z-index: 5; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1);',
+      '  color: #888;',
+      '}',
+      '.chat-msg { position: relative; }',
+      '.chat-msg:hover .ann-add-btn { opacity: 0.6; }',
+      '.chat-msg:hover .ann-add-btn:hover { opacity: 1; }',
+      '#ann-panel {',
+      '  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);',
+      '  width: 480px; max-width: 90vw; max-height: 70vh; z-index: 1100;',
+      '  background: #0d1117; border: 1px solid #30363d; border-radius: 10px;',
+      '  display: none; flex-direction: column; overflow: hidden;',
+      '  box-shadow: 0 8px 32px rgba(0,0,0,0.5);',
+      '}',
+      '#ann-panel.ann-open { display: flex; }',
+      '#ann-panel-header {',
+      '  display: flex; align-items: center; justify-content: space-between;',
+      '  padding: 12px 16px; border-bottom: 1px solid #30363d;',
+      '}',
+      '#ann-panel-header h3 { margin: 0; color: #38bdf8; font-size: 15px; }',
+      '#ann-panel-body {',
+      '  flex: 1; overflow-y: auto; padding: 8px 12px;',
+      '}',
+      '#ann-panel-footer {',
+      '  display: flex; gap: 8px; padding: 8px 12px; border-top: 1px solid #30363d;',
+      '}',
+      '#ann-panel-footer button {',
+      '  background: #21262d; border: 1px solid #30363d; color: #c9d1d9;',
+      '  padding: 5px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;',
+      '}',
+      '#ann-panel-footer button:hover { background: #30363d; }',
+      '.ann-item {',
+      '  display: flex; gap: 8px; padding: 8px; border-radius: 6px;',
+      '  margin-bottom: 6px; background: #161b22; cursor: pointer;',
+      '}',
+      '.ann-item:hover { background: #1c2333; }',
+      '.ann-item-label { font-size: 11px; font-weight: 600; }',
+      '.ann-item-text { font-size: 12px; color: #c9d1d9; flex: 1; }',
+      '.ann-item-meta { font-size: 10px; color: #6e7681; }',
+      '.ann-item-actions { display: flex; gap: 4px; align-items: flex-start; }',
+      '.ann-item-actions button {',
+      '  background: none; border: none; color: #6e7681; cursor: pointer;',
+      '  font-size: 11px; padding: 2px 4px;',
+      '}',
+      '.ann-item-actions button:hover { color: #c9d1d9; }',
+      '#ann-overlay {',
+      '  position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 1050;',
+      '  display: none;',
+      '}',
+      '#ann-overlay.ann-open { display: block; }',
+      '.ann-editor {',
+      '  position: fixed; z-index: 1200; background: #0d1117; border: 1px solid #30363d;',
+      '  border-radius: 8px; padding: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.5);',
+      '  width: 320px; max-width: 90vw;',
+      '}',
+      '.ann-editor textarea {',
+      '  width: 100%; height: 80px; background: #161b22; border: 1px solid #30363d;',
+      '  border-radius: 4px; color: #c9d1d9; padding: 6px 8px; font-size: 12px;',
+      '  resize: vertical; font-family: inherit;',
+      '}',
+      '.ann-editor-labels { display: flex; gap: 4px; margin: 8px 0; flex-wrap: wrap; }',
+      '.ann-editor-labels button {',
+      '  padding: 3px 8px; border-radius: 12px; font-size: 11px; cursor: pointer;',
+      '  border: 1px solid transparent; background: #21262d; color: #c9d1d9;',
+      '}',
+      '.ann-editor-labels button.selected { border-color: currentColor; }',
+      '.ann-editor-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 8px; }',
+      '.ann-editor-actions button {',
+      '  padding: 4px 12px; border-radius: 4px; font-size: 12px; cursor: pointer;',
+      '  border: 1px solid #30363d;',
+      '}',
+      '.ann-editor-save { background: #238636 !important; color: #fff !important; border-color: #2ea043 !important; }',
+      '.ann-editor-cancel { background: #21262d; color: #c9d1d9; }',
+      '.ann-editor-delete { background: #da3633 !important; color: #fff !important; border-color: #f85149 !important; }',
+      '.ann-count { font-size: 10px; color: #6e7681; margin-left: 4px; }',
+    ].join('\n');
+    document.head.appendChild(style);
+  }
+
+  // ── Persistence ──
+
+  function load() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        annotations = JSON.parse(raw);
+      }
+    } catch (_) {
+      annotations = {};
+    }
+  }
+
+  function save() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(annotations));
+    } catch (_) { /* quota exceeded */ }
+  }
+
+  // ── Core API ──
+
+  function addAnnotation(messageIndex, text, labelId) {
+    if (typeof messageIndex !== 'number' || messageIndex < 0) return null;
+    if (!text || typeof text !== 'string') return null;
+    const trimmed = text.trim();
+    if (!trimmed) return null;
+    if (trimmed.length > MAX_NOTE_LENGTH) return null;
+    if (Object.keys(annotations).length >= MAX_ANNOTATIONS && !annotations[messageIndex]) return null;
+
+    const label = LABELS.find(l => l.id === labelId) || LABELS[0];
+    const now = new Date().toISOString();
+
+    annotations[messageIndex] = {
+      text: trimmed,
+      label: label.id,
+      createdAt: annotations[messageIndex] ? annotations[messageIndex].createdAt : now,
+      updatedAt: now,
+    };
+
+    save();
+    return getAnnotation(messageIndex);
+  }
+
+  function removeAnnotation(messageIndex) {
+    if (!annotations[messageIndex]) return false;
+    delete annotations[messageIndex];
+    save();
+    return true;
+  }
+
+  function getAnnotation(messageIndex) {
+    const ann = annotations[messageIndex];
+    if (!ann) return null;
+    return Object.assign({}, ann, { messageIndex: messageIndex });
+  }
+
+  function getAllAnnotations() {
+    return Object.keys(annotations).map(key => {
+      const idx = parseInt(key, 10);
+      return Object.assign({}, annotations[key], { messageIndex: idx });
+    }).sort((a, b) => a.messageIndex - b.messageIndex);
+  }
+
+  function getCount() {
+    return Object.keys(annotations).length;
+  }
+
+  function hasAnnotation(messageIndex) {
+    return !!annotations[messageIndex];
+  }
+
+  function clearAll() {
+    const count = getCount();
+    annotations = {};
+    save();
+    return count;
+  }
+
+  function getLabels() {
+    return LABELS.map(l => Object.assign({}, l));
+  }
+
+  function exportAnnotations() {
+    const all = getAllAnnotations();
+    const messages = typeof ConversationManager !== 'undefined'
+      ? ConversationManager.getMessages().filter(m => m.role !== 'system')
+      : [];
+
+    return all.map(ann => {
+      const domIndex = ann.messageIndex - 1;
+      const msg = messages[domIndex];
+      const label = LABELS.find(l => l.id === ann.label) || LABELS[0];
+      return {
+        messageIndex: ann.messageIndex,
+        messagePreview: msg ? msg.content.substring(0, 120) : '(unavailable)',
+        messageRole: msg ? msg.role : 'unknown',
+        label: label.name,
+        note: ann.text,
+        createdAt: ann.createdAt,
+        updatedAt: ann.updatedAt,
+      };
+    });
+  }
+
+  // ── UI: Badge + Tooltip on messages ──
+
+  function renderBadges() {
+    const output = document.getElementById('chat-output');
+    if (!output) return;
+    const msgs = output.querySelectorAll('.chat-msg');
+
+    msgs.forEach((msgEl, domIdx) => {
+      const msgIndex = domIdx + 1; // skip system prompt at [0]
+
+      // Ensure add button exists
+      let addBtn = msgEl.querySelector('.ann-add-btn');
+      if (!addBtn) {
+        addBtn = document.createElement('button');
+        addBtn.className = 'ann-add-btn';
+        addBtn.textContent = '📝';
+        addBtn.title = 'Add annotation';
+        addBtn.setAttribute('aria-label', 'Add annotation');
+        addBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          openEditor(msgIndex, msgEl);
+        });
+        msgEl.appendChild(addBtn);
+      }
+
+      // Remove existing badge/tooltip
+      const existing = msgEl.querySelector('.ann-badge');
+      if (existing) existing.remove();
+      const existingTip = msgEl.querySelector('.ann-tooltip');
+      if (existingTip) existingTip.remove();
+
+      const ann = annotations[msgIndex];
+      if (!ann) return;
+
+      const label = LABELS.find(l => l.id === ann.label) || LABELS[0];
+
+      const badge = document.createElement('span');
+      badge.className = 'ann-badge';
+      badge.textContent = label.icon;
+      badge.title = label.name + ': ' + ann.text.substring(0, 60);
+      badge.style.borderColor = label.color;
+      badge.setAttribute('aria-label', 'Annotation: ' + label.name);
+      badge.tabIndex = 0;
+
+      const tooltip = document.createElement('div');
+      tooltip.className = 'ann-tooltip';
+      tooltip.setAttribute('role', 'tooltip');
+
+      const dot = document.createElement('span');
+      dot.className = 'ann-label-dot';
+      dot.style.backgroundColor = label.color;
+      tooltip.appendChild(dot);
+
+      const labelSpan = document.createElement('strong');
+      labelSpan.textContent = label.name;
+      labelSpan.style.color = label.color;
+      tooltip.appendChild(labelSpan);
+
+      tooltip.appendChild(document.createElement('br'));
+
+      const textSpan = document.createElement('span');
+      textSpan.textContent = ann.text;
+      tooltip.appendChild(textSpan);
+
+      const editLink = document.createElement('div');
+      editLink.style.cssText = 'margin-top:6px;font-size:11px;';
+      editLink.innerHTML = '<a href="#" style="color:#38bdf8;text-decoration:none;">Edit</a>';
+      editLink.querySelector('a').addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        tooltip.classList.remove('visible');
+        openEditor(msgIndex, msgEl);
+      });
+      tooltip.appendChild(editLink);
+
+      badge.addEventListener('click', (e) => {
+        e.stopPropagation();
+        tooltip.classList.toggle('visible');
+      });
+      badge.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          tooltip.classList.toggle('visible');
+        }
+      });
+
+      msgEl.appendChild(badge);
+      msgEl.appendChild(tooltip);
+
+      // Hide add btn if annotation exists (badge replaces it visually)
+      addBtn.style.right = '30px';
+    });
+  }
+
+  // ── UI: Inline Editor ──
+
+  let editorEl = null;
+
+  function openEditor(messageIndex, anchorEl) {
+    closeEditor();
+
+    const existing = annotations[messageIndex];
+    const currentLabel = existing ? existing.label : 'note';
+    const currentText = existing ? existing.text : '';
+
+    editorEl = document.createElement('div');
+    editorEl.className = 'ann-editor';
+    editorEl.setAttribute('role', 'dialog');
+    editorEl.setAttribute('aria-label', 'Annotation editor');
+
+    // Position near the message
+    const rect = anchorEl.getBoundingClientRect();
+    editorEl.style.top = Math.max(8, rect.top) + 'px';
+    editorEl.style.left = Math.min(window.innerWidth - 340, Math.max(8, rect.right + 8)) + 'px';
+
+    const textarea = document.createElement('textarea');
+    textarea.value = currentText;
+    textarea.placeholder = 'Add a note about this message...';
+    textarea.maxLength = MAX_NOTE_LENGTH;
+    textarea.setAttribute('aria-label', 'Annotation text');
+    editorEl.appendChild(textarea);
+
+    // Label buttons
+    const labelsDiv = document.createElement('div');
+    labelsDiv.className = 'ann-editor-labels';
+    let selectedLabel = currentLabel;
+
+    LABELS.forEach(label => {
+      const btn = document.createElement('button');
+      btn.textContent = label.icon + ' ' + label.name;
+      btn.style.color = label.color;
+      if (label.id === selectedLabel) btn.classList.add('selected');
+      btn.addEventListener('click', () => {
+        selectedLabel = label.id;
+        labelsDiv.querySelectorAll('button').forEach(b => b.classList.remove('selected'));
+        btn.classList.add('selected');
+      });
+      labelsDiv.appendChild(btn);
+    });
+    editorEl.appendChild(labelsDiv);
+
+    // Action buttons
+    const actionsDiv = document.createElement('div');
+    actionsDiv.className = 'ann-editor-actions';
+
+    if (existing) {
+      const delBtn = document.createElement('button');
+      delBtn.className = 'ann-editor-delete';
+      delBtn.textContent = 'Delete';
+      delBtn.addEventListener('click', () => {
+        removeAnnotation(messageIndex);
+        closeEditor();
+        renderBadges();
+        renderPanel();
+      });
+      actionsDiv.appendChild(delBtn);
+    }
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'ann-editor-cancel';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', closeEditor);
+    actionsDiv.appendChild(cancelBtn);
+
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'ann-editor-save';
+    saveBtn.textContent = existing ? 'Update' : 'Save';
+    saveBtn.addEventListener('click', () => {
+      const text = textarea.value.trim();
+      if (!text) return;
+      addAnnotation(messageIndex, text, selectedLabel);
+      closeEditor();
+      renderBadges();
+      renderPanel();
+    });
+    actionsDiv.appendChild(saveBtn);
+    editorEl.appendChild(actionsDiv);
+
+    document.body.appendChild(editorEl);
+    textarea.focus();
+
+    // Close on Escape
+    editorEl._keyHandler = (e) => {
+      if (e.key === 'Escape') closeEditor();
+    };
+    document.addEventListener('keydown', editorEl._keyHandler);
+  }
+
+  function closeEditor() {
+    if (editorEl) {
+      if (editorEl._keyHandler) {
+        document.removeEventListener('keydown', editorEl._keyHandler);
+      }
+      editorEl.remove();
+      editorEl = null;
+    }
+  }
+
+  // ── UI: Panel ──
+
+  function buildPanel() {
+    if (panelEl) return;
+
+    overlayEl = document.createElement('div');
+    overlayEl.id = 'ann-overlay';
+    overlayEl.addEventListener('click', closePanel);
+    document.body.appendChild(overlayEl);
+
+    panelEl = document.createElement('div');
+    panelEl.id = 'ann-panel';
+    panelEl.setAttribute('role', 'dialog');
+    panelEl.setAttribute('aria-label', 'Message annotations');
+
+    const header = document.createElement('div');
+    header.id = 'ann-panel-header';
+
+    const title = document.createElement('h3');
+    title.textContent = '📝 Annotations';
+    header.appendChild(title);
+
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = '✕';
+    closeBtn.style.cssText = 'background:none;border:none;color:#888;cursor:pointer;font-size:16px;';
+    closeBtn.addEventListener('click', closePanel);
+    header.appendChild(closeBtn);
+
+    panelEl.appendChild(header);
+
+    const body = document.createElement('div');
+    body.id = 'ann-panel-body';
+    panelEl.appendChild(body);
+
+    const footer = document.createElement('div');
+    footer.id = 'ann-panel-footer';
+
+    const exportBtn = document.createElement('button');
+    exportBtn.textContent = '⬇ Export JSON';
+    exportBtn.addEventListener('click', () => {
+      const data = exportAnnotations();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'annotations.json';
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+    footer.appendChild(exportBtn);
+
+    const clearBtn = document.createElement('button');
+    clearBtn.textContent = '🗑 Clear All';
+    clearBtn.addEventListener('click', () => {
+      if (getCount() === 0) return;
+      clearAll();
+      renderPanel();
+      renderBadges();
+    });
+    footer.appendChild(clearBtn);
+
+    panelEl.appendChild(footer);
+    document.body.appendChild(panelEl);
+  }
+
+  function renderPanel() {
+    if (!panelEl) return;
+    const body = panelEl.querySelector('#ann-panel-body');
+    if (!body) return;
+    body.innerHTML = '';
+
+    const all = getAllAnnotations();
+    if (all.length === 0) {
+      body.innerHTML = '<div style="padding:16px;color:#6e7681;text-align:center;">No annotations yet.<br>Click 📝 on any message to add one.</div>';
+      return;
+    }
+
+    const messages = typeof ConversationManager !== 'undefined'
+      ? ConversationManager.getMessages().filter(m => m.role !== 'system')
+      : [];
+
+    all.forEach(ann => {
+      const domIndex = ann.messageIndex - 1;
+      const msg = messages[domIndex];
+      const label = LABELS.find(l => l.id === ann.label) || LABELS[0];
+
+      const item = document.createElement('div');
+      item.className = 'ann-item';
+      item.title = 'Click to jump to message';
+      item.addEventListener('click', () => {
+        closePanel();
+        jumpToMessage(ann.messageIndex);
+      });
+
+      const content = document.createElement('div');
+      content.style.cssText = 'flex:1;min-width:0;';
+
+      const labelSpan = document.createElement('div');
+      labelSpan.className = 'ann-item-label';
+      labelSpan.style.color = label.color;
+      labelSpan.textContent = label.icon + ' ' + label.name;
+      content.appendChild(labelSpan);
+
+      const textDiv = document.createElement('div');
+      textDiv.className = 'ann-item-text';
+      textDiv.textContent = ann.text;
+      content.appendChild(textDiv);
+
+      const meta = document.createElement('div');
+      meta.className = 'ann-item-meta';
+      const preview = msg ? msg.content.substring(0, 80) : '(message unavailable)';
+      const role = msg ? msg.role : '?';
+      meta.textContent = role + ': "' + preview + (preview.length >= 80 ? '…' : '') + '"';
+      content.appendChild(meta);
+
+      item.appendChild(content);
+
+      const actions = document.createElement('div');
+      actions.className = 'ann-item-actions';
+
+      const editBtn = document.createElement('button');
+      editBtn.textContent = '✎';
+      editBtn.title = 'Edit';
+      editBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closePanel();
+        // Find message element to anchor editor
+        const output = document.getElementById('chat-output');
+        if (output) {
+          const allMsgs = output.querySelectorAll('.chat-msg');
+          const el = allMsgs[domIndex];
+          if (el) openEditor(ann.messageIndex, el);
+        }
+      });
+      actions.appendChild(editBtn);
+
+      const delBtn = document.createElement('button');
+      delBtn.textContent = '✕';
+      delBtn.title = 'Delete';
+      delBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        removeAnnotation(ann.messageIndex);
+        renderPanel();
+        renderBadges();
+      });
+      actions.appendChild(delBtn);
+
+      item.appendChild(actions);
+      body.appendChild(item);
+    });
+  }
+
+  function jumpToMessage(messageIndex) {
+    const output = document.getElementById('chat-output');
+    if (!output) return;
+    const allMsgs = output.querySelectorAll('.chat-msg');
+    const domIndex = messageIndex - 1;
+    if (domIndex >= 0 && domIndex < allMsgs.length) {
+      const target = allMsgs[domIndex];
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const orig = target.style.outline;
+      target.style.outline = '2px solid #38bdf8';
+      target.style.outlineOffset = '2px';
+      setTimeout(() => {
+        target.style.outline = orig;
+        target.style.outlineOffset = '';
+      }, 1500);
+    }
+  }
+
+  function openPanel() {
+    buildPanel();
+    renderPanel();
+    panelEl.classList.add('ann-open');
+    overlayEl.classList.add('ann-open');
+  }
+
+  function closePanel() {
+    if (panelEl) panelEl.classList.remove('ann-open');
+    if (overlayEl) overlayEl.classList.remove('ann-open');
+  }
+
+  function togglePanel() {
+    if (panelEl && panelEl.classList.contains('ann-open')) {
+      closePanel();
+    } else {
+      openPanel();
+    }
+  }
+
+  // ── Filter ──
+
+  function getByLabel(labelId) {
+    return getAllAnnotations().filter(a => a.label === labelId);
+  }
+
+  function search(query) {
+    if (!query || typeof query !== 'string') return [];
+    const q = query.toLowerCase();
+    return getAllAnnotations().filter(a =>
+      a.text.toLowerCase().includes(q)
+    );
+  }
+
+  // ── Init ──
+
+  function init() {
+    injectStyles();
+    load();
+    renderBadges();
+
+    // Re-render badges when messages are added
+    const output = document.getElementById('chat-output');
+    if (output) {
+      const observer = new MutationObserver(() => {
+        renderBadges();
+      });
+      observer.observe(output, { childList: true });
+    }
+  }
+
+  return {
+    init,
+    addAnnotation,
+    removeAnnotation,
+    getAnnotation,
+    getAllAnnotations,
+    getCount,
+    hasAnnotation,
+    clearAll,
+    getLabels,
+    getByLabel,
+    search,
+    exportAnnotations,
+    openPanel,
+    closePanel,
+    togglePanel,
+    renderBadges,
+    openEditor,
+  };
+})();
+

@@ -177,6 +177,7 @@ function setupDOM() {
     </div>
     <span id="model-label"></span>
     <button id="zen-btn"></button>
+    <button id="annotations-btn"></button>
     <div id="file-drop-overlay"></div>
   `;
 }
@@ -230,7 +231,8 @@ function loadApp() {
     'MessagePinning',
     'ReadAloud',
     'MessageDiff',
-    'ConversationTimeline'
+    'ConversationTimeline',
+    'MessageAnnotations'
   ];
 
   for (const mod of modules) {
