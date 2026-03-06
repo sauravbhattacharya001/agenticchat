@@ -7601,6 +7601,288 @@ const ConversationTimeline = (() => {
   };
 })();
 
+/* ---------- Word Cloud ---------- */
+/**
+ * WordCloud — generates a visual word cloud from conversation text.
+ * Extracts words from all messages, counts frequency, filters stop words,
+ * and renders an interactive SVG word cloud in a modal panel.
+ *
+ * Public API:
+ *   init()            - inject styles and create panel DOM
+ *   open() / close() / toggle()
+ *   generate()        - analyze conversation and return word frequency data
+ *   getWords()        - return sorted [{word, count, pct}] array
+ *   getConfig()       - current configuration
+ *   setConfig(opts)   - update config (minCount, maxWords, filterRoles)
+ *   exportData(fmt)   - export as JSON or CSV
+ */
+const WordCloud = (() => {
+  'use strict';
+
+  let panelEl = null;
+  let overlayEl = null;
+  let styleInjected = false;
+
+  const config = {
+    minCount: 2,
+    maxWords: 80,
+    filterRoles: 'all', // 'all' | 'user' | 'assistant'
+  };
+
+  const STOP_WORDS = new Set([
+    'the','a','an','and','or','but','in','on','at','to','for','of','with','by',
+    'from','is','it','its','this','that','was','are','were','be','been','being',
+    'have','has','had','do','does','did','will','would','could','should','may',
+    'might','can','shall','not','no','nor','as','if','then','than','so','up',
+    'out','about','into','through','during','before','after','above','below',
+    'between','under','again','further','once','here','there','when','where',
+    'why','how','all','each','every','both','few','more','most','other','some',
+    'such','only','own','same','too','very','just','because','also','any','much',
+    'what','which','who','whom','these','those','am','we','they','you','he','she',
+    'me','him','her','us','them','my','your','his','our','their','i','don','doesn',
+    'didn','won','wouldn','couldn','shouldn','isn','aren','wasn','weren','hasn',
+    'haven','hadn','let','get','got','like','make','made','know','think','want',
+    'need','use','using','used','one','two','new','way','well','still','even',
+    'back','over','yes','no','ok','oh','um','uh','hey','hi','hello','thanks',
+    'thank','please','sure','right','see','said','say','really','thing','things',
+    'going','come','take','give','look','try','ask','tell','put','keep','go',
+    'went','goes','been','being','re','ve','ll','don','t','s','d','m',
+  ]);
+
+  const COLORS = [
+    '#2196F3','#4CAF50','#FF9800','#E91E63','#9C27B0','#00BCD4',
+    '#FF5722','#607D8B','#795548','#3F51B5','#8BC34A','#FFC107',
+    '#009688','#673AB7','#F44336','#03A9F4',
+  ];
+
+  function extractText() {
+    const history = typeof ConversationManager !== 'undefined'
+      ? ConversationManager.getHistory()
+      : [];
+    const texts = [];
+    for (let i = 0; i < history.length; i++) {
+      const msg = history[i];
+      if (!msg || !msg.content) continue;
+      if (config.filterRoles === 'user' && msg.role !== 'user') continue;
+      if (config.filterRoles === 'assistant' && msg.role !== 'assistant') continue;
+      if (msg.role === 'system') continue;
+      texts.push(msg.content);
+    }
+    return texts.join(' ');
+  }
+
+  function tokenize(text) {
+    // Strip code blocks
+    text = text.replace(/```[\s\S]*?```/g, ' ');
+    text = text.replace(/`[^`]+`/g, ' ');
+    // Strip URLs
+    text = text.replace(/https?:\/\/\S+/g, ' ');
+    // Lowercase and split on non-alpha
+    return text.toLowerCase().split(/[^a-z]+/).filter(w => w.length > 2 && !STOP_WORDS.has(w));
+  }
+
+  function countWords(tokens) {
+    const freq = {};
+    for (let i = 0; i < tokens.length; i++) {
+      const w = tokens[i];
+      freq[w] = (freq[w] || 0) + 1;
+    }
+    return freq;
+  }
+
+  function generate() {
+    const text = extractText();
+    if (!text.trim()) return [];
+    const tokens = tokenize(text);
+    const freq = countWords(tokens);
+    const total = tokens.length;
+    const entries = Object.entries(freq)
+      .filter(([, c]) => c >= config.minCount)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, config.maxWords)
+      .map(([word, count]) => ({ word, count, pct: Math.round((count / total) * 10000) / 100 }));
+    return entries;
+  }
+
+  function getWords() {
+    return generate();
+  }
+
+  function getConfig() {
+    return { ...config };
+  }
+
+  function setConfig(opts) {
+    if (opts && typeof opts === 'object') {
+      if (typeof opts.minCount === 'number' && opts.minCount >= 1) config.minCount = opts.minCount;
+      if (typeof opts.maxWords === 'number' && opts.maxWords >= 1) config.maxWords = opts.maxWords;
+      if (['all', 'user', 'assistant'].includes(opts.filterRoles)) config.filterRoles = opts.filterRoles;
+    }
+  }
+
+  function exportData(format) {
+    const words = generate();
+    if (format === 'csv') {
+      const lines = ['word,count,pct'];
+      words.forEach(w => lines.push(`${w.word},${w.count},${w.pct}`));
+      return lines.join('\n');
+    }
+    return JSON.stringify(words, null, 2);
+  }
+
+  // ── Styles ──
+
+  function injectStyles() {
+    if (styleInjected) return;
+    styleInjected = true;
+    const style = document.createElement('style');
+    style.textContent = `
+      .wc-overlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.45);z-index:9998;opacity:0;transition:opacity .2s}
+      .wc-overlay.open{opacity:1}
+      .wc-panel{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:min(700px,92vw);max-height:80vh;background:var(--bg,#fff);border:1px solid var(--border,#ccc);border-radius:12px;z-index:9999;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.2);overflow:hidden}
+      .wc-header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border,#ddd)}
+      .wc-header h3{margin:0;font-size:1.1em}
+      .wc-body{flex:1;overflow-y:auto;padding:16px;min-height:200px}
+      .wc-cloud{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:6px 10px;padding:12px}
+      .wc-word{cursor:default;transition:transform .15s;font-weight:600;line-height:1.3}
+      .wc-word:hover{transform:scale(1.15)}
+      .wc-controls{display:flex;gap:8px;align-items:center;padding:8px 16px;border-top:1px solid var(--border,#ddd);flex-wrap:wrap}
+      .wc-controls select,.wc-controls button{font-size:.85em;padding:4px 8px;border-radius:4px;border:1px solid var(--border,#ccc);background:var(--bg,#fff);cursor:pointer}
+      .wc-controls button:hover{background:var(--accent,#2196F3);color:#fff}
+      .wc-empty{text-align:center;color:#888;padding:40px 20px;font-size:.95em}
+      .wc-tooltip{position:absolute;background:#333;color:#fff;padding:4px 8px;border-radius:4px;font-size:.8em;pointer-events:none;z-index:10000;white-space:nowrap}
+    `;
+    document.head.appendChild(style);
+  }
+
+  // ── Panel ──
+
+  function createPanel() {
+    if (panelEl) return;
+    overlayEl = document.createElement('div');
+    overlayEl.className = 'wc-overlay';
+    overlayEl.addEventListener('click', close);
+
+    panelEl = document.createElement('div');
+    panelEl.className = 'wc-panel';
+    panelEl.setAttribute('role', 'dialog');
+    panelEl.setAttribute('aria-label', 'Word Cloud');
+    panelEl.innerHTML = `
+      <div class="wc-header">
+        <h3>☁️ Word Cloud</h3>
+        <button class="wc-close-btn btn-sm" title="Close" aria-label="Close word cloud">✕</button>
+      </div>
+      <div class="wc-body"><div class="wc-cloud"></div></div>
+      <div class="wc-controls">
+        <label>Show: <select class="wc-role-filter">
+          <option value="all">All messages</option>
+          <option value="user">User only</option>
+          <option value="assistant">Assistant only</option>
+        </select></label>
+        <button class="wc-refresh-btn" title="Refresh">🔄 Refresh</button>
+        <button class="wc-export-json-btn" title="Export JSON">📋 JSON</button>
+        <button class="wc-export-csv-btn" title="Export CSV">📊 CSV</button>
+      </div>
+    `;
+
+    panelEl.querySelector('.wc-close-btn').addEventListener('click', close);
+    panelEl.querySelector('.wc-refresh-btn').addEventListener('click', refresh);
+    panelEl.querySelector('.wc-role-filter').addEventListener('change', (e) => {
+      config.filterRoles = e.target.value;
+      refresh();
+    });
+    panelEl.querySelector('.wc-export-json-btn').addEventListener('click', () => downloadExport('json'));
+    panelEl.querySelector('.wc-export-csv-btn').addEventListener('click', () => downloadExport('csv'));
+
+    document.body.appendChild(overlayEl);
+    document.body.appendChild(panelEl);
+  }
+
+  function renderCloud() {
+    const container = panelEl.querySelector('.wc-cloud');
+    container.innerHTML = '';
+    const words = generate();
+    if (words.length === 0) {
+      container.innerHTML = '<div class="wc-empty">No words to display.<br>Start a conversation first!</div>';
+      return;
+    }
+    const maxCount = words[0].count;
+    const minCount = words[words.length - 1].count;
+    const minFont = 14;
+    const maxFont = 48;
+
+    words.forEach((w, idx) => {
+      const span = document.createElement('span');
+      span.className = 'wc-word';
+      span.textContent = w.word;
+      const scale = maxCount === minCount ? 0.5 : (w.count - minCount) / (maxCount - minCount);
+      const fontSize = Math.round(minFont + scale * (maxFont - minFont));
+      span.style.fontSize = fontSize + 'px';
+      span.style.color = COLORS[idx % COLORS.length];
+      span.title = `${w.word}: ${w.count} (${w.pct}%)`;
+      container.appendChild(span);
+    });
+  }
+
+  function refresh() {
+    if (panelEl) renderCloud();
+  }
+
+  function downloadExport(format) {
+    const data = exportData(format);
+    const blob = new Blob([data], { type: format === 'csv' ? 'text/csv' : 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `wordcloud.${format}`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function open() {
+    injectStyles();
+    createPanel();
+    overlayEl.classList.add('open');
+    panelEl.style.display = 'flex';
+    renderCloud();
+  }
+
+  function close() {
+    if (overlayEl) overlayEl.classList.remove('open');
+    if (panelEl) panelEl.style.display = 'none';
+  }
+
+  function toggle() {
+    if (panelEl && panelEl.style.display !== 'none') {
+      close();
+    } else {
+      open();
+    }
+  }
+
+  function init() {
+    injectStyles();
+    document.addEventListener('keydown', (e) => {
+      if (e.altKey && e.key === 'w' && !e.ctrlKey && !e.shiftKey && !e.metaKey) {
+        e.preventDefault();
+        toggle();
+      }
+    });
+  }
+
+  return {
+    init: init,
+    open: open,
+    close: close,
+    toggle: toggle,
+    generate: generate,
+    getWords: getWords,
+    getConfig: getConfig,
+    setConfig: setConfig,
+    exportData: exportData,
+  };
+})();
+
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('send-btn').addEventListener('click', ChatController.send);
   document.getElementById('cancel-btn').addEventListener('click', () => {
@@ -7824,6 +8106,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // Conversation summarizer
   document.getElementById('summary-btn').addEventListener('click', ConversationSummarizer.togglePanel);
   ConversationSummarizer.init();
+
+  // Word cloud
+  document.getElementById('wordcloud-btn').addEventListener('click', WordCloud.toggle);
+  WordCloud.init();
 
   // Cross-tab sync (must come after SessionManager.initAutoSave)
   CrossTabSync.init();
