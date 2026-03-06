@@ -2082,3 +2082,97 @@ html.light .fork-notification {
   color: var(--text-muted, #a6adc8);
   font-size: 0.9rem;
 }
+
+/* ── Cost Dashboard ─────────────────────────────────────────── */
+.cost-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.5);
+  z-index: 5000; animation: fade-in .15s ease;
+}
+.cost-panel {
+  position: fixed; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(480px, 92vw); max-height: 85vh;
+  overflow-y: auto;
+  background: var(--bg-surface, #1e1e2e);
+  border: 1px solid var(--border, #45475a);
+  border-radius: 12px; padding: 20px;
+  z-index: 5001; box-shadow: 0 8px 32px rgba(0,0,0,.4);
+  animation: slide-up .2s ease;
+}
+.cost-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 12px;
+}
+.cost-header h3 { margin: 0; font-size: 1.1rem; }
+.cost-header div { display: flex; gap: 4px; }
+.cost-summary {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 10px; margin-bottom: 16px;
+}
+.cost-stat {
+  text-align: center; padding: 10px 4px;
+  background: var(--bg-code, #181825);
+  border-radius: 8px;
+}
+.cost-stat-value { font-size: 1.15rem; font-weight: 700; color: var(--accent, #89b4fa); }
+.cost-stat-label { font-size: .7rem; color: var(--text-muted, #a6adc8); margin-top: 2px; }
+.cost-section { margin-bottom: 16px; }
+.cost-section h4 { margin: 0 0 8px; font-size: .9rem; }
+
+/* Daily chart */
+.cost-chart {
+  display: flex; align-items: flex-end; gap: 3px;
+  height: 90px; padding: 4px 0;
+  border-bottom: 1px solid var(--border, #45475a);
+}
+.cost-bar-col {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; height: 100%;
+  justify-content: flex-end;
+}
+.cost-bar {
+  width: 100%; min-width: 6px; border-radius: 3px 3px 0 0;
+  background: var(--accent, #89b4fa); transition: height .3s ease;
+}
+.cost-bar-label {
+  font-size: .55rem; color: var(--text-muted, #a6adc8);
+  margin-top: 3px; white-space: nowrap;
+}
+
+/* Model table */
+.cost-table {
+  width: 100%; border-collapse: collapse; font-size: .8rem;
+}
+.cost-table th {
+  text-align: left; padding: 4px 6px; font-weight: 600;
+  border-bottom: 1px solid var(--border, #45475a);
+  color: var(--text-muted, #a6adc8); font-size: .7rem;
+}
+.cost-table td { padding: 4px 6px; }
+.cost-table tr:hover { background: var(--bg-code, #181825); }
+.cost-model-name { font-family: 'SF Mono', 'Fira Code', monospace; font-size: .75rem; }
+.cost-amount { font-weight: 600; color: var(--accent, #89b4fa); }
+.cost-empty { text-align: center; padding: 20px; color: var(--text-muted, #a6adc8); }
+
+/* Budget bar */
+.cost-budget-bar {
+  position: relative; height: 22px; border-radius: 6px;
+  background: var(--bg-code, #181825);
+  margin-bottom: 14px; overflow: hidden;
+}
+.cost-budget-fill {
+  height: 100%; border-radius: 6px;
+  background: linear-gradient(90deg, #a6e3a1, #f9e2af 60%, #f38ba8 100%);
+  transition: width .3s ease;
+}
+.cost-budget-text {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: .7rem; font-weight: 600;
+  color: var(--text, #cdd6f4); text-shadow: 0 1px 2px rgba(0,0,0,.5);
+}
+.cost-budget-warning {
+  color: #f38ba8; font-weight: 600; font-size: .8rem;
+  animation: pulse 1.5s ease infinite;
+}
+@keyframes pulse { 50% { opacity: .6; } }

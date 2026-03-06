@@ -1,7 +1,7 @@
 /* ============================================================
  * Agentic Chat — Application Logic
  *
- * Architecture (38 modules, all revealing-module-pattern IIFEs):
+ * Architecture (39 modules, all revealing-module-pattern IIFEs):
  *
  *   Core:
  *   SafeStorage          — safe localStorage wrapper for restricted-storage environments
@@ -26,6 +26,7 @@
  *   SessionManager       — multi-session persistence with auto-save and quota mgmt
  *   CrossTabSync         — multi-tab conflict detection via storage events + BroadcastChannel
  *   ChatStats            — conversation analytics (word counts, code blocks, timing)
+ *   CostDashboard        — persistent API spend tracker with budget alerts
  *   PersonaPresets       — switchable system prompt presets with custom persona support
  *   ModelSelector        — model picker with localStorage persistence
  *   FileDropZone         — drag-and-drop file inclusion (text-based files, 100 KB limit)
@@ -1037,6 +1038,7 @@ const ChatController = (() => {
       ConversationManager.addMessage('assistant', reply, { responseTimeMs, timestamp: Date.now() });
       ConversationManager.trim();
       UIController.showTokenUsage(usage);
+      CostDashboard.recordUsage(usage);
 
       // Warn if history is getting large
       if (ConversationManager.estimateTokens() > ChatConfig.TOKEN_WARNING_THRESHOLD) {
@@ -4960,6 +4962,366 @@ const ChatStats = (() => {
   return { compute, render, open, close, toggle, isOpen: () => isOpen };
 })();
 
+/* ---------- Cost Dashboard ---------- */
+
+/**
+ * Persistent API spend tracker with cumulative totals, per-model
+ * breakdown, daily trend chart, and configurable budget alerts.
+ *
+ * Every API response records { model, promptTokens, completionTokens,
+ * cost, timestamp } in localStorage.  The dashboard visualises this
+ * data and warns when spending crosses a user-set threshold.
+ *
+ * @namespace CostDashboard
+ */
+const CostDashboard = (() => {
+  const STORAGE_KEY = 'agenticchat_cost_log';
+  const BUDGET_KEY  = 'agenticchat_cost_budget';
+  const MAX_ENTRIES = 5000; // cap stored entries to avoid quota issues
+
+  let isOpen = false;
+
+  /* ── Persistence helpers ─────────────────────────────────────── */
+
+  /** Load cost log array from storage. */
+  function _load() {
+    try {
+      const raw = SafeStorage.get(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch (_) { return []; }
+  }
+
+  /** Persist cost log array. */
+  function _save(log) {
+    // Trim oldest entries if over cap
+    if (log.length > MAX_ENTRIES) log = log.slice(log.length - MAX_ENTRIES);
+    SafeStorage.set(STORAGE_KEY, JSON.stringify(log));
+  }
+
+  /** Get budget limit (USD) or null if not set. */
+  function getBudget() {
+    try {
+      const v = SafeStorage.get(BUDGET_KEY);
+      if (v === null || v === undefined) return null;
+      const n = parseFloat(v);
+      return isFinite(n) && n > 0 ? n : null;
+    } catch (_) { return null; }
+  }
+
+  /** Set budget limit (pass null to clear). */
+  function setBudget(usd) {
+    if (usd === null || usd === undefined) {
+      SafeStorage.remove(BUDGET_KEY);
+    } else {
+      SafeStorage.set(BUDGET_KEY, String(usd));
+    }
+  }
+
+  /* ── Recording ───────────────────────────────────────────────── */
+
+  /**
+   * Record a single API response's token usage.
+   * Called from ChatController after each successful API call.
+   *
+   * @param {Object} usage  – OpenAI usage object
+   * @param {string} [model] – model name (defaults to ChatConfig.MODEL)
+   */
+  function recordUsage(usage, model) {
+    if (!usage) return;
+    const m = model || ChatConfig.MODEL || 'unknown';
+    const prompt = usage.prompt_tokens || 0;
+    const completion = usage.completion_tokens || 0;
+    const pricing = ChatConfig.MODEL_PRICING[m] || [2.50, 10.00];
+    const cost = (prompt * pricing[0] + completion * pricing[1]) / 1_000_000;
+
+    const log = _load();
+    log.push({
+      ts: Date.now(),
+      model: m,
+      pt: prompt,
+      ct: completion,
+      cost: Math.round(cost * 1_000_000) / 1_000_000 // 6 decimal places
+    });
+    _save(log);
+
+    // Check budget
+    _checkBudgetAlert();
+  }
+
+  /* ── Budget alerts ───────────────────────────────────────────── */
+
+  function _checkBudgetAlert() {
+    const budget = getBudget();
+    if (!budget) return;
+    const totals = _computeTotals(_load());
+    if (totals.totalCost >= budget) {
+      _showBudgetWarning(totals.totalCost, budget);
+    }
+  }
+
+  function _showBudgetWarning(spent, budget) {
+    // Only show once per page load per threshold crossing
+    if (_showBudgetWarning._shown) return;
+    _showBudgetWarning._shown = true;
+    const pct = Math.round((spent / budget) * 100);
+    const bar = document.getElementById('token-usage');
+    if (bar) {
+      const warn = document.createElement('span');
+      warn.className = 'cost-budget-warning';
+      warn.textContent = ` ⚠️ Budget ${pct}% used ($${spent.toFixed(4)} / $${budget.toFixed(2)})`;
+      bar.appendChild(warn);
+    }
+  }
+
+  /* ── Computations ────────────────────────────────────────────── */
+
+  function _computeTotals(log) {
+    let totalCost = 0;
+    let totalPrompt = 0;
+    let totalCompletion = 0;
+    let totalCalls = log.length;
+    const byModel = {};
+    const byDay = {};
+
+    for (let i = 0; i < log.length; i++) {
+      const e = log[i];
+      totalCost += e.cost;
+      totalPrompt += e.pt;
+      totalCompletion += e.ct;
+
+      // Per-model
+      if (!byModel[e.model]) {
+        byModel[e.model] = { cost: 0, calls: 0, pt: 0, ct: 0 };
+      }
+      byModel[e.model].cost += e.cost;
+      byModel[e.model].calls += 1;
+      byModel[e.model].pt += e.pt;
+      byModel[e.model].ct += e.ct;
+
+      // Per-day
+      const day = new Date(e.ts).toISOString().slice(0, 10);
+      if (!byDay[day]) byDay[day] = { cost: 0, calls: 0 };
+      byDay[day].cost += e.cost;
+      byDay[day].calls += 1;
+    }
+
+    return { totalCost, totalPrompt, totalCompletion, totalCalls, byModel, byDay };
+  }
+
+  /* ── Rendering ───────────────────────────────────────────────── */
+
+  function _esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function _fmtCost(n) {
+    if (n < 0.01) return '$' + n.toFixed(6);
+    if (n < 1) return '$' + n.toFixed(4);
+    return '$' + n.toFixed(2);
+  }
+
+  function _fmtTokens(n) {
+    if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
+    if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
+    return String(n);
+  }
+
+  /** Build the daily spending sparkline bar chart (last 14 days). */
+  function _renderDailyChart(byDay) {
+    const today = new Date();
+    const days = [];
+    for (let d = 13; d >= 0; d--) {
+      const dt = new Date(today);
+      dt.setDate(dt.getDate() - d);
+      const key = dt.toISOString().slice(0, 10);
+      days.push({ key, label: dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }), cost: (byDay[key] || {}).cost || 0 });
+    }
+    const maxCost = Math.max(...days.map(d => d.cost), 0.000001);
+
+    let bars = '';
+    for (let i = 0; i < days.length; i++) {
+      const pct = Math.round((days[i].cost / maxCost) * 100);
+      const costStr = _fmtCost(days[i].cost);
+      bars += `<div class="cost-bar-col" title="${_esc(days[i].label)}: ${costStr}">` +
+        `<div class="cost-bar" style="height:${Math.max(pct, 2)}%"></div>` +
+        `<div class="cost-bar-label">${_esc(days[i].label.split(' ')[1] || days[i].label)}</div>` +
+        `</div>`;
+    }
+    return `<div class="cost-chart">${bars}</div>`;
+  }
+
+  /** Render per-model breakdown table. */
+  function _renderModelTable(byModel) {
+    const models = Object.keys(byModel).sort((a, b) => byModel[b].cost - byModel[a].cost);
+    if (models.length === 0) return '<p class="cost-empty">No data yet</p>';
+
+    let rows = '';
+    for (let i = 0; i < models.length; i++) {
+      const m = byModel[models[i]];
+      rows += `<tr>` +
+        `<td class="cost-model-name">${_esc(models[i])}</td>` +
+        `<td>${m.calls}</td>` +
+        `<td>${_fmtTokens(m.pt)}</td>` +
+        `<td>${_fmtTokens(m.ct)}</td>` +
+        `<td class="cost-amount">${_fmtCost(m.cost)}</td>` +
+        `</tr>`;
+    }
+
+    return `<table class="cost-table">` +
+      `<thead><tr><th>Model</th><th>Calls</th><th>Input</th><th>Output</th><th>Cost</th></tr></thead>` +
+      `<tbody>${rows}</tbody>` +
+      `</table>`;
+  }
+
+  function render() {
+    close(); // Remove existing
+
+    const log = _load();
+    const totals = _computeTotals(log);
+    const budget = getBudget();
+
+    const panel = document.createElement('div');
+    panel.id = 'cost-panel';
+    panel.className = 'cost-panel';
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-label', 'Cost Dashboard');
+
+    const budgetHtml = budget
+      ? `<div class="cost-budget-bar">` +
+        `<div class="cost-budget-fill" style="width:${Math.min(100, Math.round((totals.totalCost / budget) * 100))}%"></div>` +
+        `<span class="cost-budget-text">${_fmtCost(totals.totalCost)} / ${_fmtCost(budget)} (${Math.round((totals.totalCost / budget) * 100)}%)</span>` +
+        `</div>`
+      : '';
+
+    const avgCostPerCall = totals.totalCalls > 0 ? totals.totalCost / totals.totalCalls : 0;
+
+    panel.innerHTML = `
+      <div class="cost-header">
+        <h3>💰 Cost Dashboard</h3>
+        <div>
+          <button class="cost-budget-btn btn-sm" title="Set budget limit">🎯 Budget</button>
+          <button class="cost-export-btn btn-sm" title="Export cost data as CSV">📥 Export</button>
+          <button class="cost-reset-btn btn-sm btn-danger-sm" title="Reset all cost data">🗑️</button>
+          <button class="cost-close btn-sm" title="Close">✕</button>
+        </div>
+      </div>
+      ${budgetHtml}
+      <div class="cost-summary">
+        <div class="cost-stat">
+          <div class="cost-stat-value">${_fmtCost(totals.totalCost)}</div>
+          <div class="cost-stat-label">Total Spent</div>
+        </div>
+        <div class="cost-stat">
+          <div class="cost-stat-value">${totals.totalCalls}</div>
+          <div class="cost-stat-label">API Calls</div>
+        </div>
+        <div class="cost-stat">
+          <div class="cost-stat-value">${_fmtTokens(totals.totalPrompt + totals.totalCompletion)}</div>
+          <div class="cost-stat-label">Total Tokens</div>
+        </div>
+        <div class="cost-stat">
+          <div class="cost-stat-value">${_fmtCost(avgCostPerCall)}</div>
+          <div class="cost-stat-label">Avg / Call</div>
+        </div>
+      </div>
+      <div class="cost-section">
+        <h4>📊 Daily Spending (14 days)</h4>
+        ${_renderDailyChart(totals.byDay)}
+      </div>
+      <div class="cost-section">
+        <h4>🤖 By Model</h4>
+        ${_renderModelTable(totals.byModel)}
+      </div>
+    `;
+
+    document.body.appendChild(panel);
+
+    // Overlay
+    const overlay = document.createElement('div');
+    overlay.id = 'cost-overlay';
+    overlay.className = 'cost-overlay';
+    overlay.addEventListener('click', close);
+    document.body.insertBefore(overlay, panel);
+
+    // Wire buttons
+    panel.querySelector('.cost-close').addEventListener('click', close);
+    panel.querySelector('.cost-reset-btn').addEventListener('click', () => {
+      if (confirm('Reset all cost tracking data? This cannot be undone.')) {
+        _save([]);
+        _showBudgetWarning._shown = false;
+        render(); // re-render with empty data
+      }
+    });
+    panel.querySelector('.cost-budget-btn').addEventListener('click', () => {
+      const current = getBudget();
+      const input = prompt(
+        'Set monthly budget limit (USD).\nEnter a number or leave blank to clear:',
+        current !== null ? current.toString() : ''
+      );
+      if (input === null) return; // cancelled
+      if (input.trim() === '') {
+        setBudget(null);
+      } else {
+        const val = parseFloat(input);
+        if (isFinite(val) && val > 0) {
+          setBudget(val);
+        } else {
+          alert('Please enter a positive number.');
+          return;
+        }
+      }
+      _showBudgetWarning._shown = false;
+      render(); // re-render with updated budget
+    });
+    panel.querySelector('.cost-export-btn').addEventListener('click', _exportCSV);
+
+    isOpen = true;
+  }
+
+  /* ── Export ──────────────────────────────────────────────────── */
+
+  function _exportCSV() {
+    const log = _load();
+    if (log.length === 0) { alert('No cost data to export.'); return; }
+    const header = 'timestamp,model,prompt_tokens,completion_tokens,cost_usd\n';
+    const rows = log.map(e =>
+      `${new Date(e.ts).toISOString()},${e.model},${e.pt},${e.ct},${e.cost.toFixed(6)}`
+    ).join('\n');
+    const blob = new Blob([header + rows], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `agenticchat-costs-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function open()   { if (!isOpen) render(); }
+  function close()  {
+    const panel = document.getElementById('cost-panel');
+    const overlay = document.getElementById('cost-overlay');
+    if (panel) panel.remove();
+    if (overlay) overlay.remove();
+    isOpen = false;
+  }
+  function toggle() { isOpen ? close() : open(); }
+
+  /** Get totals for external use (e.g. tests). */
+  function getTotals() { return _computeTotals(_load()); }
+
+  /** Get raw log for testing. */
+  function getLog() { return _load(); }
+
+  /** Clear all data (for testing). */
+  function reset() { _save([]); _showBudgetWarning._shown = false; }
+
+  return {
+    recordUsage, getBudget, setBudget, getTotals, getLog, reset,
+    render, open, close, toggle, isOpen: () => isOpen
+  };
+})();
+
 /* ---------- Persona / System Prompt Presets ---------- */
 
 /**
@@ -7940,6 +8302,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Stats button
   document.getElementById('stats-btn').addEventListener('click', ChatStats.toggle);
+
+  // Cost dashboard
+  document.getElementById('cost-btn').addEventListener('click', CostDashboard.toggle);
 
   // Focus / Zen mode
   document.getElementById('zen-btn').addEventListener('click', FocusMode.toggle);

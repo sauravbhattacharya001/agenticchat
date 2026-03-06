@@ -22,6 +22,7 @@ function setupDOM() {
       <button id="snippets-btn" class="btn-secondary">Snippets</button>
       <button id="shortcuts-btn" class="btn-secondary">⌨️</button>
       <button id="stats-btn" class="btn-secondary" title="Chat statistics (Ctrl+I)">📊</button>
+      <button id="cost-btn" class="btn-secondary" title="Cost dashboard">💰</button>
       <button id="bookmarks-btn" title="Bookmarks (Ctrl+B)">🔖</button>
       <button id="voice-btn" class="btn-secondary" aria-label="Toggle voice input">🎤</button>
       <button id="theme-btn" class="btn-secondary" aria-label="Toggle theme">☀️</button>
@@ -223,6 +224,7 @@ function loadApp() {
     'SlashCommands',
     'MessageReactions',
     'ChatStats',
+    'CostDashboard',
     'PersonaPresets',
     'ModelSelector',
     'FileDropZone',
