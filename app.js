@@ -1654,10 +1654,19 @@ ${messagesHTML}
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 
     function csvEscape(str) {
-      if (/[",\n\r]/.test(str)) {
-        return '"' + str.replace(/"/g, '""') + '"';
+      // Defend against CSV injection (DDE/formula injection): if the cell
+      // value starts with =, +, -, @, tab, or carriage return, a spreadsheet
+      // app (Excel, Google Sheets, LibreOffice) may interpret it as a
+      // formula.  Prefix with a single-quote to force text mode.
+      // Reference: OWASP CSV Injection cheat sheet.
+      var s = String(str);
+      if (/^[=+\-@\t\r]/.test(s)) {
+        s = "'" + s;
       }
-      return str;
+      if (/[",\n\r]/.test(s)) {
+        return '"' + s.replace(/"/g, '""') + '"';
+      }
+      return s;
     }
 
     let csv = 'Role,Message,Timestamp,Response Time (ms)\n';
