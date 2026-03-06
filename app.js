@@ -1,38 +1,48 @@
 /* ============================================================
  * Agentic Chat — Application Logic
  *
- * Architecture (19 modules, all revealing-module-pattern IIFEs):
+ * Architecture (37 modules, all revealing-module-pattern IIFEs):
  *
  *   Core:
- *   ChatConfig          — constants and configuration
- *   ConversationManager — history management (add, trim, clear, token estimation)
- *   SandboxRunner       — iframe sandbox for executing LLM-generated code
- *   ApiKeyManager       — OpenAI key + per-service key storage, modal handling
- *   UIController        — DOM updates, button state, character count
- *   ChatController      — orchestrates sending messages, processing responses
+ *   SafeStorage          — safe localStorage wrapper for restricted-storage environments
+ *   ChatConfig           — constants, model list, pricing, and runtime configuration
+ *   ConversationManager  — history management (add, trim, clear, token estimation)
+ *   SandboxRunner        — iframe sandbox for executing LLM-generated code
+ *   ApiKeyManager        — OpenAI key + per-service key storage, modal handling
+ *   UIController         — DOM updates, button state, character count
+ *   ChatController       — orchestrates sending messages, processing responses
  *
  *   Features:
- *   PromptTemplates     — categorized prompt library with search and one-click insert
- *   HistoryPanel        — slide-out conversation history with export/import
- *   SnippetLibrary      — persistent code snippet storage with tagging and search
- *   MessageSearch       — full-text search across conversation messages
- *   ChatBookmarks       — bookmark individual messages for quick reference
- *   SlashCommands       — slash-command dropdown (autocomplete, keyboard nav)
- *   MessageReactions    — per-message emoji reactions with persistent counts
- *   KeyboardShortcuts   — global keyboard shortcuts with help modal
- *   VoiceInput          — browser speech recognition with language selection
- *   ThemeManager        — dark/light theme with OS preference detection
- *   SessionManager      — multi-session persistence with auto-save and quota mgmt
- *   ChatStats           — conversation analytics (word counts, code blocks, timing)
- *   InputHistory        — navigate previous prompts with ↑/↓ arrow keys
- *   ConversationFork    — branch conversations from any message into new sessions
- *   ReadAloud           — text-to-speech for messages with voice/speed controls
- *   MessageDiff         — compare any two messages with visual line-level diff
+ *   PromptTemplates      — categorized prompt library with search and one-click insert
+ *   HistoryPanel         — slide-out conversation history with export/import
+ *   SnippetLibrary       — persistent code snippet storage with tagging and search
+ *   MessageSearch        — full-text search across conversation messages
+ *   ChatBookmarks        — bookmark individual messages for quick reference
+ *   SlashCommands        — slash-command dropdown (autocomplete, keyboard nav)
+ *   MessageReactions     — per-message emoji reactions with persistent counts
+ *   KeyboardShortcuts    — global keyboard shortcuts with help modal
+ *   VoiceInput           — browser speech recognition with language selection
+ *   ThemeManager         — dark/light theme with OS preference detection
+ *   SessionManager       — multi-session persistence with auto-save and quota mgmt
+ *   CrossTabSync         — multi-tab conflict detection via storage events + BroadcastChannel
+ *   ChatStats            — conversation analytics (word counts, code blocks, timing)
+ *   PersonaPresets       — switchable system prompt presets with custom persona support
+ *   ModelSelector        — model picker with localStorage persistence
+ *   FileDropZone         — drag-and-drop file inclusion (text-based files, 100 KB limit)
+ *   FocusMode            — distraction-free zen mode (Ctrl+Shift+F)
+ *   InputHistory         — navigate previous prompts with ↑/↓ arrow keys
+ *   Scratchpad           — persistent notepad panel with copy/insert/download actions
+ *   ResponseTimeBadge    — response time indicator below token usage area
+ *   ConversationFork     — branch conversations from any message into new sessions
+ *   QuickReplies         — contextual follow-up suggestion chips after AI responses
+ *   MessagePinning       — pin important messages to a floating quick-jump bar
+ *   ReadAloud            — text-to-speech for messages with voice/speed controls
+ *   MessageDiff          — compare any two messages with visual line-level diff
  *   ConversationTimeline — visual minimap sidebar for conversation navigation
- *   MessageAnnotations  — private notes/annotations on messages with labels
- *   ConversationChapters — named section dividers with TOC navigation
  *   ConversationSummarizer — heuristic conversation summary with topics, decisions, action items
- *   ConversationTags — colored tag labels on sessions with filtering and management
+ *   MessageAnnotations   — private notes/annotations on messages with labels
+ *   ConversationChapters — named section dividers with TOC navigation
+ *   ConversationTags     — colored tag labels on sessions with filtering and management
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -82,7 +92,17 @@ const SafeStorage = (() => {
   };
 })();
 
-/* ---------- Configuration ---------- */
+/* ============================================================
+ * ChatConfig — application constants and runtime configuration.
+ *
+ * Centralizes all tunables: model selection, token limits, input
+ * constraints, sandbox timeout, streaming toggle, system prompt,
+ * and per-model pricing.  Model selection and streaming preference
+ * persist in localStorage via SafeStorage.  All other modules read
+ * from ChatConfig rather than hard-coding values.
+ *
+ * @namespace ChatConfig
+ * ============================================================ */
 const ChatConfig = (() => {
   const _cfg = {
     _model: SafeStorage.get('ac-selected-model') || 'gpt-4o',
@@ -8631,6 +8651,21 @@ const ConversationSummarizer = (() => {
 })();
 
 
+/* ============================================================
+ * MessageAnnotations — private notes and annotations on messages.
+ *
+ * Lets users attach personal notes to any message in the conversation.
+ * Each annotation has a text body (up to 500 chars) and one of six
+ * labels: Note, Important, Correction, Question, To-Do, Reference.
+ * Annotations persist in localStorage and display as coloured badges
+ * on decorated messages, with a slide-out panel for editing.
+ *
+ * Supports: create, edit, delete, bulk export, label filtering,
+ * and a summary view listing all annotated messages.  Limited to
+ * 200 annotations per session to keep storage bounded.
+ *
+ * @namespace MessageAnnotations
+ * ============================================================ */
 const MessageAnnotations = (() => {
   'use strict';
 
