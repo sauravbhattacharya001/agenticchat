@@ -128,6 +128,7 @@ function setupDOM() {
         <button id="sessions-new-btn" class="btn-sm">➕ New</button>
         <button id="sessions-save-btn" class="btn-sm">💾 Save</button>
         <button id="sessions-import-btn" class="btn-sm">📥 Import</button>
+        <button id="sessions-tags-btn" class="btn-sm">🏷️ Tags</button>
         <button id="sessions-clear-btn" class="btn-sm btn-danger-sm">Clear All</button>
         <label class="sessions-autosave-label">
           <input type="checkbox" id="sessions-autosave">
@@ -236,7 +237,8 @@ function loadApp() {
     'ConversationTimeline',
     'ConversationSummarizer',
     'MessageAnnotations',
-    'ConversationChapters'
+    'ConversationChapters',
+    'ConversationTags'
   ];
 
   for (const mod of modules) {

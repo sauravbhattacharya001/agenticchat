@@ -32,6 +32,7 @@
  *   MessageAnnotations  — private notes/annotations on messages with labels
  *   ConversationChapters — named section dividers with TOC navigation
  *   ConversationSummarizer — heuristic conversation summary with topics, decisions, action items
+ *   ConversationTags — colored tag labels on sessions with filtering and management
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -2654,6 +2655,10 @@ const SlashCommands = (() => {
             if (!visible) ResponseTimeBadge.hide();
             UIController.setChatOutput(`Response timing badges ${visible ? 'enabled ⏱️' : 'hidden'}`);
           } },
+        { name: 'tags', description: 'Manage conversation tags — add, view, filter', icon: '🏷️',
+          action: () => {
+            ConversationTags.openManager();
+          } },
         { name: 'input-history', description: 'Clear prompt history (↑/↓ navigation)', icon: '🕐',
           action: () => {
             const count = InputHistory.getCount();
@@ -3812,6 +3817,10 @@ const SessionManager = (() => {
     const sessions = _loadAll().filter(s => s.id !== id);
     _saveAll(sessions);
     if (_getActiveId() === id) _setActiveId(null);
+    // Clean up tags for deleted session
+    if (typeof ConversationTags !== 'undefined') {
+      ConversationTags.clearSession(id);
+    }
     return sessions;
   }
 
@@ -4011,7 +4020,21 @@ const SessionManager = (() => {
 
     const fragment = document.createDocumentFragment();
 
+    // Render tag filter bar if active
+    if (typeof ConversationTags !== 'undefined') {
+      const filterTag = ConversationTags.getActiveFilter();
+      if (filterTag) {
+        ConversationTags.setFilter(filterTag); // renders the filter bar
+      }
+    }
+
     sessions.forEach(session => {
+      // Skip sessions that don't match the active tag filter
+      if (typeof ConversationTags !== 'undefined' &&
+          !ConversationTags.matchesFilter(session.id)) {
+        return;
+      }
+
       const card = document.createElement('div');
       card.className = 'session-card';
       if (session.id === activeId) card.classList.add('session-active');
@@ -4043,6 +4066,11 @@ const SessionManager = (() => {
       meta.textContent = `${session.messageCount} msg${session.messageCount !== 1 ? 's' : ''} · ${formatRelativeTime(session.updatedAt)}`;
       meta.title = `Created: ${new Date(session.createdAt).toLocaleString()}\nUpdated: ${new Date(session.updatedAt).toLocaleString()}`;
       card.appendChild(meta);
+
+      // Tags
+      if (typeof ConversationTags !== 'undefined') {
+        card.appendChild(ConversationTags.renderTagPills(session.id));
+      }
 
       // Preview
       if (session.preview) {
@@ -7769,6 +7797,8 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('sessions-save-btn').addEventListener('click', SessionManager.openSaveDialog);
   document.getElementById('sessions-import-btn').addEventListener('click', SessionManager.handleImport);
   document.getElementById('sessions-clear-btn').addEventListener('click', SessionManager.handleClearAll);
+  const tagsBtn = document.getElementById('sessions-tags-btn');
+  if (tagsBtn) tagsBtn.addEventListener('click', ConversationTags.openManager);
   document.getElementById('sessions-autosave').addEventListener('change', SessionManager.toggleAutoSave);
 
   // Session save dialog
@@ -9992,5 +10022,516 @@ const ConversationChapters = (() => {
     addChapterAtCurrent: addChapterAtCurrent,
     suggestTitle: suggestTitle,
     scrollToMessageIndex: scrollToMessageIndex,
+  };
+})();
+
+/* ---------- Conversation Tags ---------- */
+/**
+ * ConversationTags — colored label tags for organizing conversations.
+ *
+ * Lets users attach colored tags (e.g. "work", "research", "code review")
+ * to any conversation session. Tags are stored alongside sessions in
+ * localStorage and rendered as colored pills on session cards.
+ *
+ * Features:
+ *   - Add/remove tags per session (up to 5 per session)
+ *   - 12 predefined colors, auto-assigned based on tag name hash
+ *   - Filter session list by tag
+ *   - Manage tags: view all tags with usage counts
+ *   - Bulk tag operations (rename, delete across all sessions)
+ *   - Persistent via localStorage
+ *   - Integrates with SessionManager card rendering
+ *
+ * Usage:
+ *   ConversationTags.addTag(sessionId, 'research')
+ *   ConversationTags.removeTag(sessionId, 'research')
+ *   ConversationTags.getTagsForSession(sessionId)
+ *   ConversationTags.getActiveFilter()      // current filter tag or null
+ *   ConversationTags.setFilter('research')  // filter session list
+ *   ConversationTags.clearFilter()
+ *
+ * @namespace ConversationTags
+ */
+const ConversationTags = (() => {
+  const STORAGE_KEY = 'agenticchat_session_tags';
+  const MAX_TAGS_PER_SESSION = 5;
+  const MAX_TAG_LENGTH = 30;
+
+  // 12 distinct colors for tag pills
+  const TAG_COLORS = [
+    '#e74c3c', '#e67e22', '#f1c40f', '#2ecc71',
+    '#1abc9c', '#3498db', '#9b59b6', '#e84393',
+    '#00b894', '#6c5ce7', '#fd79a8', '#636e72'
+  ];
+
+  /** Tag data: { [sessionId]: ['tag1', 'tag2', ...] } */
+  let tagMap = {};
+  let activeFilter = null;
+  let filterBar = null;
+
+  // ── Persistence ─────────────────────────────────────────────
+
+  function load() {
+    try {
+      const raw = SafeStorage.get(STORAGE_KEY);
+      tagMap = raw ? JSON.parse(raw) : {};
+    } catch { tagMap = {}; }
+  }
+
+  function save() {
+    try {
+      SafeStorage.set(STORAGE_KEY, JSON.stringify(tagMap));
+    } catch { /* quota exceeded — tags are non-critical */ }
+  }
+
+  // ── Color assignment ────────────────────────────────────────
+
+  /** Deterministic color from tag name (hash-based). */
+  function colorForTag(tag) {
+    let hash = 0;
+    for (let i = 0; i < tag.length; i++) {
+      hash = ((hash << 5) - hash + tag.charCodeAt(i)) | 0;
+    }
+    return TAG_COLORS[Math.abs(hash) % TAG_COLORS.length];
+  }
+
+  // ── Tag CRUD ────────────────────────────────────────────────
+
+  /** Sanitize a tag name: lowercase, trim, truncate. */
+  function sanitize(tag) {
+    return tag.trim().toLowerCase().substring(0, MAX_TAG_LENGTH);
+  }
+
+  /** Get tags for a session. */
+  function getTagsForSession(sessionId) {
+    return (tagMap[sessionId] || []).slice();
+  }
+
+  /** Add a tag to a session. Returns false if invalid, duplicate, or at limit. */
+  function addTag(sessionId, tag) {
+    const clean = sanitize(tag);
+    if (!clean || !sessionId) return false;
+    if (!tagMap[sessionId]) tagMap[sessionId] = [];
+    if (tagMap[sessionId].length >= MAX_TAGS_PER_SESSION) return false;
+    if (tagMap[sessionId].includes(clean)) return false;
+    tagMap[sessionId].push(clean);
+    save();
+    return true;
+  }
+
+  /** Remove a tag from a session. Returns false if not found. */
+  function removeTag(sessionId, tag) {
+    const clean = sanitize(tag);
+    const tags = tagMap[sessionId];
+    if (!tags) return false;
+    const idx = tags.indexOf(clean);
+    if (idx === -1) return false;
+    tags.splice(idx, 1);
+    if (tags.length === 0) delete tagMap[sessionId];
+    save();
+    return true;
+  }
+
+  /** Remove all tags for a session (called on session delete). */
+  function clearSession(sessionId) {
+    if (tagMap[sessionId]) {
+      delete tagMap[sessionId];
+      save();
+    }
+  }
+
+  /** Get all unique tags across all sessions, sorted by usage count desc. */
+  function getAllTags() {
+    const counts = {};
+    for (const tags of Object.values(tagMap)) {
+      for (const t of tags) {
+        counts[t] = (counts[t] || 0) + 1;
+      }
+    }
+    return Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .map(([tag, count]) => ({ tag, count, color: colorForTag(tag) }));
+  }
+
+  /** Rename a tag across all sessions. */
+  function renameTag(oldTag, newTag) {
+    const oldClean = sanitize(oldTag);
+    const newClean = sanitize(newTag);
+    if (!oldClean || !newClean || oldClean === newClean) return false;
+    let changed = false;
+    for (const [sid, tags] of Object.entries(tagMap)) {
+      const idx = tags.indexOf(oldClean);
+      if (idx !== -1) {
+        // Avoid duplicates after rename
+        if (tags.includes(newClean)) {
+          tags.splice(idx, 1);
+        } else {
+          tags[idx] = newClean;
+        }
+        if (tags.length === 0) delete tagMap[sid];
+        changed = true;
+      }
+    }
+    if (changed) save();
+    if (activeFilter === oldClean) activeFilter = newClean;
+    return changed;
+  }
+
+  /** Delete a tag across all sessions. */
+  function deleteTag(tag) {
+    const clean = sanitize(tag);
+    let changed = false;
+    for (const [sid, tags] of Object.entries(tagMap)) {
+      const idx = tags.indexOf(clean);
+      if (idx !== -1) {
+        tags.splice(idx, 1);
+        if (tags.length === 0) delete tagMap[sid];
+        changed = true;
+      }
+    }
+    if (changed) save();
+    if (activeFilter === clean) activeFilter = null;
+    return changed;
+  }
+
+  // ── Filtering ───────────────────────────────────────────────
+
+  /** Get the current filter tag (or null). */
+  function getActiveFilter() { return activeFilter; }
+
+  /** Set filter to show only sessions with this tag. */
+  function setFilter(tag) {
+    activeFilter = sanitize(tag) || null;
+    renderFilterBar();
+  }
+
+  /** Clear the filter. */
+  function clearFilter() {
+    activeFilter = null;
+    renderFilterBar();
+  }
+
+  /** Check if a session matches the current filter. */
+  function matchesFilter(sessionId) {
+    if (!activeFilter) return true;
+    const tags = tagMap[sessionId] || [];
+    return tags.includes(activeFilter);
+  }
+
+  /** Get session IDs that have a specific tag. */
+  function getSessionsWithTag(tag) {
+    const clean = sanitize(tag);
+    const result = [];
+    for (const [sid, tags] of Object.entries(tagMap)) {
+      if (tags.includes(clean)) result.push(sid);
+    }
+    return result;
+  }
+
+  // ── UI: Tag pills on session cards ──────────────────────────
+
+  /** Create tag pill elements for a session card. */
+  function renderTagPills(sessionId) {
+    const container = document.createElement('div');
+    container.className = 'session-tags';
+    container.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;margin:4px 0;';
+
+    const tags = getTagsForSession(sessionId);
+    tags.forEach(tag => {
+      const pill = document.createElement('span');
+      pill.className = 'tag-pill';
+      pill.textContent = tag;
+      pill.title = `Click to filter by "${tag}". Right-click to remove.`;
+      pill.style.cssText =
+        'display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;' +
+        'cursor:pointer;color:#fff;font-weight:500;line-height:1.6;' +
+        'background:' + colorForTag(tag) + ';';
+
+      pill.addEventListener('click', (e) => {
+        e.stopPropagation();
+        setFilter(tag);
+        // Trigger session panel refresh if SessionManager exposes it
+        if (typeof SessionManager !== 'undefined' && SessionManager.refresh) {
+          SessionManager.refresh();
+        }
+      });
+
+      pill.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        removeTag(sessionId, tag);
+        if (typeof SessionManager !== 'undefined' && SessionManager.refresh) {
+          SessionManager.refresh();
+        }
+      });
+
+      container.appendChild(pill);
+    });
+
+    // Add tag button (if under limit)
+    if (tags.length < MAX_TAGS_PER_SESSION) {
+      const addBtn = document.createElement('button');
+      addBtn.className = 'tag-add-btn';
+      addBtn.textContent = '+ tag';
+      addBtn.title = 'Add a tag to this conversation';
+      addBtn.style.cssText =
+        'display:inline-block;padding:1px 6px;border-radius:10px;font-size:11px;' +
+        'cursor:pointer;border:1px dashed #888;background:transparent;color:#888;' +
+        'line-height:1.6;';
+
+      addBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        showTagInput(sessionId, container, addBtn);
+      });
+
+      container.appendChild(addBtn);
+    }
+
+    return container;
+  }
+
+  /** Show inline tag input on the session card. */
+  function showTagInput(sessionId, container, addBtn) {
+    // Replace the add button with an input
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = 'tag name…';
+    input.maxLength = MAX_TAG_LENGTH;
+    input.style.cssText =
+      'width:80px;padding:1px 6px;border-radius:10px;font-size:11px;' +
+      'border:1px solid #6c5ce7;outline:none;background:transparent;' +
+      'color:inherit;line-height:1.6;';
+
+    function commit() {
+      const val = input.value.trim();
+      if (val) {
+        addTag(sessionId, val);
+      }
+      if (typeof SessionManager !== 'undefined' && SessionManager.refresh) {
+        SessionManager.refresh();
+      }
+    }
+
+    input.addEventListener('blur', commit);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+      if (e.key === 'Escape') { input.value = ''; input.blur(); }
+      e.stopPropagation(); // prevent keyboard shortcuts
+    });
+
+    addBtn.replaceWith(input);
+    input.focus();
+  }
+
+  // ── UI: Filter bar ──────────────────────────────────────────
+
+  /** Render the active filter indicator in the sessions panel. */
+  function renderFilterBar() {
+    // Remove existing
+    if (filterBar && filterBar.parentNode) {
+      filterBar.parentNode.removeChild(filterBar);
+    }
+
+    if (!activeFilter) {
+      filterBar = null;
+      return;
+    }
+
+    filterBar = document.createElement('div');
+    filterBar.className = 'tag-filter-bar';
+    filterBar.style.cssText =
+      'display:flex;align-items:center;gap:8px;padding:6px 12px;' +
+      'margin:4px 8px 8px;border-radius:8px;font-size:13px;' +
+      'background:rgba(108,92,231,0.15);';
+
+    const label = document.createElement('span');
+    label.textContent = 'Filtered by: ';
+    label.style.color = '#888';
+    filterBar.appendChild(label);
+
+    const pill = document.createElement('span');
+    pill.textContent = activeFilter;
+    pill.style.cssText =
+      'display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;' +
+      'color:#fff;font-weight:500;background:' + colorForTag(activeFilter) + ';';
+    filterBar.appendChild(pill);
+
+    const clearBtn = document.createElement('button');
+    clearBtn.textContent = '✕ Clear';
+    clearBtn.style.cssText =
+      'margin-left:auto;background:none;border:none;cursor:pointer;' +
+      'color:#888;font-size:12px;';
+    clearBtn.addEventListener('click', () => {
+      clearFilter();
+      if (typeof SessionManager !== 'undefined' && SessionManager.refresh) {
+        SessionManager.refresh();
+      }
+    });
+    filterBar.appendChild(clearBtn);
+
+    // Insert into sessions panel
+    const panel = document.getElementById('sessions-panel');
+    if (panel) {
+      const container = panel.querySelector('.sessions-list') ||
+                        panel.querySelector('[class*="session"]');
+      if (container) {
+        container.parentNode.insertBefore(filterBar, container);
+      } else {
+        panel.appendChild(filterBar);
+      }
+    }
+  }
+
+  // ── UI: Tag management modal ────────────────────────────────
+
+  /** Open a modal showing all tags with counts and management options. */
+  function openManager() {
+    // Remove existing
+    const existing = document.getElementById('tag-manager-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'tag-manager-overlay';
+    overlay.style.cssText =
+      'position:fixed;top:0;left:0;width:100%;height:100%;' +
+      'background:rgba(0,0,0,0.5);z-index:10000;display:flex;' +
+      'align-items:center;justify-content:center;';
+
+    const modal = document.createElement('div');
+    modal.style.cssText =
+      'background:var(--bg, #1a1a2e);color:var(--fg, #e0e0e0);' +
+      'border-radius:12px;padding:24px;max-width:400px;width:90%;' +
+      'max-height:70vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.3);';
+
+    const title = document.createElement('h3');
+    title.textContent = '🏷️ Manage Tags';
+    title.style.cssText = 'margin:0 0 16px;font-size:18px;';
+    modal.appendChild(title);
+
+    const allTags = getAllTags();
+
+    if (allTags.length === 0) {
+      const empty = document.createElement('p');
+      empty.textContent = 'No tags yet. Add tags to conversations in the Sessions panel.';
+      empty.style.color = '#888';
+      modal.appendChild(empty);
+    } else {
+      allTags.forEach(({ tag, count, color }) => {
+        const row = document.createElement('div');
+        row.style.cssText =
+          'display:flex;align-items:center;gap:8px;padding:8px 0;' +
+          'border-bottom:1px solid rgba(255,255,255,0.1);';
+
+        const pill = document.createElement('span');
+        pill.textContent = tag;
+        pill.style.cssText =
+          'display:inline-block;padding:2px 10px;border-radius:10px;' +
+          'font-size:12px;color:#fff;font-weight:500;background:' + color + ';';
+        row.appendChild(pill);
+
+        const countEl = document.createElement('span');
+        countEl.textContent = count + ' session' + (count !== 1 ? 's' : '');
+        countEl.style.cssText = 'flex:1;font-size:12px;color:#888;';
+        row.appendChild(countEl);
+
+        const filterBtn = document.createElement('button');
+        filterBtn.textContent = '🔍';
+        filterBtn.title = 'Filter by this tag';
+        filterBtn.style.cssText =
+          'background:none;border:none;cursor:pointer;font-size:14px;padding:2px 6px;';
+        filterBtn.addEventListener('click', () => {
+          setFilter(tag);
+          overlay.remove();
+          if (typeof SessionManager !== 'undefined' && SessionManager.refresh) {
+            SessionManager.refresh();
+          }
+        });
+        row.appendChild(filterBtn);
+
+        const renameBtn = document.createElement('button');
+        renameBtn.textContent = '✏️';
+        renameBtn.title = 'Rename tag';
+        renameBtn.style.cssText =
+          'background:none;border:none;cursor:pointer;font-size:14px;padding:2px 6px;';
+        renameBtn.addEventListener('click', () => {
+          const newName = prompt('Rename tag "' + tag + '" to:', tag);
+          if (newName && newName.trim() && newName.trim() !== tag) {
+            renameTag(tag, newName.trim());
+            overlay.remove();
+            openManager(); // re-open with updated data
+          }
+        });
+        row.appendChild(renameBtn);
+
+        const delBtn = document.createElement('button');
+        delBtn.textContent = '🗑️';
+        delBtn.title = 'Delete tag from all sessions';
+        delBtn.style.cssText =
+          'background:none;border:none;cursor:pointer;font-size:14px;padding:2px 6px;';
+        delBtn.addEventListener('click', () => {
+          if (confirm('Remove tag "' + tag + '" from all ' + count + ' session(s)?')) {
+            deleteTag(tag);
+            overlay.remove();
+            openManager();
+          }
+        });
+        row.appendChild(delBtn);
+
+        modal.appendChild(row);
+      });
+    }
+
+    // Close button
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = 'Close';
+    closeBtn.style.cssText =
+      'display:block;margin:16px auto 0;padding:8px 24px;border-radius:8px;' +
+      'border:1px solid #555;background:transparent;color:inherit;' +
+      'cursor:pointer;font-size:14px;';
+    closeBtn.addEventListener('click', () => overlay.remove());
+    modal.appendChild(closeBtn);
+
+    overlay.appendChild(modal);
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) overlay.remove();
+    });
+
+    document.body.appendChild(overlay);
+
+    // Escape to close
+    const onKey = (e) => {
+      if (e.key === 'Escape') {
+        overlay.remove();
+        document.removeEventListener('keydown', onKey);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+  }
+
+  // ── Init ────────────────────────────────────────────────────
+
+  function init() {
+    load();
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  return {
+    addTag: addTag,
+    removeTag: removeTag,
+    getTagsForSession: getTagsForSession,
+    clearSession: clearSession,
+    getAllTags: getAllTags,
+    renameTag: renameTag,
+    deleteTag: deleteTag,
+    getActiveFilter: getActiveFilter,
+    setFilter: setFilter,
+    clearFilter: clearFilter,
+    matchesFilter: matchesFilter,
+    getSessionsWithTag: getSessionsWithTag,
+    renderTagPills: renderTagPills,
+    openManager: openManager,
+    colorForTag: colorForTag,
+    MAX_TAGS_PER_SESSION: MAX_TAGS_PER_SESSION,
   };
 })();
