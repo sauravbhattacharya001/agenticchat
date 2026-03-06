@@ -239,10 +239,10 @@ const ConversationManager = (() => {
     },
 
     addMessage(role, content, meta) {
-      const entry = { role, content };
+      const entry = { role, content, timestamp: Date.now() };
       if (meta && meta.responseTimeMs !== undefined) {
         entry.responseTimeMs = meta.responseTimeMs;
-        entry.timestamp = meta.timestamp || Date.now();
+        entry.timestamp = meta.timestamp || entry.timestamp;
         responseTimes.push({ responseTimeMs: meta.responseTimeMs, timestamp: entry.timestamp });
       }
       history.push(entry);
@@ -1641,7 +1641,34 @@ ${messagesHTML}
     downloadBlob(`agenticchat-${timestamp}.html`, html, 'text/html');
   }
 
-  return { toggle, close, refresh, exportAsMarkdown, exportAsJSON, exportAsHTML };
+  function exportAsCSV() {
+    const messages = ConversationManager.getMessages().filter(m => m.role !== 'system');
+    if (messages.length === 0) {
+      alert('No conversation to export.');
+      return;
+    }
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+
+    function csvEscape(str) {
+      if (/[",\n\r]/.test(str)) {
+        return '"' + str.replace(/"/g, '""') + '"';
+      }
+      return str;
+    }
+
+    let csv = 'Role,Message,Timestamp,Response Time (ms)\n';
+    messages.forEach((msg) => {
+      const role = msg.role === 'user' ? 'User' : 'Assistant';
+      const ts = msg.timestamp ? new Date(msg.timestamp).toISOString() : '';
+      const rt = msg.responseTimeMs !== undefined ? msg.responseTimeMs : '';
+      csv += `${csvEscape(role)},${csvEscape(msg.content)},${csvEscape(ts)},${csvEscape(String(rt))}\n`;
+    });
+
+    downloadBlob(`agenticchat-${timestamp}.csv`, csv, 'text/csv');
+  }
+
+  return { toggle, close, refresh, exportAsMarkdown, exportAsJSON, exportAsHTML, exportAsCSV };
 })();
 
 /* ---------- Snippet Library ---------- */
@@ -2620,6 +2647,8 @@ const SlashCommands = (() => {
           action: () => HistoryPanel.exportAsMarkdown() },
         { name: 'export-html', description: 'Export chat as styled HTML page', icon: '🌐',
           action: () => HistoryPanel.exportAsHTML() },
+        { name: 'export-csv', description: 'Export chat as CSV spreadsheet', icon: '📊',
+          action: () => HistoryPanel.exportAsCSV() },
         { name: 'history', description: 'Toggle history panel', icon: '📜',
           action: () => HistoryPanel.toggle() },
         { name: 'templates', description: 'Open prompt templates', icon: '📋',
@@ -7742,6 +7771,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('export-md-btn').addEventListener('click', HistoryPanel.exportAsMarkdown);
   document.getElementById('export-json-btn').addEventListener('click', HistoryPanel.exportAsJSON);
   document.getElementById('export-html-btn').addEventListener('click', HistoryPanel.exportAsHTML);
+  document.getElementById('export-csv-btn').addEventListener('click', HistoryPanel.exportAsCSV);
 
   // Templates panel
   document.getElementById('templates-btn').addEventListener('click', PromptTemplates.toggle);
