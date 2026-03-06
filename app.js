@@ -1,7 +1,7 @@
 /* ============================================================
  * Agentic Chat — Application Logic
  *
- * Architecture (38 modules, all revealing-module-pattern IIFEs):
+ * Architecture (39 modules, all revealing-module-pattern IIFEs):
  *
  *   Core:
  *   SafeStorage          — safe localStorage wrapper for restricted-storage environments
@@ -44,6 +44,7 @@
  *   ConversationChapters — named section dividers with TOC navigation
  *   ConversationTags     — colored tag labels on sessions with filtering and management
  *   FormattingToolbar    — markdown formatting buttons above chat input
+ *   MessageQuoting       — inline quote/reply to specific messages with preview bar
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -1514,6 +1515,7 @@ const HistoryPanel = (() => {
     MessageReactions.decorateMessages();
     ConversationFork.decorateMessages();
     ReadAloud.decorateMessages();
+    MessageQuoting.decorateMessages();
   }
 
   function exportAsMarkdown() {
@@ -10843,5 +10845,312 @@ const FormattingToolbar = (() => {
     getFormat: getFormat,
     isVisible: function() { return isVisible; },
     FORMATS: FORMATS,
+  };
+})();
+
+/* ---------- Message Quoting ---------- */
+/**
+ * Inline message quoting — reply to specific messages with quoted context.
+ *
+ * Adds a "Quote" button to each message in the history panel. When clicked,
+ * a quote preview bar appears above the chat input showing the quoted text.
+ * On send, the quoted text is prepended to the user's message with `> ` formatting.
+ * Users can dismiss the quote with the X button or press Escape.
+ *
+ * Keyboard shortcut: Alt+Q clears the active quote.
+ *
+ * @namespace MessageQuoting
+ */
+const MessageQuoting = (() => {
+  const STORAGE_KEY = 'ac_message_quote';
+  const MAX_PREVIEW_LENGTH = 120;
+  const MAX_QUOTE_LENGTH = 500;
+
+  let activeQuote = null;  // { role, content, index }
+  let previewBar = null;
+  let input = null;
+
+  /**
+   * Set a quote from a message.
+   * @param {string} role - 'user' or 'assistant'
+   * @param {string} content - Full message content
+   * @param {number} index - Message index in conversation
+   */
+  function setQuote(role, content, index) {
+    if (!content || typeof content !== 'string') return;
+    const trimmed = content.trim();
+    if (!trimmed) return;
+
+    activeQuote = {
+      role: role || 'user',
+      content: trimmed.length > MAX_QUOTE_LENGTH ? trimmed.substring(0, MAX_QUOTE_LENGTH) + '…' : trimmed,
+      index: typeof index === 'number' ? index : -1
+    };
+
+    _updatePreviewBar();
+    _saveState();
+
+    // Focus the input
+    if (input) input.focus();
+  }
+
+  /**
+   * Clear the active quote.
+   */
+  function clearQuote() {
+    activeQuote = null;
+    _updatePreviewBar();
+    _saveState();
+  }
+
+  /**
+   * Get the active quote, or null.
+   * @returns {{ role: string, content: string, index: number }|null}
+   */
+  function getQuote() {
+    return activeQuote ? { ...activeQuote } : null;
+  }
+
+  /**
+   * Check if a quote is active.
+   * @returns {boolean}
+   */
+  function hasQuote() {
+    return activeQuote !== null;
+  }
+
+  /**
+   * Format the quoted text for inclusion in a message.
+   * Prepends each line with `> ` and adds the role label.
+   * @returns {string} Formatted quote block, or empty string if no quote.
+   */
+  function formatQuoteBlock() {
+    if (!activeQuote) return '';
+    const roleLabel = activeQuote.role === 'user' ? 'You' : 'Assistant';
+    const lines = activeQuote.content.split('\n');
+    const quoted = lines.map(line => '> ' + line).join('\n');
+    return `> **${roleLabel}:**\n${quoted}\n\n`;
+  }
+
+  /**
+   * Consume the active quote — returns the formatted block and clears it.
+   * Called by the send flow to prepend the quote to the outgoing message.
+   * @returns {string} Formatted quote block, or empty string.
+   */
+  function consumeQuote() {
+    const block = formatQuoteBlock();
+    if (block) clearQuote();
+    return block;
+  }
+
+  /**
+   * Truncate text for preview display.
+   * @param {string} text
+   * @returns {string}
+   */
+  function _truncate(text) {
+    if (!text) return '';
+    const oneLine = text.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+    if (oneLine.length <= MAX_PREVIEW_LENGTH) return oneLine;
+    return oneLine.substring(0, MAX_PREVIEW_LENGTH) + '…';
+  }
+
+  /**
+   * Create the quote preview bar element.
+   * @returns {HTMLElement}
+   */
+  function _createPreviewBar() {
+    const bar = document.createElement('div');
+    bar.id = 'quote-preview-bar';
+    bar.setAttribute('role', 'status');
+    bar.setAttribute('aria-label', 'Quoted message');
+    bar.style.cssText = 'display:none;align-items:center;gap:8px;padding:6px 12px;' +
+      'background:#1e293b;border-left:3px solid #38bdf8;border-radius:4px;' +
+      'font-size:13px;color:#cbd5e1;margin-bottom:4px;max-width:100%;overflow:hidden;';
+
+    const icon = document.createElement('span');
+    icon.textContent = '💬';
+    icon.style.cssText = 'flex-shrink:0;';
+    bar.appendChild(icon);
+
+    const textWrap = document.createElement('div');
+    textWrap.id = 'quote-preview-text';
+    textWrap.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+    bar.appendChild(textWrap);
+
+    const closeBtn = document.createElement('button');
+    closeBtn.id = 'quote-clear-btn';
+    closeBtn.textContent = '✕';
+    closeBtn.title = 'Clear quote (Alt+Q)';
+    closeBtn.setAttribute('aria-label', 'Clear quote');
+    closeBtn.style.cssText = 'background:none;border:none;color:#94a3b8;cursor:pointer;' +
+      'font-size:14px;padding:2px 4px;flex-shrink:0;';
+    closeBtn.addEventListener('click', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      clearQuote();
+    });
+    bar.appendChild(closeBtn);
+
+    return bar;
+  }
+
+  /**
+   * Update the preview bar visibility and content.
+   */
+  function _updatePreviewBar() {
+    if (!previewBar) return;
+
+    if (!activeQuote) {
+      previewBar.style.display = 'none';
+      return;
+    }
+
+    const roleLabel = activeQuote.role === 'user' ? '👤 You' : '🤖 Assistant';
+    const preview = _truncate(activeQuote.content);
+    const textEl = previewBar.querySelector('#quote-preview-text');
+    if (textEl) {
+      textEl.innerHTML = '';
+      const roleBadge = document.createElement('strong');
+      roleBadge.textContent = roleLabel + ': ';
+      roleBadge.style.color = activeQuote.role === 'user' ? '#38bdf8' : '#4ade80';
+      textEl.appendChild(roleBadge);
+      textEl.appendChild(document.createTextNode(preview));
+    }
+
+    previewBar.style.display = 'flex';
+  }
+
+  /**
+   * Save quote state to localStorage for session persistence.
+   */
+  function _saveState() {
+    try {
+      if (activeQuote) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(activeQuote));
+      } else {
+        localStorage.removeItem(STORAGE_KEY);
+      }
+    } catch (_) {}
+  }
+
+  /**
+   * Restore quote state from localStorage.
+   */
+  function _restoreState() {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed.content === 'string' && parsed.content.trim()) {
+          activeQuote = {
+            role: parsed.role || 'user',
+            content: parsed.content,
+            index: typeof parsed.index === 'number' ? parsed.index : -1
+          };
+        }
+      }
+    } catch (_) {}
+  }
+
+  /**
+   * Decorate history panel messages with quote buttons.
+   * Called after HistoryPanel.refresh() re-renders messages.
+   */
+  function decorateMessages() {
+    const container = document.getElementById('history-messages');
+    if (!container) return;
+
+    const msgEls = container.querySelectorAll('.history-msg');
+    const history = (typeof ConversationManager !== 'undefined')
+      ? ConversationManager.getHistory().filter(m => m.role !== 'system')
+      : [];
+
+    msgEls.forEach(function(el, i) {
+      // Skip if already decorated
+      if (el.querySelector('.quote-btn')) return;
+
+      const msg = history[i];
+      if (!msg) return;
+
+      const btn = document.createElement('button');
+      btn.className = 'quote-btn';
+      btn.textContent = '💬 Quote';
+      btn.title = 'Quote this message in your reply';
+      btn.setAttribute('aria-label', 'Quote this message');
+      btn.style.cssText = 'background:none;border:1px solid #475569;color:#94a3b8;' +
+        'cursor:pointer;font-size:11px;padding:2px 8px;border-radius:4px;' +
+        'margin-top:6px;transition:all 0.15s;';
+
+      btn.addEventListener('mouseenter', function() {
+        btn.style.borderColor = '#38bdf8';
+        btn.style.color = '#38bdf8';
+      });
+      btn.addEventListener('mouseleave', function() {
+        btn.style.borderColor = '#475569';
+        btn.style.color = '#94a3b8';
+      });
+
+      const capturedRole = msg.role;
+      const capturedContent = msg.content;
+      const capturedIndex = i;
+      btn.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        setQuote(capturedRole, capturedContent, capturedIndex);
+      });
+
+      el.appendChild(btn);
+    });
+  }
+
+  /**
+   * Handle keyboard shortcut.
+   * @param {KeyboardEvent} e
+   */
+  function _onKeyDown(e) {
+    // Alt+Q — clear active quote
+    if (e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey && e.key.toLowerCase() === 'q') {
+      if (activeQuote) {
+        e.preventDefault();
+        clearQuote();
+      }
+    }
+  }
+
+  /**
+   * Initialize the quoting system.
+   */
+  function init() {
+    input = document.getElementById('chat-input');
+
+    // Create and insert preview bar above the chat input toolbar
+    previewBar = _createPreviewBar();
+    const toolbar = input ? input.closest('.toolbar') : null;
+    if (toolbar && toolbar.parentNode) {
+      toolbar.parentNode.insertBefore(previewBar, toolbar);
+    }
+
+    // Restore saved quote
+    _restoreState();
+    _updatePreviewBar();
+
+    // Keyboard shortcut
+    document.addEventListener('keydown', _onKeyDown);
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  return {
+    init: init,
+    setQuote: setQuote,
+    clearQuote: clearQuote,
+    getQuote: getQuote,
+    hasQuote: hasQuote,
+    formatQuoteBlock: formatQuoteBlock,
+    consumeQuote: consumeQuote,
+    decorateMessages: decorateMessages,
+    MAX_PREVIEW_LENGTH: MAX_PREVIEW_LENGTH,
+    MAX_QUOTE_LENGTH: MAX_QUOTE_LENGTH,
   };
 })();
