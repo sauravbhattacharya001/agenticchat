@@ -44,6 +44,7 @@
  *   ConversationChapters — named section dividers with TOC navigation
  *   ConversationTags     — colored tag labels on sessions with filtering and management
  *   FormattingToolbar    — markdown formatting buttons above chat input
+ *   GlobalSessionSearch  — full-text search across all saved sessions
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -2711,6 +2712,8 @@ const SlashCommands = (() => {
             const isActive = FocusMode.toggle();
             UIController.setChatOutput(`Focus mode ${isActive ? 'enabled 🧘' : 'disabled'}`);
           } },
+        { name: 'search-all', description: 'Search across all saved sessions', icon: '🔎',
+          action: () => GlobalSessionSearch.toggle() },
         { name: 'timing', description: 'Toggle response time badges on/off', icon: '⏱️',
           action: () => {
             const visible = ConversationManager.toggleTiming();
@@ -10654,6 +10657,255 @@ const ConversationTags = (() => {
     colorForTag: colorForTag,
     MAX_TAGS_PER_SESSION: MAX_TAGS_PER_SESSION,
   };
+})();
+
+// ── Global Session Search ─────────────────────────────────────────
+/**
+ * @namespace GlobalSessionSearch
+ *
+ * Full-text search across all saved sessions. Opens a modal panel
+ * (Ctrl+Shift+S) where the user can search every message in every
+ * saved session. Results are grouped by session with highlighted
+ * matches. Clicking a result loads that session.
+ */
+const GlobalSessionSearch = (() => {
+  let isOpen = false;
+  let debounceTimer = null;
+  const DEBOUNCE_MS = 250;
+  const MAX_RESULTS_PER_SESSION = 5;
+  const MAX_CONTEXT_CHARS = 160;
+
+  function open() {
+    const panel = document.getElementById('global-search-panel');
+    const overlay = document.getElementById('global-search-overlay');
+    const input = document.getElementById('global-search-input');
+    if (!panel) return;
+    isOpen = true;
+    panel.style.display = 'flex';
+    if (overlay) overlay.classList.add('visible');
+    if (input) { input.value = ''; input.focus(); }
+    _clearResults();
+    _setStatus('Type to search across all saved sessions');
+  }
+
+  function close() {
+    const panel = document.getElementById('global-search-panel');
+    const overlay = document.getElementById('global-search-overlay');
+    if (!panel) return;
+    isOpen = false;
+    panel.style.display = 'none';
+    if (overlay) overlay.classList.remove('visible');
+  }
+
+  function toggle() {
+    isOpen ? close() : open();
+  }
+
+  function _setStatus(text) {
+    const el = document.getElementById('global-search-status');
+    if (el) el.textContent = text;
+  }
+
+  function _clearResults() {
+    const el = document.getElementById('global-search-results');
+    if (el) el.innerHTML = '';
+  }
+
+  /** Escape HTML to prevent XSS. */
+  function _esc(str) {
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+  }
+
+  /** Highlight matches in text, returning safe HTML. */
+  function _highlight(text, query, caseSensitive) {
+    if (!query) return _esc(text);
+    const flags = caseSensitive ? 'g' : 'gi';
+    const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`(${escaped})`, flags);
+    // Split on matches, escaping each part
+    const parts = text.split(re);
+    return parts.map((part, i) => {
+      if (i % 2 === 1) return `<mark>${_esc(part)}</mark>`;
+      return _esc(part);
+    }).join('');
+  }
+
+  /** Extract a snippet of text around the first match. */
+  function _extractContext(content, query, caseSensitive) {
+    const idx = caseSensitive
+      ? content.indexOf(query)
+      : content.toLowerCase().indexOf(query.toLowerCase());
+    if (idx === -1) return content.substring(0, MAX_CONTEXT_CHARS);
+    const start = Math.max(0, idx - 50);
+    const end = Math.min(content.length, idx + query.length + MAX_CONTEXT_CHARS - 50);
+    let snippet = content.substring(start, end);
+    if (start > 0) snippet = '…' + snippet;
+    if (end < content.length) snippet += '…';
+    return snippet;
+  }
+
+  /** Run the search across all sessions. */
+  function _search(query) {
+    _clearResults();
+    if (!query || query.length < 2) {
+      _setStatus(query ? 'Type at least 2 characters' : 'Type to search across all saved sessions');
+      return;
+    }
+
+    const filterUser = document.getElementById('gs-filter-user')?.checked ?? true;
+    const filterAssistant = document.getElementById('gs-filter-assistant')?.checked ?? true;
+    const caseSensitive = document.getElementById('gs-filter-case')?.checked ?? false;
+
+    const sessions = SessionManager.getAll();
+    if (sessions.length === 0) {
+      _setStatus('No saved sessions to search');
+      return;
+    }
+
+    const results = []; // { session, matches: [{ role, content, index }] }
+    let totalMatches = 0;
+
+    const lowerQuery = caseSensitive ? query : query.toLowerCase();
+
+    for (const session of sessions) {
+      if (!session.messages || !Array.isArray(session.messages)) continue;
+      const matches = [];
+
+      for (let i = 0; i < session.messages.length; i++) {
+        const msg = session.messages[i];
+        if (!msg || !msg.content) continue;
+        if (msg.role === 'user' && !filterUser) continue;
+        if (msg.role === 'assistant' && !filterAssistant) continue;
+
+        const haystack = caseSensitive ? msg.content : msg.content.toLowerCase();
+        if (haystack.includes(lowerQuery)) {
+          matches.push({ role: msg.role, content: msg.content, index: i });
+          totalMatches++;
+          if (matches.length >= MAX_RESULTS_PER_SESSION) break;
+        }
+      }
+
+      if (matches.length > 0) {
+        results.push({ session, matches });
+      }
+    }
+
+    if (totalMatches === 0) {
+      _setStatus(`No matches for "${query}"`);
+      const container = document.getElementById('global-search-results');
+      if (container) {
+        const empty = document.createElement('div');
+        empty.className = 'gs-no-results';
+        empty.textContent = 'No messages matched your search across any session.';
+        container.appendChild(empty);
+      }
+      return;
+    }
+
+    _setStatus(`${totalMatches} match${totalMatches !== 1 ? 'es' : ''} in ${results.length} session${results.length !== 1 ? 's' : ''}`);
+    _renderResults(results, query, caseSensitive);
+  }
+
+  /** Render grouped search results. */
+  function _renderResults(results, query, caseSensitive) {
+    const container = document.getElementById('global-search-results');
+    if (!container) return;
+    const frag = document.createDocumentFragment();
+
+    for (const { session, matches } of results) {
+      const group = document.createElement('div');
+      group.className = 'gs-result-group';
+
+      const header = document.createElement('div');
+      header.className = 'gs-result-session';
+      header.innerHTML = `${_esc(session.name)} <span class="gs-msg-count">(${matches.length} match${matches.length !== 1 ? 'es' : ''})</span>`;
+      header.title = `Load session "${session.name}"`;
+      header.addEventListener('click', () => {
+        SessionManager.load(session.id);
+        close();
+      });
+      group.appendChild(header);
+
+      for (const match of matches) {
+        const item = document.createElement('div');
+        item.className = 'gs-result-item';
+
+        const roleEl = document.createElement('div');
+        roleEl.className = `gs-role ${match.role}`;
+        roleEl.textContent = match.role;
+        item.appendChild(roleEl);
+
+        const snippet = _extractContext(match.content, query, caseSensitive);
+        const contentEl = document.createElement('div');
+        contentEl.innerHTML = _highlight(snippet, query, caseSensitive);
+        item.appendChild(contentEl);
+
+        item.addEventListener('click', () => {
+          SessionManager.load(session.id);
+          close();
+          // Try to scroll to the matched message after a short delay
+          setTimeout(() => {
+            const msgs = document.querySelectorAll('#chat-output > div');
+            if (msgs[match.index]) {
+              msgs[match.index].scrollIntoView({ behavior: 'smooth', block: 'center' });
+              msgs[match.index].style.outline = '2px solid var(--accent, #89b4fa)';
+              setTimeout(() => { msgs[match.index].style.outline = ''; }, 2000);
+            }
+          }, 200);
+        });
+
+        group.appendChild(item);
+      }
+      frag.appendChild(group);
+    }
+    container.appendChild(frag);
+  }
+
+  /** Initialize event listeners. */
+  function init() {
+    const input = document.getElementById('global-search-input');
+    if (input) {
+      input.addEventListener('input', () => {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => _search(input.value.trim()), DEBOUNCE_MS);
+      });
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') { e.preventDefault(); close(); }
+      });
+    }
+
+    const closeBtn = document.getElementById('global-search-close-btn');
+    if (closeBtn) closeBtn.addEventListener('click', close);
+
+    const overlay = document.getElementById('global-search-overlay');
+    if (overlay) overlay.addEventListener('click', close);
+
+    const btn = document.getElementById('global-search-btn');
+    if (btn) btn.addEventListener('click', toggle);
+
+    // Filter checkboxes trigger re-search
+    ['gs-filter-user', 'gs-filter-assistant', 'gs-filter-case'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('change', () => {
+        const q = document.getElementById('global-search-input')?.value?.trim();
+        if (q) _search(q);
+      });
+    });
+
+    // Keyboard shortcut: Ctrl+Shift+S
+    document.addEventListener('keydown', (e) => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'S') {
+        e.preventDefault();
+        toggle();
+      }
+    });
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  return { open, close, toggle, init };
 })();
 
 // ── Formatting Toolbar ────────────────────────────────────────────

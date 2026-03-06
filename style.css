@@ -1969,3 +1969,116 @@ html.light .fork-notification {
 .cross-tab-banner .btn-sm:hover {
   background: rgba(255,255,255,0.35);
 }
+
+/* ---------- Global Session Search ---------- */
+#global-search-overlay {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.4);
+  z-index: 1099;
+}
+#global-search-overlay.visible { display: block; }
+
+#global-search-panel {
+  position: fixed;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(680px, 92vw);
+  max-height: 80vh;
+  background: var(--bg-secondary, #1e1e2e);
+  border: 1px solid var(--border, #444);
+  border-radius: 12px;
+  z-index: 1100;
+  display: none;
+  flex-direction: column;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+  overflow: hidden;
+}
+#global-search-panel[style*="display: flex"],
+#global-search-panel.open { display: flex; }
+
+#global-search-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 14px 18px; border-bottom: 1px solid var(--border, #444);
+  font-weight: 600; font-size: 1rem;
+}
+
+#global-search-input-wrap {
+  padding: 12px 18px 8px;
+}
+#global-search-input {
+  width: 100%; box-sizing: border-box;
+  padding: 10px 14px; border-radius: 8px;
+  border: 1px solid var(--border, #555);
+  background: var(--bg-primary, #11111b);
+  color: var(--text, #cdd6f4);
+  font-size: 0.95rem;
+}
+#global-search-input:focus {
+  outline: none;
+  border-color: var(--accent, #89b4fa);
+  box-shadow: 0 0 0 2px rgba(137,180,250,0.2);
+}
+#global-search-filters {
+  display: flex; gap: 14px; margin-top: 8px;
+  font-size: 0.82rem; color: var(--text-muted, #a6adc8);
+}
+#global-search-filters label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+
+#global-search-status {
+  padding: 4px 18px 2px;
+  font-size: 0.82rem;
+  color: var(--text-muted, #a6adc8);
+  min-height: 22px;
+}
+
+#global-search-results {
+  overflow-y: auto; flex: 1;
+  padding: 0 18px 14px;
+  max-height: 55vh;
+}
+
+.gs-result-group {
+  margin-bottom: 14px;
+}
+.gs-result-session {
+  font-weight: 600; font-size: 0.88rem;
+  color: var(--accent, #89b4fa);
+  margin-bottom: 6px;
+  cursor: pointer;
+  display: flex; align-items: center; gap: 6px;
+}
+.gs-result-session:hover { text-decoration: underline; }
+.gs-result-session .gs-msg-count {
+  font-weight: 400; font-size: 0.78rem;
+  color: var(--text-muted, #a6adc8);
+}
+
+.gs-result-item {
+  padding: 8px 12px; margin-bottom: 4px;
+  border-radius: 6px;
+  background: var(--bg-primary, #11111b);
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  transition: border-color 0.15s;
+}
+.gs-result-item:hover { border-color: var(--accent, #89b4fa); }
+.gs-result-item .gs-role {
+  font-size: 0.75rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.5px;
+  margin-bottom: 2px;
+}
+.gs-result-item .gs-role.user { color: #a6e3a1; }
+.gs-result-item .gs-role.assistant { color: #89b4fa; }
+.gs-result-item mark {
+  background: rgba(249, 226, 175, 0.35);
+  color: inherit; border-radius: 2px;
+  padding: 0 1px;
+}
+.gs-no-results {
+  text-align: center; padding: 30px;
+  color: var(--text-muted, #a6adc8);
+  font-size: 0.9rem;
+}
