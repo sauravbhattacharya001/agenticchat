@@ -1102,6 +1102,9 @@ const ChatController = (() => {
     UIController.setLastPrompt('(history cleared)');
     SnippetLibrary.setCurrentCode(null);
     ChatBookmarks.clearAll();
+    try { if (MessageAnnotations && MessageAnnotations.clearAll) MessageAnnotations.clearAll(); } catch (_) {}
+    try { if (MessagePinning && MessagePinning.clearAll) MessagePinning.clearAll(); } catch (_) {}
+    try { if (ConversationChapters && ConversationChapters.clearAll) ConversationChapters.clearAll(); } catch (_) {}
     HistoryPanel.refresh();
     QuickReplies.hide();
   }
