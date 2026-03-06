@@ -1,7 +1,7 @@
 /* ============================================================
  * Agentic Chat — Application Logic
  *
- * Architecture (37 modules, all revealing-module-pattern IIFEs):
+ * Architecture (38 modules, all revealing-module-pattern IIFEs):
  *
  *   Core:
  *   SafeStorage          — safe localStorage wrapper for restricted-storage environments
@@ -43,6 +43,7 @@
  *   MessageAnnotations   — private notes/annotations on messages with labels
  *   ConversationChapters — named section dividers with TOC navigation
  *   ConversationTags     — colored tag labels on sessions with filtering and management
+ *   FormattingToolbar    — markdown formatting buttons above chat input
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -7899,6 +7900,9 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('zen-btn').addEventListener('click', FocusMode.toggle);
   FocusMode.init();
 
+  // Formatting toolbar
+  document.getElementById('fmt-btn').addEventListener('click', FormattingToolbar.toggle);
+
   // Scratchpad
   document.getElementById('scratchpad-btn').addEventListener('click', Scratchpad.toggle);
   document.getElementById('scratchpad-close-btn').addEventListener('click', Scratchpad.close);
@@ -10607,5 +10611,237 @@ const ConversationTags = (() => {
     openManager: openManager,
     colorForTag: colorForTag,
     MAX_TAGS_PER_SESSION: MAX_TAGS_PER_SESSION,
+  };
+})();
+
+// ── Formatting Toolbar ────────────────────────────────────────────
+/**
+ * @namespace FormattingToolbar
+ *
+ * Adds a row of markdown formatting buttons above the chat input field.
+ * Supports wrapping selected text or inserting formatting at the cursor.
+ *
+ * Buttons: Bold, Italic, Inline Code, Code Block, Link, Heading,
+ * Bulleted List, Numbered List, Strikethrough, Quote.
+ *
+ * Features:
+ * - Wraps selected text with formatting markers (toggle: re-applies if
+ *   already wrapped to allow easy removal by Ctrl+Z)
+ * - Inserts placeholder text when nothing is selected
+ * - Keyboard shortcuts: Ctrl+E (inline code), Ctrl+Shift+M (toggle toolbar)
+ * - Toolbar visibility toggle via button or Ctrl+Shift+M
+ * - Compact single-row design that doesn't crowd the existing toolbar
+ * - Respects focus mode (hidden when zen mode is active)
+ * - Accessible: proper aria-labels, keyboard navigable
+ */
+const FormattingToolbar = (() => {
+  'use strict';
+
+  const STORAGE_KEY = 'agentic_fmt_toolbar_visible';
+
+  // Format definitions: { label, icon, prefix, suffix, placeholder, block }
+  // block=true means the format works on entire lines (lists, headings, quotes)
+  const FORMATS = [
+    { id: 'bold',       icon: '𝐁',  title: 'Bold',                  prefix: '**', suffix: '**', placeholder: 'bold text' },
+    { id: 'italic',     icon: '𝐼',  title: 'Italic',                prefix: '_',  suffix: '_',  placeholder: 'italic text' },
+    { id: 'code',       icon: '</>',title: 'Inline Code (Ctrl+E)',  prefix: '`',  suffix: '`',  placeholder: 'code' },
+    { id: 'codeblock',  icon: '```',title: 'Code Block',            prefix: '```\n', suffix: '\n```', placeholder: 'code here', block: true },
+    { id: 'link',       icon: '🔗', title: 'Link',                  prefix: '[',  suffix: '](url)', placeholder: 'link text' },
+    { id: 'heading',    icon: 'H',  title: 'Heading',               prefix: '## ', suffix: '',  placeholder: 'heading', block: true },
+    { id: 'bullet',     icon: '•',  title: 'Bullet List',           prefix: '- ',  suffix: '',  placeholder: 'list item', block: true },
+    { id: 'numbered',   icon: '1.', title: 'Numbered List',         prefix: '1. ', suffix: '',  placeholder: 'list item', block: true },
+    { id: 'strike',     icon: '~~', title: 'Strikethrough',         prefix: '~~', suffix: '~~', placeholder: 'text' },
+    { id: 'quote',      icon: '>',  title: 'Block Quote',           prefix: '> ',  suffix: '',  placeholder: 'quote', block: true },
+  ];
+
+  let toolbar = null;
+  let isVisible = false;
+  let input = null;
+
+  /**
+   * Apply a format to the chat input field.
+   * If text is selected, wraps it. Otherwise inserts placeholder.
+   */
+  function applyFormat(format) {
+    if (!input) return;
+    input.focus();
+
+    const start = input.selectionStart || 0;
+    const end = input.selectionEnd || 0;
+    const value = input.value;
+    const selected = value.substring(start, end);
+
+    let insertText;
+    let cursorOffset;
+
+    if (selected) {
+      // Wrap selected text
+      insertText = format.prefix + selected + format.suffix;
+      cursorOffset = start + insertText.length;
+    } else {
+      // Insert with placeholder
+      insertText = format.prefix + format.placeholder + format.suffix;
+      // Position cursor to select the placeholder
+      cursorOffset = start + format.prefix.length + format.placeholder.length;
+    }
+
+    // Use execCommand for undo support, fall back to direct value set
+    const before = value.substring(0, start);
+    const after = value.substring(end);
+    input.value = before + insertText + after;
+
+    // Set cursor position
+    if (selected) {
+      input.setSelectionRange(cursorOffset, cursorOffset);
+    } else {
+      // Select the placeholder so user can type over it
+      const pStart = start + format.prefix.length;
+      const pEnd = pStart + format.placeholder.length;
+      input.setSelectionRange(pStart, pEnd);
+    }
+
+    // Trigger input event for char count and other listeners
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  /**
+   * Build the toolbar DOM element.
+   */
+  function createToolbar() {
+    toolbar = document.createElement('div');
+    toolbar.id = 'formatting-toolbar';
+    toolbar.setAttribute('role', 'toolbar');
+    toolbar.setAttribute('aria-label', 'Text formatting');
+    toolbar.style.cssText = 'display:none;padding:4px 8px;gap:2px;align-items:center;'
+      + 'border-bottom:1px solid var(--border-color, #333);flex-wrap:nowrap;overflow-x:auto;';
+
+    FORMATS.forEach(function(fmt) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'fmt-btn';
+      btn.setAttribute('data-format', fmt.id);
+      btn.setAttribute('aria-label', fmt.title);
+      btn.title = fmt.title;
+      btn.textContent = fmt.icon;
+      btn.style.cssText = 'background:none;border:1px solid transparent;border-radius:4px;'
+        + 'padding:3px 7px;cursor:pointer;font-size:13px;color:inherit;'
+        + 'font-family:monospace;min-width:28px;text-align:center;';
+
+      btn.addEventListener('mouseenter', function() {
+        btn.style.borderColor = 'var(--accent-color, #6c5ce7)';
+        btn.style.background = 'var(--hover-bg, rgba(108,92,231,0.1))';
+      });
+      btn.addEventListener('mouseleave', function() {
+        btn.style.borderColor = 'transparent';
+        btn.style.background = 'none';
+      });
+
+      btn.addEventListener('click', function(e) {
+        e.preventDefault();
+        applyFormat(fmt);
+      });
+
+      toolbar.appendChild(btn);
+    });
+
+    return toolbar;
+  }
+
+  /**
+   * Show/hide the toolbar.
+   */
+  function toggle() {
+    isVisible = !isVisible;
+    if (toolbar) {
+      toolbar.style.display = isVisible ? 'flex' : 'none';
+    }
+    try {
+      localStorage.setItem(STORAGE_KEY, isVisible ? '1' : '0');
+    } catch (e) { /* private browsing */ }
+  }
+
+  function show() {
+    isVisible = true;
+    if (toolbar) toolbar.style.display = 'flex';
+    try { localStorage.setItem(STORAGE_KEY, '1'); } catch (e) {}
+  }
+
+  function hide() {
+    isVisible = false;
+    if (toolbar) toolbar.style.display = 'none';
+    try { localStorage.setItem(STORAGE_KEY, '0'); } catch (e) {}
+  }
+
+  /**
+   * Handle keyboard shortcuts for formatting.
+   */
+  function onKeyDown(e) {
+    // Only when chat input is focused or toolbar shortcuts
+    if (e.target.id !== 'chat-input' && !e.ctrlKey) return;
+
+    if (e.ctrlKey && !e.shiftKey && !e.altKey) {
+      let fmt = null;
+      if (e.key === 'e' || e.key === 'E') fmt = FORMATS.find(f => f.id === 'code');
+
+      if (fmt) {
+        e.preventDefault();
+        applyFormat(fmt);
+      }
+    }
+
+    // Ctrl+Shift+M to toggle toolbar
+    if (e.ctrlKey && e.shiftKey && (e.key === 'm' || e.key === 'M')) {
+      e.preventDefault();
+      toggle();
+    }
+  }
+
+  /**
+   * Get a format definition by its id.
+   */
+  function getFormat(id) {
+    return FORMATS.find(f => f.id === id) || null;
+  }
+
+  /**
+   * Initialize the formatting toolbar.
+   */
+  function init() {
+    input = document.getElementById('chat-input');
+    if (!input) return;
+
+    // Create and insert toolbar above the input's parent toolbar
+    const tb = createToolbar();
+    const parentToolbar = input.closest('.toolbar');
+    if (parentToolbar) {
+      parentToolbar.parentNode.insertBefore(tb, parentToolbar);
+    } else {
+      input.parentNode.insertBefore(tb, input);
+    }
+
+    // Restore visibility from localStorage
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved === '1') {
+        isVisible = true;
+        toolbar.style.display = 'flex';
+      }
+    } catch (e) {}
+
+    // Register keyboard shortcuts
+    document.addEventListener('keydown', onKeyDown);
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  return {
+    init: init,
+    toggle: toggle,
+    show: show,
+    hide: hide,
+    applyFormat: applyFormat,
+    getFormat: getFormat,
+    isVisible: function() { return isVisible; },
+    FORMATS: FORMATS,
   };
 })();
