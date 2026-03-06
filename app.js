@@ -7221,6 +7221,8 @@ const ConversationTimeline = (() => {
   let isVisible = false;
   let segments = [];
   let scrollRAF = null;
+  let refreshTimer = null;
+  const REFRESH_DEBOUNCE_MS = 150;
 
   /** CSS injected once. */
   let styleInjected = false;
@@ -7287,10 +7289,12 @@ const ConversationTimeline = (() => {
   function init() {
     injectStyles();
     buildDOM();
-    // Listen for chat output changes via MutationObserver
+    // Listen for chat output changes via MutationObserver.
+    // Debounce to avoid excessive rebuilds during streaming responses
+    // where mutations fire on every text chunk (potentially hundreds/sec).
     let chatOutput = document.getElementById('chat-output');
     if (chatOutput) {
-      const observer = new MutationObserver(function () { refresh(); });
+      const observer = new MutationObserver(function () { scheduleRefresh(); });
       observer.observe(chatOutput, { childList: true, subtree: true });
     }
     // Track scroll position
@@ -7354,6 +7358,21 @@ const ConversationTimeline = (() => {
   function hide() { if (isVisible) toggle(); }
 
   function getVisible() { return isVisible; }
+
+  /**
+   * Schedule a debounced refresh.  During streaming responses the
+   * MutationObserver fires on every text chunk, which would otherwise
+   * cause hundreds of full DOM rebuilds per second.  This collapses
+   * those into a single trailing refresh after REFRESH_DEBOUNCE_MS ms
+   * of quiet.
+   */
+  function scheduleRefresh() {
+    if (refreshTimer) clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(function () {
+      refreshTimer = null;
+      refresh();
+    }, REFRESH_DEBOUNCE_MS);
+  }
 
   // ── Refresh ──────────────────────────────────────────────
 
