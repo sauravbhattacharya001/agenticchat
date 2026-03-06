@@ -3581,18 +3581,46 @@ const SessionManager = (() => {
   let isOpen = false;
   let autoSave = false;
 
-  /** Load all sessions from localStorage. */
+  // ── In-memory cache (fixes #36) ─────────────────────────────
+  // Avoids redundant JSON.parse on every operation. The cache is
+  // invalidated when another tab writes (StorageEvent / BroadcastChannel)
+  // or when the raw localStorage value diverges from our last-known
+  // snapshot (same-tab external writes).  The hot-path short-circuits
+  // entirely when the raw value hasn't changed, skipping both
+  // JSON.parse AND sanitizeStorageObject.
+  let _cache = null;
+  let _cacheDirty = true;
+  let _cacheRawLen = -1;  // length of raw string at last parse
+
+  /** Load all sessions from localStorage (cached). */
   function _loadAll() {
+    if (!_cacheDirty && _cache !== null) {
+      // Quick length check to detect external writes (cheap O(1))
+      try {
+        const raw = SafeStorage.get(STORAGE_KEY);
+        if (raw !== null && raw !== undefined && raw.length === _cacheRawLen) {
+          return _cache;
+        }
+      } catch { /* fall through */ }
+    }
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
-      return raw ? sanitizeStorageObject(JSON.parse(raw)) : [];
-    } catch { return []; }
+      _cacheRawLen = raw ? raw.length : 0;
+      _cache = raw ? sanitizeStorageObject(JSON.parse(raw)) : [];
+    } catch { _cache = []; _cacheRawLen = -1; }
+    _cacheDirty = false;
+    return _cache;
   }
 
   /** Save all sessions to localStorage with quota protection. */
   function _saveAll(sessions) {
+    // Update cache before writing so subsequent reads are instant
+    _cache = sessions;
+    _cacheDirty = false;
+    const json = JSON.stringify(sessions);
+    _cacheRawLen = json.length;
     try {
-        SafeStorage.set(STORAGE_KEY, JSON.stringify(sessions));
+        SafeStorage.set(STORAGE_KEY, json);
         return true;
     } catch (e) {
         if (e.name === 'QuotaExceededError' || e.code === 22 || e.code === 1014) {
@@ -3602,14 +3630,20 @@ const SessionManager = (() => {
             while (remaining.length > 1) {
                 remaining = _evictOldest(remaining, 1);
                 try {
-                    SafeStorage.set(STORAGE_KEY, JSON.stringify(remaining));
+                    const evictedJson = JSON.stringify(remaining);
+                    SafeStorage.set(STORAGE_KEY, evictedJson);
+                    _cache = remaining;
+                    _cacheRawLen = evictedJson.length;
                     console.warn(`[SessionManager] Evicted session to fit quota. ${remaining.length} sessions remain.`);
                     return true;
                 } catch { /* continue evicting */ }
             }
             // Last resort: try saving the single remaining session
             try {
-                SafeStorage.set(STORAGE_KEY, JSON.stringify(remaining));
+                const lastJson = JSON.stringify(remaining);
+                SafeStorage.set(STORAGE_KEY, lastJson);
+                _cache = remaining;
+                _cacheRawLen = lastJson.length;
                 console.warn('[SessionManager] Evicted all but one session to fit quota.');
                 return true;
             } catch {
@@ -4293,6 +4327,8 @@ const SessionManager = (() => {
     getStorageInfo, handleClearOld,
     getActiveId: _getActiveId,
     _isOpen: function () { return isOpen; },
+    /** Invalidate the in-memory cache, forcing a fresh parse on next read. */
+    invalidateCache() { _cacheDirty = true; _cache = null; },
     // Exposed for testing
     _loadAll, _saveAll, _getActiveId, _setActiveId,
     _evictOldest, _enforceSessionLimit, _estimateQuotaUsage, _checkQuota
@@ -4403,7 +4439,9 @@ const CrossTabSync = (() => {
     }
 
     if (e.key === SESSION_STORAGE_KEY) {
-      // Another tab modified sessions
+      // Another tab modified sessions — invalidate the in-memory cache
+      // so the next SessionManager read will re-parse from localStorage.
+      SessionManager.invalidateCache();
       // Check if it's actually different from what we know
       if (e.newValue !== lastKnownSessionsJSON) {
         _showBanner('⚠️ Another tab modified your sessions.');
@@ -4423,6 +4461,7 @@ const CrossTabSync = (() => {
     if (!e.data || e.data.tabId === tabId) return; // Ignore our own
 
     if (e.data.type === 'sessions-updated') {
+      SessionManager.invalidateCache();
       _showBanner('⚠️ Another tab modified your sessions.');
     } else if (e.data.type === 'active-session-changed') {
       _showBanner('⚠️ Another tab switched the active session.');
