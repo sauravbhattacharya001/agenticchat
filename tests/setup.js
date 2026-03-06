@@ -240,7 +240,8 @@ function loadApp() {
     'MessageAnnotations',
     'ConversationChapters',
     'ConversationTags',
-    'FormattingToolbar'
+    'FormattingToolbar',
+    'MessageQuoting'
   ];
 
   for (const mod of modules) {
