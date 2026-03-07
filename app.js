@@ -12113,3 +12113,476 @@ const AutoTagger = (() => {
     _MIN_SCORE: MIN_SCORE,
   };
 })();
+
+// ── Data Backup & Restore ───────────────────────────────────────────
+const DataBackup = (() => {
+  const FORMAT_VERSION = 1;
+  const MAGIC = 'agenticchat-backup';
+
+  /**
+   * All known storage keys used by the application.
+   * Each entry maps a human-readable label to its localStorage key.
+   */
+  const STORAGE_KEYS = {
+    sessions:        'agenticchat_sessions',
+    activeSession:   'agenticchat_active_session',
+    snippets:        'agenticchat_snippets',
+    bookmarks:       'chatBookmarks',
+    reactions:       'agenticchat_reactions',
+    theme:           'agenticchat_theme',
+    costLog:         'agenticchat_cost_log',
+    persona:         'agenticchat_persona',
+    focusMode:       'ac-focus-mode',
+    inputHistory:    'ac-input-history',
+    scratchpad:      'agenticchat_scratchpad',
+    pins:            'agenticchat_pins',
+    readAloud:       'agenticchat_readaloud',
+    annotations:     'agenticchat_annotations',
+    chapters:        'agenticchat_chapters',
+    sessionTags:     'agenticchat_session_tags',
+    fmtToolbar:      'agentic_fmt_toolbar_visible',
+    selectedModel:   'ac-selected-model',
+    streaming:       'ac-streaming',
+    showTiming:      'ac-show-timing',
+    voiceLang:       'agenticchat_voice_lang',
+  };
+
+  /**
+   * Collect all app data from localStorage.
+   * @returns {Object} key→value map (only keys with non-null values)
+   */
+  function _collectData() {
+    var data = Object.create(null);
+    var labels = Object.keys(STORAGE_KEYS);
+    for (var i = 0; i < labels.length; i++) {
+      var label = labels[i];
+      var raw = SafeStorage.get(STORAGE_KEYS[label]);
+      if (raw !== null) {
+        data[label] = raw;
+      }
+    }
+    return data;
+  }
+
+  /**
+   * Build a full backup object.
+   * @returns {{ magic: string, version: number, timestamp: string, data: Object, stats: Object }}
+   */
+  function createBackup() {
+    var data = _collectData();
+    var labels = Object.keys(data);
+
+    var stats = {
+      keyCount: labels.length,
+      totalBytes: 0,
+      sessionCount: 0,
+      snippetCount: 0,
+      bookmarkCount: 0,
+      pinCount: 0,
+    };
+
+    for (var i = 0; i < labels.length; i++) {
+      stats.totalBytes += data[labels[i]].length;
+    }
+
+    try {
+      var sessions = data.sessions ? JSON.parse(data.sessions) : null;
+      if (sessions) {
+        if (Array.isArray(sessions)) {
+          stats.sessionCount = sessions.length;
+        } else {
+          stats.sessionCount = Object.keys(sessions).length;
+        }
+      }
+    } catch (_) { /* non-critical */ }
+
+    try {
+      var snippets = data.snippets ? JSON.parse(data.snippets) : [];
+      stats.snippetCount = Array.isArray(snippets) ? snippets.length : 0;
+    } catch (_) { /* non-critical */ }
+
+    try {
+      var bookmarks = data.bookmarks ? JSON.parse(data.bookmarks) : [];
+      stats.bookmarkCount = Array.isArray(bookmarks) ? bookmarks.length : 0;
+    } catch (_) { /* non-critical */ }
+
+    try {
+      var pins = data.pins ? JSON.parse(data.pins) : {};
+      stats.pinCount = typeof pins === 'object' ? Object.keys(pins).length : 0;
+    } catch (_) { /* non-critical */ }
+
+    return {
+      magic: MAGIC,
+      version: FORMAT_VERSION,
+      timestamp: new Date().toISOString(),
+      stats: stats,
+      data: data,
+    };
+  }
+
+  /**
+   * Export all data as a downloadable JSON file.
+   * @returns {{ success: boolean, filename: string, size: number, stats: Object }}
+   */
+  function exportBackup() {
+    var backup = createBackup();
+    var json = JSON.stringify(backup, null, 2);
+    var date = new Date().toISOString().slice(0, 10);
+    var filename = 'agenticchat-backup-' + date + '.json';
+
+    if (typeof downloadBlob === 'function') {
+      downloadBlob(filename, json, 'application/json');
+    }
+
+    return { success: true, filename: filename, size: json.length, stats: backup.stats };
+  }
+
+  /**
+   * Validate a backup object structure.
+   * @param {Object} backup
+   * @returns {{ valid: boolean, error?: string, warnings: string[] }}
+   */
+  function validateBackup(backup) {
+    var warnings = [];
+
+    if (!backup || typeof backup !== 'object') {
+      return { valid: false, error: 'Backup is not a valid object', warnings: warnings };
+    }
+    if (backup.magic !== MAGIC) {
+      return { valid: false, error: 'Not an Agentic Chat backup file (invalid magic)', warnings: warnings };
+    }
+    if (typeof backup.version !== 'number' || backup.version < 1) {
+      return { valid: false, error: 'Invalid backup version', warnings: warnings };
+    }
+    if (backup.version > FORMAT_VERSION) {
+      warnings.push('Backup version ' + backup.version + ' is newer than supported (' + FORMAT_VERSION + '); some data may not restore correctly');
+    }
+    if (!backup.data || typeof backup.data !== 'object') {
+      return { valid: false, error: 'Backup contains no data section', warnings: warnings };
+    }
+    if (!backup.timestamp || typeof backup.timestamp !== 'string') {
+      warnings.push('Backup has no timestamp');
+    }
+
+    var dataKeys = Object.keys(backup.data);
+    for (var i = 0; i < dataKeys.length; i++) {
+      if (typeof STORAGE_KEYS[dataKeys[i]] === 'undefined') {
+        warnings.push('Unknown data key: ' + dataKeys[i] + ' (will be skipped)');
+      }
+    }
+
+    for (var j = 0; j < dataKeys.length; j++) {
+      if (typeof backup.data[dataKeys[j]] !== 'string') {
+        return { valid: false, error: 'Data value for "' + dataKeys[j] + '" is not a string', warnings: warnings };
+      }
+    }
+
+    return { valid: true, warnings: warnings };
+  }
+
+  /**
+   * Restore data from a backup object.
+   * @param {Object} backup - Parsed backup object
+   * @param {Object} [options]
+   * @param {string[]} [options.only] - Restore only these keys (selective restore)
+   * @param {boolean} [options.merge] - If true, don't clear existing data before restore
+   * @returns {{ success: boolean, restored: string[], skipped: string[], error?: string, warnings: string[] }}
+   */
+  function restoreBackup(backup, options) {
+    options = options || {};
+    var validation = validateBackup(backup);
+    if (!validation.valid) {
+      return { success: false, restored: [], skipped: [], error: validation.error, warnings: validation.warnings };
+    }
+
+    var dataKeys = Object.keys(backup.data);
+    var restored = [];
+    var skipped = [];
+    var onlySet = null;
+    if (Array.isArray(options.only) && options.only.length > 0) {
+      onlySet = Object.create(null);
+      for (var oi = 0; oi < options.only.length; oi++) {
+        onlySet[options.only[oi]] = true;
+      }
+    }
+
+    if (!options.merge) {
+      var allLabels = Object.keys(STORAGE_KEYS);
+      for (var ci = 0; ci < allLabels.length; ci++) {
+        var label = allLabels[ci];
+        if (onlySet && !onlySet[label]) continue;
+        SafeStorage.remove(STORAGE_KEYS[label]);
+      }
+    }
+
+    for (var i = 0; i < dataKeys.length; i++) {
+      var key = dataKeys[i];
+
+      if (typeof STORAGE_KEYS[key] === 'undefined') {
+        skipped.push(key);
+        continue;
+      }
+
+      if (onlySet && !onlySet[key]) {
+        skipped.push(key);
+        continue;
+      }
+
+      try {
+        SafeStorage.set(STORAGE_KEYS[key], backup.data[key]);
+        restored.push(key);
+      } catch (e) {
+        skipped.push(key);
+        validation.warnings.push('Failed to restore "' + key + '": ' + (e.message || e));
+      }
+    }
+
+    return {
+      success: true,
+      restored: restored,
+      skipped: skipped,
+      warnings: validation.warnings,
+    };
+  }
+
+  /**
+   * Import a backup from a File object.
+   * @param {File} file
+   * @param {Object} [options] - Passed to restoreBackup
+   * @returns {Promise<Object>} restoreBackup result
+   */
+  function importFromFile(file, options) {
+    return new Promise(function (resolve) {
+      if (!file) {
+        resolve({ success: false, restored: [], skipped: [], error: 'No file provided', warnings: [] });
+        return;
+      }
+
+      var reader = new FileReader();
+      reader.onload = function () {
+        try {
+          var backup = JSON.parse(reader.result);
+          resolve(restoreBackup(backup, options));
+        } catch (e) {
+          resolve({ success: false, restored: [], skipped: [], error: 'Invalid JSON: ' + (e.message || e), warnings: [] });
+        }
+      };
+      reader.onerror = function () {
+        resolve({ success: false, restored: [], skipped: [], error: 'File read error', warnings: [] });
+      };
+      reader.readAsText(file);
+    });
+  }
+
+  /**
+   * Get a summary of currently stored data.
+   * @returns {Object} Counts and total size
+   */
+  function getDataSummary() {
+    var data = _collectData();
+    var labels = Object.keys(data);
+    var totalBytes = 0;
+    var breakdown = [];
+
+    for (var i = 0; i < labels.length; i++) {
+      var size = data[labels[i]].length;
+      totalBytes += size;
+      breakdown.push({ key: labels[i], bytes: size });
+    }
+
+    breakdown.sort(function (a, b) { return b.bytes - a.bytes; });
+
+    return {
+      keyCount: labels.length,
+      totalBytes: totalBytes,
+      humanSize: totalBytes < 1024
+        ? totalBytes + ' B'
+        : totalBytes < 1048576
+          ? (totalBytes / 1024).toFixed(1) + ' KB'
+          : (totalBytes / 1048576).toFixed(1) + ' MB',
+      breakdown: breakdown,
+    };
+  }
+
+  /**
+   * Delete all application data from localStorage.
+   * @returns {{ cleared: string[] }}
+   */
+  function clearAllData() {
+    var cleared = [];
+    var allLabels = Object.keys(STORAGE_KEYS);
+    for (var i = 0; i < allLabels.length; i++) {
+      var storageKey = STORAGE_KEYS[allLabels[i]];
+      if (SafeStorage.get(storageKey) !== null) {
+        SafeStorage.remove(storageKey);
+        cleared.push(allLabels[i]);
+      }
+    }
+    return { cleared: cleared };
+  }
+
+  /**
+   * Show the backup/restore modal UI.
+   */
+  function showModal() {
+    var existing = document.getElementById('backup-modal-overlay');
+    if (existing) existing.remove();
+
+    var overlay = document.createElement('div');
+    overlay.id = 'backup-modal-overlay';
+    overlay.style.cssText =
+      'position:fixed;top:0;left:0;width:100%;height:100%;' +
+      'background:rgba(0,0,0,0.6);z-index:10000;display:flex;' +
+      'align-items:center;justify-content:center;';
+    overlay.addEventListener('click', function (e) {
+      if (e.target === overlay) overlay.remove();
+    });
+
+    var modal = document.createElement('div');
+    modal.style.cssText =
+      'background:#1e1e2e;color:#cdd6f4;border-radius:12px;padding:24px;' +
+      'max-width:440px;width:90%;max-height:80vh;overflow-y:auto;' +
+      'box-shadow:0 8px 32px rgba(0,0,0,0.5);';
+
+    var title = document.createElement('h3');
+    title.textContent = '\uD83D\uDCBE Backup & Restore';
+    title.style.cssText = 'margin:0 0 4px;font-size:18px;';
+    modal.appendChild(title);
+
+    var subtitle = document.createElement('p');
+    subtitle.style.cssText = 'margin:0 0 20px;font-size:12px;color:#888;';
+    subtitle.textContent = 'Export or import all your chat data, sessions, snippets, and settings.';
+    modal.appendChild(subtitle);
+
+    var summary = getDataSummary();
+    var summaryDiv = document.createElement('div');
+    summaryDiv.style.cssText =
+      'background:rgba(255,255,255,0.05);border-radius:8px;padding:12px;margin-bottom:16px;font-size:13px;';
+    summaryDiv.innerHTML =
+      '<strong>Current Data:</strong> ' + summary.keyCount + ' keys, ' + summary.humanSize + ' total';
+    modal.appendChild(summaryDiv);
+
+    var exportBtn = document.createElement('button');
+    exportBtn.textContent = '\uD83D\uDCE4 Export Backup';
+    exportBtn.style.cssText =
+      'display:block;width:100%;padding:10px;border-radius:8px;border:none;' +
+      'background:#3498db;color:#fff;cursor:pointer;font-size:14px;font-weight:500;margin-bottom:12px;';
+    exportBtn.addEventListener('click', function () {
+      var result = exportBackup();
+      if (result.success) {
+        exportBtn.textContent = '\u2705 Exported! (' + (result.size / 1024).toFixed(1) + ' KB)';
+        exportBtn.style.background = '#2ecc71';
+        setTimeout(function () {
+          exportBtn.textContent = '\uD83D\uDCE4 Export Backup';
+          exportBtn.style.background = '#3498db';
+        }, 2500);
+      }
+    });
+    modal.appendChild(exportBtn);
+
+    var importLabel = document.createElement('label');
+    importLabel.style.cssText =
+      'display:block;width:100%;padding:10px;border-radius:8px;border:2px dashed #555;' +
+      'text-align:center;cursor:pointer;font-size:14px;color:#888;margin-bottom:12px;' +
+      'transition:border-color 0.2s;';
+    importLabel.textContent = '\uD83D\uDCE5 Click to import backup file...';
+
+    var fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = '.json';
+    fileInput.style.display = 'none';
+    fileInput.addEventListener('change', function () {
+      if (!fileInput.files || !fileInput.files[0]) return;
+      var file = fileInput.files[0];
+      importLabel.textContent = '\u23F3 Importing ' + file.name + '...';
+
+      importFromFile(file).then(function (result) {
+        if (result.success) {
+          importLabel.textContent = '\u2705 Restored ' + result.restored.length + ' keys!';
+          importLabel.style.borderColor = '#2ecc71';
+          importLabel.style.color = '#2ecc71';
+          if (result.warnings.length > 0) {
+            var warnP = document.createElement('p');
+            warnP.style.cssText = 'font-size:11px;color:#f39c12;margin:8px 0 0;';
+            warnP.textContent = '\u26A0\uFE0F ' + result.warnings.join('; ');
+            modal.insertBefore(warnP, importLabel.nextSibling);
+          }
+        } else {
+          importLabel.textContent = '\u274C ' + (result.error || 'Import failed');
+          importLabel.style.borderColor = '#e74c3c';
+          importLabel.style.color = '#e74c3c';
+        }
+      });
+    });
+    importLabel.appendChild(fileInput);
+    modal.appendChild(importLabel);
+
+    var dangerDiv = document.createElement('div');
+    dangerDiv.style.cssText =
+      'border-top:1px solid rgba(255,255,255,0.1);padding-top:16px;margin-top:8px;';
+
+    var dangerTitle = document.createElement('p');
+    dangerTitle.style.cssText = 'font-size:12px;color:#e74c3c;margin:0 0 8px;font-weight:600;';
+    dangerTitle.textContent = '\u26A0\uFE0F Danger Zone';
+    dangerDiv.appendChild(dangerTitle);
+
+    var clearBtn = document.createElement('button');
+    clearBtn.textContent = '\uD83D\uDDD1\uFE0F Clear All Data';
+    clearBtn.style.cssText =
+      'display:block;width:100%;padding:8px;border-radius:8px;' +
+      'border:1px solid #e74c3c;background:transparent;color:#e74c3c;' +
+      'cursor:pointer;font-size:13px;';
+    var clearConfirm = false;
+    clearBtn.addEventListener('click', function () {
+      if (!clearConfirm) {
+        clearBtn.textContent = '\u26A0\uFE0F Click again to confirm \u2014 this cannot be undone!';
+        clearBtn.style.background = '#e74c3c';
+        clearBtn.style.color = '#fff';
+        clearConfirm = true;
+        setTimeout(function () {
+          clearBtn.textContent = '\uD83D\uDDD1\uFE0F Clear All Data';
+          clearBtn.style.background = 'transparent';
+          clearBtn.style.color = '#e74c3c';
+          clearConfirm = false;
+        }, 4000);
+        return;
+      }
+      var result = clearAllData();
+      clearBtn.textContent = '\u2705 Cleared ' + result.cleared.length + ' keys';
+      clearBtn.style.background = '#2ecc71';
+      clearBtn.style.borderColor = '#2ecc71';
+      clearBtn.style.color = '#fff';
+      clearBtn.disabled = true;
+      var newSummary = getDataSummary();
+      summaryDiv.innerHTML =
+        '<strong>Current Data:</strong> ' + newSummary.keyCount + ' keys, ' + newSummary.humanSize + ' total';
+    });
+    dangerDiv.appendChild(clearBtn);
+    modal.appendChild(dangerDiv);
+
+    var closeBtn = document.createElement('button');
+    closeBtn.textContent = 'Close';
+    closeBtn.style.cssText =
+      'display:block;margin:16px auto 0;padding:8px 24px;border-radius:8px;' +
+      'border:1px solid #555;background:transparent;color:inherit;cursor:pointer;font-size:13px;';
+    closeBtn.addEventListener('click', function () { overlay.remove(); });
+    modal.appendChild(closeBtn);
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+  }
+
+  return {
+    FORMAT_VERSION: FORMAT_VERSION,
+    STORAGE_KEYS: STORAGE_KEYS,
+    createBackup: createBackup,
+    exportBackup: exportBackup,
+    validateBackup: validateBackup,
+    restoreBackup: restoreBackup,
+    importFromFile: importFromFile,
+    getDataSummary: getDataSummary,
+    clearAllData: clearAllData,
+    showModal: showModal,
+    _collectData: _collectData,
+  };
+})();

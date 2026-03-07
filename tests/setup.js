@@ -244,7 +244,8 @@ function loadApp() {
     'ConversationTags',
     'FormattingToolbar',
     'GlobalSessionSearch',
-    'AutoTagger'
+    'AutoTagger',
+    'DataBackup'
   ];
 
   for (const mod of modules) {
