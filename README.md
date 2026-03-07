@@ -24,17 +24,60 @@ A lightweight, zero-dependency chat interface that sends your prompts to GPT-4o,
 
 ## ✨ Features
 
+### Core
 - **Natural Language → Code** — Ask a question or describe a task in plain English; GPT-4o returns JavaScript that gets executed automatically
 - **Sandboxed Execution** — Generated code runs in an `<iframe sandbox="allow-scripts">` with no access to the parent page's DOM, cookies, localStorage, or variables
 - **Content Security Policy** — The sandbox iframe enforces `default-src 'none'; connect-src https:` so code can call external APIs but nothing else
 - **Nonce Validation** — Each execution gets a `crypto.randomUUID()` nonce to prevent stale or replayed postMessage events
-- **Conversation History** — Maintains a sliding window of up to 20 message pairs with automatic trimming and token-count warnings; viewable in a side panel with Markdown/JSON export
-- **Prompt Templates** — Built-in library of categorized prompt templates (data visualization, web APIs, utilities, creative) with search filtering
-- **Snippet Library** — Save, tag, search, rename, and re-run generated code snippets; persisted to localStorage
+- **Multi-Model Support** — Switch between GPT-4o, GPT-4o-mini, GPT-4-turbo, and more via the model selector
 - **API Key Management** — Detects `YOUR_API_KEY` placeholders in generated code and prompts for credentials per domain; keys are cached per session
-- **Input Guardrails** — Character limit (50K chars), total token estimate warnings (~80K threshold), and real-time character counter
-- **Cancel Execution** — Stop long-running sandbox code with a single click
+
+### Conversation Management
+- **Conversation History** — Maintains a sliding window of up to 20 message pairs with automatic trimming and token-count warnings
+- **Multi-Session** — Create, switch between, rename, and delete multiple conversation sessions with auto-save
+- **Cross-Tab Sync** — Detects concurrent edits across browser tabs via BroadcastChannel
+- **Conversation Fork** — Branch conversations from any message into new sessions
+- **Chapters** — Insert named section dividers with a table-of-contents sidebar
+- **Tags** — Colored tag labels on sessions with filtering and management
+- **Auto-Tagger** — Heuristic topic detection and automatic tag suggestions
+
+### Search & Navigation
+- **Message Search** — Full-text search across conversation messages with highlighting
+- **Global Session Search** — Search across all saved sessions at once
+- **Conversation Timeline** — Visual minimap sidebar for conversation navigation
+- **Bookmarks & Pinning** — Bookmark messages for quick reference; pin important ones to a floating bar
+- **Slash Commands** — `/`-triggered command dropdown with autocomplete and keyboard navigation
+
+### Productivity
+- **Prompt Templates** — Built-in library of categorized prompt templates with search filtering
+- **Snippet Library** — Save, tag, search, rename, and re-run generated code snippets
+- **Quick Replies** — Contextual follow-up suggestion chips after AI responses
+- **Formatting Toolbar** — Markdown formatting buttons above the chat input
+- **Scratchpad** — Persistent notepad panel with copy/insert/download actions
+- **Input History** — Navigate previous prompts with ↑/↓ arrow keys
+- **File Drop Zone** — Drag-and-drop file inclusion (text-based files, 100 KB limit)
+- **Focus Mode** — Distraction-free zen mode (Ctrl+Shift+F)
+
+### Analysis & Insights
+- **Chat Stats** — Conversation analytics: word counts, code blocks, response timing
+- **Cost Dashboard** — Persistent API spend tracker with budget alerts and daily chart
+- **Message Diff** — Compare any two messages with visual line-level diff
+- **Conversation Summarizer** — Heuristic summary with topics, decisions, and action items
+- **Response Time Badge** — Per-response latency indicator
+
+### Personalization
+- **Persona Presets** — Switchable system prompt presets with custom persona support
+- **Theme Manager** — Dark/light theme with OS preference detection
+- **Keyboard Shortcuts** — Global shortcuts with help modal
+- **Voice Input** — Browser speech recognition with language selection
+- **Read Aloud** — Text-to-speech for messages with voice/speed controls
+
+### Data
+- **Message Annotations** — Private notes/annotations on messages with labels
+- **Message Reactions** — Per-message emoji reactions with persistent counts
+- **Data Backup** — Full backup/restore for all 21 data keys (export/import/selective/merge)
 - **Zero Dependencies** — Single HTML file + CSS + JS. No build tools, no npm, no bundler. Just open and go.
+- **Input Guardrails** — Character limit (50K chars), token estimate warnings (~80K threshold), real-time counter
 
 ## 🚀 Getting Started
 
@@ -83,19 +126,65 @@ User Prompt  →  GPT-4o (system prompt: reply with JS only)
 
 ### Modules
 
-The codebase is organized into **nine** IIFE modules in `app.js`:
+The codebase is organized into **40** IIFE modules in `app.js`, each using the revealing-module pattern:
+
+<details>
+<summary><strong>Core (7 modules)</strong></summary>
 
 | Module | Purpose |
 |--------|---------|
-| `ChatConfig` | Frozen constants (model, limits, timeouts, system prompt) |
+| `SafeStorage` | Safe localStorage wrapper for restricted-storage environments |
+| `ChatConfig` | Frozen constants — model list, pricing, token limits, system prompt |
 | `ConversationManager` | Message history with sliding window trimming and token estimation |
 | `SandboxRunner` | Iframe sandbox lifecycle, execution, timeout, cancellation |
 | `ApiKeyManager` | OpenAI + per-service key storage, substitution, validation |
 | `UIController` | All DOM manipulation — button states, modals, output |
 | `ChatController` | Orchestrates send flow: input → API → code extraction → sandbox |
-| `PromptTemplates` | Browseable template library with search and category filtering |
-| `HistoryPanel` | Conversation viewer with Markdown/JSON export |
-| `SnippetLibrary` | Save, tag, search, rename, and re-run code snippets (localStorage) |
+
+</details>
+
+<details>
+<summary><strong>Features (33 modules)</strong></summary>
+
+| Module | Purpose |
+|--------|---------|
+| `PromptTemplates` | Categorized prompt library with search and one-click insert |
+| `HistoryPanel` | Slide-out conversation history with Markdown/JSON export/import |
+| `SnippetLibrary` | Persistent code snippet storage with tagging and search |
+| `MessageSearch` | Full-text search across conversation messages |
+| `ChatBookmarks` | Bookmark individual messages for quick reference |
+| `SlashCommands` | Slash-command dropdown with autocomplete and keyboard nav |
+| `MessageReactions` | Per-message emoji reactions with persistent counts |
+| `KeyboardShortcuts` | Global keyboard shortcuts with help modal |
+| `VoiceInput` | Browser speech recognition with language selection |
+| `ThemeManager` | Dark/light theme with OS preference detection |
+| `SessionManager` | Multi-session persistence with auto-save and quota management |
+| `CrossTabSync` | Multi-tab conflict detection via storage events + BroadcastChannel |
+| `ChatStats` | Conversation analytics (word counts, code blocks, timing) |
+| `CostDashboard` | Persistent API spend tracker with budget alerts and daily chart |
+| `PersonaPresets` | Switchable system prompt presets with custom persona support |
+| `ModelSelector` | Model picker with localStorage persistence |
+| `FileDropZone` | Drag-and-drop file inclusion (text-based files, 100 KB limit) |
+| `FocusMode` | Distraction-free zen mode (Ctrl+Shift+F) |
+| `InputHistory` | Navigate previous prompts with ↑/↓ arrow keys |
+| `Scratchpad` | Persistent notepad panel with copy/insert/download actions |
+| `ResponseTimeBadge` | Response time indicator below token usage area |
+| `ConversationFork` | Branch conversations from any message into new sessions |
+| `QuickReplies` | Contextual follow-up suggestion chips after AI responses |
+| `MessagePinning` | Pin important messages to a floating quick-jump bar |
+| `ReadAloud` | Text-to-speech for messages with voice/speed controls |
+| `MessageDiff` | Compare any two messages with visual line-level diff |
+| `ConversationTimeline` | Visual minimap sidebar for conversation navigation |
+| `ConversationSummarizer` | Heuristic conversation summary with topics and action items |
+| `MessageAnnotations` | Private notes/annotations on messages with labels |
+| `ConversationChapters` | Named section dividers with TOC navigation |
+| `ConversationTags` | Colored tag labels on sessions with filtering and management |
+| `FormattingToolbar` | Markdown formatting buttons above chat input |
+| `GlobalSessionSearch` | Full-text search across all saved sessions |
+| `AutoTagger` | Heuristic topic detection and automatic tag suggestions |
+| `DataBackup` | Full backup/restore for all user data (21 keys, export/import) |
+
+</details>
 
 ## 🔒 Security Model
 
@@ -131,7 +220,7 @@ The app executes AI-generated code, so security is a first-class concern:
 ```
 agenticchat/
 ├── index.html              # Single-page UI with CSP headers
-├── app.js                  # All application logic (modular IIFEs)
+├── app.js                  # All application logic (40 modular IIFEs)
 ├── style.css               # Responsive dark-theme styling
 ├── package.json            # npm metadata + test scripts
 ├── jest.config.js          # Jest test configuration
@@ -143,7 +232,20 @@ agenticchat/
 │   └── index.html          # API reference & architecture docs (GitHub Pages)
 ├── tests/
 │   ├── setup.js            # DOM mocking & app.js loader for jsdom
-│   └── app.test.js         # 90+ unit & integration tests
+│   ├── app.test.js         # Core module tests (800+)
+│   ├── annotations.test.js # MessageAnnotations tests
+│   ├── auto-tagger.test.js # AutoTagger tests
+│   ├── chapters.test.js    # ConversationChapters tests
+│   ├── conversation-tags.test.js # ConversationTags tests
+│   ├── cost-dashboard.test.js    # CostDashboard tests
+│   ├── data-backup.test.js       # DataBackup tests
+│   ├── formatting-toolbar.test.js # FormattingToolbar tests
+│   ├── messagediff.test.js       # MessageDiff tests
+│   ├── modules.test.js           # Module existence/integration tests
+│   ├── pinning.test.js           # MessagePinning tests
+│   ├── readaloud.test.js         # ReadAloud tests
+│   ├── summarizer.test.js        # ConversationSummarizer tests
+│   └── timeline.test.js          # ConversationTimeline tests
 └── .github/
     ├── copilot-instructions.md    # Copilot coding agent context
     ├── copilot-setup-steps.yml    # Copilot agent setup workflow
@@ -177,6 +279,7 @@ Contributions are welcome! Here's how:
 ### Guidelines
 
 - This is a **single-file app** — keep it that way unless there's a compelling reason to split
+- All 40 modules live in `app.js` as revealing-module IIFEs
 - Security is paramount — any change that touches the sandbox must be reviewed carefully
 - Test with various prompt types before submitting (simple questions, API calls, error cases)
 
