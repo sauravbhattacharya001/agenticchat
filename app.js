@@ -11720,6 +11720,20 @@ const AutoTagger = (() => {
     'able', 'using', 'used', 'example', 'really', 'actually', 'basically'
   ]);
 
+  /* ── Pre-compiled phrase patterns (avoids re-creating RegExp per call) ── */
+  const PHRASE_PATTERNS = {};
+  for (const [catId, cat] of Object.entries(CATEGORIES)) {
+    PHRASE_PATTERNS[catId] = [];
+    for (const word of cat.words) {
+      if (word.includes(' ')) {
+        PHRASE_PATTERNS[catId].push({
+          word,
+          regex: new RegExp(word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi')
+        });
+      }
+    }
+  }
+
   /* ── Text processing ─────────────────────────────────────── */
 
   /**
@@ -11779,20 +11793,21 @@ const AutoTagger = (() => {
       let weightedHits = 0;
 
       for (const word of cat.words) {
-        if (word.includes(' ')) {
-          // Multi-word phrase: count occurrences in raw text
-          const re = new RegExp(word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
-          const phraseMatches = (combinedText.match(re) || []).length;
-          if (phraseMatches > 0) {
-            matches++;
-            weightedHits += phraseMatches * 2; // phrases worth double
-          }
-        } else {
-          const count = freqData.wordFreq[word] || 0;
-          if (count > 0) {
-            matches++;
-            weightedHits += count;
-          }
+        if (word.includes(' ')) continue; // handled below via pre-compiled patterns
+        const count = freqData.wordFreq[word] || 0;
+        if (count > 0) {
+          matches++;
+          weightedHits += count;
+        }
+      }
+
+      // Multi-word phrases: use pre-compiled RegExp patterns
+      for (const { regex } of PHRASE_PATTERNS[catId]) {
+        regex.lastIndex = 0; // reset stateful regex
+        const phraseMatches = (combinedText.match(regex) || []).length;
+        if (phraseMatches > 0) {
+          matches++;
+          weightedHits += phraseMatches * 2; // phrases worth double
         }
       }
 
