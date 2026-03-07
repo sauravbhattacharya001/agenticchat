@@ -6293,11 +6293,7 @@ const ConversationFork = (() => {
     }, 3000);
   }
 
-  function _escapeHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
-  }
+  // Uses the shared _escapeHtml defined at file scope (line ~213).
 
   /**
    * Decorate history panel messages with fork buttons.
@@ -11456,21 +11452,19 @@ const FormattingToolbar = (() => {
     if (toolbar) {
       toolbar.style.display = isVisible ? 'flex' : 'none';
     }
-    try {
-      localStorage.setItem(STORAGE_KEY, isVisible ? '1' : '0');
-    } catch (e) { /* private browsing */ }
+    SafeStorage.set(STORAGE_KEY, isVisible ? '1' : '0');
   }
 
   function show() {
     isVisible = true;
     if (toolbar) toolbar.style.display = 'flex';
-    try { localStorage.setItem(STORAGE_KEY, '1'); } catch (e) {}
+    SafeStorage.set(STORAGE_KEY, '1');
   }
 
   function hide() {
     isVisible = false;
     if (toolbar) toolbar.style.display = 'none';
-    try { localStorage.setItem(STORAGE_KEY, '0'); } catch (e) {}
+    SafeStorage.set(STORAGE_KEY, '0');
   }
 
   /**
@@ -11520,14 +11514,12 @@ const FormattingToolbar = (() => {
       input.parentNode.insertBefore(tb, input);
     }
 
-    // Restore visibility from localStorage
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved === '1') {
-        isVisible = true;
-        toolbar.style.display = 'flex';
-      }
-    } catch (e) {}
+    // Restore visibility from SafeStorage
+    const saved = SafeStorage.get(STORAGE_KEY);
+    if (saved === '1') {
+      isVisible = true;
+      toolbar.style.display = 'flex';
+    }
 
     // Register keyboard shortcuts
     document.addEventListener('keydown', onKeyDown);
