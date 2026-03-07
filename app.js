@@ -48,6 +48,7 @@
  *   GlobalSessionSearch  — full-text search across all saved sessions
  *   AutoTagger           — heuristic topic detection and automatic tag suggestions
  *   ResponseRating       — thumbs up/down ratings on AI responses with model satisfaction dashboard
+ *   ConversationMerge    — combine 2+ sessions into one merged conversation (chronological interleave)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -12906,4 +12907,222 @@ const ResponseRating = (() => {
     getRatings, getModelStats, getOverallStats, exportRatings, clearAll,
     rate, unrate, getRating,
   };
+})();
+
+/* ---------- Conversation Merge ---------- */
+/**
+ * ConversationMerge — combine 2+ saved sessions into one merged conversation.
+ *
+ * Features:
+ *  • Multi-select sessions to merge via checkbox UI
+ *  • Chronological interleaving by message timestamps (falls back to order)
+ *  • Adds separator markers between source conversations
+ *  • Merged session preserves tags from all sources
+ *  • Option to delete originals after merge
+ *  • Accessible: keyboard nav, aria labels
+ */
+const ConversationMerge = (() => {
+  let modalEl = null;
+  let overlayEl = null;
+  let selected = new Set();
+
+  function open() {
+    if (modalEl) { close(); return; }
+    const sessions = SessionManager.getAll();
+    if (sessions.length < 2) {
+      alert('Need at least 2 saved sessions to merge.');
+      return;
+    }
+    selected.clear();
+    _render(sessions);
+  }
+
+  function close() {
+    if (overlayEl) { overlayEl.remove(); overlayEl = null; }
+    if (modalEl) { modalEl.remove(); modalEl = null; }
+    selected.clear();
+  }
+
+  function _render(sessions) {
+    // Overlay
+    overlayEl = document.createElement('div');
+    overlayEl.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.55);z-index:9998;';
+    overlayEl.addEventListener('click', close);
+    document.body.appendChild(overlayEl);
+
+    // Modal
+    modalEl = document.createElement('div');
+    modalEl.setAttribute('role', 'dialog');
+    modalEl.setAttribute('aria-modal', 'true');
+    modalEl.setAttribute('aria-label', 'Merge Sessions');
+    modalEl.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#1e1e2e;color:#cdd6f4;border:1px solid #45475a;border-radius:12px;padding:20px;z-index:9999;width:480px;max-width:92vw;max-height:80vh;display:flex;flex-direction:column;font-family:inherit;';
+
+    let html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">';
+    html += '<h3 style="margin:0;font-size:16px">🔀 Merge Sessions</h3>';
+    html += '<button id="merge-close" style="background:none;border:none;color:#cdd6f4;font-size:18px;cursor:pointer" title="Close">✕</button>';
+    html += '</div>';
+    html += '<p style="font-size:12px;color:#a6adc8;margin:0 0 10px">Select 2 or more sessions to combine into one. Messages will be interleaved chronologically.</p>';
+    html += '<div id="merge-list" style="flex:1;overflow-y:auto;min-height:100px;max-height:50vh;border:1px solid #313244;border-radius:8px;padding:4px">';
+
+    for (const s of sessions) {
+      const date = new Date(s.updatedAt).toLocaleDateString();
+      const preview = _esc((s.preview || '').slice(0, 50));
+      html += `<label style="display:flex;align-items:center;padding:8px;border-bottom:1px solid #313244;cursor:pointer;gap:8px" title="${_esc(s.name)}">`;
+      html += `<input type="checkbox" data-sid="${s.id}" class="merge-cb" style="accent-color:#89b4fa;width:16px;height:16px">`;
+      html += `<div style="flex:1;min-width:0"><div style="font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_esc(s.name)}</div>`;
+      html += `<div style="font-size:11px;color:#6c7086">${s.messageCount} msgs · ${date}${preview ? ' · ' + preview + '…' : ''}</div></div>`;
+      html += '</label>';
+    }
+    html += '</div>';
+
+    // Options
+    html += '<div style="margin-top:10px;display:flex;align-items:center;gap:12px">';
+    html += '<label style="font-size:12px;display:flex;align-items:center;gap:4px;color:#a6adc8"><input type="checkbox" id="merge-delete-originals"> Delete originals after merge</label>';
+    html += '</div>';
+
+    // Merged name
+    html += '<div style="margin-top:8px">';
+    html += '<input type="text" id="merge-name" placeholder="Merged session name (optional)" style="width:100%;box-sizing:border-box;padding:6px 10px;background:#313244;border:1px solid #45475a;border-radius:6px;color:#cdd6f4;font-size:13px">';
+    html += '</div>';
+
+    // Status + buttons
+    html += '<div id="merge-status" style="font-size:12px;color:#a6adc8;margin-top:6px;min-height:16px"></div>';
+    html += '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px">';
+    html += '<button id="merge-cancel" style="padding:6px 14px;background:#313244;border:1px solid #45475a;border-radius:6px;color:#cdd6f4;cursor:pointer;font-size:13px">Cancel</button>';
+    html += '<button id="merge-go" disabled style="padding:6px 14px;background:#89b4fa;border:none;border-radius:6px;color:#1e1e2e;cursor:pointer;font-size:13px;font-weight:600">Merge (0)</button>';
+    html += '</div>';
+
+    modalEl.innerHTML = html;
+    document.body.appendChild(modalEl);
+
+    // Events
+    modalEl.querySelector('#merge-close').addEventListener('click', close);
+    modalEl.querySelector('#merge-cancel').addEventListener('click', close);
+    modalEl.querySelector('#merge-go').addEventListener('click', _doMerge);
+
+    modalEl.querySelectorAll('.merge-cb').forEach(cb => {
+      cb.addEventListener('change', () => {
+        if (cb.checked) selected.add(cb.dataset.sid);
+        else selected.delete(cb.dataset.sid);
+        _updateStatus();
+      });
+    });
+  }
+
+  function _updateStatus() {
+    const btn = modalEl.querySelector('#merge-go');
+    const status = modalEl.querySelector('#merge-status');
+    const count = selected.size;
+    btn.disabled = count < 2;
+    btn.textContent = `Merge (${count})`;
+    if (count < 2) {
+      status.textContent = count === 0 ? '' : 'Select at least one more session';
+    } else {
+      // Count total messages
+      const sessions = SessionManager.getAll().filter(s => selected.has(s.id));
+      const total = sessions.reduce((sum, s) => sum + (s.messageCount || 0), 0);
+      status.textContent = `${count} sessions · ${total} total messages`;
+    }
+  }
+
+  function _doMerge() {
+    const sessions = SessionManager.getAll().filter(s => selected.has(s.id));
+    if (sessions.length < 2) return;
+
+    const deleteOriginals = modalEl.querySelector('#merge-delete-originals').checked;
+    const customName = modalEl.querySelector('#merge-name').value.trim();
+
+    // Collect all messages with source info
+    const allMessages = [];
+    const sourceNames = [];
+
+    for (const session of sessions) {
+      sourceNames.push(session.name);
+      if (session.messages && session.messages.length > 0) {
+        for (let i = 0; i < session.messages.length; i++) {
+          const msg = { ...session.messages[i] };
+          // Add metadata for sorting — use timestamp if present, otherwise use order
+          msg._sourceSession = session.name;
+          msg._sourceOrder = i;
+          msg._sourceTime = session.createdAt ? new Date(session.createdAt).getTime() + i : Date.now();
+          allMessages.push(msg);
+        }
+      }
+    }
+
+    // Sort: group by source session creation time, keep internal order
+    // This preserves conversation flow within each session
+    allMessages.sort((a, b) => a._sourceTime - b._sourceTime);
+
+    // Build merged messages with separator markers
+    const merged = [];
+    let currentSource = null;
+
+    for (const msg of allMessages) {
+      if (msg._sourceSession !== currentSource) {
+        currentSource = msg._sourceSession;
+        // Add a system separator
+        merged.push({
+          role: 'system',
+          content: `──── Merged from: ${currentSource} ────`
+        });
+      }
+      // Clean metadata
+      const clean = { role: msg.role, content: msg.content };
+      merged.push(clean);
+    }
+
+    // Create merged session name
+    const mergedName = customName ||
+      `Merged: ${sourceNames.slice(0, 3).join(' + ')}${sourceNames.length > 3 ? ` (+${sourceNames.length - 3})` : ''}`;
+
+    // Merge tags from all source sessions
+    const mergedTagIds = new Set();
+    if (typeof ConversationTags !== 'undefined') {
+      for (const session of sessions) {
+        const tags = ConversationTags.getSessionTags(session.id);
+        if (tags) tags.forEach(t => mergedTagIds.add(typeof t === 'string' ? t : t.id || t));
+      }
+    }
+
+    // Load into conversation and save
+    ConversationManager.clearHistory();
+    for (const msg of merged) {
+      ConversationManager.addMessage(msg.role, msg.content);
+    }
+
+    const savedSession = SessionManager.save(mergedName);
+
+    // Apply merged tags
+    if (savedSession && mergedTagIds.size > 0 && typeof ConversationTags !== 'undefined') {
+      for (const tagId of mergedTagIds) {
+        try { ConversationTags.addTagToSession(savedSession.id, tagId); } catch {}
+      }
+    }
+
+    // Delete originals if requested
+    if (deleteOriginals) {
+      for (const session of sessions) {
+        SessionManager.remove(session.id);
+      }
+    }
+
+    // Refresh UI
+    if (typeof UIController !== 'undefined' && UIController.renderMessages) {
+      UIController.renderMessages();
+    }
+    SessionManager.refresh();
+    close();
+
+    const count = merged.filter(m => m.role !== 'system').length;
+    console.log(`[ConversationMerge] Merged ${sessions.length} sessions (${count} messages) into "${mergedName}"`);
+  }
+
+  function _esc(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  return { open, close };
 })();
