@@ -1,7 +1,7 @@
 /* ============================================================
  * Agentic Chat — Application Logic
  *
- * Architecture (39 modules, all revealing-module-pattern IIFEs):
+ * Architecture (40 modules, all revealing-module-pattern IIFEs):
  *
  *   Core:
  *   SafeStorage          — safe localStorage wrapper for restricted-storage environments
@@ -46,6 +46,7 @@
  *   ConversationTags     — colored tag labels on sessions with filtering and management
  *   FormattingToolbar    — markdown formatting buttons above chat input
  *   GlobalSessionSearch  — full-text search across all saved sessions
+ *   AutoTagger           — heuristic topic detection and automatic tag suggestions
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -2732,6 +2733,15 @@ const SlashCommands = (() => {
             InputHistory.clearAll();
             UIController.setChatOutput(`Cleared ${count} prompt${count !== 1 ? 's' : ''} from input history.`);
           } },
+        { name: 'auto-tag', description: 'Auto-detect and apply topic tags to all untagged sessions', icon: '🏷️',
+          action: () => {
+            const result = AutoTagger.applyToAll();
+            if (result.tagged > 0) {
+              UIController.setChatOutput(`Auto-tagged ${result.tagged} session${result.tagged !== 1 ? 's' : ''} with ${result.totalApplied} tags.`);
+            } else {
+              UIController.setChatOutput('No untagged sessions with detectable topics.');
+            }
+          } },
     ]);
 
     function init() {
@@ -4221,6 +4231,18 @@ const SessionManager = (() => {
         refresh();
       });
       actions.appendChild(deleteBtn);
+
+      // Auto-tag button
+      if (typeof AutoTagger !== 'undefined') {
+        const autoTagBtn = document.createElement('button');
+        autoTagBtn.className = 'btn-sm';
+        autoTagBtn.textContent = '🏷️ Auto';
+        autoTagBtn.title = 'Suggest tags based on conversation content';
+        autoTagBtn.addEventListener('click', () => {
+          AutoTagger.showSuggestionModal(session.id);
+        });
+        actions.appendChild(autoTagBtn);
+      }
 
       card.appendChild(actions);
       fragment.appendChild(card);
@@ -10969,6 +10991,33 @@ const ConversationTags = (() => {
       });
     }
 
+    // Auto-tag all button (if AutoTagger available)
+    if (typeof AutoTagger !== 'undefined') {
+      const autoAllBtn = document.createElement('button');
+      autoAllBtn.textContent = '🏷️ Auto-Tag Untagged Sessions';
+      autoAllBtn.style.cssText =
+        'display:block;margin:16px auto 8px;padding:8px 24px;border-radius:8px;' +
+        'border:none;background:#3498db;color:#fff;cursor:pointer;font-size:13px;' +
+        'font-weight:500;';
+      autoAllBtn.addEventListener('click', () => {
+        const result = AutoTagger.applyToAll();
+        if (result.tagged > 0) {
+          autoAllBtn.textContent = '✓ Tagged ' + result.tagged + ' session' +
+            (result.tagged !== 1 ? 's' : '') + ' (' + result.totalApplied + ' tags)';
+          autoAllBtn.disabled = true;
+          autoAllBtn.style.background = '#2ecc71';
+          if (typeof SessionManager !== 'undefined' && SessionManager.refresh) {
+            SessionManager.refresh();
+          }
+        } else {
+          autoAllBtn.textContent = 'No untagged sessions with detectable topics';
+          autoAllBtn.disabled = true;
+          autoAllBtn.style.background = '#555';
+        }
+      });
+      modal.appendChild(autoAllBtn);
+    }
+
     // Close button
     const closeBtn = document.createElement('button');
     closeBtn.textContent = 'Close';
@@ -11502,5 +11551,565 @@ const FormattingToolbar = (() => {
     getFormat: getFormat,
     isVisible: function() { return isVisible; },
     FORMATS: FORMATS,
+  };
+})();
+
+/* ============================================================
+ * AutoTagger — heuristic topic detection and automatic tag suggestions
+ *
+ * Analyzes conversation messages to detect dominant topics and suggests
+ * relevant tags.  Uses a two-layer approach:
+ *   1. Category dictionaries — curated keyword lists for common topics
+ *   2. TF-IDF-inspired scoring — surface important terms not in the
+ *      stop-word list, weighted by frequency relative to message count
+ *
+ * Integrates with ConversationTags: suggested tags can be applied in
+ * one click.  Accessible from session cards ("🏷️ Auto" button) or
+ * from the Tags manager ("Auto-tag all" action).
+ *
+ * Public API:
+ *   AutoTagger.analyze(messages)           → [{ tag, score, source }]
+ *   AutoTagger.suggestForSession(sessionId) → [{ tag, score, source }]
+ *   AutoTagger.applyToSession(sessionId)    → number (tags applied)
+ *   AutoTagger.applyToAll()                 → { tagged, totalApplied }
+ *   AutoTagger.showSuggestionModal(sessionId) → void (UI)
+ *
+ * @namespace AutoTagger
+ */
+const AutoTagger = (() => {
+  const MAX_SUGGESTIONS = 5;
+  const MIN_SCORE = 0.15;
+  const MIN_MESSAGES = 2;
+
+  /* ── Category dictionaries ─────────────────────────────────
+   * Each category maps to an array of indicator words/phrases.
+   * Scores are boosted when multiple indicators from the same
+   * category appear.
+   */
+  const CATEGORIES = {
+    coding: {
+      tag: 'coding',
+      words: [
+        'function', 'variable', 'const', 'class', 'import', 'export',
+        'array', 'object', 'loop', 'iterate', 'algorithm', 'compile',
+        'debug', 'error', 'bug', 'fix', 'refactor', 'syntax', 'api',
+        'endpoint', 'request', 'response', 'json', 'parse', 'regex',
+        'typescript', 'javascript', 'python', 'java', 'rust', 'golang',
+        'html', 'css', 'react', 'node', 'npm', 'webpack', 'git',
+        'commit', 'branch', 'merge', 'pull request', 'repository',
+        'database', 'sql', 'query', 'schema', 'index', 'migration',
+        'async', 'await', 'promise', 'callback', 'closure'
+      ]
+    },
+    ai: {
+      tag: 'ai/ml',
+      words: [
+        'machine learning', 'deep learning', 'neural network', 'model',
+        'training', 'inference', 'dataset', 'feature', 'classification',
+        'regression', 'clustering', 'transformer', 'attention', 'gpt',
+        'llm', 'prompt', 'embedding', 'token', 'fine-tune', 'finetune',
+        'pytorch', 'tensorflow', 'gradient', 'loss function', 'epoch',
+        'batch', 'overfitting', 'underfitting', 'hyperparameter',
+        'reinforcement learning', 'generative', 'diffusion', 'bert',
+        'chatgpt', 'openai', 'anthropic', 'langchain', 'rag',
+        'retrieval augmented', 'vector database', 'agent', 'chain'
+      ]
+    },
+    writing: {
+      tag: 'writing',
+      words: [
+        'write', 'essay', 'article', 'blog', 'story', 'narrative',
+        'paragraph', 'sentence', 'grammar', 'tone', 'style',
+        'proofread', 'edit', 'rewrite', 'summarize', 'outline',
+        'creative writing', 'fiction', 'non-fiction', 'draft',
+        'headline', 'title', 'introduction', 'conclusion', 'thesis',
+        'argument', 'persuasive', 'descriptive', 'poem', 'poetry',
+        'dialogue', 'character', 'plot', 'setting', 'metaphor'
+      ]
+    },
+    math: {
+      tag: 'math',
+      words: [
+        'equation', 'formula', 'calculate', 'calculation', 'algebra',
+        'calculus', 'derivative', 'integral', 'matrix', 'vector',
+        'probability', 'statistics', 'mean', 'median', 'standard deviation',
+        'theorem', 'proof', 'geometry', 'trigonometry', 'polynomial',
+        'logarithm', 'exponent', 'factorial', 'permutation', 'combination',
+        'linear algebra', 'eigenvalue', 'differential', 'graph theory'
+      ]
+    },
+    data: {
+      tag: 'data',
+      words: [
+        'data analysis', 'visualization', 'chart', 'graph', 'plot',
+        'dashboard', 'metrics', 'kpi', 'report', 'csv', 'excel',
+        'spreadsheet', 'pivot', 'aggregate', 'filter', 'sort',
+        'pandas', 'numpy', 'matplotlib', 'seaborn', 'd3', 'tableau',
+        'etl', 'pipeline', 'warehouse', 'lake', 'analytics'
+      ]
+    },
+    devops: {
+      tag: 'devops',
+      words: [
+        'docker', 'container', 'kubernetes', 'k8s', 'deploy', 'deployment',
+        'ci/cd', 'pipeline', 'jenkins', 'github actions', 'terraform',
+        'ansible', 'aws', 'azure', 'gcp', 'cloud', 'server', 'nginx',
+        'load balancer', 'scaling', 'microservice', 'monitoring',
+        'logging', 'alerting', 'infrastructure', 'helm', 'pod',
+        'yaml', 'dockerfile', 'registry', 'orchestration'
+      ]
+    },
+    design: {
+      tag: 'design',
+      words: [
+        'design', 'ui', 'ux', 'user interface', 'user experience',
+        'wireframe', 'mockup', 'prototype', 'figma', 'sketch',
+        'layout', 'responsive', 'mobile', 'accessibility', 'a11y',
+        'color palette', 'typography', 'font', 'icon', 'animation',
+        'component', 'design system', 'material design', 'tailwind'
+      ]
+    },
+    business: {
+      tag: 'business',
+      words: [
+        'strategy', 'marketing', 'revenue', 'profit', 'customer',
+        'market', 'competitor', 'product', 'roadmap', 'stakeholder',
+        'budget', 'forecast', 'roi', 'conversion', 'funnel',
+        'acquisition', 'retention', 'growth', 'pricing', 'subscription',
+        'saas', 'b2b', 'b2c', 'startup', 'mvp', 'pitch'
+      ]
+    },
+    security: {
+      tag: 'security',
+      words: [
+        'security', 'vulnerability', 'exploit', 'attack', 'threat',
+        'encryption', 'decrypt', 'hash', 'authentication', 'authorization',
+        'oauth', 'jwt', 'token', 'firewall', 'penetration', 'pentest',
+        'xss', 'csrf', 'injection', 'sanitize', 'malware', 'phishing',
+        'certificate', 'ssl', 'tls', 'https', 'cors', 'csp'
+      ]
+    },
+    science: {
+      tag: 'science',
+      words: [
+        'research', 'experiment', 'hypothesis', 'theory', 'observation',
+        'biology', 'chemistry', 'physics', 'genetics', 'evolution',
+        'molecule', 'atom', 'cell', 'protein', 'dna', 'rna',
+        'climate', 'ecosystem', 'quantum', 'relativity', 'particle'
+      ]
+    }
+  };
+
+  /* ── Stop words ──────────────────────────────────────────── */
+  const STOP_WORDS = new Set([
+    'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+    'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
+    'should', 'may', 'might', 'shall', 'can', 'need', 'must', 'ought',
+    'i', 'me', 'my', 'mine', 'we', 'us', 'our', 'ours', 'you', 'your',
+    'yours', 'he', 'him', 'his', 'she', 'her', 'hers', 'it', 'its',
+    'they', 'them', 'their', 'theirs', 'this', 'that', 'these', 'those',
+    'what', 'which', 'who', 'whom', 'where', 'when', 'why', 'how',
+    'all', 'each', 'every', 'both', 'few', 'more', 'most', 'some',
+    'any', 'no', 'not', 'only', 'same', 'so', 'than', 'too', 'very',
+    'just', 'also', 'now', 'then', 'here', 'there', 'if', 'or', 'and',
+    'but', 'nor', 'for', 'yet', 'about', 'above', 'after', 'again',
+    'against', 'at', 'before', 'below', 'between', 'by', 'down',
+    'during', 'from', 'in', 'into', 'of', 'off', 'on', 'out', 'over',
+    'through', 'to', 'under', 'until', 'up', 'with', 'as', 'like',
+    'want', 'know', 'think', 'make', 'get', 'go', 'see', 'say', 'tell',
+    'give', 'take', 'come', 'look', 'use', 'find', 'put', 'try', 'ask',
+    'work', 'call', 'keep', 'let', 'begin', 'seem', 'help', 'show',
+    'hear', 'play', 'run', 'move', 'live', 'believe', 'happen', 'provide',
+    'include', 'turn', 'follow', 'start', 'point', 'read', 'right',
+    'thing', 'much', 'well', 'way', 'even', 'new', 'because', 'good',
+    'long', 'great', 'still', 'own', 'old', 'big', 'something',
+    'please', 'thanks', 'thank', 'sure', 'okay', 'yes', 'yeah', 'hi',
+    'hello', 'hey', 'one', 'two', 'three', 'first', 'second', 'last',
+    'able', 'using', 'used', 'example', 'really', 'actually', 'basically'
+  ]);
+
+  /* ── Text processing ─────────────────────────────────────── */
+
+  /**
+   * Normalize and tokenize text into lowercase words.
+   * Strips markdown code fences and inline code to avoid noise
+   * from code examples polluting keyword extraction.
+   * @param {string} text
+   * @returns {string[]}
+   */
+  function tokenize(text) {
+    // Remove code blocks (``` ... ```)
+    let clean = text.replace(/```[\s\S]*?```/g, ' ');
+    // Remove inline code (`...`)
+    clean = clean.replace(/`[^`]+`/g, ' ');
+    // Remove URLs
+    clean = clean.replace(/https?:\/\/\S+/g, ' ');
+    // Lowercase and split on non-alpha characters
+    return clean.toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length > 2);
+  }
+
+  /**
+   * Build a word frequency map from an array of messages.
+   * @param {{ role: string, content: string }[]} messages
+   * @returns {{ wordFreq: Object, totalWords: number, messageCount: number }}
+   */
+  function buildFrequencyMap(messages) {
+    const wordFreq = Object.create(null);
+    let totalWords = 0;
+    let messageCount = 0;
+
+    for (const msg of messages) {
+      if (msg.role === 'system') continue;
+      messageCount++;
+      const words = tokenize(msg.content || '');
+      for (const w of words) {
+        if (STOP_WORDS.has(w)) continue;
+        wordFreq[w] = (wordFreq[w] || 0) + 1;
+        totalWords++;
+      }
+    }
+
+    return { wordFreq, totalWords, messageCount };
+  }
+
+  /**
+   * Score categories against a word frequency map.
+   * Multi-word phrases are checked by scanning the original text.
+   * @param {{ wordFreq: Object, totalWords: number }} freqData
+   * @param {string} combinedText  Lowercased concatenation of all messages
+   * @returns {{ tag: string, score: number, source: string, matches: number }[]}
+   */
+  function scoreCategories(freqData, combinedText) {
+    const results = [];
+
+    for (const [catId, cat] of Object.entries(CATEGORIES)) {
+      let matches = 0;
+      let weightedHits = 0;
+
+      for (const word of cat.words) {
+        if (word.includes(' ')) {
+          // Multi-word phrase: count occurrences in raw text
+          const re = new RegExp(word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+          const phraseMatches = (combinedText.match(re) || []).length;
+          if (phraseMatches > 0) {
+            matches++;
+            weightedHits += phraseMatches * 2; // phrases worth double
+          }
+        } else {
+          const count = freqData.wordFreq[word] || 0;
+          if (count > 0) {
+            matches++;
+            weightedHits += count;
+          }
+        }
+      }
+
+      if (matches < 2) continue; // Need at least 2 indicator words
+
+      // Score: combination of match breadth (unique words) and depth (frequency)
+      const breadth = matches / cat.words.length; // 0-1
+      const depth = Math.min(1, weightedHits / (freqData.totalWords * 0.1 + 1));
+      const score = breadth * 0.6 + depth * 0.4;
+
+      if (score >= MIN_SCORE) {
+        results.push({
+          tag: cat.tag,
+          score: Math.round(score * 1000) / 1000,
+          source: 'category',
+          matches: matches
+        });
+      }
+    }
+
+    return results.sort((a, b) => b.score - a.score);
+  }
+
+  /**
+   * Extract top keywords not covered by category matches for
+   * "emergent" tags (e.g., specific technologies or topics).
+   * @param {Object} wordFreq
+   * @param {number} totalWords
+   * @param {Set<string>} coveredWords  Words already in matched categories
+   * @returns {{ tag: string, score: number, source: string }[]}
+   */
+  function extractKeywords(wordFreq, totalWords, coveredWords) {
+    const candidates = [];
+
+    for (const [word, count] of Object.entries(wordFreq)) {
+      if (coveredWords.has(word)) continue;
+      if (count < 3) continue; // Need repetition to be significant
+      if (word.length < 4) continue; // Too short to be meaningful tag
+
+      // TF-IDF-inspired: frequency relative to total, boosted by length
+      const tf = count / totalWords;
+      const lengthBoost = Math.min(1.5, word.length / 6);
+      const score = tf * lengthBoost * 10; // Scale up
+
+      if (score >= MIN_SCORE) {
+        candidates.push({
+          tag: word,
+          score: Math.round(score * 1000) / 1000,
+          source: 'keyword'
+        });
+      }
+    }
+
+    return candidates.sort((a, b) => b.score - a.score).slice(0, 3);
+  }
+
+  /* ── Core analysis ───────────────────────────────────────── */
+
+  /**
+   * Analyze an array of messages and return suggested tags.
+   * @param {{ role: string, content: string }[]} messages
+   * @returns {{ tag: string, score: number, source: string }[]}
+   */
+  function analyze(messages) {
+    if (!messages || messages.length < MIN_MESSAGES) return [];
+
+    const freqData = buildFrequencyMap(messages);
+    if (freqData.totalWords < 10) return [];
+
+    // Build combined text for phrase matching
+    const combinedText = messages
+      .filter(m => m.role !== 'system')
+      .map(m => (m.content || '').toLowerCase())
+      .join(' ');
+
+    // Score categories
+    const categoryTags = scoreCategories(freqData, combinedText);
+
+    // Collect words covered by matched categories
+    const coveredWords = new Set();
+    for (const ct of categoryTags) {
+      const cat = Object.values(CATEGORIES).find(c => c.tag === ct.tag);
+      if (cat) {
+        for (const w of cat.words) {
+          if (!w.includes(' ')) coveredWords.add(w);
+        }
+      }
+    }
+
+    // Extract emergent keyword tags
+    const keywordTags = extractKeywords(
+      freqData.wordFreq, freqData.totalWords, coveredWords
+    );
+
+    // Merge and limit
+    const all = [...categoryTags, ...keywordTags];
+    return all.slice(0, MAX_SUGGESTIONS);
+  }
+
+  /**
+   * Suggest tags for a saved session by ID.
+   * @param {string} sessionId
+   * @returns {{ tag: string, score: number, source: string }[]}
+   */
+  function suggestForSession(sessionId) {
+    if (typeof SessionManager === 'undefined') return [];
+    const sessions = SessionManager.getAll();
+    const session = sessions.find(s => s.id === sessionId);
+    if (!session || !session.messages) return [];
+    return analyze(session.messages);
+  }
+
+  /**
+   * Apply auto-detected tags to a session (skips duplicates).
+   * @param {string} sessionId
+   * @returns {number} Count of tags actually applied
+   */
+  function applyToSession(sessionId) {
+    if (typeof ConversationTags === 'undefined') return 0;
+    const suggestions = suggestForSession(sessionId);
+    let applied = 0;
+    for (const s of suggestions) {
+      if (ConversationTags.addTag(sessionId, s.tag)) {
+        applied++;
+      }
+    }
+    return applied;
+  }
+
+  /**
+   * Auto-tag all saved sessions that currently have no tags.
+   * @returns {{ tagged: number, totalApplied: number }}
+   */
+  function applyToAll() {
+    if (typeof SessionManager === 'undefined' || typeof ConversationTags === 'undefined') {
+      return { tagged: 0, totalApplied: 0 };
+    }
+    const sessions = SessionManager.getAll();
+    let tagged = 0;
+    let totalApplied = 0;
+    for (const session of sessions) {
+      const existing = ConversationTags.getTagsForSession(session.id);
+      if (existing.length > 0) continue; // skip already-tagged sessions
+      const count = applyToSession(session.id);
+      if (count > 0) {
+        tagged++;
+        totalApplied += count;
+      }
+    }
+    return { tagged, totalApplied };
+  }
+
+  /* ── UI ──────────────────────────────────────────────────── */
+
+  /**
+   * Show a modal with tag suggestions for a session.
+   * The user can accept/reject individual tags before applying.
+   * @param {string} sessionId
+   */
+  function showSuggestionModal(sessionId) {
+    const suggestions = suggestForSession(sessionId);
+
+    // Create overlay
+    const overlay = document.createElement('div');
+    overlay.style.cssText =
+      'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:10100;' +
+      'display:flex;align-items:center;justify-content:center;';
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) overlay.remove();
+    });
+
+    // Modal container
+    const modal = document.createElement('div');
+    modal.style.cssText =
+      'background:#1e1e2e;border:1px solid #444;border-radius:12px;' +
+      'padding:24px;max-width:420px;width:90%;color:#e0e0e0;' +
+      'box-shadow:0 8px 32px rgba(0,0,0,0.5);';
+
+    // Title
+    const title = document.createElement('h3');
+    title.textContent = '🏷️ Auto-Tag Suggestions';
+    title.style.cssText = 'margin:0 0 6px;font-size:16px;';
+    modal.appendChild(title);
+
+    const subtitle = document.createElement('p');
+    subtitle.style.cssText = 'margin:0 0 16px;font-size:12px;color:#888;';
+    subtitle.textContent = 'Select tags to apply to this session:';
+    modal.appendChild(subtitle);
+
+    if (suggestions.length === 0) {
+      const empty = document.createElement('p');
+      empty.textContent = 'No strong topic patterns detected. Try after more messages.';
+      empty.style.cssText = 'color:#888;font-style:italic;margin:16px 0;';
+      modal.appendChild(empty);
+    } else {
+      const checkboxes = [];
+
+      for (const s of suggestions) {
+        const existing = (typeof ConversationTags !== 'undefined')
+          ? ConversationTags.getTagsForSession(sessionId)
+          : [];
+        const alreadyTagged = existing.includes(s.tag.toLowerCase());
+
+        const row = document.createElement('label');
+        row.style.cssText =
+          'display:flex;align-items:center;gap:10px;padding:8px 0;' +
+          'border-bottom:1px solid rgba(255,255,255,0.08);cursor:pointer;';
+
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = !alreadyTagged;
+        cb.disabled = alreadyTagged;
+        cb.dataset.tag = s.tag;
+        checkboxes.push(cb);
+        row.appendChild(cb);
+
+        const color = (typeof ConversationTags !== 'undefined')
+          ? ConversationTags.colorForTag(s.tag)
+          : '#3498db';
+        const pill = document.createElement('span');
+        pill.textContent = s.tag;
+        pill.style.cssText =
+          'display:inline-block;padding:2px 10px;border-radius:10px;' +
+          'font-size:12px;color:#fff;font-weight:500;background:' + color + ';';
+        row.appendChild(pill);
+
+        const scoreEl = document.createElement('span');
+        const pct = Math.round(s.score * 100);
+        scoreEl.textContent = pct + '% · ' + s.source;
+        scoreEl.style.cssText = 'flex:1;font-size:11px;color:#888;text-align:right;';
+        row.appendChild(scoreEl);
+
+        if (alreadyTagged) {
+          const existingLabel = document.createElement('span');
+          existingLabel.textContent = '✓';
+          existingLabel.style.cssText = 'font-size:14px;color:#4ade80;';
+          existingLabel.title = 'Already tagged';
+          row.appendChild(existingLabel);
+        }
+
+        modal.appendChild(row);
+      }
+
+      // Buttons
+      const btnRow = document.createElement('div');
+      btnRow.style.cssText = 'display:flex;gap:8px;margin-top:16px;justify-content:flex-end;';
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.textContent = 'Cancel';
+      cancelBtn.style.cssText =
+        'padding:8px 20px;border-radius:8px;border:1px solid #555;' +
+        'background:transparent;color:inherit;cursor:pointer;font-size:13px;';
+      cancelBtn.addEventListener('click', () => overlay.remove());
+      btnRow.appendChild(cancelBtn);
+
+      const applyBtn = document.createElement('button');
+      applyBtn.textContent = 'Apply Selected';
+      applyBtn.style.cssText =
+        'padding:8px 20px;border-radius:8px;border:none;' +
+        'background:#3498db;color:#fff;cursor:pointer;font-size:13px;font-weight:500;';
+      applyBtn.addEventListener('click', () => {
+        let applied = 0;
+        for (const cb of checkboxes) {
+          if (cb.checked && !cb.disabled && typeof ConversationTags !== 'undefined') {
+            if (ConversationTags.addTag(sessionId, cb.dataset.tag)) {
+              applied++;
+            }
+          }
+        }
+        overlay.remove();
+        // Refresh session list to show new tag pills
+        if (typeof SessionManager !== 'undefined' && SessionManager.refresh) {
+          SessionManager.refresh();
+        }
+      });
+      btnRow.appendChild(applyBtn);
+      modal.appendChild(btnRow);
+    }
+
+    // Close-only button when no suggestions
+    if (suggestions.length === 0) {
+      const closeBtn = document.createElement('button');
+      closeBtn.textContent = 'Close';
+      closeBtn.style.cssText =
+        'display:block;margin:12px auto 0;padding:8px 24px;border-radius:8px;' +
+        'border:1px solid #555;background:transparent;color:inherit;cursor:pointer;';
+      closeBtn.addEventListener('click', () => overlay.remove());
+      modal.appendChild(closeBtn);
+    }
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+  }
+
+  /* ── Public API ──────────────────────────────────────────── */
+
+  return {
+    analyze: analyze,
+    suggestForSession: suggestForSession,
+    applyToSession: applyToSession,
+    applyToAll: applyToAll,
+    showSuggestionModal: showSuggestionModal,
+    // Expose internals for testing
+    _tokenize: tokenize,
+    _buildFrequencyMap: buildFrequencyMap,
+    _scoreCategories: scoreCategories,
+    _extractKeywords: extractKeywords,
+    _CATEGORIES: CATEGORIES,
+    _STOP_WORDS: STOP_WORDS,
+    _MIN_SCORE: MIN_SCORE,
   };
 })();

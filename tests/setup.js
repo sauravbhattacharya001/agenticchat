@@ -242,7 +242,9 @@ function loadApp() {
     'MessageAnnotations',
     'ConversationChapters',
     'ConversationTags',
-    'FormattingToolbar'
+    'FormattingToolbar',
+    'GlobalSessionSearch',
+    'AutoTagger'
   ];
 
   for (const mod of modules) {
