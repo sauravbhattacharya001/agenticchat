@@ -47,6 +47,7 @@
  *   FormattingToolbar    — markdown formatting buttons above chat input
  *   GlobalSessionSearch  — full-text search across all saved sessions
  *   AutoTagger           — heuristic topic detection and automatic tag suggestions
+ *   ResponseRating       — thumbs up/down ratings on AI responses with model satisfaction dashboard
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -1537,6 +1538,7 @@ const HistoryPanel = (() => {
     MessageReactions.decorateMessages();
     ConversationFork.decorateMessages();
     ReadAloud.decorateMessages();
+    ResponseRating.decorateMessages();
   }
 
   function exportAsMarkdown() {
@@ -8362,6 +8364,10 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('summary-btn').addEventListener('click', ConversationSummarizer.togglePanel);
   ConversationSummarizer.init();
 
+  // Response rating
+  document.getElementById('rating-btn').addEventListener('click', ResponseRating.toggleDashboard);
+  ResponseRating.init();
+
   // Cross-tab sync (must come after SessionManager.initAutoSave)
   CrossTabSync.init();
 });
@@ -12569,5 +12575,335 @@ const DataBackup = (() => {
     clearAllData: clearAllData,
     showModal: showModal,
     _collectData: _collectData,
+  };
+})();
+
+
+/* ---------- Response Rating ---------- */
+/**
+ * Rate AI responses with thumbs up/down. Tracks ratings per model for
+ * satisfaction insights. Shows a dashboard with per-model approval rates,
+ * trends, and exportable data.
+ *
+ * Public API:
+ *   init()              - inject styles, attach observer
+ *   decorateMessages()  - add rating buttons to assistant messages
+ *   toggleDashboard()   - open/close the ratings dashboard
+ *   getRatings()        - get all ratings data
+ *   getModelStats()     - per-model satisfaction stats
+ *   exportRatings(fmt)  - export as JSON or CSV
+ *   clearAll()          - clear all ratings
+ *
+ * @namespace ResponseRating
+ */
+const ResponseRating = (() => {
+  'use strict';
+
+  const STORAGE_KEY = 'agenticchat_ratings';
+  // Each rating: { messageIndex, rating ('up'|'down'), model, timestamp, snippet }
+  let ratings = [];
+  let dashboardEl = null;
+  let dashboardOverlayEl = null;
+  let styleInjected = false;
+
+  function init() {
+    load();
+    injectStyles();
+  }
+
+  function load() {
+    try {
+      const raw = SafeStorage.get(STORAGE_KEY);
+      if (raw) ratings = JSON.parse(raw);
+      if (!Array.isArray(ratings)) ratings = [];
+    } catch (_) { ratings = []; }
+  }
+
+  function save() {
+    try { SafeStorage.set(STORAGE_KEY, JSON.stringify(ratings)); } catch (_) {}
+  }
+
+  function injectStyles() {
+    if (styleInjected) return;
+    styleInjected = true;
+    const style = document.createElement('style');
+    style.textContent = `
+      .rating-bar { display:flex; gap:4px; align-items:center; margin-top:6px; }
+      .rating-btn {
+        background:transparent; border:1px solid #555; border-radius:6px;
+        padding:2px 8px; cursor:pointer; font-size:14px; opacity:0.6;
+        transition: opacity 0.2s, background 0.2s, border-color 0.2s;
+      }
+      .rating-btn:hover { opacity:1; background:rgba(255,255,255,0.08); }
+      .rating-btn.rated-up { opacity:1; border-color:#4caf50; background:rgba(76,175,80,0.15); }
+      .rating-btn.rated-down { opacity:1; border-color:#f44336; background:rgba(244,67,54,0.15); }
+      .rating-label { font-size:11px; color:#888; margin-left:4px; }
+
+      .rating-dashboard-overlay {
+        position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:9998;
+      }
+      .rating-dashboard {
+        position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+        background:var(--bg, #1e1e1e); border:1px solid #444; border-radius:12px;
+        padding:24px; z-index:9999; width:520px; max-width:92vw; max-height:80vh;
+        overflow-y:auto; color:inherit; font-family:inherit;
+      }
+      .rating-dashboard h3 { margin:0 0 16px; font-size:16px; }
+      .rating-dashboard table {
+        width:100%; border-collapse:collapse; font-size:13px; margin:12px 0;
+      }
+      .rating-dashboard th, .rating-dashboard td {
+        text-align:left; padding:6px 8px; border-bottom:1px solid #333;
+      }
+      .rating-dashboard th { font-weight:600; color:#aaa; font-size:11px; text-transform:uppercase; }
+      .rating-bar-visual {
+        height:14px; border-radius:4px; display:flex; overflow:hidden;
+      }
+      .rating-bar-up { background:#4caf50; height:100%; }
+      .rating-bar-down { background:#f44336; height:100%; }
+      .rating-summary { display:flex; gap:20px; margin:12px 0; flex-wrap:wrap; }
+      .rating-stat { text-align:center; }
+      .rating-stat-value { font-size:24px; font-weight:700; }
+      .rating-stat-label { font-size:11px; color:#888; }
+      .rating-actions { display:flex; gap:8px; margin-top:16px; justify-content:flex-end; }
+      .rating-actions button {
+        padding:6px 14px; border-radius:6px; border:1px solid #555;
+        background:transparent; color:inherit; cursor:pointer; font-size:12px;
+      }
+      .rating-actions button:hover { background:rgba(255,255,255,0.08); }
+      .rating-actions .btn-danger-sm { border-color:#f44336; color:#f44336; }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function rate(messageIndex, rating) {
+    if (typeof messageIndex !== 'number' || messageIndex < 0) return false;
+    if (rating !== 'up' && rating !== 'down') return false;
+
+    // Get model and snippet from message
+    const history = ConversationManager.getHistory();
+    const nonSystem = [];
+    for (let i = 0; i < history.length; i++) {
+      if (history[i].role !== 'system') nonSystem.push({ idx: i, msg: history[i] });
+    }
+    const entry = nonSystem[messageIndex];
+    if (!entry || entry.msg.role !== 'assistant') return false;
+
+    // Remove existing rating for this message index
+    ratings = ratings.filter(r => r.messageIndex !== messageIndex);
+
+    ratings.push({
+      messageIndex: messageIndex,
+      rating: rating,
+      model: ChatConfig.MODEL || 'unknown',
+      timestamp: Date.now(),
+      snippet: (entry.msg.content || '').slice(0, 80),
+    });
+    save();
+    return true;
+  }
+
+  function unrate(messageIndex) {
+    const before = ratings.length;
+    ratings = ratings.filter(r => r.messageIndex !== messageIndex);
+    if (ratings.length < before) { save(); return true; }
+    return false;
+  }
+
+  function getRating(messageIndex) {
+    const r = ratings.find(r => r.messageIndex === messageIndex);
+    return r ? r.rating : null;
+  }
+
+  function getRatings() { return ratings.slice(); }
+
+  function getModelStats() {
+    const stats = {};
+    for (const r of ratings) {
+      if (!stats[r.model]) stats[r.model] = { up: 0, down: 0, total: 0 };
+      stats[r.model][r.rating]++;
+      stats[r.model].total++;
+    }
+    return stats;
+  }
+
+  function getOverallStats() {
+    let up = 0, down = 0;
+    for (const r of ratings) { if (r.rating === 'up') up++; else down++; }
+    return { up, down, total: up + down, rate: (up + down) > 0 ? Math.round(up / (up + down) * 100) : 0 };
+  }
+
+  function decorateMessages() {
+    const container = document.getElementById('chat-output');
+    if (!container) return;
+
+    const msgDivs = container.querySelectorAll('.history-msg.assistant');
+    msgDivs.forEach((div, displayIndex) => {
+      // Remove existing
+      const existing = div.querySelector('.rating-bar');
+      if (existing) existing.remove();
+
+      const bar = document.createElement('div');
+      bar.className = 'rating-bar';
+      const current = getRating(displayIndex);
+
+      const upBtn = document.createElement('button');
+      upBtn.className = 'rating-btn' + (current === 'up' ? ' rated-up' : '');
+      upBtn.textContent = '👍';
+      upBtn.title = current === 'up' ? 'Remove rating' : 'Good response';
+      upBtn.addEventListener('click', () => {
+        if (current === 'up') { unrate(displayIndex); } else { rate(displayIndex, 'up'); }
+        decorateMessages();
+      });
+
+      const downBtn = document.createElement('button');
+      downBtn.className = 'rating-btn' + (current === 'down' ? ' rated-down' : '');
+      downBtn.textContent = '👎';
+      downBtn.title = current === 'down' ? 'Remove rating' : 'Poor response';
+      downBtn.addEventListener('click', () => {
+        if (current === 'down') { unrate(displayIndex); } else { rate(displayIndex, 'down'); }
+        decorateMessages();
+      });
+
+      bar.appendChild(upBtn);
+      bar.appendChild(downBtn);
+
+      if (current) {
+        const label = document.createElement('span');
+        label.className = 'rating-label';
+        label.textContent = current === 'up' ? 'Helpful' : 'Not helpful';
+        bar.appendChild(label);
+      }
+
+      div.appendChild(bar);
+    });
+  }
+
+  function openDashboard() {
+    closeDashboard();
+    const overlay = document.createElement('div');
+    overlay.className = 'rating-dashboard-overlay';
+    overlay.addEventListener('click', closeDashboard);
+    document.body.appendChild(overlay);
+    dashboardOverlayEl = overlay;
+
+    const panel = document.createElement('div');
+    panel.className = 'rating-dashboard';
+
+    const overall = getOverallStats();
+    const modelStats = getModelStats();
+
+    let html = '<h3>⭐ Response Ratings Dashboard</h3>';
+
+    // Summary
+    html += '<div class="rating-summary">';
+    html += `<div class="rating-stat"><div class="rating-stat-value">${overall.total}</div><div class="rating-stat-label">Total Ratings</div></div>`;
+    html += `<div class="rating-stat"><div class="rating-stat-value" style="color:#4caf50">${overall.up}</div><div class="rating-stat-label">👍 Helpful</div></div>`;
+    html += `<div class="rating-stat"><div class="rating-stat-value" style="color:#f44336">${overall.down}</div><div class="rating-stat-label">👎 Not Helpful</div></div>`;
+    html += `<div class="rating-stat"><div class="rating-stat-value">${overall.rate}%</div><div class="rating-stat-label">Satisfaction</div></div>`;
+    html += '</div>';
+
+    // Overall bar
+    if (overall.total > 0) {
+      const upPct = (overall.up / overall.total * 100).toFixed(1);
+      const downPct = (overall.down / overall.total * 100).toFixed(1);
+      html += '<div class="rating-bar-visual">';
+      html += `<div class="rating-bar-up" style="width:${upPct}%" title="${upPct}% helpful"></div>`;
+      html += `<div class="rating-bar-down" style="width:${downPct}%" title="${downPct}% not helpful"></div>`;
+      html += '</div>';
+    }
+
+    // Per-model table
+    const models = Object.keys(modelStats).sort();
+    if (models.length > 0) {
+      html += '<table><thead><tr><th>Model</th><th>👍</th><th>👎</th><th>Total</th><th>Satisfaction</th><th></th></tr></thead><tbody>';
+      for (const m of models) {
+        const s = modelStats[m];
+        const pct = Math.round(s.up / s.total * 100);
+        const upW = (s.up / s.total * 100).toFixed(1);
+        const downW = (s.down / s.total * 100).toFixed(1);
+        html += `<tr><td>${_esc(m)}</td><td>${s.up}</td><td>${s.down}</td><td>${s.total}</td><td>${pct}%</td>`;
+        html += `<td style="width:100px"><div class="rating-bar-visual"><div class="rating-bar-up" style="width:${upW}%"></div><div class="rating-bar-down" style="width:${downW}%"></div></div></td></tr>`;
+      }
+      html += '</tbody></table>';
+    } else {
+      html += '<p style="color:#888;text-align:center;margin:20px 0">No ratings yet. Rate AI responses with 👍 or 👎 to see stats here.</p>';
+    }
+
+    // Recent ratings
+    if (ratings.length > 0) {
+      html += '<details><summary style="cursor:pointer;color:#aaa;font-size:12px;margin-top:12px">Recent ratings (' + ratings.length + ')</summary>';
+      html += '<div style="max-height:200px;overflow-y:auto;margin-top:8px">';
+      const recent = ratings.slice().reverse().slice(0, 20);
+      for (const r of recent) {
+        const icon = r.rating === 'up' ? '👍' : '👎';
+        const time = new Date(r.timestamp).toLocaleString();
+        const snippet = _esc((r.snippet || '').slice(0, 60));
+        html += `<div style="font-size:12px;padding:4px 0;border-bottom:1px solid #222">${icon} <strong>${_esc(r.model)}</strong> — "${snippet}…" <span style="color:#666;float:right">${time}</span></div>`;
+      }
+      html += '</div></details>';
+    }
+
+    // Actions
+    html += '<div class="rating-actions">';
+    html += '<button onclick="ResponseRating.exportRatings(\'json\')" title="Export as JSON">📋 JSON</button>';
+    html += '<button onclick="ResponseRating.exportRatings(\'csv\')" title="Export as CSV">📊 CSV</button>';
+    html += '<button class="btn-danger-sm" onclick="if(confirm(\'Clear all ratings?\')){ResponseRating.clearAll();ResponseRating.closeDashboard();ResponseRating.openDashboard();}">🗑️ Clear</button>';
+    html += '<button onclick="ResponseRating.closeDashboard()">Close</button>';
+    html += '</div>';
+
+    panel.innerHTML = html;
+    document.body.appendChild(panel);
+    dashboardEl = panel;
+  }
+
+  function closeDashboard() {
+    if (dashboardOverlayEl) { dashboardOverlayEl.remove(); dashboardOverlayEl = null; }
+    if (dashboardEl) { dashboardEl.remove(); dashboardEl = null; }
+  }
+
+  function toggleDashboard() {
+    if (dashboardEl) closeDashboard(); else openDashboard();
+  }
+
+  function exportRatings(format) {
+    if (ratings.length === 0) { alert('No ratings to export.'); return; }
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    if (format === 'csv') {
+      let csv = 'MessageIndex,Rating,Model,Timestamp,Snippet\n';
+      for (const r of ratings) {
+        csv += `${r.messageIndex},${r.rating},"${(r.model || '').replace(/"/g, '""')}",${new Date(r.timestamp).toISOString()},"${(r.snippet || '').replace(/"/g, '""')}"\n`;
+      }
+      _download(`ratings-${ts}.csv`, csv, 'text/csv');
+    } else {
+      _download(`ratings-${ts}.json`, JSON.stringify(ratings, null, 2), 'application/json');
+    }
+  }
+
+  function clearAll() {
+    ratings = [];
+    save();
+    decorateMessages();
+  }
+
+  function _esc(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  function _download(name, content, mime) {
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+  }
+
+  return {
+    init, decorateMessages, toggleDashboard, openDashboard, closeDashboard,
+    getRatings, getModelStats, getOverallStats, exportRatings, clearAll,
+    rate, unrate, getRating,
   };
 })();

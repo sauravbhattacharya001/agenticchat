@@ -180,6 +180,7 @@ function setupDOM() {
     <span id="model-label"></span>
     <button id="zen-btn"></button>
     <button id="fmt-btn"></button>
+    <button id="rating-btn"></button>
     <button id="annotations-btn"></button>
     <button id="summary-btn"></button>
     <button id="chapters-btn"></button>
@@ -245,7 +246,8 @@ function loadApp() {
     'FormattingToolbar',
     'GlobalSessionSearch',
     'AutoTagger',
-    'DataBackup'
+    'DataBackup',
+    'ResponseRating'
   ];
 
   for (const mod of modules) {
