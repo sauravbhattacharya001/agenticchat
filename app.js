@@ -204,6 +204,17 @@ function sanitizeStorageObject(obj) {
   return clean;
 }
 
+/* ---------- Shared HTML Escape ---------- */
+/**
+ * Escape HTML special characters to prevent XSS in rendered content.
+ * Used by ChatStats, CostDashboard, PersonaPresets, HistoryPanel,
+ * ConversationTimeline, and GlobalSessionSearch.
+ */
+function _escapeHtml(str) {
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 /* ---------- Conversation Manager ---------- */
 /**
  * Manages the conversation message history sent to the OpenAI API.
@@ -1401,6 +1412,11 @@ const HistoryPanel = (() => {
     return node;
   }
 
+  /** File-safe ISO timestamp (colons/dots → dashes, trimmed to seconds). */
+  function _fileTimestamp() {
+    return new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  }
+
   function toggle() {
     isOpen = !isOpen;
     const panel = el('history-panel');
@@ -1530,7 +1546,7 @@ const HistoryPanel = (() => {
       return;
     }
 
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const timestamp = _fileTimestamp();
     let md = `# Agentic Chat Export\n\n**Exported:** ${new Date().toLocaleString()}\n\n---\n\n`;
 
     messages.forEach((msg) => {
@@ -1548,7 +1564,7 @@ const HistoryPanel = (() => {
       return;
     }
 
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const timestamp = _fileTimestamp();
     const data = {
       exported: new Date().toISOString(),
       model: ChatConfig.MODEL,
@@ -1566,16 +1582,10 @@ const HistoryPanel = (() => {
       return;
     }
 
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const timestamp = _fileTimestamp();
     const dateStr = new Date().toLocaleString();
 
-    function escapeHTML(str) {
-      return str
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
-    }
+    const escapeHTML = _escapeHtml;
 
     function renderMessageHTML(msg) {
       const isUser = msg.role === 'user';
@@ -1655,7 +1665,7 @@ ${messagesHTML}
       return;
     }
 
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const timestamp = _fileTimestamp();
 
     function csvEscape(str) {
       // Defend against CSV injection (DDE/formula injection): if the cell
@@ -4772,11 +4782,7 @@ const ChatStats = (() => {
     return node;
   }
 
-  /** Escape HTML special characters to prevent XSS in rendered stats. */
-  function _esc(str) {
-    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-  }
+  const _esc = _escapeHtml;
 
   /**
    * Compute statistics from current conversation messages.
@@ -5132,10 +5138,8 @@ const CostDashboard = (() => {
 
   /* ── Rendering ───────────────────────────────────────────────── */
 
-  function _esc(s) {
-    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  }
+  const _esc = _escapeHtml;
+
 
   function _fmtCost(n) {
     if (n < 0.01) return '$' + n.toFixed(6);
@@ -5355,11 +5359,8 @@ const PersonaPresets = (() => {
   const STORAGE_KEY = 'agenticchat_persona';
   let isOpen = false;
 
-  /** Escape HTML special characters to prevent XSS in rendered presets. */
-  function _esc(str) {
-    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-  }
+  const _esc = _escapeHtml;
+
 
   const presets = [
     {
@@ -8090,11 +8091,7 @@ const ConversationTimeline = (() => {
     if (tooltipEl) tooltipEl.style.display = 'none';
   }
 
-  function escapeHtml(text) {
-    let div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-  }
+  const escapeHtml = _escapeHtml;
 
   // ── Stats ────────────────────────────────────────────────
 
@@ -11125,12 +11122,8 @@ const GlobalSessionSearch = (() => {
     if (el) el.innerHTML = '';
   }
 
-  /** Escape HTML to prevent XSS. */
-  function _esc(str) {
-    const d = document.createElement('div');
-    d.textContent = str;
-    return d.innerHTML;
-  }
+  const _esc = _escapeHtml;
+
 
   /** Highlight matches in text, returning safe HTML. */
   function _highlight(text, query, caseSensitive) {
