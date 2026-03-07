@@ -4444,7 +4444,7 @@ describe('SlashCommands', () => {
   describe('getCommands', () => {
     test('returns all commands', () => {
       const cmds = SlashCommands.getCommands();
-      expect(cmds.length).toBe(21);
+      expect(cmds.length).toBe(26);
     });
 
     test('returns a defensive copy', () => {

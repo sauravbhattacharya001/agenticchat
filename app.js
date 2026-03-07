@@ -2755,6 +2755,8 @@ const SlashCommands = (() => {
               UIController.setChatOutput('No untagged sessions with detectable topics.');
             }
           } },
+        { name: 'replay', description: 'Replay conversation message-by-message with transport controls', icon: '🎬',
+          action: () => ConversationReplay.start() },
     ]);
 
     function init() {
@@ -13141,3 +13143,342 @@ const ConversationMerge = (() => {
 
   return { open, close };
 })();
+
+
+// 🎬 Conversation Replay ─────────────────────────────────────────────────────
+const ConversationReplay = (() => {
+  'use strict';
+
+  var STATE_STOPPED = 0;
+  var STATE_PLAYING = 1;
+  var STATE_PAUSED  = 2;
+
+  var state = STATE_STOPPED;
+  var currentIndex = 0;
+  var messages = [];
+  var speed = 1;
+  var timerId = null;
+  var barEl = null;
+  var styleInjected = false;
+
+  var USER_DELAY_MS    = 2000;
+  var ASSIST_DELAY_MS  = 3000;
+  var SYSTEM_DELAY_MS  = 800;
+  var SPEEDS = [0.5, 1, 2, 4];
+
+  // ── Helpers ──
+
+  function _delay(role) {
+    var base = role === 'user' ? USER_DELAY_MS
+             : role === 'assistant' ? ASSIST_DELAY_MS
+             : SYSTEM_DELAY_MS;
+    return Math.round(base / speed);
+  }
+
+  function _injectStyles() {
+    if (styleInjected) return;
+    styleInjected = true;
+    var s = document.createElement('style');
+    s.textContent = [
+      '.replay-bar {',
+      '  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);',
+      '  background: #1e1e2e; border: 1px solid #45475a; border-radius: 12px;',
+      '  padding: 8px 16px; display: flex; align-items: center; gap: 10px;',
+      '  z-index: 10000; font-family: inherit; color: #cdd6f4;',
+      '  box-shadow: 0 4px 24px rgba(0,0,0,.4);',
+      '}',
+      '.replay-bar button {',
+      '  background: none; border: 1px solid #45475a; border-radius: 6px;',
+      '  color: #cdd6f4; cursor: pointer; font-size: 16px; width: 36px; height: 32px;',
+      '  display: flex; align-items: center; justify-content: center; padding: 0;',
+      '  transition: background .15s, border-color .15s;',
+      '}',
+      '.replay-bar button:hover { background: #313244; border-color: #585b70; }',
+      '.replay-bar button:disabled { opacity: .4; cursor: default; }',
+      '.replay-bar button:disabled:hover { background: none; border-color: #45475a; }',
+      '.replay-bar .replay-progress {',
+      '  font-size: 13px; color: #a6adc8; min-width: 60px; text-align: center;',
+      '}',
+      '.replay-bar .replay-speed {',
+      '  font-size: 12px; color: #89b4fa; cursor: pointer; padding: 2px 8px;',
+      '  border: 1px solid #45475a; border-radius: 6px; background: none;',
+      '  min-width: 40px; text-align: center;',
+      '}',
+      '.replay-bar .replay-speed:hover { background: #313244; }',
+      '.replay-typing {',
+      '  display: inline-flex; gap: 4px; padding: 8px 12px;',
+      '}',
+      '.replay-typing span {',
+      '  width: 8px; height: 8px; border-radius: 50%; background: #6c7086;',
+      '  animation: replayDot 1.2s infinite;',
+      '}',
+      '.replay-typing span:nth-child(2) { animation-delay: .2s; }',
+      '.replay-typing span:nth-child(3) { animation-delay: .4s; }',
+      '@keyframes replayDot {',
+      '  0%, 60%, 100% { opacity: .3; transform: scale(.8); }',
+      '  30% { opacity: 1; transform: scale(1); }',
+      '}',
+      '.replay-hidden { display: none !important; }',
+      '.replay-reveal {',
+      '  animation: replayFadeIn .3s ease-out;',
+      '}',
+      '@keyframes replayFadeIn {',
+      '  from { opacity: 0; transform: translateY(8px); }',
+      '  to   { opacity: 1; transform: translateY(0); }',
+      '}',
+    ].join('\n');
+    document.body.appendChild(s);
+  }
+
+  // ── Control bar ──
+
+  function _createBar() {
+    _injectStyles();
+    if (barEl) barEl.remove();
+    barEl = document.createElement('div');
+    barEl.className = 'replay-bar';
+    barEl.setAttribute('role', 'toolbar');
+    barEl.setAttribute('aria-label', 'Conversation Replay');
+    _renderBar();
+    document.body.appendChild(barEl);
+  }
+
+  function _renderBar() {
+    if (!barEl) return;
+    var total = messages.length;
+    var idx = Math.min(currentIndex + 1, total);
+    var playing = state === STATE_PLAYING;
+    var stopped = state === STATE_STOPPED;
+
+    barEl.innerHTML = [
+      '<span style="font-size:14px;margin-right:4px" title="Conversation Replay">🎬</span>',
+      '<button id="replay-prev" title="Previous message" aria-label="Previous"' + (currentIndex <= 0 || playing ? ' disabled' : '') + '>⏮</button>',
+      '<button id="replay-play" title="' + (playing ? 'Pause' : 'Play') + '" aria-label="' + (playing ? 'Pause' : 'Play') + '">' + (playing ? '⏸' : '▶️') + '</button>',
+      '<button id="replay-next" title="Next message" aria-label="Next"' + (currentIndex >= total - 1 || playing ? ' disabled' : '') + '>⏭</button>',
+      '<button id="replay-stop" title="Stop replay" aria-label="Stop"' + (stopped ? ' disabled' : '') + '>⏹</button>',
+      '<span class="replay-progress">' + idx + ' / ' + total + '</span>',
+      '<span class="replay-speed" id="replay-speed" title="Click to change speed">' + speed + 'x</span>',
+    ].join('');
+
+    var prevBtn = barEl.querySelector('#replay-prev');
+    var playBtn = barEl.querySelector('#replay-play');
+    var nextBtn = barEl.querySelector('#replay-next');
+    var stopBtn = barEl.querySelector('#replay-stop');
+    var speedBtn = barEl.querySelector('#replay-speed');
+
+    if (prevBtn) prevBtn.addEventListener('click', prev);
+    if (playBtn) playBtn.addEventListener('click', function() {
+      if (state === STATE_PLAYING) pause();
+      else play();
+    });
+    if (nextBtn) nextBtn.addEventListener('click', next);
+    if (stopBtn) stopBtn.addEventListener('click', stop);
+    if (speedBtn) speedBtn.addEventListener('click', cycleSpeed);
+  }
+
+  // ── Message visibility ──
+
+  function _getMsgElements() {
+    var output = document.getElementById('chat-output');
+    if (!output) return [];
+    return Array.prototype.slice.call(output.children);
+  }
+
+  function _hideAll() {
+    var els = _getMsgElements();
+    for (var i = 0; i < els.length; i++) {
+      els[i].classList.add('replay-hidden');
+      els[i].classList.remove('replay-reveal');
+    }
+  }
+
+  function _showUpTo(index) {
+    var els = _getMsgElements();
+    for (var i = 0; i < els.length; i++) {
+      if (i <= index) {
+        var wasHidden = els[i].classList.contains('replay-hidden');
+        els[i].classList.remove('replay-hidden');
+        if (wasHidden && i === index) {
+          els[i].classList.add('replay-reveal');
+        }
+      } else {
+        els[i].classList.add('replay-hidden');
+        els[i].classList.remove('replay-reveal');
+      }
+    }
+    // Scroll revealed message into view
+    if (els[index]) {
+      els[index].scrollIntoView && els[index].scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
+  }
+
+  function _showTypingIndicator() {
+    var output = document.getElementById('chat-output');
+    if (!output) return;
+    var existing = output.querySelector('.replay-typing-container');
+    if (existing) existing.remove();
+    var div = document.createElement('div');
+    div.className = 'replay-typing-container';
+    div.innerHTML = '<div class="replay-typing"><span></span><span></span><span></span></div>';
+    output.appendChild(div);
+    if (div.scrollIntoView) div.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }
+
+  function _removeTypingIndicator() {
+    var output = document.getElementById('chat-output');
+    if (!output) return;
+    var indicator = output.querySelector('.replay-typing-container');
+    if (indicator) indicator.remove();
+  }
+
+  // ── Playback ──
+
+  function _scheduleNext() {
+    if (state !== STATE_PLAYING) return;
+    if (currentIndex >= messages.length - 1) {
+      state = STATE_PAUSED;
+      _removeTypingIndicator();
+      _renderBar();
+      return;
+    }
+    var nextRole = messages[currentIndex + 1] ? messages[currentIndex + 1].role : 'user';
+    _showTypingIndicator();
+    timerId = setTimeout(function() {
+      _removeTypingIndicator();
+      currentIndex++;
+      _showUpTo(currentIndex);
+      _renderBar();
+      _scheduleNext();
+    }, _delay(nextRole));
+  }
+
+  function _clearTimer() {
+    if (timerId) {
+      clearTimeout(timerId);
+      timerId = null;
+    }
+  }
+
+  // ── Public API ──
+
+  function start() {
+    messages = ConversationManager.getMessages().filter(function(m) { return m.role !== 'system'; });
+    if (messages.length === 0) {
+      if (typeof UIController !== 'undefined') {
+        UIController.setChatOutput('No messages to replay.');
+      }
+      return;
+    }
+    currentIndex = -1;
+    state = STATE_STOPPED;
+    _hideAll();
+    _createBar();
+    play();
+  }
+
+  function play() {
+    if (messages.length === 0) return;
+    if (currentIndex < 0) {
+      currentIndex = 0;
+      _showUpTo(0);
+      state = STATE_PLAYING;
+      _renderBar();
+      _scheduleNext();
+    } else if (state === STATE_PAUSED) {
+      state = STATE_PLAYING;
+      _renderBar();
+      _scheduleNext();
+    } else if (state === STATE_STOPPED) {
+      currentIndex = 0;
+      _hideAll();
+      _showUpTo(0);
+      state = STATE_PLAYING;
+      _renderBar();
+      _scheduleNext();
+    }
+  }
+
+  function pause() {
+    if (state !== STATE_PLAYING) return;
+    _clearTimer();
+    _removeTypingIndicator();
+    state = STATE_PAUSED;
+    _renderBar();
+  }
+
+  function stop() {
+    _clearTimer();
+    _removeTypingIndicator();
+    state = STATE_STOPPED;
+    speed = 1;
+    // Show all messages again
+    var els = _getMsgElements();
+    for (var i = 0; i < els.length; i++) {
+      els[i].classList.remove('replay-hidden', 'replay-reveal');
+    }
+    currentIndex = 0;
+    if (barEl) { barEl.remove(); barEl = null; }
+  }
+
+  function next() {
+    if (state === STATE_PLAYING) return;
+    if (currentIndex >= messages.length - 1) return;
+    _clearTimer();
+    _removeTypingIndicator();
+    currentIndex++;
+    _showUpTo(currentIndex);
+    if (state === STATE_STOPPED) state = STATE_PAUSED;
+    _renderBar();
+  }
+
+  function prev() {
+    if (state === STATE_PLAYING) return;
+    if (currentIndex <= 0) return;
+    _clearTimer();
+    _removeTypingIndicator();
+    currentIndex--;
+    _showUpTo(currentIndex);
+    _renderBar();
+  }
+
+  function cycleSpeed() {
+    var idx = SPEEDS.indexOf(speed);
+    speed = SPEEDS[(idx + 1) % SPEEDS.length];
+    _renderBar();
+  }
+
+  function isActive() {
+    return state !== STATE_STOPPED;
+  }
+
+  function getState() {
+    return {
+      state: state === STATE_PLAYING ? 'playing' : state === STATE_PAUSED ? 'paused' : 'stopped',
+      currentIndex: currentIndex,
+      totalMessages: messages.length,
+      speed: speed,
+    };
+  }
+
+  // Keyboard handler — Escape stops replay
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && state !== STATE_STOPPED) {
+      e.preventDefault();
+      e.stopPropagation();
+      stop();
+    }
+  });
+
+  return {
+    start: start,
+    play: play,
+    pause: pause,
+    stop: stop,
+    next: next,
+    prev: prev,
+    cycleSpeed: cycleSpeed,
+    isActive: isActive,
+    getState: getState,
+  };
+})();
+

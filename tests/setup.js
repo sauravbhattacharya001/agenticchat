@@ -247,7 +247,9 @@ function loadApp() {
     'GlobalSessionSearch',
     'AutoTagger',
     'DataBackup',
-    'ResponseRating'
+    'ResponseRating',
+    'ConversationMerge',
+    'ConversationReplay'
   ];
 
   for (const mod of modules) {
