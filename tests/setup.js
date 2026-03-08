@@ -184,6 +184,46 @@ function setupDOM() {
     <button id="annotations-btn"></button>
     <button id="summary-btn"></button>
     <button id="chapters-btn"></button>
+    <button id="prompt-library-btn"></button>
+    <div id="prompt-library-overlay"></div>
+    <div id="prompt-library-panel" style="display:none;">
+      <div id="prompt-library-header">
+        <span>📚 Prompt Library</span>
+        <div id="prompt-library-actions">
+          <button id="prompt-library-add-btn" class="btn-sm">➕ New</button>
+          <button id="prompt-library-import-btn" class="btn-sm">📥 Import</button>
+          <button id="prompt-library-export-btn" class="btn-sm">📤 Export</button>
+          <button id="prompt-library-close-btn" class="btn-sm">✕</button>
+        </div>
+      </div>
+      <div id="prompt-library-search-wrap">
+        <input id="prompt-library-search" type="text" placeholder="Search your prompts…" autocomplete="off">
+      </div>
+      <div id="prompt-library-filters">
+        <select id="prompt-library-folder-filter"><option value="">All Folders</option></select>
+        <select id="prompt-library-sort">
+          <option value="recent">Recently Used</option>
+          <option value="alpha">A-Z</option>
+          <option value="created">Newest</option>
+          <option value="used">Most Used</option>
+        </select>
+      </div>
+      <div id="prompt-library-count"></div>
+      <div id="prompt-library-list"></div>
+    </div>
+    <div id="prompt-library-save-modal" style="display:none;">
+      <div id="prompt-library-save-content">
+        <p><strong id="prompt-library-modal-title">Save Prompt</strong></p>
+        <input id="prompt-library-name-input" type="text">
+        <input id="prompt-library-folder-input" type="text" list="prompt-library-folder-suggestions">
+        <datalist id="prompt-library-folder-suggestions"></datalist>
+        <textarea id="prompt-library-text-input" rows="5"></textarea>
+        <div id="prompt-library-modal-buttons">
+          <button id="prompt-library-cancel-btn">Cancel</button>
+          <button id="prompt-library-confirm-btn">Save</button>
+        </div>
+      </div>
+    </div>
     <div id="file-drop-overlay"></div>
   `;
 }
@@ -249,7 +289,8 @@ function loadApp() {
     'DataBackup',
     'ResponseRating',
     'ConversationMerge',
-    'ConversationReplay'
+    'ConversationReplay',
+    'PromptLibrary'
   ];
 
   for (const mod of modules) {

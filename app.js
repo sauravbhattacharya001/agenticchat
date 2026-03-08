@@ -49,6 +49,8 @@
  *   AutoTagger           — heuristic topic detection and automatic tag suggestions
  *   ResponseRating       — thumbs up/down ratings on AI responses with model satisfaction dashboard
  *   ConversationMerge    — combine 2+ sessions into one merged conversation (chronological interleave)
+ *   ConversationReplay   — message-by-message playback with transport controls
+ *   PromptLibrary        — user-created prompt snippets with folders, search, usage tracking, import/export
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -13479,6 +13481,460 @@ const ConversationReplay = (() => {
     cycleSpeed: cycleSpeed,
     isActive: isActive,
     getState: getState,
+  };
+})();
+
+
+/* ---------- Prompt Library ---------- */
+/**
+ * PromptLibrary — user-created prompt snippets with folders, search,
+ * usage tracking, import/export, and one-click insert into the chat input.
+ *
+ * Storage key: ac_prompt_library (JSON array of prompt objects).
+ * Each prompt: { id, name, text, folder, createdAt, lastUsedAt, useCount }
+ */
+const PromptLibrary = (() => {
+  'use strict';
+
+  const STORAGE_KEY = 'ac_prompt_library';
+  let prompts = [];
+  let visible = false;
+  let editingId = null;
+
+  function _load() {
+    try {
+      var raw = SafeStorage.get(STORAGE_KEY);
+      prompts = raw ? JSON.parse(raw) : [];
+    } catch (_) { prompts = []; }
+  }
+
+  function _save() {
+    SafeStorage.set(STORAGE_KEY, JSON.stringify(prompts));
+  }
+
+  function _genId() {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  }
+
+  function _getFolders() {
+    var set = {};
+    for (var i = 0; i < prompts.length; i++) {
+      if (prompts[i].folder) set[prompts[i].folder] = true;
+    }
+    return Object.keys(set).sort();
+  }
+
+  function _getFilteredPrompts() {
+    var searchEl = document.getElementById('prompt-library-search');
+    var folderEl = document.getElementById('prompt-library-folder-filter');
+    var sortEl = document.getElementById('prompt-library-sort');
+    var query = searchEl ? searchEl.value.toLowerCase().trim() : '';
+    var folder = folderEl ? folderEl.value : '';
+    var sortBy = sortEl ? sortEl.value : 'recent';
+
+    var filtered = prompts.filter(function(p) {
+      if (folder && p.folder !== folder) return false;
+      if (query) {
+        var haystack = (p.name + ' ' + p.text + ' ' + (p.folder || '')).toLowerCase();
+        return haystack.indexOf(query) !== -1;
+      }
+      return true;
+    });
+
+    filtered.sort(function(a, b) {
+      if (sortBy === 'alpha') return (a.name || '').localeCompare(b.name || '');
+      if (sortBy === 'created') return (b.createdAt || 0) - (a.createdAt || 0);
+      if (sortBy === 'used') return (b.useCount || 0) - (a.useCount || 0);
+      // recent — by lastUsedAt desc, then createdAt desc
+      return (b.lastUsedAt || b.createdAt || 0) - (a.lastUsedAt || a.createdAt || 0);
+    });
+
+    return filtered;
+  }
+
+  function _renderFolderFilter() {
+    var el = document.getElementById('prompt-library-folder-filter');
+    if (!el) return;
+    var current = el.value;
+    var folders = _getFolders();
+    el.innerHTML = '<option value="">All Folders</option>';
+    for (var i = 0; i < folders.length; i++) {
+      var opt = document.createElement('option');
+      opt.value = folders[i];
+      opt.textContent = '📁 ' + folders[i];
+      el.appendChild(opt);
+    }
+    el.value = current;
+
+    // Also update datalist in save modal
+    var dl = document.getElementById('prompt-library-folder-suggestions');
+    if (dl) {
+      dl.innerHTML = '';
+      for (var j = 0; j < folders.length; j++) {
+        var o = document.createElement('option');
+        o.value = folders[j];
+        dl.appendChild(o);
+      }
+    }
+  }
+
+  function _renderList() {
+    var listEl = document.getElementById('prompt-library-list');
+    var countEl = document.getElementById('prompt-library-count');
+    if (!listEl) return;
+
+    var filtered = _getFilteredPrompts();
+    if (countEl) countEl.textContent = filtered.length + ' prompt' + (filtered.length !== 1 ? 's' : '');
+
+    if (filtered.length === 0) {
+      listEl.innerHTML = '<div class="prompt-library-empty">No prompts yet. Click ➕ New to save one!</div>';
+      return;
+    }
+
+    var html = '';
+    for (var i = 0; i < filtered.length; i++) {
+      var p = filtered[i];
+      var preview = p.text.length > 80 ? p.text.slice(0, 80) + '…' : p.text;
+      html += '<div class="prompt-library-item" data-id="' + p.id + '">';
+      html += '<div class="prompt-library-item-header">';
+      html += '<span class="prompt-library-item-name">' + _esc(p.name || 'Untitled') + '</span>';
+      if (p.folder) html += '<span class="prompt-library-item-folder">📁 ' + _esc(p.folder) + '</span>';
+      html += '</div>';
+      html += '<div class="prompt-library-item-preview">' + _esc(preview) + '</div>';
+      html += '<div class="prompt-library-item-meta">';
+      html += '<span>Used ' + (p.useCount || 0) + '×</span>';
+      html += '</div>';
+      html += '<div class="prompt-library-item-actions">';
+      html += '<button class="btn-sm pl-use-btn" title="Insert into chat input">▶ Use</button>';
+      html += '<button class="btn-sm pl-edit-btn" title="Edit this prompt">✏️</button>';
+      html += '<button class="btn-sm btn-danger-sm pl-delete-btn" title="Delete this prompt">🗑️</button>';
+      html += '</div>';
+      html += '</div>';
+    }
+    listEl.innerHTML = html;
+
+    // Bind actions
+    var items = listEl.querySelectorAll('.prompt-library-item');
+    for (var j = 0; j < items.length; j++) {
+      (function(item) {
+        var id = item.getAttribute('data-id');
+        var useBtn = item.querySelector('.pl-use-btn');
+        var editBtn = item.querySelector('.pl-edit-btn');
+        var delBtn = item.querySelector('.pl-delete-btn');
+        if (useBtn) useBtn.addEventListener('click', function(e) { e.stopPropagation(); usePrompt(id); });
+        if (editBtn) editBtn.addEventListener('click', function(e) { e.stopPropagation(); openEditModal(id); });
+        if (delBtn) delBtn.addEventListener('click', function(e) { e.stopPropagation(); deletePrompt(id); });
+        // Double-click item to use
+        item.addEventListener('dblclick', function() { usePrompt(id); });
+      })(items[j]);
+    }
+  }
+
+  function _esc(s) {
+    var d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  function toggle() {
+    visible ? close() : open();
+  }
+
+  function open() {
+    _load();
+    var panel = document.getElementById('prompt-library-panel');
+    var overlay = document.getElementById('prompt-library-overlay');
+    if (panel) panel.style.display = '';
+    if (overlay) overlay.style.display = '';
+    visible = true;
+    _renderFolderFilter();
+    _renderList();
+    var searchEl = document.getElementById('prompt-library-search');
+    if (searchEl) { searchEl.value = ''; searchEl.focus(); }
+  }
+
+  function close() {
+    var panel = document.getElementById('prompt-library-panel');
+    var overlay = document.getElementById('prompt-library-overlay');
+    if (panel) panel.style.display = 'none';
+    if (overlay) overlay.style.display = 'none';
+    visible = false;
+  }
+
+  function isOpen() { return visible; }
+
+  function addPrompt(name, text, folder) {
+    _load();
+    if (!name || !text) return null;
+    var p = {
+      id: _genId(),
+      name: name.trim(),
+      text: text.trim(),
+      folder: (folder || '').trim() || null,
+      createdAt: Date.now(),
+      lastUsedAt: null,
+      useCount: 0
+    };
+    prompts.push(p);
+    _save();
+    return p;
+  }
+
+  function updatePrompt(id, updates) {
+    _load();
+    for (var i = 0; i < prompts.length; i++) {
+      if (prompts[i].id === id) {
+        if (updates.name !== undefined) prompts[i].name = updates.name.trim();
+        if (updates.text !== undefined) prompts[i].text = updates.text.trim();
+        if (updates.folder !== undefined) prompts[i].folder = updates.folder.trim() || null;
+        _save();
+        return prompts[i];
+      }
+    }
+    return null;
+  }
+
+  function deletePrompt(id) {
+    _load();
+    var len = prompts.length;
+    prompts = prompts.filter(function(p) { return p.id !== id; });
+    _save();
+    _renderFolderFilter();
+    _renderList();
+    return prompts.length < len;
+  }
+
+  function usePrompt(id) {
+    _load();
+    for (var i = 0; i < prompts.length; i++) {
+      if (prompts[i].id === id) {
+        prompts[i].useCount = (prompts[i].useCount || 0) + 1;
+        prompts[i].lastUsedAt = Date.now();
+        _save();
+        // Insert into chat input
+        var input = document.getElementById('chat-input');
+        if (input) {
+          input.value = prompts[i].text;
+          input.focus();
+          if (typeof UIController !== 'undefined' && UIController.updateCharCount) {
+            UIController.updateCharCount(input.value.length);
+          }
+        }
+        close();
+        return prompts[i];
+      }
+    }
+    return null;
+  }
+
+  function getAll() {
+    _load();
+    return prompts.slice();
+  }
+
+  function getById(id) {
+    _load();
+    for (var i = 0; i < prompts.length; i++) {
+      if (prompts[i].id === id) return prompts[i];
+    }
+    return null;
+  }
+
+  function openSaveModal(prefillText) {
+    editingId = null;
+    var modal = document.getElementById('prompt-library-save-modal');
+    var titleEl = document.getElementById('prompt-library-modal-title');
+    var nameInput = document.getElementById('prompt-library-name-input');
+    var folderInput = document.getElementById('prompt-library-folder-input');
+    var textInput = document.getElementById('prompt-library-text-input');
+    if (titleEl) titleEl.textContent = 'Save Prompt';
+    if (nameInput) nameInput.value = '';
+    if (folderInput) folderInput.value = '';
+    if (textInput) textInput.value = prefillText || '';
+    if (modal) modal.style.display = '';
+    _renderFolderFilter(); // update datalist
+    if (nameInput) nameInput.focus();
+  }
+
+  function openEditModal(id) {
+    var p = getById(id);
+    if (!p) return;
+    editingId = id;
+    var modal = document.getElementById('prompt-library-save-modal');
+    var titleEl = document.getElementById('prompt-library-modal-title');
+    var nameInput = document.getElementById('prompt-library-name-input');
+    var folderInput = document.getElementById('prompt-library-folder-input');
+    var textInput = document.getElementById('prompt-library-text-input');
+    if (titleEl) titleEl.textContent = 'Edit Prompt';
+    if (nameInput) nameInput.value = p.name || '';
+    if (folderInput) folderInput.value = p.folder || '';
+    if (textInput) textInput.value = p.text || '';
+    if (modal) modal.style.display = '';
+    _renderFolderFilter();
+    if (nameInput) nameInput.focus();
+  }
+
+  function closeSaveModal() {
+    var modal = document.getElementById('prompt-library-save-modal');
+    if (modal) modal.style.display = 'none';
+    editingId = null;
+  }
+
+  function confirmSave() {
+    var nameInput = document.getElementById('prompt-library-name-input');
+    var folderInput = document.getElementById('prompt-library-folder-input');
+    var textInput = document.getElementById('prompt-library-text-input');
+    var name = nameInput ? nameInput.value.trim() : '';
+    var folder = folderInput ? folderInput.value.trim() : '';
+    var text = textInput ? textInput.value.trim() : '';
+    if (!name || !text) return null;
+
+    var result;
+    if (editingId) {
+      result = updatePrompt(editingId, { name: name, text: text, folder: folder });
+    } else {
+      result = addPrompt(name, text, folder);
+    }
+    closeSaveModal();
+    _renderFolderFilter();
+    _renderList();
+    return result;
+  }
+
+  function exportPrompts() {
+    _load();
+    var json = JSON.stringify(prompts, null, 2);
+    if (typeof downloadBlob === 'function') {
+      downloadBlob(json, 'prompt-library.json', 'application/json');
+    }
+    return json;
+  }
+
+  function importPrompts(jsonStr) {
+    try {
+      var imported = JSON.parse(jsonStr);
+      if (!Array.isArray(imported)) return 0;
+      _load();
+      var existingIds = {};
+      for (var i = 0; i < prompts.length; i++) existingIds[prompts[i].id] = true;
+      var added = 0;
+      for (var j = 0; j < imported.length; j++) {
+        var p = imported[j];
+        if (!p.name || !p.text) continue;
+        if (existingIds[p.id]) {
+          // Update existing
+          updatePrompt(p.id, { name: p.name, text: p.text, folder: p.folder || '' });
+        } else {
+          p.id = p.id || _genId();
+          p.createdAt = p.createdAt || Date.now();
+          p.useCount = p.useCount || 0;
+          p.lastUsedAt = p.lastUsedAt || null;
+          prompts.push(p);
+          added++;
+        }
+      }
+      _save();
+      _renderFolderFilter();
+      _renderList();
+      return added;
+    } catch (_) { return -1; }
+  }
+
+  function clearAll() {
+    prompts = [];
+    _save();
+    _renderFolderFilter();
+    _renderList();
+  }
+
+  function saveCurrentInput() {
+    var input = document.getElementById('chat-input');
+    var text = input ? input.value.trim() : '';
+    if (!text) return;
+    openSaveModal(text);
+  }
+
+  function init() {
+    _load();
+
+    var btn = document.getElementById('prompt-library-btn');
+    if (btn) btn.addEventListener('click', toggle);
+
+    var closeBtn = document.getElementById('prompt-library-close-btn');
+    if (closeBtn) closeBtn.addEventListener('click', close);
+
+    var overlay = document.getElementById('prompt-library-overlay');
+    if (overlay) overlay.addEventListener('click', close);
+
+    var addBtn = document.getElementById('prompt-library-add-btn');
+    if (addBtn) addBtn.addEventListener('click', function() { openSaveModal(); });
+
+    var exportBtn = document.getElementById('prompt-library-export-btn');
+    if (exportBtn) exportBtn.addEventListener('click', exportPrompts);
+
+    var importBtn = document.getElementById('prompt-library-import-btn');
+    if (importBtn) importBtn.addEventListener('click', function() {
+      var input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.json';
+      input.addEventListener('change', function() {
+        if (!input.files || !input.files[0]) return;
+        var reader = new FileReader();
+        reader.onload = function() { importPrompts(reader.result); };
+        reader.readAsText(input.files[0]);
+      });
+      input.click();
+    });
+
+    var confirmBtn = document.getElementById('prompt-library-confirm-btn');
+    if (confirmBtn) confirmBtn.addEventListener('click', confirmSave);
+
+    var cancelBtn = document.getElementById('prompt-library-cancel-btn');
+    if (cancelBtn) cancelBtn.addEventListener('click', closeSaveModal);
+
+    var searchEl = document.getElementById('prompt-library-search');
+    if (searchEl) searchEl.addEventListener('input', _renderList);
+
+    var folderFilter = document.getElementById('prompt-library-folder-filter');
+    if (folderFilter) folderFilter.addEventListener('change', _renderList);
+
+    var sortEl = document.getElementById('prompt-library-sort');
+    if (sortEl) sortEl.addEventListener('change', _renderList);
+
+    // Ctrl+L shortcut
+    document.addEventListener('keydown', function(e) {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'l' && !e.shiftKey && !e.altKey) {
+        // Don't override browser address bar if nothing else is focused
+        var tag = (document.activeElement || {}).tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+        e.preventDefault();
+        toggle();
+      }
+    });
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  return {
+    toggle: toggle,
+    open: open,
+    close: close,
+    isOpen: isOpen,
+    addPrompt: addPrompt,
+    updatePrompt: updatePrompt,
+    deletePrompt: deletePrompt,
+    usePrompt: usePrompt,
+    getAll: getAll,
+    getById: getById,
+    openSaveModal: openSaveModal,
+    openEditModal: openEditModal,
+    closeSaveModal: closeSaveModal,
+    confirmSave: confirmSave,
+    exportPrompts: exportPrompts,
+    importPrompts: importPrompts,
+    clearAll: clearAll,
+    saveCurrentInput: saveCurrentInput,
+    init: init,
   };
 })();
 

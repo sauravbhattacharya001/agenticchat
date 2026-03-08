@@ -52,6 +52,7 @@
     <button id="zen-btn" class="btn-secondary" title="Focus mode — hide distractions (Ctrl+Shift+F)">🧘</button>
     <button id="fmt-btn" class="btn-secondary" title="Formatting toolbar — markdown helpers (Ctrl+Shift+M)">✏️</button>
     <button id="rating-btn" class="btn-secondary" title="Response ratings — rate AI responses and view satisfaction stats">⭐</button>
+    <button id="prompt-library-btn" class="btn-secondary" title="Prompt Library — save and reuse your prompts (Ctrl+L)">📚</button>
   </div>
 
   <div class="zen-indicator">Focus Mode — press <kbd>Ctrl+Shift+F</kbd> or <kbd>Esc</kbd> to exit</div>
@@ -319,6 +320,54 @@
     </div>
     <div id="global-search-status" aria-live="polite"></div>
     <div id="global-search-results"></div>
+  </div>
+
+  <!-- Prompt Library Panel -->
+  <div id="prompt-library-overlay"></div>
+  <div id="prompt-library-panel" aria-label="Prompt Library" style="display:none;">
+    <div id="prompt-library-header">
+      <span>📚 Prompt Library</span>
+      <div id="prompt-library-actions">
+        <button id="prompt-library-add-btn" class="btn-sm" title="Save a new prompt">➕ New</button>
+        <button id="prompt-library-import-btn" class="btn-sm" title="Import prompts from JSON">📥 Import</button>
+        <button id="prompt-library-export-btn" class="btn-sm" title="Export prompts as JSON">📤 Export</button>
+        <button id="prompt-library-close-btn" class="btn-sm" title="Close panel">✕</button>
+      </div>
+    </div>
+    <div id="prompt-library-search-wrap">
+      <input id="prompt-library-search" type="text" placeholder="Search your prompts…" autocomplete="off" aria-label="Search prompt library">
+    </div>
+    <div id="prompt-library-filters">
+      <select id="prompt-library-folder-filter" aria-label="Filter by folder">
+        <option value="">All Folders</option>
+      </select>
+      <select id="prompt-library-sort" aria-label="Sort prompts">
+        <option value="recent">Recently Used</option>
+        <option value="alpha">A-Z</option>
+        <option value="created">Newest</option>
+        <option value="used">Most Used</option>
+      </select>
+    </div>
+    <div id="prompt-library-count" aria-live="polite"></div>
+    <div id="prompt-library-list"></div>
+  </div>
+
+  <!-- Prompt Library Save Modal -->
+  <div id="prompt-library-save-modal" role="dialog" aria-modal="true" style="display:none;">
+    <div id="prompt-library-save-content">
+      <p><strong id="prompt-library-modal-title">Save Prompt</strong></p>
+      <label for="prompt-library-name-input">Name</label>
+      <input id="prompt-library-name-input" type="text" placeholder="e.g. Code Review Request" autocomplete="off">
+      <label for="prompt-library-folder-input">Folder</label>
+      <input id="prompt-library-folder-input" type="text" placeholder="e.g. Work, Creative, Research" autocomplete="off" list="prompt-library-folder-suggestions">
+      <datalist id="prompt-library-folder-suggestions"></datalist>
+      <label for="prompt-library-text-input">Prompt Text</label>
+      <textarea id="prompt-library-text-input" rows="5" placeholder="Enter your prompt text…"></textarea>
+      <div id="prompt-library-modal-buttons">
+        <button id="prompt-library-cancel-btn" class="btn-secondary">Cancel</button>
+        <button id="prompt-library-confirm-btn">Save</button>
+      </div>
+    </div>
   </div>
 
   <!-- Model Selector Panel -->
