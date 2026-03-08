@@ -1564,12 +1564,60 @@ const HistoryPanel = (() => {
     // Auto-scroll to bottom
     container.scrollTop = container.scrollHeight;
 
-    // Decorate messages with reaction bars
-    MessageReactions.decorateMessages();
-    ConversationFork.decorateMessages();
-    ReadAloud.decorateMessages();
-    ResponseRating.decorateMessages();
-    MessageTranslator.decorateMessages();
+    // Decorate messages — single DOM traversal instead of 5 separate passes.
+    // See issue #40: each decorateMessages() was doing its own querySelectorAll,
+    // causing 5×N DOM traversals. Now we query once and dispatch per-message.
+    _decorateAllMessages(container);
+  }
+
+  /**
+   * Unified single-pass message decoration. Queries the DOM once and calls
+   * each decorator's per-message function in a single loop.
+   *
+   * Before this fix, 5 separate decorateMessages() calls each did:
+   *   container.querySelectorAll('.history-msg')  → full DOM traversal
+   *   iterate all N messages
+   * Total: 5 × N DOM reads + element creates.
+   *
+   * Now: 1 querySelectorAll + 1 iteration through N messages.
+   * Complexity: O(N) instead of O(5N) with 5× fewer DOM queries.
+   */
+  function _decorateAllMessages(container) {
+    if (!container) return;
+    var msgs = container.querySelectorAll('.history-msg');
+    if (msgs.length === 0) return;
+
+    var history = ConversationManager.getHistory();
+    var nonSystemIdx = 0;
+
+    for (var i = 0; i < history.length; i++) {
+      if (history[i].role === 'system') continue;
+      if (nonSystemIdx >= msgs.length) break;
+
+      var msgEl = msgs[nonSystemIdx];
+      var role = history[i].role;
+
+      // MessageReactions: all messages
+      MessageReactions.decorateOne(msgEl, i);
+
+      // ConversationFork: all messages
+      ConversationFork.decorateOne(msgEl, i);
+
+      // ReadAloud: assistant messages only
+      if (role === 'assistant') {
+        ReadAloud.decorateOne(msgEl, i);
+      }
+
+      // ResponseRating: assistant messages only
+      if (role === 'assistant') {
+        ResponseRating.decorateOne(msgEl, nonSystemIdx);
+      }
+
+      // MessageTranslator: all messages
+      MessageTranslator.decorateOne(msgEl, nonSystemIdx);
+
+      nonSystemIdx++;
+    }
   }
 
   function exportAsMarkdown() {
@@ -3211,6 +3259,7 @@ const MessageReactions = (() => {
         showEmojiPicker,
         hideEmojiPicker,
         decorateMessages,
+        decorateOne: renderReactionBar,
         getAvailableEmojis,
         _getState,
         reset,
@@ -6377,7 +6426,7 @@ const ConversationFork = (() => {
     messageElement.appendChild(btn);
   }
 
-  return { forkAt, decorateMessages };
+  return { forkAt, decorateMessages, decorateOne: _addForkButton };
 })();
 
 /* ---------- Quick Replies ---------- */
@@ -7286,6 +7335,7 @@ const ReadAloud = (() => {
     updateControls: updateControls,
     buildControls: buildControls,
     decorateMessages: decorateMessages,
+    decorateOne: renderSpeakButton,
     reset: reset,
     _getState: _getState
   };
@@ -12794,49 +12844,58 @@ const ResponseRating = (() => {
     return { up, down, total: up + down, rate: (up + down) > 0 ? Math.round(up / (up + down) * 100) : 0 };
   }
 
+  /**
+   * Decorate a single assistant message with rating buttons.
+   * @param {Element} div - The message DOM element
+   * @param {number} displayIndex - Index for rating storage
+   */
+  function _decorateOneRating(div, displayIndex) {
+    // Remove existing
+    var existing = div.querySelector('.rating-bar');
+    if (existing) existing.remove();
+
+    var bar = document.createElement('div');
+    bar.className = 'rating-bar';
+    var current = getRating(displayIndex);
+
+    var upBtn = document.createElement('button');
+    upBtn.className = 'rating-btn' + (current === 'up' ? ' rated-up' : '');
+    upBtn.textContent = '👍';
+    upBtn.title = current === 'up' ? 'Remove rating' : 'Good response';
+    upBtn.addEventListener('click', function () {
+      if (current === 'up') { unrate(displayIndex); } else { rate(displayIndex, 'up'); }
+      decorateMessages();
+    });
+
+    var downBtn = document.createElement('button');
+    downBtn.className = 'rating-btn' + (current === 'down' ? ' rated-down' : '');
+    downBtn.textContent = '👎';
+    downBtn.title = current === 'down' ? 'Remove rating' : 'Poor response';
+    downBtn.addEventListener('click', function () {
+      if (current === 'down') { unrate(displayIndex); } else { rate(displayIndex, 'down'); }
+      decorateMessages();
+    });
+
+    bar.appendChild(upBtn);
+    bar.appendChild(downBtn);
+
+    if (current) {
+      var label = document.createElement('span');
+      label.className = 'rating-label';
+      label.textContent = current === 'up' ? 'Helpful' : 'Not helpful';
+      bar.appendChild(label);
+    }
+
+    div.appendChild(bar);
+  }
+
   function decorateMessages() {
     const container = document.getElementById('chat-output');
     if (!container) return;
 
     const msgDivs = container.querySelectorAll('.history-msg.assistant');
     msgDivs.forEach((div, displayIndex) => {
-      // Remove existing
-      const existing = div.querySelector('.rating-bar');
-      if (existing) existing.remove();
-
-      const bar = document.createElement('div');
-      bar.className = 'rating-bar';
-      const current = getRating(displayIndex);
-
-      const upBtn = document.createElement('button');
-      upBtn.className = 'rating-btn' + (current === 'up' ? ' rated-up' : '');
-      upBtn.textContent = '👍';
-      upBtn.title = current === 'up' ? 'Remove rating' : 'Good response';
-      upBtn.addEventListener('click', () => {
-        if (current === 'up') { unrate(displayIndex); } else { rate(displayIndex, 'up'); }
-        decorateMessages();
-      });
-
-      const downBtn = document.createElement('button');
-      downBtn.className = 'rating-btn' + (current === 'down' ? ' rated-down' : '');
-      downBtn.textContent = '👎';
-      downBtn.title = current === 'down' ? 'Remove rating' : 'Poor response';
-      downBtn.addEventListener('click', () => {
-        if (current === 'down') { unrate(displayIndex); } else { rate(displayIndex, 'down'); }
-        decorateMessages();
-      });
-
-      bar.appendChild(upBtn);
-      bar.appendChild(downBtn);
-
-      if (current) {
-        const label = document.createElement('span');
-        label.className = 'rating-label';
-        label.textContent = current === 'up' ? 'Helpful' : 'Not helpful';
-        bar.appendChild(label);
-      }
-
-      div.appendChild(bar);
+      _decorateOneRating(div, displayIndex);
     });
   }
 
@@ -12963,7 +13022,8 @@ const ResponseRating = (() => {
   }
 
   return {
-    init, decorateMessages, toggleDashboard, openDashboard, closeDashboard,
+    init, decorateMessages, decorateOne: _decorateOneRating,
+    toggleDashboard, openDashboard, closeDashboard,
     getRatings, getModelStats, getOverallStats, exportRatings, clearAll,
     rate, unrate, getRating,
   };
@@ -14337,35 +14397,44 @@ const MessageTranslator = (() => {
     msgs[msgIndex].appendChild(result);
   }
 
+  /**
+   * Decorate a single message element with a translate button.
+   * @param {Element} div - The message DOM element
+   * @param {number} idx - Display index of the message
+   */
+  function _decorateOneTranslate(div, idx) {
+    if (div.querySelector('.translate-btn')) return;
+
+    div.addEventListener('mouseenter', function () { hoveredMsgIndex = idx; });
+    div.addEventListener('mouseleave', function () {
+      if (hoveredMsgIndex === idx) hoveredMsgIndex = -1;
+    });
+
+    var btn = document.createElement('button');
+    btn.className = 'translate-btn';
+    btn.textContent = '\uD83C\uDF10';
+    btn.title = 'Translate message (Ctrl+Shift+T)';
+    btn.setAttribute('aria-label', 'Translate message');
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      showDropdown(btn, idx);
+    });
+
+    var roleEl = div.querySelector('.msg-role');
+    if (roleEl) {
+      roleEl.appendChild(btn);
+    } else {
+      div.insertBefore(btn, div.firstChild);
+    }
+  }
+
   function decorateMessages() {
     var container = document.getElementById('chat-output');
     if (!container) return;
 
     var msgs = container.querySelectorAll('.history-msg');
     msgs.forEach(function (div, idx) {
-      if (div.querySelector('.translate-btn')) return;
-
-      div.addEventListener('mouseenter', function () { hoveredMsgIndex = idx; });
-      div.addEventListener('mouseleave', function () {
-        if (hoveredMsgIndex === idx) hoveredMsgIndex = -1;
-      });
-
-      var btn = document.createElement('button');
-      btn.className = 'translate-btn';
-      btn.textContent = '\uD83C\uDF10';
-      btn.title = 'Translate message (Ctrl+Shift+T)';
-      btn.setAttribute('aria-label', 'Translate message');
-      btn.addEventListener('click', function (e) {
-        e.stopPropagation();
-        showDropdown(btn, idx);
-      });
-
-      var roleEl = div.querySelector('.msg-role');
-      if (roleEl) {
-        roleEl.appendChild(btn);
-      } else {
-        div.insertBefore(btn, div.firstChild);
-      }
+      _decorateOneTranslate(div, idx);
     });
   }
 
@@ -14386,6 +14455,7 @@ const MessageTranslator = (() => {
 
   return {
     decorateMessages: decorateMessages,
+    decorateOne: _decorateOneTranslate,
     translateMessage: translateMessage,
     quickTranslate: quickTranslate,
     clearCache: clearCache,
