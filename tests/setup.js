@@ -290,7 +290,8 @@ function loadApp() {
     'ResponseRating',
     'ConversationMerge',
     'ConversationReplay',
-    'PromptLibrary'
+    'PromptLibrary',
+    'ModelCompare'
   ];
 
   for (const mod of modules) {

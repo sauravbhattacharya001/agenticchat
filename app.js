@@ -14366,3 +14366,327 @@ const MessageTranslator = (() => {
     init: init,
   };
 })();
+
+/* ═══════════════════════════════════════════════════════════════════
+ *  ModelCompare – Send the same prompt to multiple models, compare
+ *  results side-by-side with timing and token metrics.
+ * ═══════════════════════════════════════════════════════════════════ */
+const ModelCompare = (() => {
+  const STORAGE_KEY = 'ac-model-compare-history';
+  const MAX_HISTORY = 50;
+  let _history = [];
+
+  /** Load history from localStorage. */
+  function _load() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      _history = raw ? JSON.parse(raw) : [];
+    } catch (_) { _history = []; }
+  }
+
+  /** Save history to localStorage. */
+  function _save() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(_history));
+    } catch (_) { /* quota */ }
+  }
+
+  /**
+   * Run a comparison: send the same prompt to multiple models in parallel.
+   *
+   * @param {string} prompt - The user prompt to compare.
+   * @param {string[]} modelIds - Array of model IDs (at least 2).
+   * @param {Object} [opts] - Optional config.
+   * @param {string} [opts.systemPrompt] - Override system prompt.
+   * @param {number} [opts.temperature] - Temperature for all models.
+   * @returns {Promise<Object>} Comparison result with per-model responses.
+   */
+  async function compare(prompt, modelIds, opts) {
+    if (!prompt || typeof prompt !== 'string') {
+      throw new Error('ModelCompare: prompt is required');
+    }
+    if (!Array.isArray(modelIds) || modelIds.length < 2) {
+      throw new Error('ModelCompare: at least 2 model IDs required');
+    }
+
+    const options = opts || {};
+    const systemPrompt = options.systemPrompt || ChatConfig.SYSTEM_PROMPT;
+    const temperature = typeof options.temperature === 'number' ? options.temperature : undefined;
+
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: prompt }
+    ];
+
+    const startTime = Date.now();
+
+    // Run all models in parallel
+    const results = await Promise.allSettled(
+      modelIds.map(function (modelId) {
+        const t0 = Date.now();
+        return _callModel(messages, modelId, temperature).then(function (resp) {
+          return {
+            modelId: modelId,
+            modelLabel: _getLabel(modelId),
+            content: resp.content,
+            tokens: resp.tokens || null,
+            latencyMs: Date.now() - t0,
+            error: null
+          };
+        }).catch(function (err) {
+          return {
+            modelId: modelId,
+            modelLabel: _getLabel(modelId),
+            content: null,
+            tokens: null,
+            latencyMs: Date.now() - t0,
+            error: err.message || 'Unknown error'
+          };
+        });
+      })
+    );
+
+    const responses = results.map(function (r) {
+      return r.status === 'fulfilled' ? r.value : {
+        modelId: 'unknown', modelLabel: 'Unknown', content: null,
+        tokens: null, latencyMs: 0, error: r.reason ? r.reason.message : 'Failed'
+      };
+    });
+
+    const comparison = {
+      id: _generateId(),
+      prompt: prompt,
+      systemPrompt: systemPrompt,
+      modelIds: modelIds.slice(),
+      responses: responses,
+      totalMs: Date.now() - startTime,
+      createdAt: new Date().toISOString(),
+      winner: null
+    };
+
+    _history.unshift(comparison);
+    if (_history.length > MAX_HISTORY) _history.length = MAX_HISTORY;
+    _save();
+
+    return comparison;
+  }
+
+  /**
+   * Call a single model. Wraps the existing callOpenAI flow but with
+   * a specific model override.
+   */
+  async function _callModel(messages, modelId, temperature) {
+    const apiKey = typeof ChatConfig !== 'undefined' ? ChatConfig.API_KEY : '';
+    if (!apiKey) {
+      throw new Error('API key not configured');
+    }
+
+    const body = {
+      model: modelId,
+      messages: messages
+    };
+    if (typeof temperature === 'number') {
+      body.temperature = temperature;
+    }
+
+    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + apiKey
+      },
+      body: JSON.stringify(body)
+    });
+
+    if (!resp.ok) {
+      const errText = await resp.text().catch(function () { return ''; });
+      throw new Error('HTTP ' + resp.status + ': ' + errText.slice(0, 200));
+    }
+
+    const data = await resp.json();
+    const choice = data.choices && data.choices[0];
+    return {
+      content: choice ? (choice.message ? choice.message.content : '') : '',
+      tokens: data.usage || null
+    };
+  }
+
+  /** Get human-readable label for a model ID. */
+  function _getLabel(modelId) {
+    if (typeof ChatConfig !== 'undefined' && ChatConfig.AVAILABLE_MODELS) {
+      const match = ChatConfig.AVAILABLE_MODELS.find(function (m) {
+        return m.id === modelId;
+      });
+      if (match) return match.label;
+    }
+    return modelId;
+  }
+
+  /** Generate a simple unique ID. */
+  function _generateId() {
+    return 'cmp-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+  }
+
+  /**
+   * Set a winner for a comparison.
+   * @param {string} comparisonId - ID from compare().
+   * @param {string} winnerModelId - Model ID that won.
+   * @returns {boolean} True if updated.
+   */
+  function setWinner(comparisonId, winnerModelId) {
+    const entry = _history.find(function (c) { return c.id === comparisonId; });
+    if (!entry) return false;
+    entry.winner = winnerModelId;
+    _save();
+    return true;
+  }
+
+  /**
+   * Get comparison history.
+   * @param {number} [limit] - Max entries to return.
+   * @returns {Object[]} History entries (newest first).
+   */
+  function getHistory(limit) {
+    _load();
+    if (typeof limit === 'number' && limit > 0) return _history.slice(0, limit);
+    return _history.slice();
+  }
+
+  /**
+   * Get a specific comparison by ID.
+   * @param {string} id - Comparison ID.
+   * @returns {Object|null}
+   */
+  function getComparison(id) {
+    return _history.find(function (c) { return c.id === id; }) || null;
+  }
+
+  /**
+   * Build a side-by-side HTML comparison view.
+   * @param {Object} comparison - Result from compare().
+   * @returns {string} HTML string.
+   */
+  function buildComparisonView(comparison) {
+    if (!comparison || !comparison.responses) return '';
+
+    function esc(s) { return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+
+    const colWidth = Math.floor(100 / comparison.responses.length);
+
+    let html = '<div class="mc-comparison" data-mc-id="' + esc(comparison.id) + '">';
+    html += '<div class="mc-prompt"><strong>Prompt:</strong> ' + esc(comparison.prompt) + '</div>';
+    html += '<div class="mc-grid" style="display:grid;grid-template-columns:repeat(' +
+      comparison.responses.length + ',1fr);gap:12px;">';
+
+    for (let i = 0; i < comparison.responses.length; i++) {
+      const r = comparison.responses[i];
+      const isWinner = comparison.winner === r.modelId;
+
+      html += '<div class="mc-card' + (isWinner ? ' mc-winner' : '') + '">';
+      html += '<div class="mc-card-header">';
+      html += '<span class="mc-model-name">' + esc(r.modelLabel) + '</span>';
+      if (isWinner) html += ' <span class="mc-crown">👑</span>';
+      html += '</div>';
+
+      if (r.error) {
+        html += '<div class="mc-error">❌ ' + esc(r.error) + '</div>';
+      } else {
+        html += '<div class="mc-content">' + esc(r.content) + '</div>';
+      }
+
+      html += '<div class="mc-metrics">';
+      html += '<span class="mc-metric">⏱ ' + r.latencyMs + 'ms</span>';
+      if (r.tokens) {
+        if (r.tokens.prompt_tokens != null) {
+          html += '<span class="mc-metric">📥 ' + r.tokens.prompt_tokens + '</span>';
+        }
+        if (r.tokens.completion_tokens != null) {
+          html += '<span class="mc-metric">📤 ' + r.tokens.completion_tokens + '</span>';
+        }
+        if (r.tokens.total_tokens != null) {
+          html += '<span class="mc-metric">Σ ' + r.tokens.total_tokens + '</span>';
+        }
+      }
+      html += '</div>';
+
+      if (!comparison.winner) {
+        html += '<button class="mc-vote-btn" data-mc-model="' + esc(r.modelId) +
+          '" data-mc-id="' + esc(comparison.id) + '">Pick as best</button>';
+      }
+
+      html += '</div>';
+    }
+
+    html += '</div>';
+    html += '<div class="mc-footer">Total: ' + comparison.totalMs + 'ms | ' +
+      new Date(comparison.createdAt).toLocaleString() + '</div>';
+    html += '</div>';
+
+    return html;
+  }
+
+  /**
+   * Get win/loss statistics per model across all comparisons.
+   * @returns {Object<string, {wins:number, appearances:number, avgLatencyMs:number}>}
+   */
+  function getModelStats() {
+    _load();
+    const stats = {};
+    for (let i = 0; i < _history.length; i++) {
+      const c = _history[i];
+      for (let j = 0; j < c.responses.length; j++) {
+        const r = c.responses[j];
+        if (!stats[r.modelId]) {
+          stats[r.modelId] = { wins: 0, appearances: 0, totalLatencyMs: 0, label: r.modelLabel };
+        }
+        stats[r.modelId].appearances++;
+        stats[r.modelId].totalLatencyMs += (r.latencyMs || 0);
+        if (c.winner === r.modelId) stats[r.modelId].wins++;
+      }
+    }
+    const result = {};
+    for (const id in stats) {
+      if (stats.hasOwnProperty(id)) {
+        result[id] = {
+          label: stats[id].label,
+          wins: stats[id].wins,
+          appearances: stats[id].appearances,
+          winRate: stats[id].appearances > 0 ?
+            Math.round((stats[id].wins / stats[id].appearances) * 1000) / 1000 : 0,
+          avgLatencyMs: stats[id].appearances > 0 ?
+            Math.round(stats[id].totalLatencyMs / stats[id].appearances) : 0
+        };
+      }
+    }
+    return result;
+  }
+
+  /** Clear all comparison history. */
+  function clearHistory() {
+    _history = [];
+    _save();
+  }
+
+  /**
+   * Export comparison history as JSON string.
+   * @returns {string}
+   */
+  function exportHistory() {
+    _load();
+    return JSON.stringify(_history, null, 2);
+  }
+
+  // Initialize on load
+  _load();
+
+  return {
+    compare: compare,
+    setWinner: setWinner,
+    getHistory: getHistory,
+    getComparison: getComparison,
+    buildComparisonView: buildComparisonView,
+    getModelStats: getModelStats,
+    clearHistory: clearHistory,
+    exportHistory: exportHistory
+  };
+})();
