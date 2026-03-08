@@ -51,6 +51,7 @@
  *   ConversationMerge    — combine 2+ sessions into one merged conversation (chronological interleave)
  *   ConversationReplay   — message-by-message playback with transport controls
  *   PromptLibrary        — user-created prompt snippets with folders, search, usage tracking, import/export
+ *   MessageTranslator    — inline message translation to 20+ languages via OpenAI API
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -1542,6 +1543,7 @@ const HistoryPanel = (() => {
     ConversationFork.decorateMessages();
     ReadAloud.decorateMessages();
     ResponseRating.decorateMessages();
+    MessageTranslator.decorateMessages();
   }
 
   function exportAsMarkdown() {
@@ -13938,3 +13940,412 @@ const PromptLibrary = (() => {
   };
 })();
 
+/* ============================================================
+ * MessageTranslator — inline message translation via OpenAI API
+ *
+ * Adds a 🌐 button to every message. Click to pick a target language,
+ * then the message content is translated using the configured model
+ * and shown inline below the original text. Translations are cached
+ * in localStorage so repeated requests are instant.
+ *
+ * Keyboard shortcut: Ctrl+Shift+T (when a message is hovered).
+ * ============================================================ */
+const MessageTranslator = (() => {
+  'use strict';
+
+  const STORAGE_KEY = 'agenticchat_translations';
+  const LANGUAGES = [
+    { code: 'es', name: 'Spanish' },
+    { code: 'fr', name: 'French' },
+    { code: 'de', name: 'German' },
+    { code: 'it', name: 'Italian' },
+    { code: 'pt', name: 'Portuguese' },
+    { code: 'nl', name: 'Dutch' },
+    { code: 'ru', name: 'Russian' },
+    { code: 'zh', name: 'Chinese (Simplified)' },
+    { code: 'ja', name: 'Japanese' },
+    { code: 'ko', name: 'Korean' },
+    { code: 'ar', name: 'Arabic' },
+    { code: 'hi', name: 'Hindi' },
+    { code: 'bn', name: 'Bengali' },
+    { code: 'tr', name: 'Turkish' },
+    { code: 'pl', name: 'Polish' },
+    { code: 'sv', name: 'Swedish' },
+    { code: 'vi', name: 'Vietnamese' },
+    { code: 'th', name: 'Thai' },
+    { code: 'uk', name: 'Ukrainian' },
+    { code: 'en', name: 'English' },
+  ];
+
+  let cache = {};
+  let styleInjected = false;
+  let activeDropdown = null;
+  let lastPreferredLang = 'es';
+  let hoveredMsgIndex = -1;
+
+  function init() {
+    load();
+    injectStyles();
+
+    document.addEventListener('click', function (e) {
+      if (activeDropdown && !activeDropdown.contains(e.target)) {
+        closeDropdown();
+      }
+    });
+
+    document.addEventListener('keydown', function (e) {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'T') {
+        e.preventDefault();
+        if (hoveredMsgIndex >= 0) {
+          quickTranslate(hoveredMsgIndex, lastPreferredLang);
+        }
+      }
+    });
+  }
+
+  function load() {
+    try {
+      var raw = SafeStorage.get(STORAGE_KEY);
+      if (raw) cache = JSON.parse(raw);
+      if (typeof cache !== 'object' || cache === null) cache = {};
+    } catch (_) { cache = {}; }
+    var pref = SafeStorage.get('agenticchat_translate_lang');
+    if (pref) lastPreferredLang = pref;
+  }
+
+  function save() {
+    try { SafeStorage.set(STORAGE_KEY, JSON.stringify(cache)); } catch (_) {}
+  }
+
+  function savePref() {
+    try { SafeStorage.set('agenticchat_translate_lang', lastPreferredLang); } catch (_) {}
+  }
+
+  function injectStyles() {
+    if (styleInjected) return;
+    styleInjected = true;
+    var style = document.createElement('style');
+    style.textContent = [
+      '.translate-btn { background:transparent; border:1px solid #555; border-radius:6px;',
+      '  padding:2px 8px; cursor:pointer; font-size:13px; opacity:0.6;',
+      '  transition:opacity 0.2s, background 0.2s; margin-left:4px; }',
+      '.translate-btn:hover { opacity:1; background:rgba(255,255,255,0.08); }',
+      '.translate-dropdown {',
+      '  position:absolute; z-index:9999; background:var(--bg,#1e1e1e);',
+      '  border:1px solid #555; border-radius:8px; padding:6px 0;',
+      '  min-width:180px; max-height:300px; overflow-y:auto;',
+      '  box-shadow:0 4px 16px rgba(0,0,0,0.3); }',
+      '.translate-dropdown-item {',
+      '  padding:6px 14px; cursor:pointer; font-size:13px; color:inherit;',
+      '  transition:background 0.15s; }',
+      '.translate-dropdown-item:hover { background:rgba(255,255,255,0.1); }',
+      '.translate-dropdown-item.preferred { font-weight:600; }',
+      '.translate-dropdown-search {',
+      '  width:calc(100% - 16px); margin:4px 8px 6px; padding:4px 8px;',
+      '  border:1px solid #555; border-radius:4px; background:transparent;',
+      '  color:inherit; font-size:12px; outline:none; }',
+      '.translate-result {',
+      '  margin-top:8px; padding:10px 12px; border-radius:8px;',
+      '  background:rgba(100,180,255,0.08); border-left:3px solid #5b9bd5;',
+      '  font-size:13px; line-height:1.5; position:relative; }',
+      '.translate-result-header {',
+      '  font-size:11px; color:#888; margin-bottom:4px; display:flex;',
+      '  justify-content:space-between; align-items:center; }',
+      '.translate-result-actions { display:flex; gap:4px; }',
+      '.translate-result-actions button {',
+      '  background:transparent; border:none; cursor:pointer; font-size:12px;',
+      '  opacity:0.6; padding:2px 4px; }',
+      '.translate-result-actions button:hover { opacity:1; }',
+      '.translate-loading { color:#888; font-style:italic; font-size:12px; margin-top:6px; }',
+    ].join('\n');
+    document.head.appendChild(style);
+  }
+
+  function cacheKey(msgIndex, langCode) {
+    return msgIndex + ':' + langCode;
+  }
+
+  function getCached(msgIndex, langCode) {
+    return cache[cacheKey(msgIndex, langCode)] || null;
+  }
+
+  function setCache(msgIndex, langCode, translation) {
+    cache[cacheKey(msgIndex, langCode)] = translation;
+    save();
+  }
+
+  function closeDropdown() {
+    if (activeDropdown) {
+      activeDropdown.remove();
+      activeDropdown = null;
+    }
+  }
+
+  function showDropdown(btn, msgIndex) {
+    closeDropdown();
+
+    var dropdown = document.createElement('div');
+    dropdown.className = 'translate-dropdown';
+
+    var search = document.createElement('input');
+    search.className = 'translate-dropdown-search';
+    search.placeholder = 'Search language...';
+    search.setAttribute('type', 'text');
+    dropdown.appendChild(search);
+
+    function renderItems(filter) {
+      var existing = dropdown.querySelectorAll('.translate-dropdown-item');
+      existing.forEach(function (el) { el.remove(); });
+
+      var filtered = LANGUAGES.filter(function (l) {
+        if (!filter) return true;
+        return l.name.toLowerCase().indexOf(filter.toLowerCase()) >= 0 ||
+               l.code.toLowerCase().indexOf(filter.toLowerCase()) >= 0;
+      });
+
+      filtered.sort(function (a, b) {
+        if (a.code === lastPreferredLang) return -1;
+        if (b.code === lastPreferredLang) return 1;
+        return 0;
+      });
+
+      filtered.forEach(function (lang) {
+        var item = document.createElement('div');
+        item.className = 'translate-dropdown-item';
+        if (lang.code === lastPreferredLang) item.classList.add('preferred');
+        item.textContent = lang.name;
+        item.addEventListener('click', function (e) {
+          e.stopPropagation();
+          lastPreferredLang = lang.code;
+          savePref();
+          closeDropdown();
+          translateMessage(msgIndex, lang.code, lang.name);
+        });
+        dropdown.appendChild(item);
+      });
+    }
+
+    search.addEventListener('input', function () {
+      renderItems(search.value);
+    });
+
+    renderItems('');
+
+    var rect = btn.getBoundingClientRect();
+    dropdown.style.position = 'fixed';
+    dropdown.style.top = (rect.bottom + 4) + 'px';
+    dropdown.style.left = Math.min(rect.left, window.innerWidth - 200) + 'px';
+    document.body.appendChild(dropdown);
+    activeDropdown = dropdown;
+
+    setTimeout(function () { search.focus(); }, 50);
+  }
+
+  function getMessageContent(msgIndex) {
+    var history = ConversationManager.getHistory();
+    var nonSystem = [];
+    for (var i = 0; i < history.length; i++) {
+      if (history[i].role !== 'system') nonSystem.push(history[i]);
+    }
+    return nonSystem[msgIndex] ? nonSystem[msgIndex].content : null;
+  }
+
+  async function translateMessage(msgIndex, langCode, langName) {
+    var content = getMessageContent(msgIndex);
+    if (!content) return;
+
+    var cached = getCached(msgIndex, langCode);
+    if (cached) {
+      showTranslation(msgIndex, langCode, langName, cached);
+      return;
+    }
+
+    showLoading(msgIndex);
+
+    var key = ApiKeyManager.getKey();
+    if (!key) {
+      removeLoading(msgIndex);
+      alert('Please set your OpenAI API key first.');
+      return;
+    }
+
+    try {
+      var rsp = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + key
+        },
+        body: JSON.stringify({
+          model: ChatConfig.MODEL,
+          messages: [
+            { role: 'system', content: 'You are a translator. Translate the following text to ' + langName + '. Return ONLY the translation, nothing else. Preserve formatting, code blocks, and markdown.' },
+            { role: 'user', content: content }
+          ],
+          max_tokens: 4096,
+          temperature: 0.3
+        })
+      });
+
+      removeLoading(msgIndex);
+
+      if (!rsp.ok) {
+        var errData = await rsp.json().catch(function () { return {}; });
+        alert('Translation failed: ' + (errData.error ? errData.error.message : rsp.statusText));
+        return;
+      }
+
+      var data = await rsp.json();
+      var translation = data.choices && data.choices[0] && data.choices[0].message
+        ? data.choices[0].message.content : '';
+
+      if (!translation) {
+        alert('No translation returned.');
+        return;
+      }
+
+      setCache(msgIndex, langCode, translation);
+      showTranslation(msgIndex, langCode, langName, translation);
+
+      if (typeof CostDashboard !== 'undefined' && data.usage) {
+        CostDashboard.trackUsage(data.usage);
+      }
+    } catch (err) {
+      removeLoading(msgIndex);
+      if (err.name !== 'AbortError') {
+        alert('Translation error: ' + err.message);
+      }
+    }
+  }
+
+  function quickTranslate(msgIndex, langCode) {
+    var lang = LANGUAGES.find(function (l) { return l.code === langCode; });
+    if (lang) return translateMessage(msgIndex, langCode, lang.name);
+  }
+
+  function showLoading(msgIndex) {
+    var container = document.getElementById('chat-output');
+    if (!container) return;
+    var msgs = container.querySelectorAll('.history-msg');
+    if (msgIndex >= msgs.length) return;
+    removeLoading(msgIndex);
+    var loading = document.createElement('div');
+    loading.className = 'translate-loading';
+    loading.setAttribute('data-translate-loading', msgIndex);
+    loading.textContent = '\uD83C\uDF10 Translating...';
+    msgs[msgIndex].appendChild(loading);
+  }
+
+  function removeLoading(msgIndex) {
+    var el = document.querySelector('[data-translate-loading="' + msgIndex + '"]');
+    if (el) el.remove();
+  }
+
+  function showTranslation(msgIndex, langCode, langName, text) {
+    var container = document.getElementById('chat-output');
+    if (!container) return;
+    var msgs = container.querySelectorAll('.history-msg');
+    if (msgIndex >= msgs.length) return;
+
+    var existing = msgs[msgIndex].querySelector('.translate-result');
+    if (existing) existing.remove();
+
+    var result = document.createElement('div');
+    result.className = 'translate-result';
+
+    var header = document.createElement('div');
+    header.className = 'translate-result-header';
+
+    var label = document.createElement('span');
+    label.textContent = '\uD83C\uDF10 ' + langName;
+
+    var actions = document.createElement('div');
+    actions.className = 'translate-result-actions';
+
+    var copyBtn = document.createElement('button');
+    copyBtn.textContent = '\uD83D\uDCCB';
+    copyBtn.title = 'Copy translation';
+    copyBtn.addEventListener('click', function () {
+      navigator.clipboard.writeText(text).then(function () {
+        copyBtn.textContent = '\u2705';
+        setTimeout(function () { copyBtn.textContent = '\uD83D\uDCCB'; }, 1500);
+      });
+    });
+
+    var closeBtn = document.createElement('button');
+    closeBtn.textContent = '\u2715';
+    closeBtn.title = 'Hide translation';
+    closeBtn.addEventListener('click', function () {
+      result.remove();
+    });
+
+    actions.appendChild(copyBtn);
+    actions.appendChild(closeBtn);
+    header.appendChild(label);
+    header.appendChild(actions);
+
+    var body = document.createElement('div');
+    body.textContent = text;
+
+    result.appendChild(header);
+    result.appendChild(body);
+    msgs[msgIndex].appendChild(result);
+  }
+
+  function decorateMessages() {
+    var container = document.getElementById('chat-output');
+    if (!container) return;
+
+    var msgs = container.querySelectorAll('.history-msg');
+    msgs.forEach(function (div, idx) {
+      if (div.querySelector('.translate-btn')) return;
+
+      div.addEventListener('mouseenter', function () { hoveredMsgIndex = idx; });
+      div.addEventListener('mouseleave', function () {
+        if (hoveredMsgIndex === idx) hoveredMsgIndex = -1;
+      });
+
+      var btn = document.createElement('button');
+      btn.className = 'translate-btn';
+      btn.textContent = '\uD83C\uDF10';
+      btn.title = 'Translate message (Ctrl+Shift+T)';
+      btn.setAttribute('aria-label', 'Translate message');
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        showDropdown(btn, idx);
+      });
+
+      var roleEl = div.querySelector('.msg-role');
+      if (roleEl) {
+        roleEl.appendChild(btn);
+      } else {
+        div.insertBefore(btn, div.firstChild);
+      }
+    });
+  }
+
+  function clearCache() {
+    cache = {};
+    save();
+  }
+
+  function getLanguages() {
+    return LANGUAGES.slice();
+  }
+
+  function getPreferredLanguage() {
+    return lastPreferredLang;
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  return {
+    decorateMessages: decorateMessages,
+    translateMessage: translateMessage,
+    quickTranslate: quickTranslate,
+    clearCache: clearCache,
+    getLanguages: getLanguages,
+    getPreferredLanguage: getPreferredLanguage,
+    init: init,
+  };
+})();
