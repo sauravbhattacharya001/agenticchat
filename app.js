@@ -13118,7 +13118,7 @@ const ConversationMerge = (() => {
     }
 
     // Load into conversation and save
-    ConversationManager.clearHistory();
+    ConversationManager.clear();
     for (const msg of merged) {
       ConversationManager.addMessage(msg.role, msg.content);
     }
