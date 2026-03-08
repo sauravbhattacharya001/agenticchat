@@ -589,9 +589,29 @@ const UIController = (() => {
   }
 
   /** Set the chat output area to the given text (replaces content). */
-  function setChatOutput(text)    { el('chat-output').textContent = text; }
-  /** Append text to the chat output area (used during streaming). */
-  function appendChatOutput(text)  { el('chat-output').textContent += text; }
+  // Streaming text node — kept as module-level state so appendChatOutput
+  // can append in O(1) instead of the old textContent += which was O(n²)
+  // (read full string → concat → write back on every single token).
+  let _streamNode = null;
+  function setChatOutput(text) {
+    const out = el('chat-output');
+    out.textContent = text;
+    // Reset streaming node; appendChatOutput will lazily create a new one.
+    _streamNode = null;
+  }
+  /** Append text to the chat output area (used during streaming).
+   *  Uses a dedicated Text node so each token append is O(1) via
+   *  nodeValue mutation rather than reading + rewriting the entire
+   *  container's textContent (which was O(n) per call, making a
+   *  full stream O(n²) in total tokens).
+   */
+  function appendChatOutput(text) {
+    if (!_streamNode) {
+      _streamNode = document.createTextNode('');
+      el('chat-output').appendChild(_streamNode);
+    }
+    _streamNode.data += text;
+  }
   /**
    * Set the console/sandbox output area text and optional color.
    * @param {string} text - Output text to display.
@@ -863,7 +883,11 @@ const ChatController = (() => {
 
     const reader = rsp.body.getReader();
     const decoder = new TextDecoder();
-    let fullText = '';
+    // Collect chunks in an array and join once at the end.
+    // The old `fullText += delta` was O(n²) because JS strings are
+    // immutable — every += allocates a new string and copies the
+    // entire previous content.  Array.push + join is O(n) amortised.
+    const chunks = [];
     let buffer = '';
 
     while (true) {
@@ -884,12 +908,14 @@ const ChatController = (() => {
           const parsed = JSON.parse(payload);
           const delta = parsed.choices?.[0]?.delta?.content;
           if (delta) {
-            fullText += delta;
+            chunks.push(delta);
             onToken(delta);
           }
         } catch (_) { /* skip malformed chunks */ }
       }
     }
+
+    const fullText = chunks.join('');
 
     // Estimate tokens since streaming doesn't return usage
     const promptTokens = Math.ceil(
@@ -1554,14 +1580,16 @@ const HistoryPanel = (() => {
     }
 
     const timestamp = _fileTimestamp();
-    let md = `# Agentic Chat Export\n\n**Exported:** ${new Date().toLocaleString()}\n\n---\n\n`;
+    // Build via array.join — repeated string += is O(n²) in total
+    // content length because JS strings are immutable (each += copies).
+    const parts = [`# Agentic Chat Export\n\n**Exported:** ${new Date().toLocaleString()}\n\n---\n\n`];
 
     messages.forEach((msg) => {
       const role = msg.role === 'user' ? '👤 **You**' : '🤖 **Assistant**';
-      md += `### ${role}\n\n${msg.content}\n\n---\n\n`;
+      parts.push(`### ${role}\n\n${msg.content}\n\n---\n\n`);
     });
 
-    downloadBlob(`agenticchat-${timestamp}.md`, md, 'text/markdown');
+    downloadBlob(`agenticchat-${timestamp}.md`, parts.join(''), 'text/markdown');
   }
 
   function exportAsJSON() {
