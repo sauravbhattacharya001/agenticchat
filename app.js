@@ -12257,6 +12257,8 @@ const DataBackup = (() => {
    */
   function validateBackup(backup) {
     var warnings = [];
+    var MAX_TOTAL_BYTES = 5 * 1024 * 1024; // 5 MB hard cap (localStorage limit)
+    var MAX_VALUE_BYTES = 2 * 1024 * 1024; // 2 MB per key
 
     if (!backup || typeof backup !== 'object') {
       return { valid: false, error: 'Backup is not a valid object', warnings: warnings };
@@ -12284,10 +12286,19 @@ const DataBackup = (() => {
       }
     }
 
+    var totalBytes = 0;
     for (var j = 0; j < dataKeys.length; j++) {
       if (typeof backup.data[dataKeys[j]] !== 'string') {
         return { valid: false, error: 'Data value for "' + dataKeys[j] + '" is not a string', warnings: warnings };
       }
+      var valueLen = backup.data[dataKeys[j]].length;
+      if (valueLen > MAX_VALUE_BYTES) {
+        return { valid: false, error: 'Data value for "' + dataKeys[j] + '" exceeds 2 MB size limit (' + Math.round(valueLen / 1024) + ' KB)', warnings: warnings };
+      }
+      totalBytes += valueLen;
+    }
+    if (totalBytes > MAX_TOTAL_BYTES) {
+      return { valid: false, error: 'Backup total data size exceeds 5 MB limit (' + Math.round(totalBytes / 1024) + ' KB)', warnings: warnings };
     }
 
     return { valid: true, warnings: warnings };
@@ -13813,9 +13824,13 @@ const PromptLibrary = (() => {
   }
 
   function importPrompts(jsonStr) {
+    var MAX_IMPORT_PROMPTS = 5000;
+    var MAX_PROMPT_TEXT = 50000; // 50 KB per prompt text
+    var MAX_PROMPT_NAME = 500;
     try {
       var imported = JSON.parse(jsonStr);
       if (!Array.isArray(imported)) return 0;
+      if (imported.length > MAX_IMPORT_PROMPTS) return -1;
       _load();
       var existingIds = {};
       for (var i = 0; i < prompts.length; i++) existingIds[prompts[i].id] = true;
@@ -13823,6 +13838,8 @@ const PromptLibrary = (() => {
       for (var j = 0; j < imported.length; j++) {
         var p = imported[j];
         if (!p.name || !p.text) continue;
+        if (typeof p.name !== 'string' || typeof p.text !== 'string') continue;
+        if (p.name.length > MAX_PROMPT_NAME || p.text.length > MAX_PROMPT_TEXT) continue;
         if (existingIds[p.id]) {
           // Update existing
           updatePrompt(p.id, { name: p.name, text: p.text, folder: p.folder || '' });
