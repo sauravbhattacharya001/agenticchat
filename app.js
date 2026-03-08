@@ -52,6 +52,7 @@
  *   ConversationReplay   — message-by-message playback with transport controls
  *   PromptLibrary        — user-created prompt snippets with folders, search, usage tracking, import/export
  *   MessageTranslator    — inline message translation to 20+ languages via OpenAI API
+ *   MessageEditor        — edit & resend user messages (truncate + reload into input)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -313,6 +314,24 @@ const ConversationManager = (() => {
     estimateTokens() {
       if (charCountDirty) recomputeCharCount();
       return Math.ceil(cachedCharCount / ChatConfig.CHARS_PER_TOKEN);
+    },
+
+    /**
+     * Truncate history to keep only messages up to (but not including)
+     * the given index.  Preserves the system message at index 0.
+     * Used by MessageEditor to rewind the conversation for re-sending.
+     *
+     * @param {number} historyIndex — index into getHistory(); messages
+     *   from this index onward are removed.
+     */
+    truncateAt(historyIndex) {
+      if (historyIndex < 1) return;
+      if (historyIndex >= history.length) return;
+      history.splice(historyIndex);
+      charCountDirty = true;
+      // Prune response times that reference removed messages
+      const assistantCount = history.filter(m => m.role === 'assistant').length;
+      responseTimes.length = Math.min(responseTimes.length, assistantCount);
     }
   };
 })();
@@ -722,6 +741,8 @@ const UIController = (() => {
   function getChatInput()   { return el('chat-input').value.trim(); }
   /** Clear the chat input field and return focus to it. */
   function clearChatInput() { const inp = el('chat-input'); inp.value = ''; inp.focus(); }
+  /** Set the chat input field value and return focus to it. */
+  function setChatInput(text) { const inp = el('chat-input'); inp.value = text; inp.focus(); }
   /** Get the trimmed API key input value, or empty string if field is absent. */
   function getApiKeyInput() { const inp = el('api-key'); return inp ? inp.value.trim() : ''; }
   /** Get the trimmed service key input value from the modal. */
@@ -759,7 +780,7 @@ const UIController = (() => {
     setSendingState, setSandboxRunning, resetSandboxUI,
     showTokenUsage, showApiKeyInput, removeApiKeyInput,
     showServiceKeyModal, hideServiceKeyModal,
-    getChatInput, clearChatInput, getApiKeyInput, getServiceKeyInput,
+    getChatInput, clearChatInput, setChatInput, getApiKeyInput, getServiceKeyInput,
     displayCode, updateCharCount
   };
 })();
@@ -1615,6 +1636,9 @@ const HistoryPanel = (() => {
 
       // MessageTranslator: all messages
       MessageTranslator.decorateOne(msgEl, nonSystemIdx);
+
+      // MessageEditor: user messages only (decorateOne checks role internally)
+      MessageEditor.decorateOne(msgEl, i);
 
       nonSystemIdx++;
     }
@@ -14786,5 +14810,211 @@ const ModelCompare = (() => {
     getModelStats: getModelStats,
     clearHistory: clearHistory,
     exportHistory: exportHistory
+  };
+})();
+
+/* ---------- Message Editor ---------- */
+/**
+ * Edit & resend user messages.
+ *
+ * Adds a pencil button (✏️) on each user message in the history panel.
+ * When clicked:
+ *   1. The conversation is truncated to remove that message and everything
+ *      after it (rewinding the timeline).
+ *   2. The message text is placed into the chat input so the user can
+ *      modify it and re-send.
+ *   3. The history panel refreshes to reflect the shorter conversation.
+ *
+ * This mirrors the "Edit message" UX in ChatGPT / Claude — a frequently
+ * requested pattern for iterating on prompts without starting over.
+ *
+ * Hooks into HistoryPanel's single-pass _decorateAllMessages via
+ * decorateOne(msgEl, historyIndex).
+ *
+ * Storage key: agenticchat_edit_history (last 50 edits for undo).
+ *
+ * @namespace MessageEditor
+ */
+const MessageEditor = (() => {
+  const STORE_KEY = 'agenticchat_edit_history';
+  const MAX_EDITS = 50;
+
+  // Uses the shared _escapeHtml defined at file scope.
+
+  /* ── Persistence ──────────────────────────────────────────── */
+
+  /** Load edit history from storage. */
+  function _loadEdits() {
+    try {
+      const raw = SafeStorage.get(STORE_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch (_) { return []; }
+  }
+
+  /** Save edit history to storage. */
+  function _saveEdits(edits) {
+    try {
+      SafeStorage.set(STORE_KEY, JSON.stringify(edits.slice(-MAX_EDITS)));
+    } catch (_) { /* quota */ }
+  }
+
+  /** Record an edit action (original text + index). */
+  function _recordEdit(historyIndex, originalText) {
+    const edits = _loadEdits();
+    edits.push({
+      historyIndex,
+      originalText,
+      timestamp: Date.now()
+    });
+    _saveEdits(edits);
+  }
+
+  /* ── Core logic ───────────────────────────────────────────── */
+
+  /**
+   * Edit a user message at the given history index.
+   *
+   * Truncates the conversation so that the edited message and all
+   * subsequent messages are removed, then places the original text
+   * in the chat input for modification.
+   *
+   * @param {number} historyIndex — index in ConversationManager.getHistory()
+   *   (includes system message at index 0)
+   */
+  function editAt(historyIndex) {
+    const history = ConversationManager.getHistory();
+    if (historyIndex < 1 || historyIndex >= history.length) return;
+
+    const msg = history[historyIndex];
+    if (msg.role !== 'user') return;
+
+    const originalText = msg.content;
+
+    // Confirm if there are assistant replies that will be lost
+    const messagesAfter = history.length - historyIndex - 1;
+    if (messagesAfter > 0) {
+      const ok = confirm(
+        `Editing this message will remove ${messagesAfter} message${messagesAfter !== 1 ? 's' : ''} ` +
+        'after it (including assistant replies).\n\nContinue?'
+      );
+      if (!ok) return;
+    }
+
+    // Record for undo history
+    _recordEdit(historyIndex, originalText);
+
+    // Truncate conversation at this message
+    ConversationManager.truncateAt(historyIndex);
+
+    // Place original text in input
+    UIController.setChatInput(originalText);
+
+    // Update the main chat display
+    UIController.setChatOutput('');
+    UIController.setConsoleOutput('(editing message — modify and re-send)');
+    UIController.setLastPrompt('✏️ Editing previous message');
+
+    // Refresh history panel
+    HistoryPanel.refresh();
+
+    // Auto-save the truncated session
+    SessionManager.autoSaveIfEnabled();
+
+    // Show notification
+    _showEditNotification();
+  }
+
+  /* ── UI / decoration ──────────────────────────────────────── */
+
+  /**
+   * Add an edit button to a single user-message element.
+   * Called by HistoryPanel._decorateAllMessages for each message.
+   *
+   * @param {HTMLElement} msgEl — the .history-msg element
+   * @param {number} historyIndex — index in ConversationManager.getHistory()
+   */
+  function decorateOne(msgEl, historyIndex) {
+    // Only decorate user messages
+    const history = ConversationManager.getHistory();
+    if (historyIndex < 1 || historyIndex >= history.length) return;
+    if (history[historyIndex].role !== 'user') return;
+
+    // Don't add if already present
+    if (msgEl.querySelector('.msg-edit-btn')) return;
+
+    const btn = document.createElement('button');
+    btn.className = 'msg-edit-btn';
+    btn.textContent = '✏️ Edit';
+    btn.title = 'Edit this message — truncates conversation and loads text into input for re-sending';
+    btn.setAttribute('aria-label', 'Edit and resend this message');
+
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      editAt(historyIndex);
+      HistoryPanel.close();
+    });
+
+    msgEl.appendChild(btn);
+  }
+
+  /**
+   * Bulk-decorate all messages in a container.
+   * Kept for backward compatibility; the single-pass decorator
+   * in HistoryPanel uses decorateOne directly.
+   */
+  function decorateMessages() {
+    const container = document.getElementById('history-messages');
+    if (!container) return;
+
+    const msgs = container.querySelectorAll('.history-msg');
+    const history = ConversationManager.getHistory();
+
+    let nonSystemIdx = 0;
+    for (let i = 0; i < history.length; i++) {
+      if (history[i].role === 'system') continue;
+      if (nonSystemIdx < msgs.length) {
+        decorateOne(msgs[nonSystemIdx], i);
+      }
+      nonSystemIdx++;
+    }
+  }
+
+  /**
+   * Show a temporary notification when a message is loaded for editing.
+   */
+  function _showEditNotification() {
+    const note = document.createElement('div');
+    note.className = 'msg-edit-notification';
+    note.setAttribute('role', 'status');
+    note.setAttribute('aria-live', 'polite');
+    note.innerHTML =
+      '<span class="msg-edit-notification-icon">✏️</span> ' +
+      '<span>Message loaded for editing — modify and press Send</span>';
+    document.body.appendChild(note);
+
+    requestAnimationFrame(() => note.classList.add('visible'));
+
+    setTimeout(() => {
+      note.classList.remove('visible');
+      setTimeout(() => note.remove(), 300);
+    }, 3000);
+  }
+
+  /* ── Edit history access ──────────────────────────────────── */
+
+  /** Get the list of recorded edits (most recent last). */
+  function getEditHistory() { return _loadEdits(); }
+
+  /** Clear stored edit history. */
+  function clearEditHistory() {
+    try { SafeStorage.remove(STORE_KEY); } catch (_) { /* ok */ }
+  }
+
+  return {
+    editAt,
+    decorateOne,
+    decorateMessages,
+    getEditHistory,
+    clearEditHistory
   };
 })();

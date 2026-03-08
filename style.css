@@ -2331,3 +2331,64 @@ html.light .fork-notification {
   display: flex; gap: 8px; justify-content: flex-end;
   margin-top: 16px;
 }
+
+/* ---------- Message Editor ---------- */
+
+.msg-edit-btn {
+  display: inline-block;
+  padding: 2px 8px;
+  margin-top: 6px;
+  margin-right: 4px;
+  font-size: 0.75rem;
+  background: transparent;
+  color: #888;
+  border: 1px solid rgba(136, 136, 136, 0.3);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  opacity: 0;
+}
+
+.history-msg:hover .msg-edit-btn {
+  opacity: 1;
+}
+
+.msg-edit-btn:hover {
+  background: rgba(234, 179, 8, 0.15);
+  color: #eab308;
+  border-color: rgba(234, 179, 8, 0.4);
+}
+
+.msg-edit-btn:active {
+  transform: scale(0.95);
+}
+
+/* Edit notification toast */
+.msg-edit-notification {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  background: #422006;
+  color: #fbbf24;
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  transition: all 0.3s ease;
+  z-index: 10001;
+  pointer-events: none;
+}
+
+.msg-edit-notification.visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+.msg-edit-notification-icon {
+  font-size: 1.1rem;
+}

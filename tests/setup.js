@@ -291,7 +291,9 @@ function loadApp() {
     'ConversationMerge',
     'ConversationReplay',
     'PromptLibrary',
-    'ModelCompare'
+    'ModelCompare',
+    'MessageTranslator',
+    'MessageEditor'
   ];
 
   for (const mod of modules) {
