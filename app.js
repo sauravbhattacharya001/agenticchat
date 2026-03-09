@@ -823,6 +823,25 @@ const ChatController = (() => {
   }
 
   /**
+   * Build a user-friendly error result from a non-ok fetch Response.
+   * Shared by callOpenAI and callOpenAIStreaming to avoid duplicating
+   * the status-code interpretation and body-parsing logic.
+   */
+  async function buildErrorResult(rsp) {
+    let errMsg = `OpenAI error ${rsp.status}`;
+    try {
+      const body = await rsp.json();
+      if (body?.error?.message) errMsg += `: ${body.error.message}`;
+    } catch (_) {}
+
+    if (rsp.status === 401) errMsg += ' — check your API key';
+    else if (rsp.status === 429) errMsg += ' — rate limited, try again shortly';
+    else if (rsp.status === 503) errMsg += ' — service temporarily unavailable';
+
+    return { ok: false, status: rsp.status, error: errMsg };
+  }
+
+  /**
    * Send a non-streaming chat completion request to the OpenAI API.
    * Aborts any in-flight request before starting a new one.
    * @param {string} key - OpenAI API key.
@@ -848,17 +867,7 @@ const ChatController = (() => {
     });
 
     if (!rsp.ok) {
-      let errMsg = `OpenAI error ${rsp.status}`;
-      try {
-        const body = await rsp.json();
-        if (body?.error?.message) errMsg += `: ${body.error.message}`;
-      } catch (_) {}
-
-      if (rsp.status === 401) errMsg += ' — check your API key';
-      else if (rsp.status === 429) errMsg += ' — rate limited, try again shortly';
-      else if (rsp.status === 503) errMsg += ' — service temporarily unavailable';
-
-      return { ok: false, status: rsp.status, error: errMsg };
+      return buildErrorResult(rsp);
     }
 
     currentAbortController = null;
@@ -889,17 +898,7 @@ const ChatController = (() => {
     });
 
     if (!rsp.ok) {
-      let errMsg = `OpenAI error ${rsp.status}`;
-      try {
-        const body = await rsp.json();
-        if (body?.error?.message) errMsg += `: ${body.error.message}`;
-      } catch (_) {}
-
-      if (rsp.status === 401) errMsg += ' — check your API key';
-      else if (rsp.status === 429) errMsg += ' — rate limited, try again shortly';
-      else if (rsp.status === 503) errMsg += ' — service temporarily unavailable';
-
-      return { ok: false, status: rsp.status, error: errMsg };
+      return buildErrorResult(rsp);
     }
 
     const reader = rsp.body.getReader();
@@ -13260,9 +13259,6 @@ const ConversationMerge = (() => {
     }
     SessionManager.refresh();
     close();
-
-    const count = merged.filter(m => m.role !== 'system').length;
-    console.log(`[ConversationMerge] Merged ${sessions.length} sessions (${count} messages) into "${mergedName}"`);
   }
 
   function _esc(s) {
