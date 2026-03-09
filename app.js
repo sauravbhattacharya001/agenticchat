@@ -54,6 +54,7 @@
  *   MessageTranslator    — inline message translation to 20+ languages via OpenAI API
  *   MessageEditor        — edit & resend user messages (truncate + reload into input)
  *   SmartRetry           — automatic retry with exponential backoff for transient API failures
+ *   UsageHeatmap         — GitHub-style 7×24 activity heatmap across all sessions
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -8298,6 +8299,7 @@ document.addEventListener('DOMContentLoaded', () => {
       ModelSelector.close();
       Scratchpad.close();
       ConversationChapters.closePanel();
+      UsageHeatmap.close();
     }
   });
 
@@ -8431,6 +8433,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Cost dashboard
   document.getElementById('cost-btn').addEventListener('click', CostDashboard.toggle);
+
+  // Usage heatmap
+  document.getElementById('heatmap-btn').addEventListener('click', UsageHeatmap.toggle);
 
   // Focus / Zen mode
   document.getElementById('zen-btn').addEventListener('click', FocusMode.toggle);
@@ -15748,3 +15753,286 @@ const SmartRetry = (() => {
     _clearIndicator
   };
 })();
+
+/* ---------- Usage Heatmap ---------- */
+/**
+ * GitHub-style 7x24 activity heatmap showing chat patterns across
+ * all saved sessions.  Scans message timestamps and renders a
+ * day-of-week x hour-of-day grid with color intensity proportional
+ * to message count.
+ *
+ * Public API:
+ *   toggle()           - open / close heatmap panel
+ *   open()             - render and show
+ *   close()            - hide panel
+ *   getData()          - raw 7x24 matrix of counts
+ *   getTotalMessages() - total messages scanned
+ *   getPeakHour()      - {day, hour, count} of busiest slot
+ *   getActiveHours()   - number of day x hour slots with >= 1 message
+ *   exportCSV()        - download heatmap data as CSV
+ *
+ * @namespace UsageHeatmap
+ */
+const UsageHeatmap = (() => {
+  const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const FULL_DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday',
+    'Thursday', 'Friday', 'Saturday'];
+
+  let isOpen = false;
+
+  /* -- Data collection ------------------------------------------------- */
+
+  /**
+   * Scan all saved sessions and the current conversation to build
+   * a 7x24 matrix of message counts.
+   * @returns {{grid: number[][], total: number, sessionCount: number}}
+   */
+  function _collectData() {
+    const grid = Array.from({ length: 7 }, () => Array(24).fill(0));
+    let total = 0;
+    let sessionCount = 0;
+
+    if (typeof SessionManager !== 'undefined' && SessionManager.getAll) {
+      const sessions = SessionManager.getAll();
+      sessionCount = sessions.length;
+      for (const session of sessions) {
+        const msgs = session.messages || session.history || [];
+        for (const msg of msgs) {
+          const ts = msg.timestamp || msg.createdAt || msg.time;
+          if (!ts) continue;
+          const d = new Date(ts);
+          if (isNaN(d.getTime())) continue;
+          grid[d.getDay()][d.getHours()]++;
+          total++;
+        }
+      }
+    }
+
+    if (typeof ConversationManager !== 'undefined' && ConversationManager.getHistory) {
+      const current = ConversationManager.getHistory();
+      for (const msg of current) {
+        const ts = msg.timestamp || msg.createdAt || msg.time;
+        if (!ts) continue;
+        const d = new Date(ts);
+        if (isNaN(d.getTime())) continue;
+        grid[d.getDay()][d.getHours()]++;
+        total++;
+      }
+    }
+
+    return { grid, total, sessionCount };
+  }
+
+  function getData() {
+    return _collectData().grid;
+  }
+
+  function getTotalMessages() {
+    return _collectData().total;
+  }
+
+  /**
+   * Find the peak (busiest) day x hour slot.
+   * @returns {{day: number, dayName: string, hour: number, count: number}|null}
+   */
+  function getPeakHour() {
+    const { grid } = _collectData();
+    let maxCount = 0;
+    let peakDay = 0;
+    let peakHour = 0;
+    for (let d = 0; d < 7; d++) {
+      for (let h = 0; h < 24; h++) {
+        if (grid[d][h] > maxCount) {
+          maxCount = grid[d][h];
+          peakDay = d;
+          peakHour = h;
+        }
+      }
+    }
+    if (maxCount === 0) return null;
+    return {
+      day: peakDay,
+      dayName: FULL_DAY_NAMES[peakDay],
+      hour: peakHour,
+      count: maxCount
+    };
+  }
+
+  function getActiveHours() {
+    const { grid } = _collectData();
+    let count = 0;
+    for (let d = 0; d < 7; d++) {
+      for (let h = 0; h < 24; h++) {
+        if (grid[d][h] > 0) count++;
+      }
+    }
+    return count;
+  }
+
+  /* -- Color mapping --------------------------------------------------- */
+
+  function _intensityClass(count, maxCount) {
+    if (count === 0) return 'heatmap-level-0';
+    if (maxCount === 0) return 'heatmap-level-0';
+    const ratio = count / maxCount;
+    if (ratio <= 0.25) return 'heatmap-level-1';
+    if (ratio <= 0.50) return 'heatmap-level-2';
+    if (ratio <= 0.75) return 'heatmap-level-3';
+    return 'heatmap-level-4';
+  }
+
+  function _fmtHour(h) {
+    if (h === 0) return '12a';
+    if (h < 12) return h + 'a';
+    if (h === 12) return '12p';
+    return (h - 12) + 'p';
+  }
+
+  /* -- Rendering ------------------------------------------------------- */
+
+  function _render() {
+    const container = document.getElementById('heatmap-grid');
+    const statsEl = document.getElementById('heatmap-stats');
+    if (!container) return;
+
+    const { grid, total, sessionCount } = _collectData();
+
+    let maxCount = 0;
+    for (let d = 0; d < 7; d++) {
+      for (let h = 0; h < 24; h++) {
+        if (grid[d][h] > maxCount) maxCount = grid[d][h];
+      }
+    }
+
+    let html = '<div class="heatmap-row heatmap-header-row">';
+    html += '<div class="heatmap-label"></div>';
+    for (let h = 0; h < 24; h++) {
+      const show = h % 3 === 0;
+      html += '<div class="heatmap-hour-label">' + (show ? _fmtHour(h) : '') + '</div>';
+    }
+    html += '</div>';
+
+    for (let d = 0; d < 7; d++) {
+      html += '<div class="heatmap-row">';
+      html += '<div class="heatmap-label">' + DAY_NAMES[d] + '</div>';
+      for (let h = 0; h < 24; h++) {
+        const count = grid[d][h];
+        const cls = _intensityClass(count, maxCount);
+        const tip = FULL_DAY_NAMES[d] + ' ' + _fmtHour(h) + ': ' + count +
+          ' message' + (count !== 1 ? 's' : '');
+        html += '<div class="heatmap-cell ' + cls +
+          '" title="' + tip + '" data-count="' + count + '"></div>';
+      }
+      html += '</div>';
+    }
+
+    html += '<div class="heatmap-legend">';
+    html += '<span class="heatmap-legend-label">Less</span>';
+    for (let i = 0; i <= 4; i++) {
+      html += '<div class="heatmap-cell heatmap-legend-cell heatmap-level-' + i + '"></div>';
+    }
+    html += '<span class="heatmap-legend-label">More</span>';
+    html += '</div>';
+
+    container.innerHTML = html;
+
+    if (statsEl) {
+      const peak = getPeakHour();
+      const active = getActiveHours();
+      let s = '<div class="heatmap-stat">';
+      s += '<span class="heatmap-stat-value">' + total.toLocaleString() + '</span>';
+      s += '<span class="heatmap-stat-label">messages</span></div>';
+      s += '<div class="heatmap-stat">';
+      s += '<span class="heatmap-stat-value">' + sessionCount + '</span>';
+      s += '<span class="heatmap-stat-label">sessions scanned</span></div>';
+      s += '<div class="heatmap-stat">';
+      s += '<span class="heatmap-stat-value">' + active + '/168</span>';
+      s += '<span class="heatmap-stat-label">active hours</span></div>';
+      if (peak) {
+        s += '<div class="heatmap-stat">';
+        s += '<span class="heatmap-stat-value">' + peak.dayName + ' ' +
+          _fmtHour(peak.hour) + '</span>';
+        s += '<span class="heatmap-stat-label">peak (' + peak.count + ' msgs)</span></div>';
+      }
+      statsEl.innerHTML = s;
+    }
+  }
+
+  /* -- Panel management ------------------------------------------------ */
+
+  function open() {
+    const panel = document.getElementById('heatmap-panel');
+    const overlay = document.getElementById('heatmap-overlay');
+    if (panel) panel.style.display = '';
+    if (overlay) overlay.style.display = '';
+    isOpen = true;
+    _render();
+  }
+
+  function close() {
+    const panel = document.getElementById('heatmap-panel');
+    const overlay = document.getElementById('heatmap-overlay');
+    if (panel) panel.style.display = 'none';
+    if (overlay) overlay.style.display = 'none';
+    isOpen = false;
+  }
+
+  function toggle() {
+    isOpen ? close() : open();
+  }
+
+  /* -- CSV export ------------------------------------------------------ */
+
+  function exportCSV() {
+    const { grid } = _collectData();
+    let csv = 'Day,' +
+      Array.from({ length: 24 }, (_, h) => _fmtHour(h)).join(',') + '\n';
+    for (let d = 0; d < 7; d++) {
+      csv += DAY_NAMES[d] + ',' + grid[d].join(',') + '\n';
+    }
+
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'usage-heatmap.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  /* -- Init ------------------------------------------------------------ */
+
+  function init() {
+    const closeBtn = document.getElementById('heatmap-close-btn');
+    if (closeBtn) closeBtn.addEventListener('click', close);
+
+    const overlay = document.getElementById('heatmap-overlay');
+    if (overlay) overlay.addEventListener('click', close);
+
+    const exportBtn = document.getElementById('heatmap-export-btn');
+    if (exportBtn) exportBtn.addEventListener('click', exportCSV);
+
+    const refreshBtn = document.getElementById('heatmap-refresh-btn');
+    if (refreshBtn) refreshBtn.addEventListener('click', _render);
+  }
+
+  return {
+    toggle,
+    open,
+    close,
+    getData,
+    getTotalMessages,
+    getPeakHour,
+    getActiveHours,
+    exportCSV,
+    init,
+    _collectData,
+    _intensityClass,
+    _fmtHour,
+    _render
+  };
+})();
+
+document.addEventListener('DOMContentLoaded', UsageHeatmap.init);
