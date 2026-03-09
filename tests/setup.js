@@ -23,6 +23,7 @@ function setupDOM() {
       <button id="shortcuts-btn" class="btn-secondary">⌨️</button>
       <button id="stats-btn" class="btn-secondary" title="Chat statistics (Ctrl+I)">📊</button>
       <button id="cost-btn" class="btn-secondary" title="Cost dashboard">💰</button>
+      <button id="heatmap-btn" class="btn-secondary" title="Usage heatmap">🗓️</button>
       <button id="bookmarks-btn" title="Bookmarks (Ctrl+B)">🔖</button>
       <button id="voice-btn" class="btn-secondary" aria-label="Toggle voice input">🎤</button>
       <button id="theme-btn" class="btn-secondary" aria-label="Toggle theme">☀️</button>
@@ -224,6 +225,14 @@ function setupDOM() {
         </div>
       </div>
     </div>
+    <div id="heatmap-overlay" style="display:none;"></div>
+    <div id="heatmap-panel" style="display:none;">
+      <div id="heatmap-stats"></div>
+      <div id="heatmap-grid"></div>
+      <button id="heatmap-close-btn"></button>
+      <button id="heatmap-export-btn"></button>
+      <button id="heatmap-refresh-btn"></button>
+    </div>
     <div id="file-drop-overlay"></div>
   `;
 }
@@ -296,7 +305,8 @@ function loadApp() {
     'MessageTranslator',
     'MessageEditor',
     'MessageScheduler',
-    'SmartRetry'
+    'SmartRetry',
+    'UsageHeatmap'
   ];
 
   for (const mod of modules) {
@@ -316,9 +326,9 @@ function loadApp() {
     );
   }
 
-  // Suppress DOMContentLoaded listener (tests call functions directly)
-  appCode = appCode.replace(
-    /document\.addEventListener\('DOMContentLoaded'/,
+  // Suppress DOMContentLoaded listeners (tests call functions directly)
+  appCode = appCode.replaceAll(
+    "document.addEventListener('DOMContentLoaded'",
     "document.addEventListener('__test_skip_DOMContentLoaded__'"
   );
 

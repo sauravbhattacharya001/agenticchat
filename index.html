@@ -40,6 +40,7 @@
     <button id="shortcuts-btn" class="btn-secondary" title="Keyboard shortcuts (press ? for help)">⌨️</button>
     <button id="stats-btn" class="btn-secondary" title="Chat statistics (Ctrl+I)">📊</button>
     <button id="cost-btn" class="btn-secondary" title="Cost dashboard — track API spending">💰</button>
+    <button id="heatmap-btn" class="btn-secondary" title="Usage heatmap — activity patterns">🗓️</button>
     <button id="voice-btn" class="btn-secondary" title="Voice input — speak your prompt (Ctrl+M)" aria-label="Toggle voice input">🎤</button>
     <button id="persona-btn" class="btn-secondary" title="System prompt presets (Ctrl+P)">🎭</button>
     <button id="model-btn" class="btn-secondary" title="Select AI model">🤖 <span id="model-label">GPT-4o</span></button>
@@ -368,6 +369,21 @@
         <button id="prompt-library-confirm-btn">Save</button>
       </div>
     </div>
+  </div>
+
+  <!-- Usage Heatmap Panel -->
+  <div id="heatmap-overlay"></div>
+  <div id="heatmap-panel" aria-label="Usage heatmap" style="display:none;">
+    <div id="heatmap-header">
+      <span>🗓️ Usage Heatmap</span>
+      <div id="heatmap-actions">
+        <button id="heatmap-refresh-btn" class="btn-sm" title="Refresh data">🔄</button>
+        <button id="heatmap-export-btn" class="btn-sm" title="Export as CSV">📥 CSV</button>
+        <button id="heatmap-close-btn" class="btn-sm" title="Close panel">✕</button>
+      </div>
+    </div>
+    <div id="heatmap-stats"></div>
+    <div id="heatmap-grid"></div>
   </div>
 
   <!-- Model Selector Panel -->
