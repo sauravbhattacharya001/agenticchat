@@ -53,6 +53,7 @@
  *   PromptLibrary        — user-created prompt snippets with folders, search, usage tracking, import/export
  *   MessageTranslator    — inline message translation to 20+ languages via OpenAI API
  *   MessageEditor        — edit & resend user messages (truncate + reload into input)
+ *   SmartRetry           — automatic retry with exponential backoff for transient API failures
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -8481,6 +8482,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Scheduled messages
   MessageScheduler.init();
+  SmartRetry.init();
 });
 
 
@@ -15464,5 +15466,285 @@ const MessageScheduler = (() => {
     clearHistory,
     togglePanel,
     onSend
+  };
+})();
+
+/* ---------- Smart Retry ---------- */
+/**
+ * SmartRetry — Automatic retry with exponential backoff for transient API failures.
+ *
+ * Intercepts 429 (rate limit), 500, 502, 503, and network errors. Shows a
+ * visual countdown indicator in the chat output area with a cancel button.
+ * Retries up to {@link MAX_RETRIES} times with exponential delays (1s, 2s, 4s).
+ *
+ * Usage:
+ *   const result = await SmartRetry.withRetry(() => callOpenAI(key, msgs));
+ *   // result is the first successful response, or the final failure after all retries
+ *
+ * The retry indicator shows: attempt number, countdown timer, and a cancel button.
+ * Cancelled retries return the original error immediately.
+ *
+ * @namespace SmartRetry
+ */
+const SmartRetry = (() => {
+  const STORAGE_KEY = 'agenticchat_smart_retry';
+  const MAX_RETRIES = 3;
+  const BASE_DELAY_MS = 1000;
+  const RETRYABLE_STATUSES = new Set([429, 500, 502, 503]);
+
+  let _enabled = true;
+  let _cancelled = false;
+  let _retryStats = { totalRetries: 0, successfulRetries: 0, failedRetries: 0 };
+  let _countdownInterval = null;
+
+  /** Load persisted settings. */
+  function _loadSettings() {
+    const raw = SafeStorage.get(STORAGE_KEY);
+    if (raw) {
+      try {
+        const data = JSON.parse(raw);
+        _enabled = data.enabled !== false;
+        if (data.stats) _retryStats = data.stats;
+      } catch (_) {}
+    }
+  }
+
+  /** Save settings to localStorage. */
+  function _save() {
+    SafeStorage.set(STORAGE_KEY, JSON.stringify({
+      enabled: _enabled,
+      stats: _retryStats
+    }));
+  }
+
+  /** Check if a result should be retried. */
+  function isRetryable(result) {
+    if (!result) return false;
+    if (result.networkError) return true;
+    return !!(result.status && RETRYABLE_STATUSES.has(result.status));
+  }
+
+  /** Calculate delay for attempt n (0-indexed): base * 2^n + jitter. */
+  function getDelay(attempt) {
+    const base = BASE_DELAY_MS * Math.pow(2, attempt);
+    const jitter = Math.floor(Math.random() * 300);
+    return base + jitter;
+  }
+
+  /** Show retry indicator in chat output. */
+  function _showRetryIndicator(attempt, delayMs, error) {
+    const container = document.getElementById('chat-output');
+    if (!container) return;
+
+    let remaining = Math.ceil(delayMs / 1000);
+    const retryDiv = document.createElement('div');
+    retryDiv.className = 'smart-retry-indicator';
+    retryDiv.id = 'smart-retry-indicator';
+
+    const statusText = error || 'Request failed';
+    retryDiv.innerHTML =
+      '<div class="retry-header">' +
+        '<span class="retry-icon">\u27F3</span> ' +
+        '<strong>Retrying</strong> (attempt ' + (attempt + 1) + '/' + MAX_RETRIES + ')' +
+      '</div>' +
+      '<div class="retry-reason">' + _escapeHtml(statusText) + '</div>' +
+      '<div class="retry-countdown">Retrying in <span id="retry-seconds">' + remaining + '</span>s\u2026</div>' +
+      '<button class="retry-cancel-btn" id="retry-cancel-btn">Cancel</button>';
+
+    const existing = document.getElementById('smart-retry-indicator');
+    if (existing) existing.remove();
+
+    container.appendChild(retryDiv);
+
+    const cancelBtn = document.getElementById('retry-cancel-btn');
+    if (cancelBtn) {
+      cancelBtn.addEventListener('click', () => {
+        _cancelled = true;
+        _clearIndicator();
+      });
+    }
+
+    if (_countdownInterval) clearInterval(_countdownInterval);
+    _countdownInterval = setInterval(() => {
+      remaining--;
+      const el = document.getElementById('retry-seconds');
+      if (el) el.textContent = String(remaining);
+      if (remaining <= 0) {
+        clearInterval(_countdownInterval);
+        _countdownInterval = null;
+      }
+    }, 1000);
+  }
+
+  /** Remove retry indicator. */
+  function _clearIndicator() {
+    if (_countdownInterval) {
+      clearInterval(_countdownInterval);
+      _countdownInterval = null;
+    }
+    const el = document.getElementById('smart-retry-indicator');
+    if (el) el.remove();
+  }
+
+  /** Escape HTML for safe display. */
+  function _escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  /**
+   * Wrap an async API call with automatic retry logic.
+   *
+   * @param {Function} fn — Async function returning {ok, status?, error?, networkError?}
+   * @param {Object} [opts] — Options
+   * @param {number} [opts.maxRetries] — Override max retries (default 3)
+   * @param {boolean} [opts.showIndicator] — Show visual retry indicator (default true)
+   * @returns {Promise<Object>} The API result (success or final failure)
+   */
+  async function withRetry(fn, opts) {
+    if (!_enabled) return fn();
+
+    const maxRetries = (opts && opts.maxRetries) || MAX_RETRIES;
+    const showIndicator = !(opts && opts.showIndicator === false);
+    _cancelled = false;
+
+    let lastResult = null;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const result = await fn();
+
+        if (result && result.ok) {
+          if (attempt > 0) {
+            _retryStats.successfulRetries++;
+            _save();
+            _clearIndicator();
+          }
+          return result;
+        }
+
+        lastResult = result;
+
+        if (attempt < maxRetries && isRetryable(result)) {
+          _retryStats.totalRetries++;
+          const delay = getDelay(attempt);
+
+          if (showIndicator) {
+            _showRetryIndicator(attempt, delay, result.error);
+          }
+
+          await new Promise((resolve) => {
+            const timer = setTimeout(resolve, delay);
+            const checkCancel = setInterval(() => {
+              if (_cancelled) {
+                clearTimeout(timer);
+                clearInterval(checkCancel);
+                resolve();
+              }
+            }, 100);
+            setTimeout(() => clearInterval(checkCancel), delay + 100);
+          });
+
+          if (_cancelled) {
+            _clearIndicator();
+            _retryStats.failedRetries++;
+            _save();
+            return lastResult;
+          }
+
+          _clearIndicator();
+          continue;
+        }
+
+        if (attempt > 0) {
+          _retryStats.failedRetries++;
+          _save();
+        }
+        return result;
+
+      } catch (err) {
+        lastResult = {
+          ok: false,
+          error: 'Network error: ' + err.message,
+          networkError: true
+        };
+
+        if (attempt < maxRetries) {
+          _retryStats.totalRetries++;
+          const delay = getDelay(attempt);
+
+          if (showIndicator) {
+            _showRetryIndicator(attempt, delay, lastResult.error);
+          }
+
+          await new Promise((resolve) => {
+            const timer = setTimeout(resolve, delay);
+            const checkCancel = setInterval(() => {
+              if (_cancelled) {
+                clearTimeout(timer);
+                clearInterval(checkCancel);
+                resolve();
+              }
+            }, 100);
+            setTimeout(() => clearInterval(checkCancel), delay + 100);
+          });
+
+          if (_cancelled) {
+            _clearIndicator();
+            _retryStats.failedRetries++;
+            _save();
+            return lastResult;
+          }
+
+          _clearIndicator();
+          continue;
+        }
+
+        _retryStats.failedRetries++;
+        _save();
+        return lastResult;
+      }
+    }
+
+    return lastResult;
+  }
+
+  /** Toggle retry on/off. */
+  function setEnabled(val) {
+    _enabled = !!val;
+    _save();
+  }
+
+  function isEnabled() { return _enabled; }
+
+  function getStats() { return Object.assign({}, _retryStats); }
+
+  function resetStats() {
+    _retryStats = { totalRetries: 0, successfulRetries: 0, failedRetries: 0 };
+    _save();
+  }
+
+  function cancel() {
+    _cancelled = true;
+    _clearIndicator();
+  }
+
+  function init() { _loadSettings(); }
+
+  return {
+    withRetry,
+    isRetryable,
+    getDelay,
+    setEnabled,
+    isEnabled,
+    getStats,
+    resetStats,
+    cancel,
+    init,
+    MAX_RETRIES,
+    RETRYABLE_STATUSES,
+    _showRetryIndicator,
+    _clearIndicator
   };
 })();
