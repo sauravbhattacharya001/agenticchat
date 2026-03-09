@@ -79,6 +79,16 @@ A lightweight, zero-dependency chat interface that sends your prompts to GPT-4o,
 - **Zero Dependencies** — Single HTML file + CSS + JS. No build tools, no npm, no bundler. Just open and go.
 - **Input Guardrails** — Character limit (50K chars), token estimate warnings (~80K threshold), real-time counter
 
+### AI & Reliability
+- **Response Rating** — Thumbs up/down ratings on AI responses with model satisfaction dashboard
+- **Smart Retry** — Automatic retry with exponential backoff for transient API failures
+- **Message Editor** — Edit and resend user messages (truncates history and reloads into input)
+- **Message Translator** — Inline message translation to 20+ languages via OpenAI API
+- **Conversation Merge** — Combine 2+ sessions into one merged conversation with chronological interleaving
+- **Conversation Replay** — Message-by-message playback with transport controls (play/pause/speed)
+- **Prompt Library** — User-created prompt snippets with folders, search, usage tracking, import/export
+- **Usage Heatmap** — GitHub-style 7x24 activity heatmap across all sessions
+
 ## 🚀 Getting Started
 
 ### Prerequisites
@@ -126,7 +136,7 @@ User Prompt  →  GPT-4o (system prompt: reply with JS only)
 
 ### Modules
 
-The codebase is organized into **40** IIFE modules in `app.js`, each using the revealing-module pattern:
+The codebase is organized into **48** IIFE modules in `app.js`, each using the revealing-module pattern:
 
 <details>
 <summary><strong>Core (7 modules)</strong></summary>
@@ -144,7 +154,7 @@ The codebase is organized into **40** IIFE modules in `app.js`, each using the r
 </details>
 
 <details>
-<summary><strong>Features (33 modules)</strong></summary>
+<summary><strong>Features (41 modules)</strong></summary>
 
 | Module | Purpose |
 |--------|---------|
@@ -183,6 +193,14 @@ The codebase is organized into **40** IIFE modules in `app.js`, each using the r
 | `GlobalSessionSearch` | Full-text search across all saved sessions |
 | `AutoTagger` | Heuristic topic detection and automatic tag suggestions |
 | `DataBackup` | Full backup/restore for all user data (21 keys, export/import) |
+| `ResponseRating` | Thumbs up/down ratings on AI responses with model satisfaction dashboard |
+| `ConversationMerge` | Combine 2+ sessions into one merged conversation (chronological interleave) |
+| `ConversationReplay` | Message-by-message playback with transport controls |
+| `PromptLibrary` | User-created prompt snippets with folders, search, usage tracking, import/export |
+| `MessageTranslator` | Inline message translation to 20+ languages via OpenAI API |
+| `MessageEditor` | Edit and resend user messages (truncate history + reload into input) |
+| `SmartRetry` | Automatic retry with exponential backoff for transient API failures |
+| `UsageHeatmap` | GitHub-style 7x24 activity heatmap across all sessions |
 
 </details>
 
@@ -220,7 +238,7 @@ The app executes AI-generated code, so security is a first-class concern:
 ```
 agenticchat/
 ├── index.html              # Single-page UI with CSP headers
-├── app.js                  # All application logic (40 modular IIFEs)
+├── app.js                  # All application logic (48 modular IIFEs)
 ├── style.css               # Responsive dark-theme styling
 ├── package.json            # npm metadata + test scripts
 ├── jest.config.js          # Jest test configuration
@@ -231,21 +249,30 @@ agenticchat/
 ├── docs/
 │   └── index.html          # API reference & architecture docs (GitHub Pages)
 ├── tests/
-│   ├── setup.js            # DOM mocking & app.js loader for jsdom
-│   ├── app.test.js         # Core module tests (800+)
-│   ├── annotations.test.js # MessageAnnotations tests
-│   ├── auto-tagger.test.js # AutoTagger tests
-│   ├── chapters.test.js    # ConversationChapters tests
+│   ├── setup.js                  # DOM mocking & app.js loader for jsdom
+│   ├── app.test.js               # Core module tests (800+)
+│   ├── annotations.test.js       # MessageAnnotations tests
+│   ├── auto-tagger.test.js       # AutoTagger tests
+│   ├── chapters.test.js          # ConversationChapters tests
+│   ├── conversation-merge.test.js # ConversationMerge tests
+│   ├── conversation-replay.test.js # ConversationReplay tests
 │   ├── conversation-tags.test.js # ConversationTags tests
 │   ├── cost-dashboard.test.js    # CostDashboard tests
 │   ├── data-backup.test.js       # DataBackup tests
 │   ├── formatting-toolbar.test.js # FormattingToolbar tests
+│   ├── message-editor.test.js    # MessageEditor tests
+│   ├── message-translator.test.js # MessageTranslator tests
 │   ├── messagediff.test.js       # MessageDiff tests
+│   ├── model-compare.test.js     # ModelCompare tests
 │   ├── modules.test.js           # Module existence/integration tests
 │   ├── pinning.test.js           # MessagePinning tests
+│   ├── prompt-library.test.js    # PromptLibrary tests
 │   ├── readaloud.test.js         # ReadAloud tests
+│   ├── response-rating.test.js   # ResponseRating tests
+│   ├── smart-retry.test.js       # SmartRetry tests
 │   ├── summarizer.test.js        # ConversationSummarizer tests
-│   └── timeline.test.js          # ConversationTimeline tests
+│   ├── timeline.test.js          # ConversationTimeline tests
+│   └── usageHeatmap.test.js      # UsageHeatmap tests
 └── .github/
     ├── copilot-instructions.md    # Copilot coding agent context
     ├── copilot-setup-steps.yml    # Copilot agent setup workflow
@@ -279,7 +306,7 @@ Contributions are welcome! Here's how:
 ### Guidelines
 
 - This is a **single-file app** — keep it that way unless there's a compelling reason to split
-- All 40 modules live in `app.js` as revealing-module IIFEs
+- All 48 modules live in `app.js` as revealing-module IIFEs
 - Security is paramount — any change that touches the sandbox must be reviewed carefully
 - Test with various prompt types before submitting (simple questions, API calls, error cases)
 
