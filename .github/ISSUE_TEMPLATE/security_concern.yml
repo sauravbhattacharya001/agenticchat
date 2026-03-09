@@ -1,0 +1,75 @@
+---
+name: Security Concern
+description: Report a security concern that is NOT a critical vulnerability (use Security Advisories for those)
+title: "[Security]: "
+labels: ["security", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **For critical security vulnerabilities**, please use
+        [Security Advisories](https://github.com/sauravbhattacharya001/agenticchat/security/advisories/new)
+        for private disclosure. This template is for non-critical security concerns,
+        hardening suggestions, or sandbox escape observations.
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Security Category
+      description: What type of security concern is this?
+      options:
+        - Sandbox escape / bypass
+        - API key exposure risk
+        - Content Security Policy gap
+        - Cross-site scripting (XSS)
+        - Prompt injection / manipulation
+        - Data leakage (localStorage, etc.)
+        - Insecure default configuration
+        - Missing input validation
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Estimated Severity
+      options:
+        - Low — defense-in-depth improvement
+        - Medium — exploitable under specific conditions
+        - High — easily exploitable, significant impact
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: Describe the security concern in detail.
+      placeholder: |
+        e.g., "The sandbox CSP allows connect-src https: which means LLM-generated code
+        can exfiltrate injected service API keys to any HTTPS endpoint."
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to Reproduce (if applicable)
+      description: How can the concern be demonstrated?
+      placeholder: |
+        1. Enter a prompt that asks the AI to make an HTTP request
+        2. Observe that the sandbox can reach any HTTPS endpoint
+        3. ...
+
+  - type: textarea
+    id: mitigation
+    attributes:
+      label: Suggested Mitigation
+      description: If you have ideas on how to fix or mitigate this, share them here.
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Any references, links, or related issues.
