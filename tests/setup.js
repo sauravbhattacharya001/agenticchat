@@ -293,7 +293,8 @@ function loadApp() {
     'PromptLibrary',
     'ModelCompare',
     'MessageTranslator',
-    'MessageEditor'
+    'MessageEditor',
+    'DraftManager'
   ];
 
   for (const mod of modules) {
