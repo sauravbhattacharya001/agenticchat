@@ -5125,7 +5125,7 @@ const CostDashboard = (() => {
   function _load() {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
-      return raw ? JSON.parse(raw) : [];
+      return raw ? sanitizeStorageObject(JSON.parse(raw)) : [];
     } catch (_) { return []; }
   }
 
@@ -5986,7 +5986,7 @@ const InputHistory = (() => {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
       if (raw) {
-        const parsed = JSON.parse(raw);
+        const parsed = sanitizeStorageObject(JSON.parse(raw));
         if (Array.isArray(parsed)) {
           entries = parsed.slice(-MAX_ENTRIES);
         }
@@ -6852,7 +6852,7 @@ const MessagePinning = (() => {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
       if (raw) {
-        const parsed = JSON.parse(raw);
+        const parsed = sanitizeStorageObject(JSON.parse(raw));
         if (Array.isArray(parsed)) {
           pins = parsed.filter(p =>
             typeof p.messageIndex === 'number' &&
@@ -7308,7 +7308,7 @@ const ReadAloud = (() => {
     try {
       let data = SafeStorage.get(STORAGE_KEY);
       if (data) {
-        let parsed = JSON.parse(data);
+        let parsed = sanitizeStorageObject(JSON.parse(data));
         if (parsed && typeof parsed === 'object') {
           if (parsed.voiceURI) prefs.voiceURI = String(parsed.voiceURI);
           if (typeof parsed.rate === 'number') prefs.rate = Math.max(MIN_RATE, Math.min(MAX_RATE, parsed.rate));
@@ -9389,7 +9389,7 @@ const MessageAnnotations = (() => {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
       if (raw) {
-        annotations = JSON.parse(raw);
+        annotations = sanitizeStorageObject(JSON.parse(raw));
       }
     } catch (_) {
       annotations = {};
@@ -9974,7 +9974,7 @@ const ConversationChapters = (() => {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
       if (raw) {
-        const parsed = JSON.parse(raw);
+        const parsed = sanitizeStorageObject(JSON.parse(raw));
         if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
           chapters = parsed;
         }
@@ -10696,7 +10696,7 @@ const ConversationTags = (() => {
   function load() {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
-      tagMap = raw ? JSON.parse(raw) : {};
+      tagMap = raw ? sanitizeStorageObject(JSON.parse(raw)) : {};
     } catch { tagMap = {}; }
   }
 
@@ -12753,7 +12753,7 @@ const ResponseRating = (() => {
   function load() {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
-      if (raw) ratings = JSON.parse(raw);
+      if (raw) ratings = sanitizeStorageObject(JSON.parse(raw));
       if (!Array.isArray(ratings)) ratings = [];
     } catch (_) { ratings = []; }
   }
@@ -13630,7 +13630,7 @@ const PromptLibrary = (() => {
   function _load() {
     try {
       var raw = SafeStorage.get(STORAGE_KEY);
-      prompts = raw ? JSON.parse(raw) : [];
+      prompts = raw ? sanitizeStorageObject(JSON.parse(raw)) : [];
     } catch (_) { prompts = []; }
   }
 
@@ -14136,7 +14136,7 @@ const MessageTranslator = (() => {
   function load() {
     try {
       var raw = SafeStorage.get(STORAGE_KEY);
-      if (raw) cache = JSON.parse(raw);
+      if (raw) cache = sanitizeStorageObject(JSON.parse(raw));
       if (typeof cache !== 'object' || cache === null) cache = {};
     } catch (_) { cache = {}; }
     var pref = SafeStorage.get('agenticchat_translate_lang');
@@ -14503,7 +14503,7 @@ const ModelCompare = (() => {
   function _load() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      _history = raw ? JSON.parse(raw) : [];
+      _history = raw ? sanitizeStorageObject(JSON.parse(raw)) : [];
     } catch (_) { _history = []; }
   }
 
@@ -14848,7 +14848,7 @@ const MessageEditor = (() => {
   function _loadEdits() {
     try {
       const raw = SafeStorage.get(STORE_KEY);
-      return raw ? JSON.parse(raw) : [];
+      return raw ? sanitizeStorageObject(JSON.parse(raw)) : [];
     } catch (_) { return []; }
   }
 
@@ -15040,7 +15040,7 @@ const MessageScheduler = (() => {
     try {
       const raw = SafeStorage.get(STORE_KEY);
       if (!raw) return [];
-      const arr = JSON.parse(raw);
+      const arr = sanitizeStorageObject(JSON.parse(raw));
       if (!Array.isArray(arr)) return [];
       return arr.filter(m =>
         m && typeof m.id === 'string' &&
@@ -15502,7 +15502,7 @@ const SmartRetry = (() => {
     const raw = SafeStorage.get(STORAGE_KEY);
     if (raw) {
       try {
-        const data = JSON.parse(raw);
+        const data = sanitizeStorageObject(JSON.parse(raw));
         _enabled = data.enabled !== false;
         if (data.stats) _retryStats = data.stats;
       } catch (_) {}
