@@ -1,0 +1,102 @@
+---
+name: Performance Issue
+description: Report a performance problem (slow rendering, high memory, lag)
+title: "[Perf]: "
+labels: ["performance", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a performance issue! Since AgenticChat runs entirely in the browser,
+        performance details help us reproduce and fix the problem.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected Area
+      description: Which part of the app feels slow?
+      options:
+        - Chat input / message sending
+        - Code execution (sandbox)
+        - Conversation loading / switching
+        - Search (message or global)
+        - UI rendering / scrolling
+        - Session management
+        - Theme / visual updates
+        - Startup / initial load
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What's slow?
+      description: Describe the performance issue and when it occurs.
+      placeholder: |
+        e.g., "After ~50 messages in a conversation, scrolling becomes choppy and
+        typing in the input box has noticeable lag."
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to Reproduce
+      description: How can we trigger the performance issue?
+      placeholder: |
+        1. Open a conversation with 50+ messages
+        2. Scroll up and down rapidly
+        3. Notice dropped frames and lag
+
+  - type: input
+    id: message-count
+    attributes:
+      label: Approximate message count
+      description: How many messages are in the conversation when the issue occurs?
+      placeholder: "e.g., 100"
+
+  - type: dropdown
+    id: browser
+    attributes:
+      label: Browser
+      options:
+        - Chrome
+        - Firefox
+        - Safari
+        - Edge
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: browser-version
+    attributes:
+      label: Browser version
+      placeholder: "e.g., Chrome 133"
+
+  - type: dropdown
+    id: device
+    attributes:
+      label: Device type
+      options:
+        - Desktop / Laptop
+        - Tablet
+        - Mobile
+    validations:
+      required: true
+
+  - type: textarea
+    id: profiling
+    attributes:
+      label: Profiling data (optional)
+      description: |
+        If you can, open DevTools → Performance tab → Record the issue → share a screenshot
+        or the key findings (long tasks, layout thrashing, etc.)
+      placeholder: "e.g., Main thread blocked for 200ms during scroll handler"
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Any other details — extensions, OS, memory usage, etc.
