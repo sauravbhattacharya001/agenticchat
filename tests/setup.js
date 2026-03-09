@@ -246,6 +246,7 @@ function loadApp() {
   // Replace `const` with `globalThis.X =` for the top-level module declarations
   // so they become accessible in test scope.
   const modules = [
+    'SafeStorage',
     'ChatConfig',
     'ConversationManager',
     'SandboxRunner',
@@ -293,7 +294,9 @@ function loadApp() {
     'PromptLibrary',
     'ModelCompare',
     'MessageTranslator',
-    'MessageEditor'
+    'MessageEditor',
+    'MessageScheduler',
+    'SmartRetry'
   ];
 
   for (const mod of modules) {

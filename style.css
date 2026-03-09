@@ -2572,3 +2572,59 @@ html.light .fork-notification {
   .scheduler-panel { width: 100%; right: -100%; }
   .scheduler-time-row { flex-direction: column; align-items: stretch; }
 }
+
+/* ---------- Smart Retry ---------- */
+.smart-retry-indicator {
+  margin: 12px 0;
+  padding: 12px 16px;
+  border-radius: 8px;
+  background: #1a1a2e;
+  border: 1px solid #e94560;
+  animation: retryPulse 2s ease-in-out infinite;
+}
+.retry-header {
+  font-size: 14px;
+  color: #e94560;
+  margin-bottom: 6px;
+}
+.retry-icon {
+  display: inline-block;
+  animation: retrySpin 1s linear infinite;
+}
+.retry-reason {
+  font-size: 12px;
+  color: #888;
+  margin-bottom: 8px;
+  word-break: break-word;
+}
+.retry-countdown {
+  font-size: 13px;
+  color: #ccc;
+  margin-bottom: 8px;
+}
+#retry-seconds {
+  font-weight: bold;
+  color: #e94560;
+}
+.retry-cancel-btn {
+  background: transparent;
+  border: 1px solid #e94560;
+  color: #e94560;
+  padding: 4px 14px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.2s;
+}
+.retry-cancel-btn:hover {
+  background: #e94560;
+  color: #fff;
+}
+@keyframes retrySpin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+@keyframes retryPulse {
+  0%, 100% { border-color: #e94560; }
+  50%      { border-color: #e9456080; }
+}
