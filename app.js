@@ -53,6 +53,7 @@
  *   PromptLibrary        — user-created prompt snippets with folders, search, usage tracking, import/export
  *   MessageTranslator    — inline message translation to 20+ languages via OpenAI API
  *   MessageEditor        — edit & resend user messages (truncate + reload into input)
+ *   DraftManager         — auto-save input drafts per session with restore on switch
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -8239,6 +8240,330 @@ const ConversationTimeline = (() => {
   };
 })();
 
+/* ============================================================
+ * DraftManager — auto-save input drafts per session
+ *
+ * Automatically saves the chat input text as a draft tied to the
+ * current session. When switching sessions, the draft is restored.
+ * A small indicator appears when a draft is present. Drafts are
+ * cleared when the message is sent.
+ *
+ * Public API:
+ *   init()          — attach listeners, inject styles
+ *   saveDraft()     — manually save current input as draft
+ *   loadDraft(id?)  — load draft for session (current if omitted)
+ *   clearDraft(id?) — clear draft for session (current if omitted)
+ *   getDraft(id?)   — get draft text without loading into input
+ *   hasDraft(id?)   — check if session has a draft
+ *   getAllDrafts()   — get all drafts keyed by session id
+ *   clearAllDrafts() — remove all drafts
+ *   getStats()      — draft count and total size
+ * ============================================================ */
+const DraftManager = (() => {
+  const STORAGE_KEY = 'agenticchat_drafts';
+  const DEBOUNCE_MS = 1000;
+  const MAX_DRAFT_LENGTH = 50000;
+  const MAX_DRAFTS = 100;
+  let _debounceTimer = null;
+  let _indicator = null;
+  let _initialized = false;
+
+  /* ---- Storage ---- */
+
+  function _loadDrafts() {
+    try {
+      const raw = SafeStorage.get(STORAGE_KEY);
+      return raw ? sanitizeStorageObject(JSON.parse(raw)) : {};
+    } catch { return {}; }
+  }
+
+  function _saveDrafts(drafts) {
+    try {
+      // Enforce max drafts — evict oldest by savedAt
+      const keys = Object.keys(drafts);
+      if (keys.length > MAX_DRAFTS) {
+        const sorted = keys.sort((a, b) =>
+          (drafts[a].savedAt || 0) - (drafts[b].savedAt || 0)
+        );
+        const toRemove = sorted.slice(0, keys.length - MAX_DRAFTS);
+        toRemove.forEach(k => delete drafts[k]);
+      }
+      SafeStorage.set(STORAGE_KEY, JSON.stringify(drafts));
+    } catch (e) {
+      console.warn('[DraftManager] Failed to save drafts:', e);
+    }
+  }
+
+  /* ---- Session ID helper ---- */
+
+  function _getSessionId() {
+    try {
+      return SafeStorage.get('agenticchat_active_session') || '__default__';
+    } catch { return '__default__'; }
+  }
+
+  /* ---- Core operations ---- */
+
+  function saveDraft() {
+    const input = document.getElementById('chat-input');
+    if (!input) return;
+    const text = input.value || '';
+    const sessionId = _getSessionId();
+    const drafts = _loadDrafts();
+
+    if (!text.trim()) {
+      // Clear draft if input is empty
+      if (drafts[sessionId]) {
+        delete drafts[sessionId];
+        _saveDrafts(drafts);
+      }
+      _updateIndicator(false);
+      return;
+    }
+
+    drafts[sessionId] = {
+      text: text.substring(0, MAX_DRAFT_LENGTH),
+      savedAt: Date.now()
+    };
+    _saveDrafts(drafts);
+    _updateIndicator(true);
+  }
+
+  function loadDraft(sessionId) {
+    const id = sessionId || _getSessionId();
+    const drafts = _loadDrafts();
+    const draft = drafts[id];
+    if (draft && draft.text) {
+      const input = document.getElementById('chat-input');
+      if (input) {
+        input.value = draft.text;
+        // Trigger input event so other modules (char count, etc.) update
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      _updateIndicator(true);
+      return draft.text;
+    }
+    _updateIndicator(false);
+    return null;
+  }
+
+  function clearDraft(sessionId) {
+    const id = sessionId || _getSessionId();
+    const drafts = _loadDrafts();
+    if (drafts[id]) {
+      delete drafts[id];
+      _saveDrafts(drafts);
+    }
+    _updateIndicator(false);
+  }
+
+  function getDraft(sessionId) {
+    const id = sessionId || _getSessionId();
+    const drafts = _loadDrafts();
+    const draft = drafts[id];
+    return draft ? draft.text : null;
+  }
+
+  function hasDraft(sessionId) {
+    const id = sessionId || _getSessionId();
+    const drafts = _loadDrafts();
+    return !!(drafts[id] && drafts[id].text && drafts[id].text.trim());
+  }
+
+  function getAllDrafts() {
+    return _loadDrafts();
+  }
+
+  function clearAllDrafts() {
+    try { SafeStorage.set(STORAGE_KEY, '{}'); } catch {}
+    _updateIndicator(false);
+  }
+
+  function getStats() {
+    const drafts = _loadDrafts();
+    const keys = Object.keys(drafts);
+    let totalChars = 0;
+    keys.forEach(k => { totalChars += (drafts[k].text || '').length; });
+    return { count: keys.length, totalChars };
+  }
+
+  /* ---- Debounced auto-save ---- */
+
+  function _onInput() {
+    if (_debounceTimer) clearTimeout(_debounceTimer);
+    _debounceTimer = setTimeout(() => {
+      saveDraft();
+    }, DEBOUNCE_MS);
+  }
+
+  /* ---- Visual indicator ---- */
+
+  function _updateIndicator(hasDraft) {
+    if (!_indicator) return;
+    _indicator.style.display = hasDraft ? 'inline-flex' : 'none';
+    _indicator.title = hasDraft ? 'Draft saved — will restore when you return to this session' : '';
+  }
+
+  function _createIndicator() {
+    const ind = document.createElement('span');
+    ind.className = 'draft-indicator';
+    ind.setAttribute('aria-label', 'Draft saved');
+    ind.style.display = 'none';
+    ind.innerHTML = '📝 <small>draft</small>';
+    return ind;
+  }
+
+  /* ---- Styles ---- */
+
+  function _injectStyles() {
+    if (document.getElementById('draft-manager-styles')) return;
+    const style = document.createElement('style');
+    style.id = 'draft-manager-styles';
+    style.textContent = `
+      .draft-indicator {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 12px;
+        color: #888;
+        padding: 2px 8px;
+        border-radius: 10px;
+        background: rgba(128,128,128,0.1);
+        user-select: none;
+        transition: opacity 0.2s;
+      }
+      .draft-indicator small {
+        font-size: 11px;
+        opacity: 0.8;
+      }
+      body.dark-mode .draft-indicator {
+        color: #aaa;
+        background: rgba(255,255,255,0.08);
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  /* ---- Monkey-patch SessionManager.load to restore drafts ---- */
+
+  function _patchSessionLoad() {
+    if (typeof SessionManager !== 'undefined' && SessionManager.load) {
+      const originalLoad = SessionManager.load;
+      SessionManager.load = function(id) {
+        // Save current draft before switching
+        saveDraft();
+        const result = originalLoad.call(SessionManager, id);
+        // After session switch, restore draft for new session
+        if (result) {
+          setTimeout(() => loadDraft(id), 50);
+        }
+        return result;
+      };
+    }
+  }
+
+  /* ---- Clear draft on send ---- */
+
+  function _patchChatSend() {
+    if (typeof ChatController !== 'undefined' && ChatController.send) {
+      const originalSend = ChatController.send;
+      ChatController.send = function() {
+        clearDraft();
+        if (_debounceTimer) clearTimeout(_debounceTimer);
+        return originalSend.apply(ChatController, arguments);
+      };
+    }
+  }
+
+  /* ---- Init ---- */
+
+  function init() {
+    if (_initialized) return;
+    _initialized = true;
+
+    _injectStyles();
+
+    // Create and place indicator near the input area
+    _indicator = _createIndicator();
+    const inputContainer = document.querySelector('.input-container, .chat-input-container, #chat-input');
+    if (inputContainer) {
+      if (inputContainer.id === 'chat-input') {
+        inputContainer.parentElement.appendChild(_indicator);
+      } else {
+        inputContainer.appendChild(_indicator);
+      }
+    }
+
+    // Attach input listener for auto-save
+    const input = document.getElementById('chat-input');
+    if (input) {
+      input.addEventListener('input', _onInput);
+    }
+
+    // Patch session load and chat send
+    _patchSessionLoad();
+    _patchChatSend();
+
+    // Restore draft for current session on page load
+    const currentDraft = getDraft();
+    if (currentDraft) {
+      const inp = document.getElementById('chat-input');
+      if (inp && !inp.value.trim()) {
+        loadDraft();
+      }
+    }
+
+    // Register slash command
+    if (typeof SlashCommands !== 'undefined' && SlashCommands.register) {
+      SlashCommands.register({
+        name: 'draft',
+        description: 'Manage drafts: /draft clear | /draft list | /draft stats',
+        handler: function(args) {
+          const cmd = (args || '').trim().toLowerCase();
+          if (cmd === 'clear') {
+            clearDraft();
+            const inp = document.getElementById('chat-input');
+            if (inp) inp.value = '';
+            return 'Draft cleared for this session.';
+          }
+          if (cmd === 'clearall') {
+            clearAllDrafts();
+            return 'All drafts cleared.';
+          }
+          if (cmd === 'stats') {
+            const s = getStats();
+            return `${s.count} draft(s), ${s.totalChars.toLocaleString()} total characters.`;
+          }
+          if (cmd === 'list') {
+            const all = getAllDrafts();
+            const keys = Object.keys(all);
+            if (keys.length === 0) return 'No drafts saved.';
+            return keys.map(k => {
+              const d = all[k];
+              const preview = d.text.substring(0, 60).replace(/\n/g, ' ');
+              const ago = formatRelativeTime(new Date(d.savedAt).toISOString());
+              return `• ${k === '__default__' ? '(unsaved session)' : k.substring(0, 8)} — "${preview}…" (${ago})`;
+            }).join('\n');
+          }
+          return 'Usage: /draft clear | /draft clearall | /draft list | /draft stats';
+        }
+      });
+    }
+  }
+
+  return {
+    init,
+    saveDraft,
+    loadDraft,
+    clearDraft,
+    getDraft,
+    hasDraft,
+    getAllDrafts,
+    clearAllDrafts,
+    getStats
+  };
+})();
+
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('send-btn').addEventListener('click', ChatController.send);
   document.getElementById('cancel-btn').addEventListener('click', () => {
@@ -8481,6 +8806,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Scheduled messages
   MessageScheduler.init();
+
+  // Draft auto-save
+  DraftManager.init();
 });
 
 
