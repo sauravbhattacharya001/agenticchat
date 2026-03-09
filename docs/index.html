@@ -662,6 +662,125 @@ open index.html</code></pre>
           <tr><td><code>isOpen()</code></td><td>boolean</td><td>Whether the stats panel is currently visible</td></tr>
         </tbody>
       </table>
+      <h3>SafeStorage</h3>
+      <p>Wraps <code>localStorage</code> access so the app works in private-browsing or restricted-storage environments where <code>localStorage</code> may throw. All other modules use SafeStorage instead of calling <code>localStorage</code> directly.</p>
+      <table>
+        <thead><tr><th>Method</th><th>Returns</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>getItem(key)</code></td><td>string|null</td><td>Read from localStorage with try/catch fallback</td></tr>
+          <tr><td><code>setItem(key, value)</code></td><td>void</td><td>Write to localStorage, silently fails in restricted mode</td></tr>
+          <tr><td><code>removeItem(key)</code></td><td>void</td><td>Remove a key from localStorage</td></tr>
+        </tbody>
+      </table>
+
+      <h3>UIController</h3>
+      <p>Centralized DOM manipulation layer for all non-sandbox UI updates. Provides cached element lookups, button state toggling, character-count output, console output, and last-prompt areas. All other modules should use UIController instead of querying the DOM directly.</p>
+      <table>
+        <thead><tr><th>Method</th><th>Returns</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>setConsoleOutput(html)</code></td><td>void</td><td>Update the sandbox output panel</td></tr>
+          <tr><td><code>setCharCount(n)</code></td><td>void</td><td>Update the character-count display</td></tr>
+          <tr><td><code>setTokenUsage(tokens, cost)</code></td><td>void</td><td>Display token usage and estimated cost in the status bar</td></tr>
+          <tr><td><code>toggleSendButton(enabled)</code></td><td>void</td><td>Enable or disable the send button</td></tr>
+        </tbody>
+      </table>
+
+      <h3>ChatController</h3>
+      <p>Orchestrates sending messages to OpenAI, processing responses, extracting code blocks, and coordinating between ConversationManager, SandboxRunner, UIController, and ApiKeyManager. This is the central "glue" module.</p>
+      <table>
+        <thead><tr><th>Method</th><th>Returns</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>send()</code></td><td>void</td><td>Send the current input to OpenAI, process the response, and run any code</td></tr>
+          <tr><td><code>abort()</code></td><td>void</td><td>Cancel the in-flight API request</td></tr>
+        </tbody>
+      </table>
+
+      <h3>KeyboardShortcuts</h3>
+      <p>Global keyboard shortcut handler with a help modal (<code>?</code> key). Registers document-level <code>keydown</code> listeners for common actions like send, clear, toggle panels, and focus input.</p>
+
+      <h3>CrossTabSync</h3>
+      <p>Prevents multi-tab data corruption by detecting cross-tab <code>localStorage</code> writes via <code>storage</code> events and <code>BroadcastChannel</code>. Shows a non-intrusive banner offering Reload&nbsp;/&nbsp;Keep&nbsp;mine options when a conflict is detected. Uses a unique tab ID to distinguish own writes from foreign ones.</p>
+
+      <h3>CostDashboard</h3>
+      <p>Persistent API spend tracker with cumulative totals, per-model breakdowns, and budget alerts. Warns when spending crosses a user-set threshold. Data persists across sessions via <code>localStorage</code>.</p>
+
+      <h3>PersonaPresets</h3>
+      <p>Switchable system-prompt presets with custom persona support. Users can pick from built-in presets or define a custom system prompt that is injected as the first message in every conversation.</p>
+
+      <h3>ModelSelector</h3>
+      <p>Model picker dropdown with <code>localStorage</code> persistence. Lets users switch between available OpenAI models (configured in <code>ChatConfig.AVAILABLE_MODELS</code>) and remembers the last selection across sessions.</p>
+
+      <h3>FileDropZone</h3>
+      <p>Drag-and-drop file input for including file contents in chat prompts. Supports text-based files (.txt, .json, .csv, .js, .py, .md, .html, .css, .xml) up to 100&nbsp;KB. Dropped file content is inserted into the input area.</p>
+
+      <h3>FocusMode</h3>
+      <p>Distraction-free zen mode toggled with <code>Ctrl+Shift+F</code>. Hides all secondary panels and UI chrome, leaving only the chat input and message area visible.</p>
+
+      <h3>InputHistory</h3>
+      <p>Navigate previous prompts with <code>&uarr;</code>/<code>&darr;</code> arrow keys. Stores sent prompts in memory and lets users cycle through them without losing the current draft.</p>
+
+      <h3>Scratchpad</h3>
+      <p>Persistent notepad panel with copy, insert-into-chat, and download actions. Content persists across sessions. Useful for drafting prompts or saving intermediate notes.</p>
+
+      <h3>ResponseTimeBadge</h3>
+      <p>Displays a response-time indicator below the token usage area after each API call. Shows elapsed time in seconds or milliseconds to help users understand model latency.</p>
+
+      <h3>ConversationFork</h3>
+      <p>Branch conversations from any message into a new session. Copies the conversation up to the selected message into a fresh session, allowing users to explore alternative conversation paths without losing the original.</p>
+
+      <h3>QuickReplies</h3>
+      <p>Contextual follow-up suggestion chips shown after AI responses. Analyzes the latest response to generate 2&ndash;4 relevant follow-up prompts that users can click to continue the conversation.</p>
+
+      <h3>MessagePinning</h3>
+      <p>Pin important messages to a floating quick-jump bar at the top of the chat. Pinned messages persist across page reloads and can be clicked to scroll directly to the original message.</p>
+
+      <h3>ReadAloud</h3>
+      <p>Text-to-speech for messages using the Web Speech Synthesis API. Provides voice selection, speed controls, and a play/pause/stop interface. Supports reading individual messages or continuous playback.</p>
+
+      <h3>MessageDiff</h3>
+      <p>Compare any two messages with a visual line-level diff view. Highlights additions, deletions, and changes between selected messages. Useful for comparing model outputs across re-sends or forks.</p>
+
+      <h3>ConversationTimeline</h3>
+      <p>Visual minimap sidebar for conversation navigation. Renders a compact vertical timeline of all messages with color-coded role indicators. Click any point on the timeline to scroll to that message.</p>
+
+      <h3>ConversationSummarizer</h3>
+      <p>Heuristic conversation summary generator. Analyzes the current conversation to extract topics discussed, key decisions made, and action items identified — all computed client-side without additional API calls.</p>
+
+      <h3>MessageAnnotations</h3>
+      <p>Private notes and annotations on individual messages. Users can attach labeled notes (e.g., "important", "follow-up", "reference") to any message. Annotations persist in <code>localStorage</code> and are displayed inline with click-to-scroll navigation and inline note editing.</p>
+
+      <h3>ConversationChapters</h3>
+      <p>Named section dividers that split long conversations into navigable chapters. Includes a table-of-contents overlay for quick jumps to any chapter heading.</p>
+
+      <h3>ConversationTags</h3>
+      <p>Colored tag labels on saved sessions with filtering and management. Tags appear in the session list and can be used to categorize, filter, and organize conversations.</p>
+
+      <h3>FormattingToolbar</h3>
+      <p>Markdown formatting buttons above the chat input area. Provides one-click insertion of bold, italic, code, code block, heading, list, and link markdown syntax around the current selection or at the cursor position.</p>
+
+      <h3>GlobalSessionSearch</h3>
+      <p>Full-text search across all saved sessions (not just the current conversation). Returns matching sessions with highlighted snippets, letting users find past conversations by content.</p>
+
+      <h3>AutoTagger</h3>
+      <p>Heuristic topic detection and automatic tag suggestions. Analyzes conversation content to suggest relevant tags (e.g., "python", "debugging", "data-analysis") when saving sessions. Works entirely client-side using keyword matching and frequency analysis.</p>
+
+      <h3>ResponseRating</h3>
+      <p>Thumbs up/down ratings on AI responses with a model satisfaction dashboard. Tracks ratings per model over time and shows aggregate satisfaction scores, helping users identify which models perform best for their use cases.</p>
+
+      <h3>ConversationMerge</h3>
+      <p>Combine two or more saved sessions into one merged conversation. Interleaves messages chronologically based on timestamps, preserving the original ordering from each session.</p>
+
+      <h3>ConversationReplay</h3>
+      <p>Message-by-message playback of conversations with transport controls (play, pause, speed, skip). Useful for reviewing past conversations at a controlled pace or demonstrating workflows.</p>
+
+      <h3>PromptLibrary</h3>
+      <p>User-created prompt snippets organized into folders with search, usage tracking, and import/export. Unlike PromptTemplates (which ships built-in prompts), PromptLibrary is entirely user-curated with persistent storage.</p>
+
+      <h3>MessageTranslator</h3>
+      <p>Inline message translation to 20+ languages via the OpenAI API. Adds a translate button to each message that sends the content through the API for translation. Requires a valid API key.</p>
+
+      <h3>MessageEditor</h3>
+      <p>Edit and resend user messages. Truncates the conversation back to the edited message, reloads its content into the input area, and lets the user modify and re-send. Enables iterative prompt refinement without manual copy-paste.</p>
     </section>
 
     <!-- Configuration -->
