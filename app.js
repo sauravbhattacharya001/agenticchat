@@ -8479,6 +8479,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Cross-tab sync (must come after SessionManager.initAutoSave)
   CrossTabSync.init();
+
+  // Scheduled messages
+  MessageScheduler.init();
 });
 
 
@@ -15016,5 +15019,454 @@ const MessageEditor = (() => {
     decorateMessages,
     getEditHistory,
     clearEditHistory
+  };
+})();
+
+
+// ═══════════════════════════════════════════════════════════════════════
+//  MessageScheduler — schedule prompts to send at a specific time
+// ═══════════════════════════════════════════════════════════════════════
+
+const MessageScheduler = (() => {
+  'use strict';
+
+  const STORE_KEY = 'agentichat_scheduled_msgs';
+  const CHECK_INTERVAL = 15000; // check every 15 seconds
+  let _checkTimer = null;
+  let _panelEl = null;
+  let _onSendCallback = null;
+
+  /* ── Persistence ────────────────────────────────────────── */
+
+  function _load() {
+    try {
+      const raw = SafeStorage.get(STORE_KEY);
+      if (!raw) return [];
+      const arr = JSON.parse(raw);
+      if (!Array.isArray(arr)) return [];
+      return arr.filter(m =>
+        m && typeof m.id === 'string' &&
+        typeof m.text === 'string' &&
+        typeof m.scheduledAt === 'number'
+      );
+    } catch (_) { return []; }
+  }
+
+  function _save(items) {
+    try { SafeStorage.set(STORE_KEY, JSON.stringify(items)); } catch (_) {}
+  }
+
+  /* ── Core ────────────────────────────────────────────────── */
+
+  function schedule(text, dateTime, label) {
+    if (!text || !text.trim()) return null;
+    const ts = dateTime instanceof Date ? dateTime.getTime() : Number(dateTime);
+    if (isNaN(ts) || ts < Date.now()) return null;
+
+    const item = {
+      id: 'sched_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+      text: text.trim(),
+      scheduledAt: ts,
+      label: (label || '').trim() || null,
+      createdAt: Date.now(),
+      status: 'pending' // pending | sent | cancelled
+    };
+
+    const items = _load();
+    items.push(item);
+    _save(items);
+    _renderPanel();
+    return item;
+  }
+
+  function cancel(id) {
+    const items = _load();
+    const idx = items.findIndex(m => m.id === id);
+    if (idx === -1) return false;
+    items[idx].status = 'cancelled';
+    _save(items);
+    _renderPanel();
+    return true;
+  }
+
+  function remove(id) {
+    let items = _load();
+    items = items.filter(m => m.id !== id);
+    _save(items);
+    _renderPanel();
+  }
+
+  function getAll() { return _load(); }
+
+  function getPending() {
+    return _load().filter(m => m.status === 'pending');
+  }
+
+  function getHistory() {
+    return _load().filter(m => m.status !== 'pending');
+  }
+
+  function clearHistory() {
+    const items = _load().filter(m => m.status === 'pending');
+    _save(items);
+    _renderPanel();
+  }
+
+  /* ── Timer loop ──────────────────────────────────────────── */
+
+  function _checkScheduled() {
+    const items = _load();
+    const now = Date.now();
+    let changed = false;
+
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].status === 'pending' && items[i].scheduledAt <= now) {
+        items[i].status = 'sent';
+        items[i].sentAt = now;
+        changed = true;
+        _dispatch(items[i]);
+      }
+    }
+
+    if (changed) {
+      _save(items);
+      _renderPanel();
+    }
+  }
+
+  function _dispatch(item) {
+    if (_onSendCallback) {
+      _onSendCallback(item.text);
+    } else {
+      // Fallback: inject into chat input and submit
+      const input = document.getElementById('messageInput');
+      if (input) {
+        input.value = item.text;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        const form = input.closest('form');
+        if (form) {
+          form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        } else {
+          const sendBtn = document.querySelector('.send-button, #sendButton, [data-send]');
+          if (sendBtn) sendBtn.click();
+        }
+      }
+    }
+  }
+
+  function onSend(callback) {
+    _onSendCallback = typeof callback === 'function' ? callback : null;
+  }
+
+  /* ── Panel UI ────────────────────────────────────────────── */
+
+  function _esc(str) {
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+  }
+
+  function _fmtTime(ts) {
+    const d = new Date(ts);
+    const now = new Date();
+    const sameDay = d.toDateString() === now.toDateString();
+    const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    if (sameDay) return 'Today ' + time;
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    if (d.toDateString() === tomorrow.toDateString()) return 'Tomorrow ' + time;
+    return d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' ' + time;
+  }
+
+  function _fmtRelative(ts) {
+    const diff = ts - Date.now();
+    if (diff <= 0) return 'now';
+    const mins = Math.round(diff / 60000);
+    if (mins < 60) return 'in ' + mins + 'm';
+    const hrs = Math.round(mins / 60);
+    if (hrs < 24) return 'in ' + hrs + 'h';
+    return 'in ' + Math.round(hrs / 24) + 'd';
+  }
+
+  function _createPanel() {
+    if (_panelEl) return _panelEl;
+
+    const panel = document.createElement('div');
+    panel.id = 'schedulerPanel';
+    panel.className = 'scheduler-panel';
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-label', 'Scheduled Messages');
+    panel.innerHTML =
+      '<div class="scheduler-header">' +
+        '<h3>⏰ Scheduled Messages</h3>' +
+        '<button class="scheduler-close" aria-label="Close">&times;</button>' +
+      '</div>' +
+      '<div class="scheduler-body">' +
+        '<div class="scheduler-form">' +
+          '<textarea id="schedMsgInput" class="scheduler-textarea" placeholder="Type your message..." rows="2" maxlength="2000"></textarea>' +
+          '<div class="scheduler-time-row">' +
+            '<label for="schedDatetime">Send at:</label>' +
+            '<input type="datetime-local" id="schedDatetime" class="scheduler-datetime">' +
+            '<div class="scheduler-quick-btns">' +
+              '<button class="scheduler-quick" data-mins="15">15m</button>' +
+              '<button class="scheduler-quick" data-mins="30">30m</button>' +
+              '<button class="scheduler-quick" data-mins="60">1h</button>' +
+              '<button class="scheduler-quick" data-mins="180">3h</button>' +
+            '</div>' +
+          '</div>' +
+          '<input type="text" id="schedLabel" class="scheduler-label-input" placeholder="Label (optional)" maxlength="50">' +
+          '<button id="schedSubmit" class="scheduler-submit">Schedule Message</button>' +
+        '</div>' +
+        '<div class="scheduler-list" id="schedulerList"></div>' +
+        '<div class="scheduler-history-toggle">' +
+          '<button id="schedHistoryToggle" class="scheduler-history-btn">Show History</button>' +
+          '<button id="schedClearHistory" class="scheduler-clear-btn" style="display:none">Clear History</button>' +
+        '</div>' +
+        '<div class="scheduler-history" id="schedulerHistory" style="display:none"></div>' +
+      '</div>';
+
+    document.body.appendChild(panel);
+    _panelEl = panel;
+
+    // Event listeners
+    panel.querySelector('.scheduler-close').addEventListener('click', togglePanel);
+
+    panel.querySelector('#schedSubmit').addEventListener('click', _handleSubmit);
+
+    panel.querySelector('#schedMsgInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        _handleSubmit();
+      }
+    });
+
+    const quickBtns = panel.querySelectorAll('.scheduler-quick');
+    for (let i = 0; i < quickBtns.length; i++) {
+      quickBtns[i].addEventListener('click', function () {
+        const mins = parseInt(this.getAttribute('data-mins'), 10);
+        const dt = new Date(Date.now() + mins * 60000);
+        const dtInput = panel.querySelector('#schedDatetime');
+        // Format for datetime-local: YYYY-MM-DDTHH:MM
+        const pad = (n) => String(n).padStart(2, '0');
+        dtInput.value = dt.getFullYear() + '-' + pad(dt.getMonth() + 1) + '-' +
+          pad(dt.getDate()) + 'T' + pad(dt.getHours()) + ':' + pad(dt.getMinutes());
+      });
+    }
+
+    const histToggle = panel.querySelector('#schedHistoryToggle');
+    const histEl = panel.querySelector('#schedulerHistory');
+    const clearBtn = panel.querySelector('#schedClearHistory');
+    histToggle.addEventListener('click', () => {
+      const showing = histEl.style.display !== 'none';
+      histEl.style.display = showing ? 'none' : 'block';
+      clearBtn.style.display = showing ? 'none' : 'inline-block';
+      histToggle.textContent = showing ? 'Show History' : 'Hide History';
+      if (!showing) _renderHistory();
+    });
+    clearBtn.addEventListener('click', () => {
+      clearHistory();
+      _renderHistory();
+    });
+
+    // Delegate clicks on cancel/remove buttons
+    panel.addEventListener('click', (e) => {
+      const cancelBtn = e.target.closest('[data-sched-cancel]');
+      if (cancelBtn) { cancel(cancelBtn.getAttribute('data-sched-cancel')); return; }
+      const removeBtn = e.target.closest('[data-sched-remove]');
+      if (removeBtn) { remove(removeBtn.getAttribute('data-sched-remove')); return; }
+    });
+
+    return panel;
+  }
+
+  function _handleSubmit() {
+    const msgInput = document.getElementById('schedMsgInput');
+    const dtInput = document.getElementById('schedDatetime');
+    const labelInput = document.getElementById('schedLabel');
+    if (!msgInput || !dtInput) return;
+
+    const text = msgInput.value.trim();
+    if (!text) { msgInput.focus(); return; }
+
+    const dtVal = dtInput.value;
+    if (!dtVal) { dtInput.focus(); return; }
+
+    const dateTime = new Date(dtVal);
+    if (isNaN(dateTime.getTime()) || dateTime.getTime() <= Date.now()) {
+      dtInput.setCustomValidity('Please pick a future time');
+      dtInput.reportValidity();
+      setTimeout(() => dtInput.setCustomValidity(''), 2000);
+      return;
+    }
+
+    const label = labelInput ? labelInput.value.trim() : '';
+    const item = schedule(text, dateTime, label);
+    if (item) {
+      msgInput.value = '';
+      dtInput.value = '';
+      if (labelInput) labelInput.value = '';
+      _showToast('Message scheduled for ' + _fmtTime(item.scheduledAt));
+    }
+  }
+
+  function _renderPanel() {
+    const listEl = document.getElementById('schedulerList');
+    if (!listEl) return;
+
+    const pending = getPending().sort((a, b) => a.scheduledAt - b.scheduledAt);
+    if (pending.length === 0) {
+      listEl.innerHTML = '<div class="scheduler-empty">No scheduled messages</div>';
+      return;
+    }
+
+    let html = '';
+    for (let i = 0; i < pending.length; i++) {
+      const m = pending[i];
+      html +=
+        '<div class="scheduler-item">' +
+          '<div class="scheduler-item-time">' +
+            '<span class="scheduler-item-when">' + _fmtTime(m.scheduledAt) + '</span>' +
+            '<span class="scheduler-item-relative">' + _fmtRelative(m.scheduledAt) + '</span>' +
+          '</div>' +
+          (m.label ? '<div class="scheduler-item-label">' + _esc(m.label) + '</div>' : '') +
+          '<div class="scheduler-item-text">' + _esc(m.text.length > 80 ? m.text.slice(0, 80) + '…' : m.text) + '</div>' +
+          '<button class="scheduler-cancel-btn" data-sched-cancel="' + m.id + '" title="Cancel">✕</button>' +
+        '</div>';
+    }
+    listEl.innerHTML = html;
+  }
+
+  function _renderHistory() {
+    const histEl = document.getElementById('schedulerHistory');
+    if (!histEl) return;
+
+    const hist = getHistory().sort((a, b) => (b.sentAt || b.scheduledAt) - (a.sentAt || a.scheduledAt));
+    if (hist.length === 0) {
+      histEl.innerHTML = '<div class="scheduler-empty">No history yet</div>';
+      return;
+    }
+
+    let html = '';
+    for (let i = 0; i < hist.length; i++) {
+      const m = hist[i];
+      const statusCls = m.status === 'sent' ? 'scheduler-status-sent' : 'scheduler-status-cancelled';
+      const statusLabel = m.status === 'sent' ? '✓ Sent' : '✕ Cancelled';
+      html +=
+        '<div class="scheduler-item scheduler-item-history">' +
+          '<div class="scheduler-item-time">' +
+            '<span class="scheduler-item-when">' + _fmtTime(m.scheduledAt) + '</span>' +
+            '<span class="' + statusCls + '">' + statusLabel + '</span>' +
+          '</div>' +
+          (m.label ? '<div class="scheduler-item-label">' + _esc(m.label) + '</div>' : '') +
+          '<div class="scheduler-item-text">' + _esc(m.text.length > 60 ? m.text.slice(0, 60) + '…' : m.text) + '</div>' +
+          '<button class="scheduler-remove-btn" data-sched-remove="' + m.id + '" title="Remove">🗑</button>' +
+        '</div>';
+    }
+    histEl.innerHTML = html;
+  }
+
+  function _showToast(msg) {
+    const existing = document.querySelector('.scheduler-toast');
+    if (existing) existing.remove();
+
+    const toast = document.createElement('div');
+    toast.className = 'scheduler-toast';
+    toast.textContent = msg;
+    document.body.appendChild(toast);
+    setTimeout(() => { toast.classList.add('scheduler-toast-visible'); }, 10);
+    setTimeout(() => {
+      toast.classList.remove('scheduler-toast-visible');
+      setTimeout(() => toast.remove(), 300);
+    }, 3000);
+  }
+
+  /* ── Toggle ──────────────────────────────────────────────── */
+
+  function togglePanel() {
+    const panel = _createPanel();
+    const visible = panel.classList.contains('scheduler-panel-visible');
+    panel.classList.toggle('scheduler-panel-visible', !visible);
+    if (!visible) {
+      _renderPanel();
+      // Set default datetime to +30 min
+      const dtInput = panel.querySelector('#schedDatetime');
+      if (dtInput && !dtInput.value) {
+        const def = new Date(Date.now() + 30 * 60000);
+        const pad = (n) => String(n).padStart(2, '0');
+        dtInput.value = def.getFullYear() + '-' + pad(def.getMonth() + 1) + '-' +
+          pad(def.getDate()) + 'T' + pad(def.getHours()) + ':' + pad(def.getMinutes());
+      }
+    }
+  }
+
+  /* ── Init ────────────────────────────────────────────────── */
+
+  function init() {
+    // Start the check loop
+    if (_checkTimer) clearInterval(_checkTimer);
+    _checkTimer = setInterval(_checkScheduled, CHECK_INTERVAL);
+
+    // Add toolbar button
+    const toolbar = document.querySelector('.toolbar, .chat-toolbar, .sidebar');
+    if (toolbar) {
+      const btn = document.createElement('button');
+      btn.className = 'scheduler-toggle-btn';
+      btn.setAttribute('aria-label', 'Scheduled Messages');
+      btn.setAttribute('title', 'Scheduled Messages');
+      btn.textContent = '⏰';
+
+      const pending = getPending();
+      if (pending.length > 0) {
+        const badge = document.createElement('span');
+        badge.className = 'scheduler-badge';
+        badge.textContent = pending.length;
+        btn.appendChild(badge);
+      }
+
+      btn.addEventListener('click', togglePanel);
+      toolbar.appendChild(btn);
+    }
+
+    // Register slash command if SlashCommands available
+    if (typeof SlashCommands !== 'undefined' && SlashCommands.register) {
+      SlashCommands.register({
+        name: 'schedule',
+        description: 'Schedule a message: /schedule 30m Your message here',
+        handler: function (args) {
+          const match = args.match(/^(\d+)\s*(m|min|h|hr|hour|d|day)\s+(.+)/i);
+          if (!match) return 'Usage: /schedule 30m Your prompt here';
+          const amount = parseInt(match[1], 10);
+          const unit = match[2].toLowerCase();
+          let ms = amount * 60000; // default minutes
+          if (unit.startsWith('h')) ms = amount * 3600000;
+          if (unit.startsWith('d')) ms = amount * 86400000;
+          const dt = new Date(Date.now() + ms);
+          const item = schedule(match[3], dt);
+          if (!item) return 'Could not schedule — check the time.';
+          return 'Scheduled for ' + _fmtTime(item.scheduledAt) + ': ' + match[3].slice(0, 50);
+        }
+      });
+    }
+
+    // Register keyboard shortcut (Ctrl+Shift+S)
+    document.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'S') {
+        e.preventDefault();
+        togglePanel();
+      }
+    });
+  }
+
+  return {
+    init,
+    schedule,
+    cancel,
+    remove,
+    getAll,
+    getPending,
+    getHistory,
+    clearHistory,
+    togglePanel,
+    onSend
   };
 })();
