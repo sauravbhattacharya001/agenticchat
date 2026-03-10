@@ -55,6 +55,7 @@
  *   MessageEditor        — edit & resend user messages (truncate + reload into input)
  *   SmartRetry           — automatic retry with exponential backoff for transient API failures
  *   UsageHeatmap         — GitHub-style 7×24 activity heatmap across all sessions
+ *   ConversationStarters — save & load full conversation templates (system prompt + seed messages)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -8300,6 +8301,7 @@ document.addEventListener('DOMContentLoaded', () => {
       Scratchpad.close();
       ConversationChapters.closePanel();
       UsageHeatmap.close();
+      ConversationStarters.closePanel();
     }
   });
 
@@ -16193,3 +16195,493 @@ const ContextWindowMeter = (() => {
 })();
 
 document.addEventListener('DOMContentLoaded', ContextWindowMeter.init);
+
+/* ============================================================
+ * ConversationStarters — Save & load full conversation templates
+ *
+ * Captures the current system prompt + seed messages as a reusable
+ * "starter" that can launch new sessions pre-filled with context.
+ * Great for recurring workflows (code review, brainstorming, etc.).
+ *
+ * Storage key: ac-conversation-starters
+ * @namespace ConversationStarters
+ * ============================================================ */
+const ConversationStarters = (() => {
+  const STORAGE_KEY = 'ac-conversation-starters';
+  const MAX_STARTERS = 30;
+  const MAX_NAME_LENGTH = 80;
+  const MAX_DESC_LENGTH = 200;
+  const MAX_MESSAGES = 50;
+
+  let starters = [];
+  let panelOpen = false;
+
+  function load() {
+    try {
+      const raw = SafeStorage.get(STORAGE_KEY);
+      if (!raw) { starters = []; return; }
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) { starters = []; return; }
+      starters = sanitizeStorageObject(parsed).filter(s =>
+        s && typeof s.id === 'string' && typeof s.name === 'string' && Array.isArray(s.messages)
+      );
+    } catch (_) {
+      starters = [];
+    }
+  }
+
+  function save() {
+    try {
+      SafeStorage.set(STORAGE_KEY, JSON.stringify(starters));
+    } catch (_) {}
+  }
+
+  function createFromCurrent(name, description, messageCount) {
+    if (!name || typeof name !== 'string') return null;
+    if (starters.length >= MAX_STARTERS) return null;
+
+    const history = ConversationManager.getHistory();
+    if (!history || history.length === 0) return null;
+
+    const trimmedName = name.trim().substring(0, MAX_NAME_LENGTH);
+    if (!trimmedName) return null;
+
+    const limit = (typeof messageCount === 'number' && messageCount > 0)
+      ? Math.min(messageCount, MAX_MESSAGES)
+      : Math.min(history.length, MAX_MESSAGES);
+
+    const messages = history.slice(0, limit).map(m => ({
+      role: m.role,
+      content: m.content
+    }));
+
+    const starter = {
+      id: Date.now().toString(36) + '-' + Math.random().toString(36).substring(2, 8),
+      name: trimmedName,
+      description: (description || '').trim().substring(0, MAX_DESC_LENGTH),
+      messages,
+      model: ChatConfig.MODEL,
+      messageCount: messages.length,
+      createdAt: new Date().toISOString(),
+      usageCount: 0,
+      lastUsedAt: null
+    };
+
+    starters.push(starter);
+    save();
+    return starter;
+  }
+
+  function createFromData(data) {
+    if (!data || typeof data.name !== 'string' || !Array.isArray(data.messages)) return null;
+    if (starters.length >= MAX_STARTERS) return null;
+    if (data.messages.length === 0) return null;
+
+    const messages = data.messages.slice(0, MAX_MESSAGES).map(m => ({
+      role: String(m.role || 'user'),
+      content: String(m.content || '')
+    }));
+
+    const starter = {
+      id: Date.now().toString(36) + '-' + Math.random().toString(36).substring(2, 8),
+      name: String(data.name).trim().substring(0, MAX_NAME_LENGTH),
+      description: String(data.description || '').trim().substring(0, MAX_DESC_LENGTH),
+      messages,
+      model: data.model || ChatConfig.MODEL,
+      messageCount: messages.length,
+      createdAt: new Date().toISOString(),
+      usageCount: 0,
+      lastUsedAt: null
+    };
+
+    starters.push(starter);
+    save();
+    return starter;
+  }
+
+  function remove(id) {
+    const before = starters.length;
+    starters = starters.filter(s => s.id !== id);
+    if (starters.length !== before) save();
+    return starters.length !== before;
+  }
+
+  function rename(id, newName) {
+    if (!newName || typeof newName !== 'string') return false;
+    const starter = starters.find(s => s.id === id);
+    if (!starter) return false;
+    starter.name = newName.trim().substring(0, MAX_NAME_LENGTH);
+    save();
+    return true;
+  }
+
+  function updateDescription(id, desc) {
+    const starter = starters.find(s => s.id === id);
+    if (!starter) return false;
+    starter.description = String(desc || '').trim().substring(0, MAX_DESC_LENGTH);
+    save();
+    return true;
+  }
+
+  function getAll() { return [...starters]; }
+  function getById(id) { return starters.find(s => s.id === id) || null; }
+  function getCount() { return starters.length; }
+
+  function search(query) {
+    if (!query || typeof query !== 'string') return getAll();
+    const q = query.toLowerCase().trim();
+    if (!q) return getAll();
+    return starters.filter(s =>
+      s.name.toLowerCase().includes(q) ||
+      (s.description && s.description.toLowerCase().includes(q))
+    );
+  }
+
+  function apply(id) {
+    const starter = starters.find(s => s.id === id);
+    if (!starter || !Array.isArray(starter.messages) || starter.messages.length === 0) return false;
+
+    ConversationManager.clear();
+
+    const first = starter.messages[0];
+    if (first.role === 'system') {
+      ConversationManager.setSystemPrompt(first.content);
+    }
+
+    const startIdx = first.role === 'system' ? 1 : 0;
+    for (let i = startIdx; i < starter.messages.length; i++) {
+      ConversationManager.addMessage(starter.messages[i].role, starter.messages[i].content);
+    }
+
+    starter.usageCount = (starter.usageCount || 0) + 1;
+    starter.lastUsedAt = new Date().toISOString();
+    save();
+
+    if (typeof UIController !== 'undefined' && UIController.renderHistory) {
+      UIController.renderHistory(ConversationManager.getHistory());
+    }
+
+    return true;
+  }
+
+  function duplicate(id) {
+    const starter = starters.find(s => s.id === id);
+    if (!starter) return null;
+    if (starters.length >= MAX_STARTERS) return null;
+
+    const copy = {
+      ...starter,
+      id: Date.now().toString(36) + '-' + Math.random().toString(36).substring(2, 8),
+      name: (starter.name + ' (copy)').substring(0, MAX_NAME_LENGTH),
+      messages: starter.messages.map(m => ({ ...m })),
+      createdAt: new Date().toISOString(),
+      usageCount: 0,
+      lastUsedAt: null
+    };
+
+    starters.push(copy);
+    save();
+    return copy;
+  }
+
+  function exportAll() { return JSON.stringify(starters, null, 2); }
+
+  function exportOne(id) {
+    const starter = starters.find(s => s.id === id);
+    return starter ? JSON.stringify(starter, null, 2) : null;
+  }
+
+  function importStarters(jsonString) {
+    try {
+      const data = JSON.parse(jsonString);
+      const arr = Array.isArray(data) ? data : [data];
+      let imported = 0;
+      for (const item of arr) {
+        if (starters.length >= MAX_STARTERS) break;
+        if (createFromData(item)) imported++;
+      }
+      return imported;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  function clearAll() { starters = []; save(); }
+
+  const BUILT_IN = [
+    {
+      name: 'Code Review',
+      description: 'Start a code review session with structured analysis prompts',
+      messages: [
+        { role: 'system', content: 'You are a senior code reviewer. Analyze code for bugs, performance issues, security vulnerabilities, and style. Provide specific, actionable feedback with line references. Rate severity as: critical, major, minor, or nitpick.' },
+        { role: 'user', content: 'I\'d like you to review some code. I\'ll paste it in the next message. Please analyze it for:\n1. Bugs and logic errors\n2. Performance issues\n3. Security vulnerabilities\n4. Code style and readability\n5. Suggestions for improvement' },
+        { role: 'assistant', content: 'Ready for your code review! Please paste the code and let me know:\n- **Language/framework** (if not obvious)\n- **Context** \u2014 what does this code do?\n- **Any specific concerns** you have?\n\nI\'ll provide a structured review covering all five areas you mentioned.' }
+      ],
+      model: 'gpt-4o'
+    },
+    {
+      name: 'Brainstorming',
+      description: 'Creative brainstorming session with divergent thinking prompts',
+      messages: [
+        { role: 'system', content: 'You are a creative brainstorming partner. Use techniques like SCAMPER, mind mapping, and lateral thinking. Generate many ideas before evaluating. Be bold and unconventional. Number all ideas for easy reference.' },
+        { role: 'user', content: 'Let\'s brainstorm! I\'ll share a topic or challenge, and I want you to generate as many ideas as possible \u2014 even wild ones. We\'ll narrow down later.' },
+        { role: 'assistant', content: 'Love it! I\'m in brainstorming mode \u2014 no idea is too wild. Share your topic and I\'ll fire off ideas using different creative techniques. We can always refine later.\n\nWhat are we brainstorming about?' }
+      ],
+      model: 'gpt-4o'
+    },
+    {
+      name: 'Debug Session',
+      description: 'Systematic debugging with structured problem analysis',
+      messages: [
+        { role: 'system', content: 'You are an expert debugger. Use systematic approaches: reproduce, isolate, identify root cause, fix, verify. Ask clarifying questions. Consider edge cases. Think about what changed recently.' },
+        { role: 'user', content: 'I have a bug I need help debugging. Let me describe the issue.' },
+        { role: 'assistant', content: 'Let\'s debug this systematically. Please tell me:\n\n1. **What\'s happening** vs. what you expected?\n2. **When did it start?** (recent change? always broken?)\n3. **Error messages** \u2014 exact text if any\n4. **Steps to reproduce**\n5. **What you\'ve already tried**\n\nPaste relevant code and I\'ll help track it down.' }
+      ],
+      model: 'gpt-4o'
+    },
+    {
+      name: 'Technical Writing',
+      description: 'Documentation and technical content creation',
+      messages: [
+        { role: 'system', content: 'You are a technical writer. Write clear, concise documentation. Use active voice, short sentences, and concrete examples. Structure content with headers, lists, and code blocks. Target audience awareness is key.' },
+        { role: 'user', content: 'I need help writing some technical documentation. I\'ll describe what needs documenting.' },
+        { role: 'assistant', content: 'Happy to help with docs! Let me know:\n\n- **What** are we documenting? (API, library, process, tutorial?)\n- **Who\'s the audience?** (beginners, developers, end users?)\n- **Format** \u2014 README, API reference, how-to guide, or something else?\n- **Any existing docs** to build on?\n\nI\'ll draft structured, clear documentation.' }
+      ],
+      model: 'gpt-4o'
+    },
+    {
+      name: 'Learning Session',
+      description: 'Socratic learning with explanations tailored to your level',
+      messages: [
+        { role: 'system', content: 'You are a patient, Socratic tutor. Explain concepts from first principles. Use analogies, examples, and progressive complexity. Check understanding before moving on. Encourage questions.' },
+        { role: 'user', content: 'I want to learn about a topic. I\'ll tell you what and my current level.' },
+        { role: 'assistant', content: 'Great, let\'s learn together! Tell me:\n\n1. **What topic** interests you?\n2. **Your current level** \u2014 complete beginner, some exposure, or need deeper understanding?\n3. **Goal** \u2014 general understanding, specific skill, or exam prep?\n\nI\'ll tailor explanations to your level and build up from there.' }
+      ],
+      model: 'gpt-4o'
+    }
+  ];
+
+  function loadBuiltIns() {
+    if (starters.length > 0) return 0;
+    let added = 0;
+    for (const bi of BUILT_IN) {
+      if (createFromData(bi)) added++;
+    }
+    return added;
+  }
+
+  function togglePanel() {
+    panelOpen = !panelOpen;
+    const panel = document.getElementById('starters-panel');
+    const overlay = document.getElementById('starters-overlay');
+    if (!panel || !overlay) return;
+
+    if (panelOpen) {
+      renderPanel();
+      panel.style.display = 'block';
+      overlay.style.display = 'block';
+      const searchInput = document.getElementById('starters-search');
+      if (searchInput) searchInput.focus();
+    } else {
+      panel.style.display = 'none';
+      overlay.style.display = 'none';
+    }
+  }
+
+  function closePanel() {
+    panelOpen = false;
+    const panel = document.getElementById('starters-panel');
+    const overlay = document.getElementById('starters-overlay');
+    if (panel) panel.style.display = 'none';
+    if (overlay) overlay.style.display = 'none';
+  }
+
+  function renderPanel() {
+    const list = document.getElementById('starters-list');
+    if (!list) return;
+
+    const searchInput = document.getElementById('starters-search');
+    const query = searchInput ? searchInput.value : '';
+    const filtered = search(query);
+
+    if (filtered.length === 0) {
+      list.innerHTML = '<div class="starters-empty">' +
+        (query ? 'No starters match your search.' : 'No starters yet. Save your current conversation as a starter!') +
+        '</div>';
+      return;
+    }
+
+    list.innerHTML = filtered.map(s => {
+      const msgCount = s.messageCount || (s.messages ? s.messages.length : 0);
+      const usageText = s.usageCount ? 'Used ' + s.usageCount + '\u00d7' : 'Never used';
+      const dateText = s.createdAt ? new Date(s.createdAt).toLocaleDateString() : '';
+      const descHtml = s.description ? '<div class="starter-desc">' + _escapeHtml(s.description) + '</div>' : '';
+      const modelBadge = s.model ? '<span class="starter-model">' + _escapeHtml(s.model) + '</span>' : '';
+
+      return '<div class="starter-card" data-id="' + _escapeHtml(s.id) + '">' +
+        '<div class="starter-header">' +
+          '<span class="starter-name">' + _escapeHtml(s.name) + '</span>' +
+          modelBadge +
+        '</div>' +
+        descHtml +
+        '<div class="starter-meta">' +
+          '<span>' + msgCount + ' message' + (msgCount !== 1 ? 's' : '') + '</span>' +
+          '<span>' + usageText + '</span>' +
+          '<span>' + dateText + '</span>' +
+        '</div>' +
+        '<div class="starter-actions">' +
+          '<button class="starter-apply-btn" data-id="' + _escapeHtml(s.id) + '" title="Start new conversation from this template">\u25b6 Use</button>' +
+          '<button class="starter-dup-btn" data-id="' + _escapeHtml(s.id) + '" title="Duplicate">\ud83d\udccb</button>' +
+          '<button class="starter-export-btn" data-id="' + _escapeHtml(s.id) + '" title="Export as JSON">\u2b07\ufe0f</button>' +
+          '<button class="starter-del-btn" data-id="' + _escapeHtml(s.id) + '" title="Delete">\ud83d\uddd1\ufe0f</button>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+
+    list.querySelectorAll('.starter-apply-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (confirm('This will clear your current conversation and load this starter. Continue?')) {
+          apply(btn.dataset.id);
+          closePanel();
+        }
+      });
+    });
+    list.querySelectorAll('.starter-dup-btn').forEach(btn => {
+      btn.addEventListener('click', () => { duplicate(btn.dataset.id); renderPanel(); });
+    });
+    list.querySelectorAll('.starter-export-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const s = getById(btn.dataset.id);
+        if (s) downloadBlob('starter-' + s.name.replace(/\s+/g, '-') + '.json', exportOne(s.id), 'application/json');
+      });
+    });
+    list.querySelectorAll('.starter-del-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (confirm('Delete this starter?')) { remove(btn.dataset.id); renderPanel(); }
+      });
+    });
+  }
+
+  function openSaveDialog() {
+    let dialog = document.getElementById('starters-save-dialog');
+    if (!dialog) return;
+    dialog.style.display = 'flex';
+    const nameInput = document.getElementById('starter-save-name');
+    if (nameInput) { nameInput.value = ''; nameInput.focus(); }
+    const descInput = document.getElementById('starter-save-desc');
+    if (descInput) descInput.value = '';
+  }
+
+  function closeSaveDialog() {
+    const dialog = document.getElementById('starters-save-dialog');
+    if (dialog) dialog.style.display = 'none';
+  }
+
+  function handleSave() {
+    const nameInput = document.getElementById('starter-save-name');
+    const descInput = document.getElementById('starter-save-desc');
+    const name = nameInput ? nameInput.value.trim() : '';
+    const desc = descInput ? descInput.value.trim() : '';
+
+    if (!name) {
+      if (nameInput) nameInput.classList.add('input-error');
+      return false;
+    }
+
+    const result = createFromCurrent(name, desc);
+    if (!result) return false;
+
+    closeSaveDialog();
+    if (panelOpen) renderPanel();
+    return true;
+  }
+
+  function triggerImport() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.addEventListener('change', () => {
+      const file = input.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const count = importStarters(reader.result);
+        if (count > 0 && panelOpen) renderPanel();
+      };
+      reader.readAsText(file);
+    });
+    input.click();
+  }
+
+  function init() {
+    load();
+    loadBuiltIns();
+
+    const btn = document.getElementById('starters-btn');
+    if (btn) btn.addEventListener('click', togglePanel);
+
+    const closeBtn = document.getElementById('starters-close-btn');
+    if (closeBtn) closeBtn.addEventListener('click', closePanel);
+
+    const overlay = document.getElementById('starters-overlay');
+    if (overlay) overlay.addEventListener('click', closePanel);
+
+    const searchInput = document.getElementById('starters-search');
+    if (searchInput) searchInput.addEventListener('input', () => renderPanel());
+
+    const saveBtn = document.getElementById('starters-save-btn');
+    if (saveBtn) saveBtn.addEventListener('click', openSaveDialog);
+
+    const importBtn = document.getElementById('starters-import-btn');
+    if (importBtn) importBtn.addEventListener('click', triggerImport);
+
+    const exportAllBtn = document.getElementById('starters-export-all-btn');
+    if (exportAllBtn) exportAllBtn.addEventListener('click', () => {
+      downloadBlob('conversation-starters.json', exportAll(), 'application/json');
+    });
+
+    const confirmSaveBtn = document.getElementById('starter-save-confirm');
+    if (confirmSaveBtn) confirmSaveBtn.addEventListener('click', handleSave);
+
+    const cancelSaveBtn = document.getElementById('starter-save-cancel');
+    if (cancelSaveBtn) cancelSaveBtn.addEventListener('click', closeSaveDialog);
+
+    const nameInput = document.getElementById('starter-save-name');
+    if (nameInput) nameInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); handleSave(); }
+    });
+  }
+
+  return {
+    init,
+    togglePanel,
+    closePanel,
+    openSaveDialog,
+    closeSaveDialog,
+    handleSave,
+    triggerImport,
+    createFromCurrent,
+    createFromData,
+    apply,
+    remove,
+    rename,
+    updateDescription,
+    duplicate,
+    getAll,
+    getById,
+    getCount,
+    search,
+    exportAll,
+    exportOne,
+    importStarters,
+    clearAll,
+    loadBuiltIns,
+    MAX_STARTERS,
+    MAX_NAME_LENGTH,
+    MAX_DESC_LENGTH,
+    MAX_MESSAGES,
+    BUILT_IN
+  };
+})();
+
+document.addEventListener('DOMContentLoaded', ConversationStarters.init);

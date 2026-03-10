@@ -54,6 +54,7 @@
     <button id="fmt-btn" class="btn-secondary" title="Formatting toolbar — markdown helpers (Ctrl+Shift+M)">✏️</button>
     <button id="rating-btn" class="btn-secondary" title="Response ratings — rate AI responses and view satisfaction stats">⭐</button>
     <button id="prompt-library-btn" class="btn-secondary" title="Prompt Library — save and reuse your prompts (Ctrl+L)">📚</button>
+    <button id="starters-btn" class="btn-secondary" title="Conversation Starters — reusable session templates (Ctrl+Shift+T)">🚀</button>
   </div>
 
   <div class="zen-indicator">Focus Mode — press <kbd>Ctrl+Shift+F</kbd> or <kbd>Esc</kbd> to exit</div>
@@ -400,6 +401,38 @@
       <button id="model-close-btn" class="btn-sm" title="Close">✕</button>
     </div>
     <div id="model-list"></div>
+  </div>
+
+  <!-- Conversation Starters panel -->
+  <div id="starters-overlay" class="panel-overlay" style="display:none"></div>
+  <div id="starters-panel" class="side-panel" style="display:none" role="dialog" aria-label="Conversation Starters">
+    <div class="panel-header">
+      <strong>🚀 Conversation Starters</strong>
+      <div class="panel-header-actions">
+        <button id="starters-save-btn" class="btn-sm" title="Save current conversation as a starter">💾 Save Current</button>
+        <button id="starters-import-btn" class="btn-sm" title="Import starters from JSON">📥 Import</button>
+        <button id="starters-export-all-btn" class="btn-sm" title="Export all starters as JSON">📤 Export All</button>
+        <button id="starters-close-btn" class="btn-sm" title="Close">✕</button>
+      </div>
+    </div>
+    <input id="starters-search" type="text" placeholder="Search starters…" autocomplete="off">
+    <div id="starters-list"></div>
+  </div>
+
+  <!-- Starters save dialog -->
+  <div id="starters-save-dialog" class="modal-overlay" style="display:none">
+    <div class="modal-dialog">
+      <h3>Save as Starter</h3>
+      <p>Save the current conversation (system prompt + messages) as a reusable template.</p>
+      <label for="starter-save-name">Name</label>
+      <input id="starter-save-name" type="text" placeholder="e.g. Code Review, API Design…" maxlength="80" autocomplete="off">
+      <label for="starter-save-desc">Description (optional)</label>
+      <input id="starter-save-desc" type="text" placeholder="Brief description…" maxlength="200" autocomplete="off">
+      <div class="modal-actions">
+        <button id="starter-save-confirm" class="btn-primary">Save</button>
+        <button id="starter-save-cancel" class="btn-secondary">Cancel</button>
+      </div>
+    </div>
   </div>
 
   <script src="app.js"></script>

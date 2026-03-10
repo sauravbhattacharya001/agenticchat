@@ -240,6 +240,24 @@ function setupDOM() {
       <button id="heatmap-refresh-btn"></button>
     </div>
     <div id="file-drop-overlay"></div>
+    <button id="starters-btn"></button>
+    <div id="starters-overlay" style="display:none;"></div>
+    <div id="starters-panel" style="display:none;">
+      <input id="starters-search" type="text">
+      <div id="starters-list"></div>
+      <button id="starters-close-btn"></button>
+      <button id="starters-save-btn"></button>
+      <button id="starters-import-btn"></button>
+      <button id="starters-export-all-btn"></button>
+    </div>
+    <div id="starters-save-dialog" style="display:none;">
+      <div class="modal-dialog">
+        <input id="starter-save-name" type="text">
+        <input id="starter-save-desc" type="text">
+        <button id="starter-save-confirm"></button>
+        <button id="starter-save-cancel"></button>
+      </div>
+    </div>
   `;
 }
 
@@ -313,7 +331,8 @@ function loadApp() {
     'MessageScheduler',
     'SmartRetry',
     'UsageHeatmap',
-    'ContextWindowMeter'
+    'ContextWindowMeter',
+    'ConversationStarters'
   ];
 
   for (const mod of modules) {
