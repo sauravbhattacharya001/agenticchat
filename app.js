@@ -16193,3 +16193,86 @@ const ContextWindowMeter = (() => {
 })();
 
 document.addEventListener('DOMContentLoaded', ContextWindowMeter.init);
+
+/* ── Offline Detection & Service Worker Registration ───────────────── */
+const OfflineManager = (function () {
+  'use strict';
+
+  var banner = null;
+  var sendBtn = null;
+  var _wasOffline = false;
+
+  function init() {
+    banner = document.getElementById('offline-banner');
+    sendBtn = document.getElementById('send-btn');
+    var dismissBtn = document.getElementById('offline-dismiss');
+
+    if (dismissBtn) {
+      dismissBtn.addEventListener('click', function () {
+        if (banner) banner.style.display = 'none';
+      });
+    }
+
+    window.addEventListener('online', _onOnline);
+    window.addEventListener('offline', _onOffline);
+
+    /* Check initial state */
+    if (!navigator.onLine) {
+      _onOffline();
+    }
+
+    /* Register service worker */
+    _registerSW();
+  }
+
+  function _onOffline() {
+    _wasOffline = true;
+    if (banner) banner.style.display = '';
+    if (sendBtn) {
+      sendBtn.disabled = true;
+      sendBtn.title = 'Cannot send — you are offline';
+    }
+  }
+
+  function _onOnline() {
+    if (banner) banner.style.display = 'none';
+    if (sendBtn) {
+      sendBtn.disabled = false;
+      sendBtn.title = '';
+    }
+    if (_wasOffline) {
+      _wasOffline = false;
+      console.log('[OfflineManager] Connection restored');
+    }
+  }
+
+  function _registerSW() {
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js')
+        .then(function (reg) {
+          console.log('[SW] Registered, scope:', reg.scope);
+          reg.addEventListener('updatefound', function () {
+            var newWorker = reg.installing;
+            if (newWorker) {
+              newWorker.addEventListener('statechange', function () {
+                if (newWorker.state === 'activated') {
+                  console.log('[SW] New version activated');
+                }
+              });
+            }
+          });
+        })
+        .catch(function (err) {
+          console.warn('[SW] Registration failed:', err.message);
+        });
+    }
+  }
+
+  function isOffline() {
+    return !navigator.onLine;
+  }
+
+  return { init: init, isOffline: isOffline };
+})();
+
+document.addEventListener('DOMContentLoaded', OfflineManager.init);
