@@ -29,6 +29,12 @@ function setupDOM() {
       <button id="theme-btn" class="btn-secondary" aria-label="Toggle theme">☀️</button>
     </div>
     <div id="char-count"></div>
+    <div id="context-meter" class="context-meter" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Context window usage">
+      <div class="context-meter__bar">
+        <div class="context-meter__fill" id="context-meter-fill"></div>
+      </div>
+      <span class="context-meter__label" id="context-meter-label"></span>
+    </div>
     <div id="last-prompt">(no input yet)</div>
     <div id="blackbox">
       <div id="search-bar" class="search-bar" role="search" aria-label="Search messages" style="display:none;">
@@ -306,7 +312,8 @@ function loadApp() {
     'MessageEditor',
     'MessageScheduler',
     'SmartRetry',
-    'UsageHeatmap'
+    'UsageHeatmap',
+    'ContextWindowMeter'
   ];
 
   for (const mod of modules) {

@@ -2761,3 +2761,42 @@ body.light-theme #heatmap-panel {
   background: #fff;
   border-color: #ddd;
 }
+
+
+/* --- Context Window Meter --- */
+.context-meter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 12px;
+  font-size: 0.75rem;
+  color: #9ca3af;
+  transition: opacity 0.3s ease;
+}
+.context-meter--hidden { opacity: 0; pointer-events: none; }
+.context-meter__bar {
+  flex: 1;
+  height: 6px;
+  background: #1f2937;
+  border-radius: 3px;
+  overflow: hidden;
+  max-width: 200px;
+}
+.context-meter__fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease, background-color 0.3s ease;
+  width: 0;
+}
+.context-meter__fill--green  { background-color: #22c55e; }
+.context-meter__fill--yellow { background-color: #eab308; }
+.context-meter__fill--red    { background-color: #ef4444; }
+.context-meter__label {
+  white-space: nowrap;
+  min-width: 100px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Light theme overrides */
+[data-theme="light"] .context-meter__bar { background: #e5e7eb; }
+[data-theme="light"] .context-meter { color: #6b7280; }
