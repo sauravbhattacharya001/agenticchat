@@ -24,7 +24,7 @@ describe('ChatConfig', () => {
   });
 
   test('has required configuration values', () => {
-    expect(ChatConfig.MODEL).toBe('gpt-4o');
+    expect(ChatConfig.MODEL).toBe('gpt-4.1');
     expect(ChatConfig.MAX_TOKENS_RESPONSE).toBe(4096);
     expect(ChatConfig.MAX_HISTORY_PAIRS).toBe(20);
     expect(ChatConfig.MAX_INPUT_CHARS).toBe(50000);
