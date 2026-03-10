@@ -2800,3 +2800,95 @@ body.light-theme #heatmap-panel {
 /* Light theme overrides */
 [data-theme="light"] .context-meter__bar { background: #e5e7eb; }
 [data-theme="light"] .context-meter { color: #6b7280; }
+
+/* ── Conversation Starters ─────────────────────────────── */
+.starter-card {
+  background: var(--bg-tertiary, #2a2a2a);
+  border: 1px solid var(--border, #444);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 8px;
+  transition: border-color 0.15s;
+}
+.starter-card:hover { border-color: var(--accent, #7c3aed); }
+.starter-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.starter-name { font-weight: 600; font-size: 0.95rem; }
+.starter-model {
+  font-size: 0.7rem;
+  background: var(--accent, #7c3aed);
+  color: #fff;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.starter-desc {
+  font-size: 0.82rem;
+  color: var(--text-secondary, #aaa);
+  margin-bottom: 4px;
+}
+.starter-meta {
+  display: flex;
+  gap: 12px;
+  font-size: 0.75rem;
+  color: var(--text-tertiary, #888);
+  margin-bottom: 6px;
+}
+.starter-actions {
+  display: flex;
+  gap: 4px;
+}
+.starter-actions button {
+  font-size: 0.8rem;
+  padding: 2px 8px;
+  border: 1px solid var(--border, #444);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.starter-actions button:hover { background: var(--bg-hover, #333); }
+.starter-apply-btn { font-weight: 600; }
+.starters-empty {
+  text-align: center;
+  padding: 24px;
+  color: var(--text-secondary, #aaa);
+  font-style: italic;
+}
+
+/* Save dialog */
+#starters-save-dialog .modal-dialog {
+  max-width: 400px;
+}
+#starters-save-dialog label {
+  display: block;
+  font-size: 0.85rem;
+  margin: 8px 0 4px;
+  color: var(--text-secondary, #aaa);
+}
+#starters-save-dialog input[type="text"] {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border, #444);
+  border-radius: 4px;
+  background: var(--bg-secondary, #1e1e1e);
+  color: inherit;
+  font-size: 0.9rem;
+}
+#starters-save-dialog input.input-error {
+  border-color: #ef4444;
+}
+.modal-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  justify-content: flex-end;
+}
+
+[data-theme="light"] .starter-card { background: #f9fafb; border-color: #e5e7eb; }
+[data-theme="light"] .starter-card:hover { border-color: #7c3aed; }
+[data-theme="light"] .starter-actions button { border-color: #d1d5db; }
+[data-theme="light"] .starter-actions button:hover { background: #f3f4f6; }
