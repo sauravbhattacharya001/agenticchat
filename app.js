@@ -958,6 +958,36 @@ const ChatController = (() => {
     };
   }
 
+  /**
+   * Rollback the last user message if the API call failed before getting
+   * an assistant reply.  Shared by the error-result handler and the
+   * catch block (abort, timeout, network error).
+   */
+  function _rollbackLastUserMessage() {
+    const h = ConversationManager.getHistory();
+    if (h.length > 1 && h.at(-1).role === 'user') {
+      ConversationManager.popLast();
+    }
+  }
+
+  /**
+   * Handle a non-ok API result uniformly for both streaming and
+   * non-streaming paths.  Rolls back the optimistic user message,
+   * surfaces the error, and re-shows the API key input on 401.
+   *
+   * @param {{ok: false, status?: number, error?: string}} result
+   */
+  function _handleApiError(result) {
+    _rollbackLastUserMessage();
+    UIController.setChatOutput(result.error);
+    UIController.setConsoleOutput('(request failed)');
+
+    if (result.status === 401) {
+      ApiKeyManager.clearOpenAIKey();
+      UIController.showApiKeyInput();
+    }
+  }
+
   /** Execute sandbox code, handling service-key substitution. Returns false on error. */
   async function executeCode(code) {
     const substituted = ApiKeyManager.substituteServiceKey(code);
@@ -1061,17 +1091,7 @@ const ChatController = (() => {
           (token) => UIController.appendChatOutput(token)
         );
 
-        if (!result.ok) {
-          ConversationManager.popLast();
-          UIController.setChatOutput(result.error);
-          UIController.setConsoleOutput('(request failed)');
-
-          if (result.status === 401) {
-            ApiKeyManager.clearOpenAIKey();
-            UIController.showApiKeyInput();
-          }
-          return;
-        }
+        if (!result.ok) { _handleApiError(result); return; }
 
         reply = result.text || 'No response';
         usage = result.usage;
@@ -1083,17 +1103,7 @@ const ChatController = (() => {
           ConversationManager.getMessages()
         );
 
-        if (!result.ok) {
-          ConversationManager.popLast();
-          UIController.setChatOutput(result.error);
-          UIController.setConsoleOutput('(request failed)');
-
-          if (result.status === 401) {
-            ApiKeyManager.clearOpenAIKey();
-            UIController.showApiKeyInput();
-          }
-          return;
-        }
+        if (!result.ok) { _handleApiError(result); return; }
 
         reply = result.data.choices?.[0]?.message?.content || 'No response';
         usage = result.data.usage;
@@ -1133,27 +1143,17 @@ const ChatController = (() => {
       // Auto-save session if enabled
       SessionManager.autoSaveIfEnabled();
     } catch (err) {
+      _rollbackLastUserMessage();
+
       if (err.name === 'AbortError') {
         UIController.setChatOutput('(request cancelled)');
         UIController.setConsoleOutput('(cancelled)');
-        if (ConversationManager.getHistory().length > 1 &&
-            ConversationManager.getHistory().at(-1).role === 'user') {
-          ConversationManager.popLast();
-        }
       } else if (err.name === 'TimeoutError') {
         UIController.setChatOutput('Request timed out — try again.');
         UIController.setConsoleOutput('(timed out)');
-        if (ConversationManager.getHistory().length > 1 &&
-            ConversationManager.getHistory().at(-1).role === 'user') {
-          ConversationManager.popLast();
-        }
       } else {
-      if (ConversationManager.getHistory().length > 1 &&
-          ConversationManager.getHistory().at(-1).role === 'user') {
-        ConversationManager.popLast();
-      }
-      UIController.setChatOutput('Network error: ' + err.message);
-      UIController.setConsoleOutput('(request failed)');
+        UIController.setChatOutput('Network error: ' + err.message);
+        UIController.setConsoleOutput('(request failed)');
       }
     } finally {
       isSending = false;
