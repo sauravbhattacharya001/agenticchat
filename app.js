@@ -1,7 +1,7 @@
 /* ============================================================
  * Agentic Chat — Application Logic
  *
- * Architecture (40 modules, all revealing-module-pattern IIFEs):
+ * Architecture (41 modules, all revealing-module-pattern IIFEs):
  *
  *   Core:
  *   SafeStorage          — safe localStorage wrapper for restricted-storage environments
@@ -16036,3 +16036,166 @@ const UsageHeatmap = (() => {
 })();
 
 document.addEventListener('DOMContentLoaded', UsageHeatmap.init);
+
+
+// ═══════════════════════════════════════════════════════════════════
+//  Context Window Meter
+// ═══════════════════════════════════════════════════════════════════
+/**
+ * ContextWindowMeter — real-time visual indicator of context window usage.
+ *
+ * Shows a persistent progress bar between the char-count and chat output
+ * areas, displaying how much of the model's MAX_TOTAL_TOKENS budget the
+ * current conversation consumes.  Color-coded:
+ *   green  (<60%)  — plenty of room
+ *   yellow (60-80%) — getting full
+ *   red    (>80%)  — near limit, messages will be trimmed soon
+ *
+ * The meter hooks into ConversationManager.estimateTokens() and updates
+ * automatically on every UI refresh cycle via a MutationObserver on the
+ * chat output container.  It also exposes a manual refresh() for modules
+ * that modify history programmatically (e.g. ConversationMerge, clear).
+ *
+ * @namespace ContextWindowMeter
+ */
+const ContextWindowMeter = (() => {
+  'use strict';
+
+  // ── Thresholds ──────────────────────────────────────────────────
+  const YELLOW_THRESHOLD = 0.60;
+  const RED_THRESHOLD    = 0.80;
+
+  // ── DOM refs (lazily resolved) ──────────────────────────────────
+  let _container = null;
+  let _fill      = null;
+  let _label     = null;
+  let _observer  = null;
+  let _visible   = true;
+
+  function _el(id) { return document.getElementById(id); }
+
+  function _ensureEls() {
+    if (!_container) _container = _el('context-meter');
+    if (!_fill)      _fill      = _el('context-meter-fill');
+    if (!_label)     _label     = _el('context-meter-label');
+  }
+
+  // ── Color class helper ──────────────────────────────────────────
+  function _colorClass(ratio) {
+    if (ratio >= RED_THRESHOLD)    return 'context-meter__fill--red';
+    if (ratio >= YELLOW_THRESHOLD) return 'context-meter__fill--yellow';
+    return 'context-meter__fill--green';
+  }
+
+  // ── Format helpers ──────────────────────────────────────────────
+  function _fmtK(n) {
+    return n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
+  }
+
+  // ── Core update ─────────────────────────────────────────────────
+  function refresh() {
+    _ensureEls();
+    if (!_container || !_fill || !_label) return;
+
+    if (typeof ConversationManager === 'undefined') return;
+
+    const used = ConversationManager.estimateTokens();
+    const max  = ChatConfig.MAX_TOTAL_TOKENS;
+    const ratio = Math.min(used / max, 1);
+    const pct   = Math.round(ratio * 100);
+
+    // Update progress bar
+    _fill.style.width = pct + '%';
+
+    // Update color
+    _fill.className = 'context-meter__fill ' + _colorClass(ratio);
+
+    // Update label
+    _label.textContent = _fmtK(used) + ' / ' + _fmtK(max) + ' tokens (' + pct + '%)';
+
+    // Update ARIA
+    _container.setAttribute('aria-valuenow', String(pct));
+
+    // Show/hide: hide when conversation is empty (just system prompt)
+    const msgs = ConversationManager.getMessages();
+    const hasContent = msgs.length > 1;  // more than just system prompt
+    if (hasContent && !_visible) {
+      _container.classList.remove('context-meter--hidden');
+      _visible = true;
+    } else if (!hasContent && _visible) {
+      _container.classList.add('context-meter--hidden');
+      _visible = false;
+    }
+  }
+
+  // ── Visibility toggle ──────────────────────────────────────────
+  function toggle() {
+    _ensureEls();
+    if (!_container) return _visible;
+    _visible = !_visible;
+    _container.style.display = _visible ? '' : 'none';
+    try { SafeStorage.set('ac-context-meter-visible', JSON.stringify(_visible)); } catch (_) {}
+    return _visible;
+  }
+
+  // ── Observer: watch chat output for changes ─────────────────────
+  function _startObserver() {
+    const chatOutput = _el('output');
+    if (!chatOutput) return;
+
+    _observer = new MutationObserver(() => {
+      // Debounce: requestAnimationFrame coalesces rapid mutations
+      requestAnimationFrame(refresh);
+    });
+
+    _observer.observe(chatOutput, { childList: true, subtree: true });
+  }
+
+  // ── Init ────────────────────────────────────────────────────────
+  function init() {
+    _ensureEls();
+    if (!_container) return;
+
+    // Restore visibility preference
+    try {
+      const saved = SafeStorage.get('ac-context-meter-visible');
+      if (saved === 'false') {
+        _container.style.display = 'none';
+        _visible = false;
+      }
+    } catch (_) {}
+
+    // Initial render (hidden if conversation is empty)
+    _container.classList.add('context-meter--hidden');
+    _visible = false;
+    refresh();
+
+    // Start watching for conversation changes
+    _startObserver();
+
+    // Also refresh on storage events (cross-tab session switches)
+    window.addEventListener('storage', (e) => {
+      if (e.key && e.key.startsWith('ac-session')) {
+        setTimeout(refresh, 100);
+      }
+    });
+  }
+
+  function destroy() {
+    if (_observer) { _observer.disconnect(); _observer = null; }
+  }
+
+  return {
+    init,
+    refresh,
+    toggle,
+    destroy,
+    // Exposed for testing
+    _colorClass,
+    _fmtK,
+    YELLOW_THRESHOLD,
+    RED_THRESHOLD
+  };
+})();
+
+document.addEventListener('DOMContentLoaded', ContextWindowMeter.init);
