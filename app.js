@@ -117,7 +117,7 @@ const SafeStorage = (() => {
  * ============================================================ */
 const ChatConfig = (() => {
   const _cfg = {
-    _model: SafeStorage.get('ac-selected-model') || 'gpt-4o',
+    _model: SafeStorage.get('ac-selected-model') || 'gpt-4.1',
     MAX_TOKENS_RESPONSE: 4096,
     MAX_HISTORY_PAIRS: 20,
     MAX_INPUT_CHARS: 50000,
@@ -133,25 +133,25 @@ If an external service needs a key use the placeholder "YOUR_API_KEY".
 Always \`return\` the final value.
     `.trim(),
     AVAILABLE_MODELS: [
+      { id: 'gpt-4.1', label: 'GPT-4.1' },
+      { id: 'gpt-4.1-mini', label: 'GPT-4.1 Mini' },
+      { id: 'gpt-4.1-nano', label: 'GPT-4.1 Nano' },
       { id: 'gpt-4o', label: 'GPT-4o' },
       { id: 'gpt-4o-mini', label: 'GPT-4o Mini' },
-      { id: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
-      { id: 'gpt-4', label: 'GPT-4' },
-      { id: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo' },
-      { id: 'o1-preview', label: 'o1 Preview' },
-      { id: 'o1-mini', label: 'o1 Mini' },
-      { id: 'o3-mini', label: 'o3 Mini' }
+      { id: 'o3', label: 'o3' },
+      { id: 'o3-mini', label: 'o3 Mini' },
+      { id: 'o4-mini', label: 'o4 Mini' }
     ],
     /** Per-model pricing in USD per 1M tokens: [input, output]. */
     MODEL_PRICING: {
+      'gpt-4.1':        [2.00,   8.00],
+      'gpt-4.1-mini':   [0.40,   1.60],
+      'gpt-4.1-nano':   [0.10,   0.40],
       'gpt-4o':         [2.50,  10.00],
       'gpt-4o-mini':    [0.15,   0.60],
-      'gpt-4-turbo':    [10.00,  30.00],
-      'gpt-4':          [30.00,  60.00],
-      'gpt-3.5-turbo':  [0.50,   1.50],
-      'o1-preview':     [15.00,  60.00],
-      'o1-mini':        [3.00,   12.00],
-      'o3-mini':        [1.10,   4.40]
+      'o3':             [2.00,   8.00],
+      'o3-mini':        [1.10,   4.40],
+      'o4-mini':        [1.10,   4.40]
     },
     get MODEL() { return _cfg._model; },
     set MODEL(v) { _cfg._model = v; try { SafeStorage.set('ac-selected-model', v); } catch (_) {} }
