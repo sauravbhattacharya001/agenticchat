@@ -196,6 +196,7 @@ function setupDOM() {
     <button id="summary-btn"></button>
     <button id="chapters-btn"></button>
     <button id="prompt-library-btn"></button>
+    <button id="agenda-btn"></button>
     <div id="prompt-library-overlay"></div>
     <div id="prompt-library-panel" style="display:none;">
       <div id="prompt-library-header">
@@ -318,6 +319,7 @@ function loadApp() {
     'SmartRetry',
     'UsageHeatmap',
     'ContextWindowMeter',
+    'ConversationAgenda',
     'OfflineManager'
   ];
 

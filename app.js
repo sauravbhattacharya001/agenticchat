@@ -1,7 +1,7 @@
 /* ============================================================
  * Agentic Chat — Application Logic
  *
- * Architecture (41 modules, all revealing-module-pattern IIFEs):
+ * Architecture (42 modules, all revealing-module-pattern IIFEs):
  *
  *   Core:
  *   SafeStorage          — safe localStorage wrapper for restricted-storage environments
@@ -55,6 +55,7 @@
  *   MessageEditor        — edit & resend user messages (truncate + reload into input)
  *   SmartRetry           — automatic retry with exponential backoff for transient API failures
  *   UsageHeatmap         — GitHub-style 7×24 activity heatmap across all sessions
+ *   ConversationAgenda   — per-session goal checklist with progress tracking
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -16193,6 +16194,341 @@ const ContextWindowMeter = (() => {
 })();
 
 document.addEventListener('DOMContentLoaded', ContextWindowMeter.init);
+
+/* ============================================================
+ * ConversationAgenda — per-session goal checklist.
+ *
+ * Users can define objectives for a chat session (e.g., "Understand
+ * React hooks", "Fix the login bug") and check them off as they go.
+ * Goals persist per session via SafeStorage. A progress bar shows
+ * completion status. Goals can be added, toggled, reordered, and
+ * deleted. Keyboard shortcut: Alt+G to toggle panel.
+ *
+ * @namespace ConversationAgenda
+ * ============================================================ */
+const ConversationAgenda = (() => {
+  'use strict';
+
+  const STORAGE_KEY = 'ac-agenda';
+  const MAX_GOALS = 50;
+  const MAX_GOAL_LENGTH = 200;
+
+  // { [sessionId]: [{ id, text, done, createdAt }] }
+  let agendas = {};
+  let panelEl = null;
+  let overlayEl = null;
+  let styleInjected = false;
+
+  // ── Persistence ──
+
+  function _load() {
+    try {
+      const raw = SafeStorage.get(STORAGE_KEY);
+      agendas = raw ? JSON.parse(raw) : {};
+    } catch (_) { agendas = {}; }
+  }
+
+  function _save() {
+    try { SafeStorage.set(STORAGE_KEY, JSON.stringify(agendas)); } catch (_) {}
+  }
+
+  function _sessionId() {
+    return (typeof SessionManager !== 'undefined' && SessionManager.currentId)
+      ? SessionManager.currentId()
+      : '__default';
+  }
+
+  function _goals() {
+    const sid = _sessionId();
+    if (!agendas[sid]) agendas[sid] = [];
+    return agendas[sid];
+  }
+
+  // ── Styles ──
+
+  function _injectStyles() {
+    if (styleInjected) return;
+    styleInjected = true;
+    const s = document.createElement('style');
+    s.textContent = `
+      #agenda-overlay {
+        position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+        z-index: 1099; display: none;
+      }
+      #agenda-overlay.agenda-open { display: block; }
+      #agenda-panel {
+        position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+        width: 440px; max-width: 92vw; max-height: 75vh; z-index: 1100;
+        background: #0d1117; border: 1px solid #30363d; border-radius: 10px;
+        display: none; flex-direction: column; overflow: hidden;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+      }
+      #agenda-panel.agenda-open { display: flex; }
+      .agenda-header {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 12px 16px; border-bottom: 1px solid #30363d;
+      }
+      .agenda-header h3 { margin: 0; color: #22c55e; font-size: 15px; }
+      .agenda-header button {
+        background: none; border: none; color: #888; font-size: 18px; cursor: pointer;
+      }
+      .agenda-progress {
+        padding: 8px 16px 4px;
+      }
+      .agenda-progress-bar {
+        height: 6px; background: #21262d; border-radius: 3px; overflow: hidden;
+      }
+      .agenda-progress-fill {
+        height: 100%; background: #22c55e; border-radius: 3px;
+        transition: width 0.3s ease;
+      }
+      .agenda-progress-label {
+        font-size: 11px; color: #8b949e; margin-top: 3px; text-align: right;
+      }
+      .agenda-body {
+        flex: 1; overflow-y: auto; padding: 8px 12px;
+      }
+      .agenda-empty {
+        text-align: center; color: #484f58; padding: 24px 0; font-size: 13px;
+      }
+      .agenda-item {
+        display: flex; align-items: center; gap: 8px; padding: 6px 4px;
+        border-bottom: 1px solid #161b22; cursor: default;
+      }
+      .agenda-item:last-child { border-bottom: none; }
+      .agenda-item input[type="checkbox"] {
+        accent-color: #22c55e; width: 16px; height: 16px; cursor: pointer; flex-shrink: 0;
+      }
+      .agenda-item-text {
+        flex: 1; font-size: 13px; color: #c9d1d9; word-break: break-word;
+      }
+      .agenda-item.done .agenda-item-text {
+        text-decoration: line-through; color: #484f58;
+      }
+      .agenda-item-delete {
+        background: none; border: none; color: #484f58; cursor: pointer;
+        font-size: 14px; padding: 2px 4px; opacity: 0; transition: opacity 0.15s;
+      }
+      .agenda-item:hover .agenda-item-delete { opacity: 1; }
+      .agenda-item-delete:hover { color: #f85149; }
+      .agenda-footer {
+        display: flex; gap: 6px; padding: 8px 12px; border-top: 1px solid #30363d;
+      }
+      .agenda-footer input {
+        flex: 1; background: #161b22; border: 1px solid #30363d; border-radius: 4px;
+        color: #c9d1d9; padding: 6px 10px; font-size: 13px; outline: none;
+      }
+      .agenda-footer input:focus { border-color: #22c55e; }
+      .agenda-footer button {
+        background: #22c55e; border: none; color: #0d1117; padding: 6px 14px;
+        border-radius: 4px; font-size: 13px; cursor: pointer; font-weight: 600;
+      }
+      .agenda-footer button:hover { background: #16a34a; }
+      .agenda-clear-btn {
+        background: #21262d !important; border: 1px solid #30363d !important;
+        color: #8b949e !important; font-weight: normal !important; font-size: 11px !important;
+        padding: 4px 10px !important;
+      }
+      .agenda-clear-btn:hover { color: #f85149 !important; }
+    `;
+    document.head.appendChild(s);
+  }
+
+  // ── UI ──
+
+  function _buildPanel() {
+    if (panelEl) return;
+    _injectStyles();
+
+    overlayEl = document.createElement('div');
+    overlayEl.id = 'agenda-overlay';
+    overlayEl.addEventListener('click', close);
+    document.body.appendChild(overlayEl);
+
+    panelEl = document.createElement('div');
+    panelEl.id = 'agenda-panel';
+    panelEl.setAttribute('role', 'dialog');
+    panelEl.setAttribute('aria-label', 'Conversation Agenda');
+    panelEl.innerHTML = `
+      <div class="agenda-header">
+        <h3>🎯 Agenda</h3>
+        <button id="agenda-close-btn" title="Close (Esc)">✕</button>
+      </div>
+      <div class="agenda-progress">
+        <div class="agenda-progress-bar"><div class="agenda-progress-fill" id="agenda-fill"></div></div>
+        <div class="agenda-progress-label" id="agenda-progress-label"></div>
+      </div>
+      <div class="agenda-body" id="agenda-body"></div>
+      <div class="agenda-footer">
+        <input id="agenda-input" type="text" placeholder="Add a goal…" maxlength="${MAX_GOAL_LENGTH}" autocomplete="off">
+        <button id="agenda-add-btn">Add</button>
+        <button class="agenda-clear-btn" id="agenda-clear-done-btn" title="Remove completed goals">Clear done</button>
+      </div>
+    `;
+    document.body.appendChild(panelEl);
+
+    panelEl.querySelector('#agenda-close-btn').addEventListener('click', close);
+    panelEl.querySelector('#agenda-add-btn').addEventListener('click', _addFromInput);
+    panelEl.querySelector('#agenda-clear-done-btn').addEventListener('click', clearDone);
+
+    const input = panelEl.querySelector('#agenda-input');
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); _addFromInput(); }
+      if (e.key === 'Escape') close();
+    });
+  }
+
+  function _addFromInput() {
+    const input = panelEl.querySelector('#agenda-input');
+    const text = (input.value || '').trim();
+    if (!text) return;
+    addGoal(text);
+    input.value = '';
+    input.focus();
+  }
+
+  function _render() {
+    if (!panelEl) return;
+    const body = panelEl.querySelector('#agenda-body');
+    const goals = _goals();
+
+    if (goals.length === 0) {
+      body.innerHTML = '<div class="agenda-empty">No goals yet. Add one below!</div>';
+    } else {
+      body.innerHTML = goals.map((g, i) => `
+        <div class="agenda-item${g.done ? ' done' : ''}" data-index="${i}">
+          <input type="checkbox" ${g.done ? 'checked' : ''} title="Toggle goal">
+          <span class="agenda-item-text">${_escHtml(g.text)}</span>
+          <button class="agenda-item-delete" title="Remove goal">✕</button>
+        </div>
+      `).join('');
+
+      body.querySelectorAll('.agenda-item input[type="checkbox"]').forEach(cb => {
+        cb.addEventListener('change', (e) => {
+          const idx = parseInt(e.target.closest('.agenda-item').dataset.index, 10);
+          toggleGoal(idx);
+        });
+      });
+
+      body.querySelectorAll('.agenda-item-delete').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          const idx = parseInt(e.target.closest('.agenda-item').dataset.index, 10);
+          removeGoal(idx);
+        });
+      });
+    }
+
+    _updateProgress();
+  }
+
+  function _updateProgress() {
+    if (!panelEl) return;
+    const goals = _goals();
+    const fill = panelEl.querySelector('#agenda-fill');
+    const label = panelEl.querySelector('#agenda-progress-label');
+    const total = goals.length;
+    const done = goals.filter(g => g.done).length;
+    const pct = total === 0 ? 0 : Math.round((done / total) * 100);
+    if (fill) fill.style.width = pct + '%';
+    if (label) label.textContent = total === 0 ? '' : `${done}/${total} completed (${pct}%)`;
+  }
+
+  function _escHtml(str) {
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+  }
+
+  // ── API ──
+
+  function addGoal(text) {
+    const goals = _goals();
+    if (goals.length >= MAX_GOALS) return false;
+    const trimmed = (text || '').trim().slice(0, MAX_GOAL_LENGTH);
+    if (!trimmed) return false;
+    goals.push({ id: Date.now() + Math.random(), text: trimmed, done: false, createdAt: new Date().toISOString() });
+    _save();
+    _render();
+    return true;
+  }
+
+  function toggleGoal(index) {
+    const goals = _goals();
+    if (index < 0 || index >= goals.length) return;
+    goals[index].done = !goals[index].done;
+    _save();
+    _render();
+  }
+
+  function removeGoal(index) {
+    const goals = _goals();
+    if (index < 0 || index >= goals.length) return;
+    goals.splice(index, 1);
+    _save();
+    _render();
+  }
+
+  function clearDone() {
+    const sid = _sessionId();
+    agendas[sid] = _goals().filter(g => !g.done);
+    _save();
+    _render();
+  }
+
+  function getProgress() {
+    const goals = _goals();
+    const total = goals.length;
+    const done = goals.filter(g => g.done).length;
+    return { total, done, percent: total === 0 ? 0 : Math.round((done / total) * 100) };
+  }
+
+  function open() {
+    _buildPanel();
+    _render();
+    panelEl.classList.add('agenda-open');
+    if (overlayEl) overlayEl.classList.add('agenda-open');
+    const input = panelEl.querySelector('#agenda-input');
+    if (input) input.focus();
+  }
+
+  function close() {
+    if (panelEl) panelEl.classList.remove('agenda-open');
+    if (overlayEl) overlayEl.classList.remove('agenda-open');
+  }
+
+  function toggle() {
+    if (panelEl && panelEl.classList.contains('agenda-open')) close();
+    else open();
+  }
+
+  function init() {
+    _load();
+
+    const btn = document.getElementById('agenda-btn');
+    if (btn) btn.addEventListener('click', toggle);
+
+    // Alt+G shortcut
+    document.addEventListener('keydown', (e) => {
+      if (e.altKey && e.key.toLowerCase() === 'g') {
+        e.preventDefault();
+        toggle();
+      }
+      if (e.key === 'Escape' && panelEl && panelEl.classList.contains('agenda-open')) {
+        close();
+      }
+    });
+  }
+
+  return {
+    init, open, close, toggle,
+    addGoal, toggleGoal, removeGoal, clearDone, getProgress,
+    // test helpers
+    _load, _goals, _sessionId,
+    STORAGE_KEY, MAX_GOALS, MAX_GOAL_LENGTH
+  };
+})();
+
+document.addEventListener('DOMContentLoaded', ConversationAgenda.init);
 
 /* ── Offline Detection & Service Worker Registration ───────────────── */
 const OfflineManager = (function () {
