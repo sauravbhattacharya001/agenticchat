@@ -1,7 +1,7 @@
 /* ============================================================
  * Agentic Chat — Application Logic
  *
- * Architecture (42 modules, all revealing-module-pattern IIFEs):
+ * Architecture (43 modules, all revealing-module-pattern IIFEs):
  *
  *   Core:
  *   SafeStorage          — safe localStorage wrapper for restricted-storage environments
@@ -2863,6 +2863,8 @@ const SlashCommands = (() => {
           } },
         { name: 'replay', description: 'Replay conversation message-by-message with transport controls', icon: '🎬',
           action: () => ConversationReplay.start() },
+        { name: 'compare', description: 'Compare AI model responses side-by-side', icon: '⚔️',
+          action: () => ModelComparePanel.toggle() },
     ]);
 
     function init() {
@@ -14811,6 +14813,348 @@ const ModelCompare = (() => {
     getModelStats: getModelStats,
     clearHistory: clearHistory,
     exportHistory: exportHistory
+  };
+})();
+
+/* ---------- Model Compare Panel ---------- */
+/**
+ * Interactive UI panel for comparing AI model responses side-by-side.
+ *
+ * Wraps the {@link ModelCompare} logic module with a full panel experience:
+ * - Model picker with checkboxes for selecting 2+ models to compare
+ * - Prompt input area with quick-fill from current chat input
+ * - Side-by-side response cards with latency/token metrics
+ * - Vote buttons to pick the best response per comparison
+ * - Comparison history with re-viewable past comparisons
+ * - Leaderboard showing win rates across all comparisons
+ * - Export comparison history as JSON
+ *
+ * Triggered via `/compare` slash command or the panel itself.
+ *
+ * @namespace ModelComparePanel
+ */
+const ModelComparePanel = (() => {
+  let isOpen = false;
+  let panelEl = null;
+  let _activeTab = 'compare'; // 'compare' | 'history' | 'leaderboard'
+
+  /** Escape HTML entities. */
+  function esc(s) {
+    return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  /** Create and inject the panel element into the DOM. */
+  function _createPanel() {
+    if (panelEl) return panelEl;
+
+    panelEl = document.createElement('div');
+    panelEl.id = 'model-compare-panel';
+    panelEl.className = 'mc-panel mc-panel-hidden';
+    panelEl.setAttribute('role', 'dialog');
+    panelEl.setAttribute('aria-label', 'Model Compare Panel');
+    panelEl.innerHTML = _buildPanelHTML();
+    document.body.appendChild(panelEl);
+    _bindEvents();
+    return panelEl;
+  }
+
+  /** Build the full panel HTML. */
+  function _buildPanelHTML() {
+    const models = (typeof ChatConfig !== 'undefined' && ChatConfig.AVAILABLE_MODELS) ?
+      ChatConfig.AVAILABLE_MODELS : [];
+
+    let modelCheckboxes = '';
+    // Pre-select first 2 models
+    for (let i = 0; i < models.length; i++) {
+      const m = models[i];
+      const checked = i < 2 ? ' checked' : '';
+      modelCheckboxes += '<label class="mcp-model-label">' +
+        '<input type="checkbox" class="mcp-model-cb" value="' + esc(m.id) + '"' + checked + '>' +
+        '<span class="mcp-model-name">' + esc(m.label || m.id) + '</span></label>';
+    }
+
+    return '' +
+      '<div class="mcp-header">' +
+        '<h3>⚔️ Model Compare</h3>' +
+        '<div class="mcp-tabs">' +
+          '<button class="mcp-tab mcp-tab-active" data-tab="compare">Compare</button>' +
+          '<button class="mcp-tab" data-tab="history">History</button>' +
+          '<button class="mcp-tab" data-tab="leaderboard">Leaderboard</button>' +
+        '</div>' +
+        '<button class="mcp-close" aria-label="Close panel">&times;</button>' +
+      '</div>' +
+      '<div class="mcp-body">' +
+        // Compare tab
+        '<div class="mcp-section mcp-section-compare">' +
+          '<div class="mcp-models-grid">' +
+            '<label class="mcp-field-label">Select models (2+):</label>' +
+            '<div class="mcp-models-list">' + modelCheckboxes + '</div>' +
+          '</div>' +
+          '<div class="mcp-prompt-area">' +
+            '<label class="mcp-field-label">Prompt:</label>' +
+            '<textarea class="mcp-prompt-input" rows="3" placeholder="Enter prompt to compare across models..."></textarea>' +
+            '<div class="mcp-prompt-actions">' +
+              '<button class="mcp-btn mcp-btn-fill" title="Fill from chat input">📋 Fill from input</button>' +
+              '<button class="mcp-btn mcp-btn-run" title="Run comparison">⚔️ Compare</button>' +
+            '</div>' +
+          '</div>' +
+          '<div class="mcp-status"></div>' +
+          '<div class="mcp-result"></div>' +
+        '</div>' +
+        // History tab
+        '<div class="mcp-section mcp-section-history" style="display:none">' +
+          '<div class="mcp-history-actions">' +
+            '<button class="mcp-btn mcp-btn-export">📤 Export JSON</button>' +
+            '<button class="mcp-btn mcp-btn-clear-history">🗑️ Clear</button>' +
+          '</div>' +
+          '<div class="mcp-history-list"></div>' +
+        '</div>' +
+        // Leaderboard tab
+        '<div class="mcp-section mcp-section-leaderboard" style="display:none">' +
+          '<div class="mcp-leaderboard-content"></div>' +
+        '</div>' +
+      '</div>';
+  }
+
+  /** Bind all event listeners. */
+  function _bindEvents() {
+    if (!panelEl) return;
+
+    // Close button
+    panelEl.querySelector('.mcp-close').addEventListener('click', close);
+
+    // Tab switching
+    panelEl.querySelectorAll('.mcp-tab').forEach(function (tab) {
+      tab.addEventListener('click', function () {
+        _switchTab(tab.dataset.tab);
+      });
+    });
+
+    // Fill from input
+    panelEl.querySelector('.mcp-btn-fill').addEventListener('click', function () {
+      const chatInput = document.getElementById('user-input');
+      if (chatInput && chatInput.value.trim()) {
+        panelEl.querySelector('.mcp-prompt-input').value = chatInput.value.trim();
+      }
+    });
+
+    // Run comparison
+    panelEl.querySelector('.mcp-btn-run').addEventListener('click', _runComparison);
+
+    // Export history
+    panelEl.querySelector('.mcp-btn-export').addEventListener('click', function () {
+      const json = ModelCompare.exportHistory();
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'model-comparisons-' + new Date().toISOString().slice(0, 10) + '.json';
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+
+    // Clear history
+    panelEl.querySelector('.mcp-btn-clear-history').addEventListener('click', function () {
+      if (confirm('Clear all comparison history?')) {
+        ModelCompare.clearHistory();
+        _renderHistory();
+      }
+    });
+
+    // Delegate vote button clicks within results
+    panelEl.addEventListener('click', function (e) {
+      const btn = e.target.closest('.mc-vote-btn');
+      if (!btn) return;
+      const modelId = btn.dataset.mcModel;
+      const compId = btn.dataset.mcId;
+      if (modelId && compId) {
+        ModelCompare.setWinner(compId, modelId);
+        // Re-render the comparison
+        const comp = ModelCompare.getComparison(compId);
+        if (comp) {
+          const container = btn.closest('.mc-comparison');
+          if (container) {
+            container.outerHTML = ModelCompare.buildComparisonView(comp);
+          }
+        }
+      }
+    });
+  }
+
+  /** Switch active tab. */
+  function _switchTab(tabName) {
+    _activeTab = tabName;
+    panelEl.querySelectorAll('.mcp-tab').forEach(function (t) {
+      t.classList.toggle('mcp-tab-active', t.dataset.tab === tabName);
+    });
+    panelEl.querySelectorAll('.mcp-section').forEach(function (s) {
+      s.style.display = 'none';
+    });
+    const section = panelEl.querySelector('.mcp-section-' + tabName);
+    if (section) section.style.display = '';
+
+    if (tabName === 'history') _renderHistory();
+    if (tabName === 'leaderboard') _renderLeaderboard();
+  }
+
+  /** Run a model comparison. */
+  async function _runComparison() {
+    const prompt = panelEl.querySelector('.mcp-prompt-input').value.trim();
+    if (!prompt) {
+      _setStatus('Enter a prompt to compare.', 'warn');
+      return;
+    }
+
+    const checked = panelEl.querySelectorAll('.mcp-model-cb:checked');
+    const modelIds = [];
+    checked.forEach(function (cb) { modelIds.push(cb.value); });
+
+    if (modelIds.length < 2) {
+      _setStatus('Select at least 2 models.', 'warn');
+      return;
+    }
+
+    _setStatus('⏳ Running comparison across ' + modelIds.length + ' models...', 'info');
+    panelEl.querySelector('.mcp-btn-run').disabled = true;
+    panelEl.querySelector('.mcp-result').innerHTML = '';
+
+    try {
+      const result = await ModelCompare.compare(prompt, modelIds);
+      panelEl.querySelector('.mcp-result').innerHTML =
+        ModelCompare.buildComparisonView(result);
+      _setStatus('✅ Comparison complete (' + result.totalMs + 'ms total)', 'success');
+    } catch (err) {
+      _setStatus('❌ ' + (err.message || 'Comparison failed'), 'error');
+    } finally {
+      panelEl.querySelector('.mcp-btn-run').disabled = false;
+    }
+  }
+
+  /** Set status message. */
+  function _setStatus(msg, type) {
+    const el = panelEl.querySelector('.mcp-status');
+    if (!el) return;
+    el.textContent = msg;
+    el.className = 'mcp-status mcp-status-' + (type || 'info');
+  }
+
+  /** Render comparison history list. */
+  function _renderHistory() {
+    const list = panelEl.querySelector('.mcp-history-list');
+    if (!list) return;
+
+    const history = ModelCompare.getHistory(50);
+    if (history.length === 0) {
+      list.innerHTML = '<div class="mcp-empty">No comparisons yet. Run your first one!</div>';
+      return;
+    }
+
+    let html = '';
+    for (let i = 0; i < history.length; i++) {
+      const c = history[i];
+      const date = new Date(c.createdAt).toLocaleString();
+      const models = c.responses.map(function (r) { return r.modelLabel; }).join(' vs ');
+      const winner = c.winner ?
+        (c.responses.find(function (r) { return r.modelId === c.winner; }) || {}).modelLabel || c.winner :
+        'No winner';
+
+      html += '<div class="mcp-history-item" data-cmp-id="' + esc(c.id) + '">' +
+        '<div class="mcp-history-prompt">' + esc(c.prompt.slice(0, 120)) +
+          (c.prompt.length > 120 ? '...' : '') + '</div>' +
+        '<div class="mcp-history-meta">' +
+          '<span>' + esc(models) + '</span>' +
+          '<span>Winner: ' + esc(winner) + '</span>' +
+          '<span>' + c.totalMs + 'ms</span>' +
+          '<span>' + date + '</span>' +
+        '</div>' +
+      '</div>';
+    }
+    list.innerHTML = html;
+
+    // Click to expand
+    list.querySelectorAll('.mcp-history-item').forEach(function (item) {
+      item.addEventListener('click', function () {
+        const comp = ModelCompare.getComparison(item.dataset.cmpId);
+        if (!comp) return;
+        // Show expanded view
+        const existing = item.querySelector('.mcp-history-expanded');
+        if (existing) {
+          existing.remove();
+          return;
+        }
+        const div = document.createElement('div');
+        div.className = 'mcp-history-expanded';
+        div.innerHTML = ModelCompare.buildComparisonView(comp);
+        item.appendChild(div);
+      });
+    });
+  }
+
+  /** Render leaderboard. */
+  function _renderLeaderboard() {
+    const el = panelEl.querySelector('.mcp-leaderboard-content');
+    if (!el) return;
+
+    const stats = ModelCompare.getModelStats();
+    const entries = Object.entries(stats);
+
+    if (entries.length === 0) {
+      el.innerHTML = '<div class="mcp-empty">No data yet. Compare some models first!</div>';
+      return;
+    }
+
+    // Sort by win rate descending, then by appearances
+    entries.sort(function (a, b) {
+      if (b[1].winRate !== a[1].winRate) return b[1].winRate - a[1].winRate;
+      return b[1].appearances - a[1].appearances;
+    });
+
+    let html = '<table class="mcp-leaderboard-table">' +
+      '<thead><tr>' +
+        '<th>#</th><th>Model</th><th>Wins</th><th>Matches</th>' +
+        '<th>Win Rate</th><th>Avg Latency</th>' +
+      '</tr></thead><tbody>';
+
+    for (let i = 0; i < entries.length; i++) {
+      const [id, s] = entries[i];
+      const medal = i === 0 ? '🥇 ' : i === 1 ? '🥈 ' : i === 2 ? '🥉 ' : '';
+      html += '<tr>' +
+        '<td>' + medal + (i + 1) + '</td>' +
+        '<td>' + esc(s.label) + '</td>' +
+        '<td>' + s.wins + '</td>' +
+        '<td>' + s.appearances + '</td>' +
+        '<td>' + (s.winRate * 100).toFixed(1) + '%</td>' +
+        '<td>' + s.avgLatencyMs + 'ms</td>' +
+      '</tr>';
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+  }
+
+  /** Open the panel. */
+  function open() {
+    _createPanel();
+    panelEl.classList.remove('mc-panel-hidden');
+    isOpen = true;
+    _switchTab('compare');
+  }
+
+  /** Close the panel. */
+  function close() {
+    if (panelEl) panelEl.classList.add('mc-panel-hidden');
+    isOpen = false;
+  }
+
+  /** Toggle the panel. */
+  function toggle() {
+    isOpen ? close() : open();
+  }
+
+  return {
+    open: open,
+    close: close,
+    toggle: toggle
   };
 })();
 
