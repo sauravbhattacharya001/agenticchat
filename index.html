@@ -4,8 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="description" content="A lightweight browser-based chat interface that turns natural language prompts into executable JavaScript, powered by OpenAI GPT-4o.">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src https://api.openai.com; frame-src 'self'; img-src 'self' data:; object-src 'none'; worker-src 'none'; form-action 'self'; base-uri 'self'; frame-ancestors 'none';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src https://api.openai.com; frame-src 'self'; img-src 'self' data:; object-src 'none'; worker-src 'self'; form-action 'self'; base-uri 'self'; frame-ancestors 'none';">
   <title>Agentic Chat</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#2196F3">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -17,6 +19,12 @@
       <button id="cross-tab-keep" class="btn-sm" title="Keep this tab's version">Keep mine</button>
       <button id="cross-tab-dismiss" class="btn-sm" title="Dismiss this warning">✕</button>
     </div>
+  </div>
+
+  <!-- Offline notification banner -->
+  <div id="offline-banner" class="offline-banner" style="display:none" role="alert" aria-live="assertive">
+    <span>📡 You are offline — browsing cached data. Sending messages requires connectivity.</span>
+    <button id="offline-dismiss" class="btn-sm" title="Dismiss">✕</button>
   </div>
 
   <h2>Agentic Chat</h2>

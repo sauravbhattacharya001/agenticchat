@@ -10,6 +10,10 @@ const path = require('path');
 
 function setupDOM() {
   document.body.innerHTML = `
+    <div id="offline-banner" class="offline-banner" style="display:none" role="alert" aria-live="assertive">
+      <span>📡 You are offline — browsing cached data. Sending messages requires connectivity.</span>
+      <button id="offline-dismiss" class="btn-sm" title="Dismiss">✕</button>
+    </div>
     <h2>Agentic Chat</h2>
     <div class="toolbar" role="form" aria-label="API key entry"></div>
     <div class="toolbar" role="form" aria-label="Chat input">
@@ -313,7 +317,8 @@ function loadApp() {
     'MessageScheduler',
     'SmartRetry',
     'UsageHeatmap',
-    'ContextWindowMeter'
+    'ContextWindowMeter',
+    'OfflineManager'
   ];
 
   for (const mod of modules) {

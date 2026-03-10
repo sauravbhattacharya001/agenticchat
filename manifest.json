@@ -1,0 +1,16 @@
+{
+  "name": "Agentic Chat",
+  "short_name": "AgenticChat",
+  "description": "A lightweight browser-based chat interface powered by OpenAI GPT-4o",
+  "start_url": "/index.html",
+  "display": "standalone",
+  "background_color": "#1e1e1e",
+  "theme_color": "#2196F3",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='80' font-size='80'>💬</text></svg>",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
