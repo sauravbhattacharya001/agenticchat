@@ -3370,11 +3370,11 @@ const KeyboardShortcuts = (() => {
       return;
     }
 
-    // Ctrl+S — toggle snippets panel
+    // Ctrl+S — toggle snippets panel; Ctrl+Shift+S — global session search
     if (ctrl && e.key === 's') {
       e.preventDefault();
       if (e.shiftKey) {
-        SessionManager.toggle();
+        GlobalSessionSearch.toggle();
       } else {
         SnippetLibrary.toggle();
       }
@@ -11421,13 +11421,7 @@ const GlobalSessionSearch = (() => {
       });
     });
 
-    // Keyboard shortcut: Ctrl+Shift+S
-    document.addEventListener('keydown', (e) => {
-      if (e.ctrlKey && e.shiftKey && e.key === 'S') {
-        e.preventDefault();
-        toggle();
-      }
-    });
+    // Keyboard shortcut: Ctrl+Shift+S — handled by central KeyboardShortcuts dispatcher
   }
 
   document.addEventListener('DOMContentLoaded', init);
@@ -15451,9 +15445,9 @@ const MessageScheduler = (() => {
       });
     }
 
-    // Register keyboard shortcut (Ctrl+Shift+S)
+    // Register keyboard shortcut (Ctrl+Shift+P for scheduler Panel)
     document.addEventListener('keydown', (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'S') {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'P' || e.key === 'p')) {
         e.preventDefault();
         togglePanel();
       }
