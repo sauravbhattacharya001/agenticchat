@@ -313,7 +313,8 @@ function loadApp() {
     'MessageScheduler',
     'SmartRetry',
     'UsageHeatmap',
-    'ContextWindowMeter'
+    'ContextWindowMeter',
+    'AutoTitle'
   ];
 
   for (const mod of modules) {

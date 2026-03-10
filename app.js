@@ -52,6 +52,7 @@
  *   ConversationReplay   — message-by-message playback with transport controls
  *   PromptLibrary        — user-created prompt snippets with folders, search, usage tracking, import/export
  *   MessageTranslator    — inline message translation to 20+ languages via OpenAI API
+ *   AutoTitle            — automatic AI-generated session titles after first exchange
  *   MessageEditor        — edit & resend user messages (truncate + reload into input)
  *   SmartRetry           — automatic retry with exponential backoff for transient API failures
  *   UsageHeatmap         — GitHub-style 7×24 activity heatmap across all sessions
@@ -1132,6 +1133,11 @@ const ChatController = (() => {
 
       // Auto-save session if enabled
       SessionManager.autoSaveIfEnabled();
+
+      // Auto-generate session title after first exchange (only when auto-save is active)
+      if (SessionManager.isAutoSaveEnabled()) {
+        try { AutoTitle.onMessageComplete(); } catch (_) {}
+      }
     } catch (err) {
       if (err.name === 'AbortError') {
         UIController.setChatOutput('(request cancelled)');
@@ -16193,3 +16199,133 @@ const ContextWindowMeter = (() => {
 })();
 
 document.addEventListener('DOMContentLoaded', ContextWindowMeter.init);
+
+/* ============================================================
+ * AutoTitle — AI-generated session titles after first exchange
+ *
+ * After the first assistant response in a session, sends a lightweight
+ * API call (gpt-4o-mini, 20 max tokens) to generate a concise,
+ * descriptive title and updates the session name automatically.
+ * Enabled by default; toggle via AutoTitle.setEnabled(bool).
+ * ============================================================ */
+
+/**
+ * @namespace AutoTitle
+ */
+const AutoTitle = (() => {
+  const ENABLED_KEY = 'agenticchat_autotitle';
+  const TITLED_KEY = 'agenticchat_autotitled_sessions';
+  const TITLE_MODEL = 'gpt-4o-mini';
+
+  function isEnabled() {
+    const val = SafeStorage.get(ENABLED_KEY);
+    return val === null || val === 'true';
+  }
+
+  function setEnabled(enabled) {
+    SafeStorage.set(ENABLED_KEY, String(enabled));
+  }
+
+  function _getTitledSet() {
+    try {
+      const raw = SafeStorage.get(TITLED_KEY);
+      return raw ? new Set(JSON.parse(raw)) : new Set();
+    } catch { return new Set(); }
+  }
+
+  function _markTitled(sessionId) {
+    const set = _getTitledSet();
+    set.add(sessionId);
+    const arr = [...set];
+    if (arr.length > 200) arr.splice(0, arr.length - 200);
+    SafeStorage.set(TITLED_KEY, JSON.stringify(arr));
+  }
+
+  function _alreadyTitled(sessionId) {
+    return _getTitledSet().has(sessionId);
+  }
+
+  async function generateTitle(userMessage, assistantReply, sessionId) {
+    if (!isEnabled()) return;
+    if (!sessionId) return;
+    if (_alreadyTitled(sessionId)) return;
+
+    const apiKey = ApiKeyManager.getOpenAIKey();
+    if (!apiKey) return;
+
+    _markTitled(sessionId);
+
+    try {
+      const truncatedUser = userMessage.substring(0, 500);
+      const truncatedReply = assistantReply.substring(0, 500);
+
+      const rsp = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: TITLE_MODEL,
+          messages: [
+            {
+              role: 'system',
+              content: 'Generate a concise title (3-7 words, no quotes, no period) for this conversation. Reply with ONLY the title text.'
+            },
+            {
+              role: 'user',
+              content: `User: ${truncatedUser}\n\nAssistant: ${truncatedReply}`
+            }
+          ],
+          max_tokens: 20,
+          temperature: 0.5
+        })
+      });
+
+      if (!rsp.ok) return;
+
+      const data = await rsp.json();
+      const title = data.choices?.[0]?.message?.content?.trim();
+      if (!title || title.length < 2 || title.length > 100) return;
+
+      const cleaned = title.replace(/^["'"\u201C\u201D\u2018\u2019]+|["'"\u201C\u201D\u2018\u2019]+$/g, '').replace(/\.+$/, '');
+      if (!cleaned || cleaned.length < 2) return;
+
+      _applyTitle(sessionId, cleaned);
+    } catch {
+      // Non-critical — silently fail
+    }
+  }
+
+  function _applyTitle(sessionId, title) {
+    try {
+      const raw = SafeStorage.get('agenticchat_sessions');
+      if (!raw) return;
+      const sessions = JSON.parse(raw);
+      const session = sessions.find(s => s.id === sessionId);
+      if (!session) return;
+
+      session.name = title;
+      SafeStorage.set('agenticchat_sessions', JSON.stringify(sessions));
+
+      try { SessionManager.refresh(); } catch {}
+      try { SessionManager.invalidateCache(); } catch {}
+    } catch {}
+  }
+
+  function onMessageComplete() {
+    if (!isEnabled()) return;
+
+    const messages = ConversationManager.getMessages().filter(m => m.role !== 'system');
+    const userMsgs = messages.filter(m => m.role === 'user');
+    const assistantMsgs = messages.filter(m => m.role === 'assistant');
+    if (userMsgs.length !== 1 || assistantMsgs.length !== 1) return;
+
+    const activeId = SafeStorage.get('agenticchat_active_session');
+    if (!activeId) return;
+
+    generateTitle(userMsgs[0].content, assistantMsgs[0].content, activeId);
+  }
+
+  return { isEnabled, setEnabled, generateTitle, onMessageComplete, _applyTitle, _markTitled, _alreadyTitled, _getTitledSet };
+})();
