@@ -1,12 +1,13 @@
 {
-  "lastRun": "2026-03-06T14:15:00-08:00",
-  "runsCompleted": 30,
-  "lastRepo": "getagentbox",
-  "lastFeature": "Onboarding Quiz \u2014 interactive plan recommendation quiz with weighted scoring, 5 questions, keyboard nav, ARIA accessibility",
+  "lastRun": "2026-03-09T22:45:00-08:00",
+  "runsCompleted": 32,
+  "lastRepo": "GraphVisual",
+  "lastFeature": "CircularLayout \u2014 circular graph layout with 5 ordering strategies, dual-ring hub mode, SVG export",
   "repoFeatures": {
     "Ocaml-sample-code": [
       "Zipper \u2014 functional cursor (list/tree/filesystem)",
-      "QuickCheck - property-based testing framework (generators, shrinking, monadic combinators)"
+      "QuickCheck - property-based testing framework (generators, shrinking, monadic combinators)",
+      "Delimited Continuations -- shift/reset, amb, coroutines, generators, exceptions, state, backtracking, ContT. 10 modules, 872 lines. (PR #36)"
     ],
     "agenticchat": [
       "CSV export for conversations with timestamps and response times",
@@ -27,14 +28,17 @@
       "sauravtest \u2014 built-in test runner for .srv files (discovery, colored output, filtering, fail-fast)"
     ],
     "BioBots": [
-      "Interactive Cost Estimator \u2014 material, machine, energy, consumable, labor breakdown with donut chart and batch scaling"
+      "Interactive Cost Estimator \u2014 material, machine, energy, consumable, labor breakdown with donut chart and batch scaling",
+      "Bioink Mixing Calculator \u2014 blend bioinks with composite properties, compatibility scoring, printability assessment, 5 tissue presets"
     ],
     "GraphVisual": [
-      "Ego Network search panel \u2014 search by node ID, highlights 1-hop neighborhood, shows degree/type breakdown/neighbor list"
+      "Ego Network search panel \u2014 search by node ID, highlights 1-hop neighborhood, shows degree/type breakdown/neighbor list",
+      "CircularLayout \u2014 circular graph layout with 5 ordering strategies (alphabetical/degree/community/BFS/minimize-crossings), dual-ring hub mode, SVG export, 15 tests"
     ],
     "agentlens": [
       "Session bookmarks \u2014 star/unstar sessions, filter by bookmarks, bookmark notes, cascade delete",
-      "Agent Baselines \u2014 track and check session performance against rolling averages (regression detection)"
+      "Agent Baselines \u2014 track and check session performance against rolling averages (regression detection)",
+      "Error Fingerprinting -- automatic error grouping by normalised message+stack signature. Trend analysis, resolution tracking, regression detection, session correlation. 54 tests. (PR #69)"
     ],
     "everything": [
       "Achievement System \u2014 40 badges, 12 categories, 5 tiers, level system, progress tracking",
@@ -46,7 +50,8 @@
     ],
     "Vidly": [
       "Parental Controls \u2014 MPAA ratings, content advisories, per-customer profiles, PIN override, family filtering",
-      "Printable rental receipt \u2014 itemized costs, timeline, status badge, print CSS, pseudo-barcode"
+      "Printable rental receipt \u2014 itemized costs, timeline, status badge, print CSS, pseudo-barcode",
+      "Copy Condition Tracker -- physical condition assessment (disc/case grades), deterioration rates, replacement flags, renter risk profiles. 40 MSTest tests. (PR #65)"
     ],
     "FeedReader": [
       "Reading Mood Tracker \u2014 mood logging, feed impact analysis, mood-based suggestions, patterns, export",
@@ -60,5 +65,6 @@
       "Interactive Commands Cheat Sheet \u2014 searchable, filterable, copy-to-clipboard command reference",
       "Onboarding Quiz"
     ]
-  }
+  },
+  "totalRuns": 224
 }
