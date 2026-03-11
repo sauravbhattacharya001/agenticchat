@@ -1,70 +1,114 @@
 {
-  "lastRun": "2026-03-09T22:45:00-08:00",
-  "runsCompleted": 32,
-  "lastRepo": "GraphVisual",
-  "lastFeature": "CircularLayout \u2014 circular graph layout with 5 ordering strategies, dual-ring hub mode, SVG export",
+  "lastRun": "2026-03-10T22:45:00-07:00",
+  "runsCompleted": 62,
+  "lastRepo": "agenticchat",
+  "lastFeature": "ClipboardHistory",
   "repoFeatures": {
     "Ocaml-sample-code": [
-      "Zipper \u2014 functional cursor (list/tree/filesystem)",
+      "Zipper  -- functional cursor (list/tree/filesystem)",
       "QuickCheck - property-based testing framework (generators, shrinking, monadic combinators)",
-      "Delimited Continuations -- shift/reset, amb, coroutines, generators, exceptions, state, backtracking, ContT. 10 modules, 872 lines. (PR #36)"
+      "Delimited Continuations -- shift/reset, amb, coroutines, generators, exceptions, state, backtracking, ContT. 10 modules, 872 lines. (PR #36)",
+      "Memoization Combinators -- 7 strategies (basic, recursive, LRU, TTL, multi-arg, stats, clearable). 28 tests."
     ],
     "agenticchat": [
       "CSV export for conversations with timestamps and response times",
-      "Global Session Search \u2014 full-text search across all saved sessions",
-      "Cost Dashboard \u2014 persistent API spend tracker with budget alerts, daily chart, model breakdown"
+      "Global Session Search  -- full-text search across all saved sessions",
+      "Cost Dashboard  -- persistent API spend tracker with budget alerts, daily chart, model breakdown",
+      "Conversation Agenda  -- per-session goal checklist with progress tracking (Alt+G). 25 tests.",
+      "ModelComparePanel -- interactive UI for model comparison. Model picker, prompt input, side-by-side cards, vote buttons, history, leaderboard, /compare slash command. 32 tests. (PR #66)",
+      "ClipboardHistory -- track and browse copied text from chat. Auto-captures copy events, searchable panel (Ctrl+Shift+V), code vs text detection, dedup, persistent localStorage (50 max). 33 tests. (PR #71)"
     ],
     "ai": [
-      "Watermark \u2014 agent state provenance fingerprinting (4 strategies)",
-      "Unified CLI entry point (python -m replication) \u2014 36 subcommands under one dispatcher"
+      "Watermark  -- agent state provenance fingerprinting (4 strategies)",
+      "Unified CLI entry point (python -m replication)  -- 36 subcommands under one dispatcher",
+      "Anomaly Replay  -- record & replay agent behavior traces against safety controls (6 controls, trace library, coverage gaps, CLI). 38 tests.",
+      "Safety Drill Runner -- automated emergency readiness drills (6 scenarios: kill switch, containment breach, runaway replication, quarantine, resource exhaustion, cascading failure). Readiness scoring, JSON reports, CLI. 32 tests.",
+      "SwarmAnalyzer -- emergent coordination detection for agent populations. 6 signals (sync replication, wave patterns, role specialization, depth clustering, burst coordination, task avoidance), Gini/entropy/sync metrics, role assignment, risk assessment, CLI. 43 tests. (PR #53)"
     ],
     "VoronoiMap": [
       "Self-contained HTML analysis report with stats, heatmap, histograms, and region table (--report flag)",
-      "Synthetic point pattern generator (vormap_generate) \u2014 6 patterns, CLI, export, NNI stats"
+      "Synthetic point pattern generator (vormap_generate)  -- 6 patterns, CLI, export, NNI stats",
+      "Voronoi Contour (vormap_contour)  -- marching squares isoline extraction, IDW grid interpolation, saddle disambiguation, 4 colormaps, SVG+GeoJSON export, CLI. 31 tests. (PR #79)",
+      "vormap_diffusion -- spatial diffusion simulation (heat/SIR/threshold) on Voronoi networks. 3 models, animated SVG/JSON/CSV export, CLI. 34 tests. (PR #80)"
     ],
     "sauravcode": [
-      "AST visualizer tool (sauravast.py) \u2014 pretty tree, JSON, Graphviz DOT, and statistics modes",
-      "VS Code extension \u2014 TextMate grammar, 25 snippets, language config",
-      "sauravtest \u2014 built-in test runner for .srv files (discovery, colored output, filtering, fail-fast)"
+      "AST visualizer tool (sauravast.py)  -- pretty tree, JSON, Graphviz DOT, and statistics modes",
+      "VS Code extension  -- TextMate grammar, 25 snippets, language config",
+      "sauravtest  -- built-in test runner for .srv files (discovery, colored output, filtering, fail-fast)",
+      "sauravtranspile -- .srv to Python transpiler. All 36 AST nodes, 83 builtins mapped, runtime preamble, --verify mode. 61 tests. (PR #52)"
     ],
     "BioBots": [
-      "Interactive Cost Estimator \u2014 material, machine, energy, consumable, labor breakdown with donut chart and batch scaling",
-      "Bioink Mixing Calculator \u2014 blend bioinks with composite properties, compatibility scoring, printability assessment, 5 tissue presets"
+      "Interactive Cost Estimator  -- material, machine, energy, consumable, labor breakdown with donut chart and batch scaling",
+      "Bioink Mixing Calculator  -- blend bioinks with composite properties, compatibility scoring, printability assessment, 5 tissue presets",
+      "Scaffold Geometry Calculator -- porosity (grid/honeycomb/gyroid), Gibson-Ashby mechanics, tissue compatibility (6 tissues), parameter sweeps. 26 tests.",
+      "Cell Seeding Calculator -- interactive 4-tab page: scaffold seeding (5 geometries), well plate planning (6-384), serial dilution, passage expansion. (PR #51)",
+      "GLP Compliance Checker -- regulatory verification (GLP 21 CFR 58, ISO 10993, 21 CFR Part 11). 15 rules, 3 intended-use tiers, batch check, CSV/JSON export. 44 tests. (PR #52)"
     ],
     "GraphVisual": [
-      "Ego Network search panel \u2014 search by node ID, highlights 1-hop neighborhood, shows degree/type breakdown/neighbor list",
-      "CircularLayout \u2014 circular graph layout with 5 ordering strategies (alphabetical/degree/community/BFS/minimize-crossings), dual-ring hub mode, SVG export, 15 tests"
+      "Ego Network search panel  -- search by node ID, highlights 1-hop neighborhood, shows degree/type breakdown/neighbor list",
+      "CircularLayout  -- circular graph layout with 5 ordering strategies (alphabetical/degree/community/BFS/minimize-crossings), dual-ring hub mode, SVG export, 15 tests",
+      "Graph Benchmark Suite  -- Zachary Karate Club, Petersen, Florentine Families, Cube Q3, Dodecahedron, Tutte, Friendship F(n). BenchmarkGraph wrapper, getByName(), 29 tests. (PR #66)",
+      "GraphProductCalculator -- Cartesian, tensor, strong, lexicographic graph products. Caching, ProductInfo metadata, degree sequences, comparative report. 30 tests.",
+      "GraphAnnotationManager -- research annotation overlay (notes, tags, colors, priority, author, search, auto-tagging, JSON export/import). 34 tests."
     ],
     "agentlens": [
-      "Session bookmarks \u2014 star/unstar sessions, filter by bookmarks, bookmark notes, cascade delete",
-      "Agent Baselines \u2014 track and check session performance against rolling averages (regression detection)",
-      "Error Fingerprinting -- automatic error grouping by normalised message+stack signature. Trend analysis, resolution tracking, regression detection, session correlation. 54 tests. (PR #69)"
+      "Session bookmarks  -- star/unstar sessions, filter by bookmarks, bookmark notes, cascade delete",
+      "Agent Baselines  -- track and check session performance against rolling averages (regression detection)",
+      "Error Fingerprinting -- automatic error grouping by normalised message+stack signature. Trend analysis, resolution tracking, regression detection, session correlation. 54 tests. (PR #69)",
+      "Session Diff -- structured comparison of two sessions (LCS event alignment, token/cost/timing deltas, tool & model divergence, similarity score, text/JSON reports). 33 tests.",
+      "Leaderboard Panel -- dashboard UI for agent rankings. Sortable by efficiency/speed/reliability/cost/volume. Medal badges, perf bars, per-session breakdowns. Uses existing /leaderboard API. (PR #74)"
     ],
     "everything": [
-      "Achievement System \u2014 40 badges, 12 categories, 5 tiers, level system, progress tracking",
-      "Meditation Tracker \u2014 session logging, mood analysis, streaks, technique insights"
+      "Achievement System  -- 40 badges, 12 categories, 5 tiers, level system, progress tracking",
+      "Meditation Tracker  -- session logging, mood analysis, streaks, technique insights",
+      "Net Worth Tracker screen  -- 4-tab UI (Accounts/Add/Report/Milestones) with balance history, financial reports, debt analysis, milestone tracking",
+      "Debt Payoff Planner -- snowball vs avalanche strategies, payoff timeline, extra payment slider, 7 debt categories. 30 tests.",
+      "Warranty Tracker -- product warranty management, expiry alerts, claim workflow, coverage scoring. 4-tab UI, 35 tests.",
+      "Vehicle Maintenance Tracker -- service history, alerts, cost analysis. Model (6 types), records (12 categories with intervals), overdue/due-soon alerts, cost breakdowns, export/import. 42 tests. (PR #58)"
     ],
     "gif-captcha": [
-      "Event Emitter \u2014 lightweight pub/sub for CAPTCHA lifecycle hooks (on/once/off/emit/pipe/wildcard)",
-      "i18n/localization module (createI18n) \u2014 12 built-in locales, interpolation, runtime switching"
+      "Event Emitter  -- lightweight pub/sub for CAPTCHA lifecycle hooks (on/once/off/emit/pipe/wildcard)",
+      "i18n/localization module (createI18n)  -- 12 built-in locales, interpolation, runtime switching",
+      "CAPTCHA Statistics Collector - time-windowed solve metrics, percentiles, per-type breakdown, CSV/JSON export. 23 tests.",
+      "Webhook Dispatcher -- HTTP event notifications with HMAC signing, retries, rate limiting, delivery logging. 39 tests.",
+      "Challenge Pool Manager -- pre-generated challenge pool for instant CAPTCHA serving. Difficulty tiers, warmUp/replenish, TTL expiry, priority lanes, health monitoring, export/import. 37 tests."
     ],
     "Vidly": [
-      "Parental Controls \u2014 MPAA ratings, content advisories, per-customer profiles, PIN override, family filtering",
-      "Printable rental receipt \u2014 itemized costs, timeline, status badge, print CSS, pseudo-barcode",
-      "Copy Condition Tracker -- physical condition assessment (disc/case grades), deterioration rates, replacement flags, renter risk profiles. 40 MSTest tests. (PR #65)"
+      "Parental Controls  -- MPAA ratings, content advisories, per-customer profiles, PIN override, family filtering",
+      "Printable rental receipt  -- itemized costs, timeline, status badge, print CSS, pseudo-barcode",
+      "Copy Condition Tracker -- physical condition assessment (disc/case grades), deterioration rates, replacement flags, renter risk profiles. 40 MSTest tests. (PR #65)",
+      "Movie Awards Tracker -- nomination/win tracking across 9 award bodies and 15 categories, leaderboard, filtering, toggle win status. 30 MSTest tests. (PR #79)",
+      "Movie Series Tracker -- franchise/series management, per-customer progress tracking, next-up recommendations, search, stats. 35 MSTest tests."
     ],
     "FeedReader": [
-      "Reading Mood Tracker \u2014 mood logging, feed impact analysis, mood-based suggestions, patterns, export",
-      "Reading Speed Tracker \u2014 personalized WPM, length-adjusted estimates, trend analysis, feed/category breakdowns, population percentile"
+      "Reading Mood Tracker  -- mood logging, feed impact analysis, mood-based suggestions, patterns, export",
+      "Reading Speed Tracker  -- personalized WPM, length-adjusted estimates, trend analysis, feed/category breakdowns, population percentile",
+      "Reading Rituals  -- named, recurring reading sessions with schedules, feed filters, goals, streaks, and analytics. 32 tests.",
+      "ArticleRelationshipMapper -- user-curated knowledge graph between articles. 10 relationship types, directional edges, strength levels, BFS cluster detection, JSON export/import. 40 XCTest cases. (PR #63)",
+      "ArticleFreshnessTracker -- temporal reference detection, freshness classification, decay scoring, staleness alerts, batch analysis. 47 tests. (PR #65)"
     ],
     "prompt": [
-      "PromptConditional \u2014 if/else/switch/case conditional logic for prompt templates (7 operators, nesting, validation, 33 tests)",
-      "PromptFallbackChain \u2014 multi-model fallback execution with quality gates, per-tier timeouts, telemetry"
+      "PromptConditional  -- if/else/switch/case conditional logic for prompt templates (7 operators, nesting, validation, 33 tests)",
+      "PromptFallbackChain  -- multi-model fallback execution with quality gates, per-tier timeouts, telemetry",
+      "PromptMemoryIndex  -- in-memory RAG retrieval for conversation messages (BM25 + recency + importance). 31 tests. (PR #65)",
+      "PromptStyleTransfer -- heuristic tone/style rewriting (7 styles, detection, round-trip). 29 tests.",
+      "PromptAnnotation -- structured inline comments and metadata ({{# ... #}} delimiters). 4 annotation types, 10 methods, 10 directives. 61 tests. (PR #67)",
+      "PromptSlotFiller -- intelligent multi-strategy template slot detection and filling. Provider pipeline (dict/env/func), validators, transforms, strict mode, diagnostics, JSON export. 45 tests. (PR #69)",
+      "PromptSlotFiller -- structured slot extraction and multi-turn filling. 8 types, validation, extraction, defaults, aliases, auto-discovery. 59 tests. (PR #70)"
     ],
     "getagentbox": [
-      "Interactive Commands Cheat Sheet \u2014 searchable, filterable, copy-to-clipboard command reference",
-      "Onboarding Quiz"
+      "Interactive Commands Cheat Sheet  -- searchable, filterable, copy-to-clipboard command reference",
+      "Onboarding Quiz",
+      "Capability Roulette -- interactive spinning wheel for discovering 12 agent capabilities (canvas animation, reduced motion, dark mode, 7 tests). (PR #61)",
+      "Memory Timeline -- animated interactive timeline showing how AgentBox builds context/memory over time. 3 scenarios, play/reset, brain panel with fact tags. (PR #62)",
+      "Agent Skill Tree -- interactive RPG-style capability explorer. 20 skills across 5 branches (Communication, Research, Automation, Creative, Memory). Canvas connections, detail panel, keyboard nav, responsive, dark/light mode. 28 tests. (PR #67)"
+    ],
+    "WinSentinel": [
+      "SLA Tracker - remediation SLA compliance for security findings. Configurable policies (Enterprise/Strict/Relaxed/Custom), per-severity deadlines, status assessment, compliance reporting with MTTR, JSON export/import, text reports. 47 xUnit tests. (PR #72)",
+      "Finding Tag Manager - custom tagging, annotations, bulk auto-tag by severity, search, JSON export/import with merge. 37 xUnit tests. (PR #73)",
+      "Finding Notes Service - investigation notes, workflow status (6 states), assignee/priority/due date tracking, overdue detection, JSON persistence, export/import. 22 xUnit tests. (PR #76)",
+      "Maintenance Window Manager - scheduled finding suppression for planned maintenance. Create/cancel/extend windows, category/severity/title filters, recurring windows, apply to findings, purge expired, text reports, JSON export/import. 39 xUnit tests."
     ]
   },
-  "totalRuns": 224
+  "totalRuns": 275
 }

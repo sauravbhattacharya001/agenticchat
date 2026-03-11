@@ -1,187 +1,187 @@
 {
-  "lastUpdated": "2026-03-10T06:00:00.000Z",
-  "totalRuns": 894,
+  "lastUpdated": "2026-03-11T05:00:00.000Z",
+  "totalRuns": 952,
   "taskTypes": {
     "setup_copilot_agent": {
-      "weight": 20,
+      "weight": 8,
       "runs": 16,
       "successes": 16,
       "description": "Set up GitHub Copilot coding agent"
     },
     "bug_fix": {
-      "weight": 20,
-      "runs": 81,
-      "successes": 82
+      "weight": 8,
+      "runs": 86,
+      "successes": 87
     },
     "security_fix": {
-      "weight": 20,
+      "weight": 8,
       "runs": 70,
       "successes": 70,
       "description": "Fix security vulnerability",
       "totalDone": 1
     },
     "perf_improvement": {
-      "weight": 20,
-      "runs": 68,
-      "successes": 68,
+      "weight": 8,
+      "runs": 69,
+      "successes": 69,
       "totalDone": 1,
       "attempts": 2
     },
     "refactor": {
-      "weight": 20,
-      "runs": 51,
-      "successes": 54,
+      "weight": 8,
+      "runs": 52,
+      "successes": 55,
       "description": "Architecture/code refactor",
       "attempts": 2
     },
     "add_tests": {
-      "weight": 20,
-      "runs": 63,
-      "successes": 63,
+      "weight": 8,
+      "runs": 65,
+      "successes": 65,
       "description": "Add meaningful tests",
       "attempts": 2
     },
     "readme_overhaul": {
-      "weight": 20,
+      "weight": 8,
       "runs": 20,
       "successes": 20,
       "description": "Overhaul repo README"
     },
     "doc_update": {
-      "weight": 20,
-      "runs": 59,
-      "successes": 61,
+      "weight": 8,
+      "runs": 61,
+      "successes": 63,
       "description": "Improve non-README documentation",
       "attempts": 1
     },
     "code_cleanup": {
-      "weight": 20,
-      "runs": 51,
-      "successes": 51,
+      "weight": 8,
+      "runs": 52,
+      "successes": 52,
       "description": "Remove dead code, unused deps",
       "totalDone": 1,
       "attempts": 4
     },
     "open_issue": {
-      "weight": 20,
-      "runs": 89,
-      "successes": 92,
+      "weight": 8,
+      "runs": 94,
+      "successes": 97,
       "description": "Open a thoughtful issue",
       "totalDone": 1,
       "attempts": 3
     },
     "fix_issue": {
-      "weight": 20,
-      "runs": 130,
-      "successes": 129,
+      "weight": 8,
+      "runs": 164,
+      "successes": 163,
       "description": "Fix an existing open issue"
     },
     "merge_dependabot": {
-      "weight": 25,
+      "weight": 13,
       "runs": 22,
       "successes": 19,
       "description": "Review and merge open Dependabot PRs"
     },
     "add_ci_cd": {
-      "weight": 20,
+      "weight": 8,
       "runs": 14,
       "successes": 14,
       "description": "Add GitHub Actions CI/CD workflow"
     },
     "add_codeql": {
-      "weight": 20,
+      "weight": 8,
       "runs": 15,
       "successes": 15,
       "description": "Add CodeQL security scanning"
     },
     "add_dependabot": {
-      "weight": 20,
+      "weight": 8,
       "runs": 16,
       "successes": 16,
       "description": "Add dependabot config"
     },
     "deploy_pages": {
-      "weight": 20,
+      "weight": 8,
       "runs": 16,
       "successes": 16,
       "description": "Deploy to GitHub Pages"
     },
     "create_release": {
-      "weight": 20,
+      "weight": 8,
       "runs": 21,
       "successes": 21,
       "description": "Create GitHub Release with tag + changelog"
     },
     "add_dockerfile": {
-      "weight": 20,
+      "weight": 8,
       "runs": 10,
       "successes": 10,
       "description": "Add Dockerfile"
     },
     "docker_workflow": {
-      "weight": 20,
+      "weight": 8,
       "runs": 17,
       "successes": 17,
       "description": "Add Docker build/push workflow"
     },
     "package_publish": {
-      "weight": 20,
+      "weight": 8,
       "runs": 17,
       "successes": 17,
       "description": "Set up package publishing (PyPI/npm/NuGet)"
     },
     "add_badges": {
-      "weight": 20,
+      "weight": 8,
       "runs": 11,
       "successes": 11,
       "description": "Add badges to README"
     },
     "add_license": {
-      "weight": 20,
+      "weight": 8,
       "runs": 8,
       "successes": 8,
       "description": "Add/update LICENSE file"
     },
     "issue_templates": {
-      "weight": 20,
+      "weight": 8,
       "runs": 16,
       "successes": 16,
       "description": "Add issue/PR templates"
     },
     "contributing_md": {
-      "weight": 20,
+      "weight": 8,
       "runs": 16,
       "successes": 16,
       "description": "Add CONTRIBUTING.md"
     },
     "repo_topics": {
-      "weight": 20,
+      "weight": 8,
       "runs": 12,
       "successes": 12,
       "description": "Add repo topics/tags"
     },
     "branch_protection": {
-      "weight": 20,
+      "weight": 8,
       "runs": 15,
       "successes": 15,
       "description": "Configure branch protection"
     },
     "code_coverage": {
-      "weight": 20,
+      "weight": 8,
       "runs": 19,
       "successes": 19,
       "description": "Add code coverage reporting"
     },
     "docs_site": {
-      "weight": 20,
+      "weight": 8,
       "runs": 16,
       "successes": 16,
       "description": "Generate & deploy docs site"
     },
     "auto_labeler": {
-      "weight": 20,
-      "runs": 15,
-      "successes": 15,
+      "weight": 8,
+      "runs": 16,
+      "successes": 16,
       "description": "Add auto-labeler or stale bot"
     }
   },
@@ -685,27 +685,61 @@
       "docs_site"
     ]
   },
-  "notes": "Run 893-894. VoronoiMap: 34 new tests for vormap_relax + O(n) scan elimination (115x speedup). PR #73 merged.",
-  "lastRepo": "VoronoiMap",
-  "lastRun": "2026-03-09",
-  "runCount": 56,
-  "lastWeightAdjustment": 892,
+  "notes": "Run 951-952. agentlens: documented 6 undocumented SDK modules in sdk-reference.html (PR #75). gif-captcha: filed O(n�) findSimilarSessions issue #49.",
+  "lastRepo": "gif-captcha",
+  "lastRun": 952,
+  "runCount": 70,
+  "lastWeightAdjustment": 950,
   "adjustmentHistory": [
     {
       "run": 650,
       "changes": {
-        "merge_dependabot": "94\u219272 (frequently re-rolled, no Dependabot PRs exist)",
-        "fix_issue": "80\u219275 (often no open issues, requires re-roll)",
-        "security_fix": "90\u219292 (consistently productive)",
-        "add_tests": "90\u219292 (consistently productive)",
-        "refactor": "81\u219283 (consistently productive)",
-        "perf_improvement": "86\u219288 (consistently productive)"
+        "merge_dependabot": "94Ã¢â€ â€™72 (frequently re-rolled, no Dependabot PRs exist)",
+        "fix_issue": "80Ã¢â€ â€™75 (often no open issues, requires re-roll)",
+        "security_fix": "90Ã¢â€ â€™92 (consistently productive)",
+        "add_tests": "90Ã¢â€ â€™92 (consistently productive)",
+        "refactor": "81Ã¢â€ â€™83 (consistently productive)",
+        "perf_improvement": "86Ã¢â€ â€™88 (consistently productive)"
+      }
+    },
+    {
+      "run": 912,
+      "changes": {
+        "setup_copilot_agent": "20 -> 17 (rate=100%, all_done=True)",
+        "bug_fix": "20 -> 17 (rate=101%, all_done=True)",
+        "security_fix": "20 -> 17 (rate=100%, all_done=True)",
+        "perf_improvement": "20 -> 17 (rate=100%, all_done=True)",
+        "refactor": "20 -> 17 (rate=106%, all_done=True)",
+        "add_tests": "20 -> 17 (rate=100%, all_done=True)",
+        "readme_overhaul": "20 -> 17 (rate=100%, all_done=True)",
+        "doc_update": "20 -> 17 (rate=103%, all_done=True)",
+        "code_cleanup": "20 -> 17 (rate=100%, all_done=True)",
+        "open_issue": "20 -> 17 (rate=103%, all_done=True)",
+        "fix_issue": "20 -> 17 (rate=99%, all_done=True)",
+        "merge_dependabot": "25 -> 22 (rate=86%, all_done=True)",
+        "add_ci_cd": "20 -> 17 (rate=100%, all_done=True)",
+        "add_codeql": "20 -> 17 (rate=100%, all_done=True)",
+        "add_dependabot": "20 -> 17 (rate=100%, all_done=True)",
+        "deploy_pages": "20 -> 17 (rate=100%, all_done=True)",
+        "create_release": "20 -> 17 (rate=100%, all_done=True)",
+        "add_dockerfile": "20 -> 17 (rate=100%, all_done=True)",
+        "docker_workflow": "20 -> 17 (rate=100%, all_done=True)",
+        "package_publish": "20 -> 17 (rate=100%, all_done=True)",
+        "add_badges": "20 -> 17 (rate=100%, all_done=True)",
+        "add_license": "20 -> 17 (rate=100%, all_done=True)",
+        "issue_templates": "20 -> 17 (rate=100%, all_done=True)",
+        "contributing_md": "20 -> 17 (rate=100%, all_done=True)",
+        "repo_topics": "20 -> 17 (rate=100%, all_done=True)",
+        "branch_protection": "20 -> 17 (rate=100%, all_done=True)",
+        "code_coverage": "20 -> 17 (rate=100%, all_done=True)",
+        "docs_site": "20 -> 17 (rate=100%, all_done=True)",
+        "auto_labeler": "20 -> 17 (rate=100%, all_done=True)"
       }
     }
   ],
   "lastTasks": [
-    "add_tests",
-    "perf_improvement"
+    "doc_update",
+    "open_issue"
   ],
-  "lastAdjusted": 880
+  "lastAdjusted": 912
 }

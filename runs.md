@@ -1,3 +1,283 @@
+### Builder #275 (agenticchat) - 2026-03-10
+- **ClipboardHistory**: Auto-captures copy events from chat output, searchable slide-out panel (Ctrl+Shift+V or /clips). Distinguishes code-block vs message text, deduplicates consecutive copies, persistent localStorage (50 entries max), one-click re-copy or insert. 33 tests. PR #71 merged.
+### Builder #275 (Ocaml-sample-code) - 2026-03-10
+- Added memoization combinators module (memoize.ml): 7 strategies (basic, recursive/fix-point, LRU-bounded, TTL expiry, multi-arg, stats-tracked, clearable). Demos for fibonacci, Collatz, binomial coefficients. 28 tests in test_memoize.ml. Pushed to master.
+
+### Gardener #951 (doc_update, agentlens) - 2026-03-10
+- Documented 6 undocumented SDK analysis modules in sdk-reference.html: AnomalyDetector, ResponseEvaluator, SLAEvaluator, SessionDiff, ABTestAnalyzer, PromptVersionTracker. Added usage examples, key methods, config options, and sidebar nav links. Coverage: 10/16 analysis modules (was 4/16). PR #75 merged.
+
+### Gardener #952 (open_issue, gif-captcha) - 2026-03-10
+- Filed issue #49: indSimilarSessions() in solve-pattern-fingerprinter.js has O(n²) complexity with no result limit, session TTL/eviction, or pagination. With unbounded session growth, this blocks the event loop under production load.
+## 2026-03-10
+
+**Run 945-946** (10:30 PM PST)
+- **Task 1:** fix_issue on WinSentinel — normalized timestamps to UTC in AuditHistoryService, added CultureInfo.InvariantCulture to all DateTimeOffset.Parse calls (PR #77, fixes #74)
+- **Task 2:** fix_issue on gif-captcha — replaced 101 plain-object map initializations with Object.create(null) to prevent prototype pollution across 10 source files (PR #48, fixes #37)
+
+### Builder #274 (everything) - 2026-03-10
+- **Vehicle Maintenance Tracker**: Service history, alerts, cost analysis. 6 vehicle types, 12 maintenance categories with default service intervals (miles + months). Overdue/due-soon alerts, cost breakdowns (total, avg, yearly, by category with %), export/import JSON. 42 tests. PR #58 merged.
+### Gardener #947 (security_fix, sauravbhattacharya001) - 2026-03-10
+- Fixed XSS in 
+heology.html — added sc() helper, escaped 8 unescaped innerHTML injections (preset names/descriptions, legend labels/colors, error messages). 454 tests pass. PR #30 merged.
+
+### Gardener #948 (code_cleanup, gif-captcha) - 2026-03-10
+- Extracted _validateKey()/_checkBanStatus() helpers in captcha-rate-limiter.js. Consolidated 4 identical key-validation and 2 ban-check blocks. Centralizes expired ban cleanup. 55 tests pass. PR #47 merged.
+### Builder #274 (gif-captcha) - 2026-03-10
+- **Challenge Pool Manager**: Pre-generated challenge pool for instant CAPTCHA serving. Difficulty tiers (easy/medium/hard), warmUp/replenish, TTL-based expiry, priority lanes with reserve protection, health monitoring (healthy/degraded/critical), export/import for persistence, stats tracking. 37 tests. Pushed to main.
+### Gardener #943-944 (bug_fix, FeedReader + VoronoiMap) - 2026-03-10
+- **FeedReader**: Fixed DST bug in `ArticleSpacedReview.currentStreak()` — was using `addingTimeInterval(-86400)` which breaks on 23/25-hour DST days. Replaced with `Calendar.date(byAdding: .day)`. Issue #66, PR #67.
+- **VoronoiMap**: Fixed missing `validate_output_path()` in `plan_path()` — SVG/JSON/CSV writes skipped path security validation unlike all other export functions. Issue #82, PR #83.
+### Builder #273 (agentlens) - 2026-03-10
+- **Leaderboard Panel**: Dashboard UI for agent rankings. Sortable by efficiency/speed/reliability/cost/volume. Medal badges (🥇🥈🥉), inline performance bars, per-session cost & token breakdowns. Uses existing /leaderboard backend API. PR #74 merged.
+### Gardener #943 (perf_improvement, BioBots) - 2026-03-10
+- Cached calcShelfLife results across render passes in shelf-life.html. Eliminated 3x redundant computation per batch, innerHTML += → rray.join(), consolidated switchTab querySelectorAll from 2→1 pass. 95 tests pass. PR #54 merged.
+
+### Gardener #944 (refactor, WinSentinel) - 2026-03-10
+- Extracted TryConsumeArg/TryConsumeInt helpers in CliParser.cs. Replaced 47 repeated boundary checks. 1119→861 lines (-23%). 177 tests pass. PR #85 merged.
+### Builder Run 60 — 2026-03-10 9:45 PM PST
+- **WinSentinel**: Maintenance Window Manager — scheduled finding suppression for planned maintenance. Create/cancel/extend windows, filter by category/severity/title pattern, recurring windows, apply to findings split (kept/suppressed), purge expired, text reports, JSON export/import. 39 xUnit tests. Pushed to main.
+
+### Gardener Run 941-942 — 2026-03-10 9:30 PM PST
+- **Vidly** (fix_issue): Added `IClock`/`SystemClock` abstraction, migrated top 5 services (LostAndFound, MovieClub, StoreAnnouncement, SeasonalPromotion, Subscription) from `DateTime.Now` — 44 of 100 calls. Added `TestClock` for tests. PR #80, fixes #72 (partial).
+- **agenticchat** (fix_issue): Wired SmartRetry into `ChatController.send()` for both streaming and non-streaming paths. Users now get automatic retry with exponential backoff on 429/500/502/503 errors. PR #67 (updated), fixes #64.
+### Builder #272 (getagentbox) - 2026-03-10
+- **Agent Skill Tree**: Interactive RPG-style capability explorer. 20 skills across 5 branches (Communication, Research, Automation, Creative, Memory). Canvas-drawn bezier connections, click-to-explore detail panel with descriptions + examples, keyboard navigation, responsive, dark/light mode, ARIA tree roles. 28 tests. PR #67 merged.
+### Builder #272 (Vidly) — 2026-03-10 9:15 PM PST
+- **Feature:** Movie Series Tracker — franchise/series management with per-customer progress tracking and "next up" recommendations.
+- **Files:** SeriesModels.cs (6 models), MovieSeriesService.cs (15 methods), SeriesController.cs (10 actions), MovieSeriesServiceTests.cs (35 tests)
+- **Commit:** 747481f → master
+
+### Gardener Run 939-940 — 2026-03-10 9:00 PM PST
+- **getagentbox** (fix_issue): Fixed #63 — 7 scrollIntoView/scrollTo calls hardcoded `behavior: 'smooth'` ignoring `prefersReducedMotion` flag (WCAG 2.3.3 violation). Applied consistent pattern across CommandPalette, ApiExplorer, WorkflowTemplates, PipelineBuilder, SectionMinimap, scrollHelper, scrollToTop. PR #66.
+- **WinSentinel** (fix_issue): Fixed #74 — AuditHistoryService stored timestamps with local timezone offset but compared against UTC cutoffs via string comparison, causing incorrect chronological ordering on non-UTC machines. Normalized to UTC on save, added CultureInfo.InvariantCulture to all DateTimeOffset.Parse calls. PR #84.
+
+### Builder #271 (ai) - 2026-03-10
+- **SwarmAnalyzer**: Emergent coordination detection for agent populations. 6 swarm signals (sync replication, wave patterns, role specialization, depth clustering, burst coordination, task avoidance). Quantitative metrics (Gini coefficient, depth entropy, sync score, specialization index). Role assignment (replicator/worker/hybrid/dormant). Composite risk assessment. CLI + JSON export. 43 pytest tests. PR #53 merged.
+### Builder #271 (GraphAnnotationManager, GraphVisual) - 2026-03-10
+- Added GraphAnnotationManager: research annotation overlay for graph nodes/edges. Notes, tags, colors, priority, author metadata. Search by tag/note/priority/author, bulk operations, auto-tagging by degree centrality, JSON export/import, file persistence. 34 JUnit tests. Pushed to master.
+
+### Gardener #937 (auto_labeler, VoronoiMap) - 2026-03-10
+- Expanded auto-labeler from 2/50 to all module categories: core engine (bug), all vormap_*.py (enhancement), 13 perf-sensitive modules, 4 I/O/security modules, test_*.py files. PR #81 merged.
+
+### Gardener #938 (doc_update, sauravbhattacharya001) - 2026-03-10
+- Updated PROJECTS.md with accurate test counts, feature counts, and new features across 9 repos: agenticchat (1500+ tests, reactions/model-compare/offline), sauravcode (83 builtins, transpiler, 2400+ tests), prompt (PromptAnnotation, PromptSlotFiller, SerializationGuards), VoronoiMap (50 modules), OCaml (84+), GraphVisual (2500+), everything (event sharing), FeedReader (readability/freshness), WinSentinel (tag manager/risk scorer), BioBots (46 tools). PR #29 merged.
+## 2026-03-10
+
+### Run 937-938 (8:30 PM PST)
+1. **fix_issue** on **Vidly** (#72): Added IClock interface + SystemClock + TestClock. Refactored 5 services (SubscriptionService, SeasonalPromotionService, LostAndFoundService, MovieClubService, StoreAnnouncementService) replacing 47 DateTime.Now calls. PR #74.
+2. **fix_issue** on **getagentbox** (#63): Fixed 6 scroll calls to respect prefers-reduced-motion (WCAG 2.3.3 compliance). PR #65.
+
+### Gardener #935 (add_tests, agenticchat) - 2026-03-10
+- 49 tests for MessageReactions module: add/remove/toggle, getReactions/count/reacted, clearReactions/clearAll, getMostUsedEmoji, persistence, edge cases. PR #70 merged.
+
+### Gardener #936 (add_tests, sauravbhattacharya001) - 2026-03-10
+- 42 tests for Project Comparison and Modal utilities: toggleCompare, clearCompare, syncCompareUI, _buildCompareRow, buildCompareBar/Checkbox, renderComparePanel, closeCompare, _activateModal/_deactivateModal/_handleModalTab. All 454 total tests pass. PR #28 merged.
+### Builder #270 (everything) - 2026-03-10
+- **Warranty Tracker**: Product warranty management with 4-tab UI (Warranties/Expiring/Claims/Coverage). 10 product categories, 5 warranty types, claim workflow with 5 statuses, coverage score gauge, expiry alerts. 35 tests. Commit e53e683.
+
+### Gardener #929-930 - 2026-03-10
+- **WinSentinel** (fix_issue #74): Normalized timestamps to UTC in AuditHistoryService — fixes string comparison of ISO 8601 timestamps with different timezone offsets. Added CultureInfo.InvariantCulture to Parse calls. PR #83.
+- **Vidly** (fix_issue #72): Extended IClock abstraction to LostAndFoundService (12 calls) and MovieClubService (10 calls). Added constructors with optional IClock param. Added TestClock helper. PR #74 updated.
+### Builder #269 (prompt) - 2026-03-10
+- **PromptSlotFiller**: Structured slot extraction and multi-turn filling engine. 8 slot types (Text, Integer, Number, Boolean, Date, Enum, Email, Phone), validation, type-specific extraction, defaults, aliases, auto-discovery. 59 xUnit tests. PR #70 merged.
+### Builder #269 (prompt) - 2026-03-10
+- **feature**: PromptSlotFiller — multi-strategy template slot detection and filling. Provider pipeline (dict/env/func), validators with wildcard matching, transforms, strict mode, fallback values, diagnostics, JSON export. Supports {{name}}, {name}, $name$ syntaxes. 45 tests. PR #69.
+
+### Gardener #931 (agenticchat) - 2026-03-10
+- **refactor**: Extracted 11 keyboard shortcut if-blocks into _ctrlBindings dispatch table. ~50 fewer lines, O(1) dispatch. PR #69 merged.
+
+### Gardener #932 (Ocaml-sample-code) - 2026-03-10
+- **add_tests**: Ported bloom_filter.ml to JS, wrote 61 Jest tests covering all API functions (create, add, mem, union, popcount, etc.). PR #40 merged.
+### Gardener #927-928 - 2026-03-10
+- **getagentbox** (fix_issue): Fixed #63 — 5 scroll modules (CommandPalette, ApiExplorer, WorkflowTemplates, PipelineBuilder, SectionMinimap) now respect `prefers-reduced-motion` by checking the global `prefersReducedMotion` flag. PR #65.
+- **agenticchat** (fix_issue): Fixed #64 — Wired the existing SmartRetry module (~280 lines) into ChatController.send(). Both streaming and non-streaming API calls now get automatic retry with exponential backoff on transient failures (429/500/502/503). PR #67.
+### Builder #269 (ai) - 2026-03-10
+- **Safety Drill Runner**: Automated emergency readiness testing — 6 drill scenarios (kill switch, containment breach, runaway replication, quarantine response, resource exhaustion, cascading failure). DrillRunner with configurable params, readiness scoring (0-100%), JSON export/import, CLI integration. 32 pytest tests. Commit 29debf5.
+### Builder #268 (BioBots) - 2026-03-10
+- **GLP Compliance Checker**: Interactive regulatory verification tool checking print runs against GLP (21 CFR 58), ISO 10993, and FDA 21 CFR Part 11. 15 rules, 3 intended-use tiers, composite scoring, batch check, CSV/JSON export. 44 Jest tests. PR #52 merged.
+### Gardener #931-932 - 2026-03-10
+- **No tasks executed.** All 16 repos have all 29 task types completed. Garden fully tended. 🌿
+
+### Gardener #929 (agentlens) - 2026-03-10
+- **security_fix**: Fixed XSS in SessionExporter HTML — session_id and status rendered unescaped, _escape() missing single-quote. 5 new tests, 28/28 pass. PR #73 merged.
+
+### Gardener #930 (GraphVisual) - 2026-03-10
+- **refactor**: Extracted appendStatItem/appendLegendItem helpers in InteractiveHtmlExporter — deduped 5x stat-div + legend-item patterns. 21/21 tests pass. PR #69 merged.
+- **Weight adjustment at 930**: All task weights reduced by 3 (14->11, merge_dependabot 19->16). Next adjustment at 940.
+### Builder #268 (GraphVisual) - 2026-03-10
+- **feature**: GraphProductCalculator — 4 standard graph products (Cartesian □, tensor ×, strong ⊠, lexicographic ∘). Result caching, ProductInfo metadata, degree sequence extraction, comparative text report with theoretical vs actual edge counts. 30 JUnit tests.
+
+### Builder #267 (Vidly) - 2026-03-10
+- **feature**: Movie Awards Tracker — nomination/win tracking across 9 award bodies (Oscar, Golden Globe, BAFTA, SAG, Cannes, etc.) and 15 categories. Leaderboard, filtering, toggle win status, duplicate prevention. Full MVC view. 30 MSTest tests. PR #79.
+
+### Gardener #927 (prompt) - 2026-03-10
+- **bug_fix**: Fixed PromptRetryPolicy.Execute() — backoff delays were calculated but never applied (Thread.Sleep missing). Retries fired instantly. Added 2 timing verification tests. PR #68 merged.
+
+### Gardener #928 (Ocaml-sample-code) - 2026-03-10
+- **doc_update**: Added 3 missing modules (delimited_cont, lsystem, neural_network) to README table + tree + concepts list, and LEARNING_PATH (3 new stages + 7 concept index entries). Count 81→84. PR #39 merged.
+### Builder #267 (FeedReader) - 2026-03-10
+- **ArticleFreshnessTracker**: Temporal reference detection (8 categories), freshness classification (breaking/timeSensitive/seasonal/evergreen), exponential decay scoring, staleness detection, batch analysis, JSON persistence. 47 XCTest cases. PR #65 merged.
+### Gardener Run 925-926 - 2026-03-10
+- **WinSentinel** (fix_issue #74): Normalized AuditHistoryService timestamps to UTC — fixes string comparison failures when timezone offsets vary. Added CultureInfo.InvariantCulture to DateTimeOffset.Parse. PR #82.
+- **Vidly** (fix_issue #72): Added IClock abstraction (IClock, SystemClock, TestClock) and migrated SubscriptionService + SeasonalPromotionService from DateTime.Now to injected clock. Optional constructor param, zero breaking changes. PR #78.
+### Builder #266 (prompt) - 2026-03-10
+- **PromptAnnotation**: Structured inline comments and metadata for prompts using {{# ... #}} delimiters. 4 annotation types (Comment, Metadata, Tag, Section, Directive), 10 methods (Strip, Extract, Validate, Insert, AddMetadata, AddTag, AddSection, GetByType, HasAnnotations, Summarize), 10 built-in directives. 61 tests. PR #67 merged.
+### Builder #265 (gif-captcha) - 2026-03-10
+- **feature**: Webhook Dispatcher — HTTP event notification system for CAPTCHA lifecycle. Register endpoints with event filters, HMAC-SHA256 signing, exponential backoff retries, per-endpoint rate limiting, delivery logging with filtering, stats, pause/resume, payload size limits, pluggable HTTP transport. 39 tests.
+
+### Gardener #923 (FeedReader) - 2026-03-10
+- **add_tests**: 78 tests for ArticleReadabilityAnalyzer — syllable counting, sentence detection, Flesch formulas, difficulty classification, reading time, HTML stripping, batch analysis, aggregate stats, edge cases. PR #64 merged.
+
+### Gardener #924 (sauravbhattacharya001) - 2026-03-10
+- **refactor**: Extracted Spotlight (11 members) and TechRadar (10 members) into IIFE modules. Legacy aliases preserved. All 412 tests pass. PR #27 merged.
+### Gardener #921 (agenticchat) - 2026-03-10
+- **fix_issue**: Wired SmartRetry into ChatController.send() — ~280 lines of retry logic existed but was never called. Wrapped both streaming and non-streaming callOpenAI paths. PR #67, closes #64.
+
+### Gardener #922 (getagentbox) - 2026-03-10
+- **fix_issue**: Fixed prefers-reduced-motion in 5 scroll modules — replaced hardcoded `'smooth'` with `prefersReducedMotion ? 'auto' : 'smooth'` (WCAG 2.3.3). PR #64, closes #63.
+
+### Gardener #919 (WinSentinel) - 2026-03-10
+- **perf_improvement**: Optimized IncidentResponsePlaybook — cached StepsForPhase() (lazy Dict), pre-lowered TriggerKeywords, pre-lowered finding text in GeneratePlan, single-pass GenerateImmediateActions (3 Where() → 1 for-loop). 77 tests pass. PR #81 merged.
+
+### Gardener #920 (getagentbox) - 2026-03-10
+- **open_issue**: Filed #63 — smooth scrolling ignores prefers-reduced-motion in 5 modules (CommandPalette, ApiExplorer, WorkflowTemplates, PipelineBuilder, SectionMinimap). WCAG 2.3.3 violation.
+
+**Weight adjustment at run 920**: All weights reduced by 3 (17→14, merge_dependabot 22→19). Next adjustment at run 930.
+## 2026-03-10
+
+**Run 265** | agentlens | 5:15 PM PST
+- **Feature:** Session Diff -- structured comparison of two agent sessions (LCS event alignment, token/cost/timing deltas, tool & model divergence, similarity score, text/JSON reports)
+- **Files:** sdk/agentlens/session_diff.py, sdk/tests/test_session_diff.py, sdk/agentlens/__init__.py
+- **Tests:** 33 passed
+- **Commit:** 77947ba
+
+### Gardener Run 917-918 - 2026-03-10
+- **WinSentinel** (fix_issue #74): Fixed timestamp comparison bug in AuditHistoryService — normalized stored timestamps to UTC via `ToUniversalTime()`, added `CultureInfo.InvariantCulture` to all `DateTimeOffset.Parse` calls. PR #80.
+- **Vidly** (fix_issue #72): Added `IClock` interface for deterministic time-dependent testing. Created `SystemClock` + `TestClock`. Migrated `SubscriptionService` and `SeasonalPromotionService` (14 `DateTime.Now` calls replaced). Backward-compatible via optional constructor param. PR #77.
+
+### Builder #264 (agenticchat) - 2026-03-10
+- **ModelComparePanel**: Interactive UI for side-by-side model comparison. Model picker, prompt input, response cards with metrics, vote buttons, history with expand/export/clear, leaderboard with medals. /compare slash command. 32 tests. PR #66 merged.
+### Builder #264 (agenticchat) - 2026-03-10
+- **feature**: Conversation Agenda — per-session goal checklist with progress bar. Add/toggle/delete goals, Alt+G shortcut, XSS-safe, localStorage persistence. 25 tests.
+
+### Gardener #917 (WinSentinel) - 2026-03-10
+- **security_fix**: Hardened CheckDangerousCommand — 10 bypass vectors (Invoke-Command, Start-Job, COM objects, env vars, call operator, null bytes, Base64, AMSI, Registry Run keys, DLL loading). Fixed 2 pre-existing test failures. PR #79 merged.
+
+### Gardener #918 (everything) - 2026-03-10
+- **add_tests**: EventSharingService — 57 tests covering plain text, markdown, Google Calendar URL, Outlook URL, shareAll, date formatting, edge cases. PR #57 merged.
+### Gardener Run 915-916 - 2026-03-10
+- **agenticchat** (fix_issue #60): Updated hardcoded model list — added GPT-4.1, GPT-4.1 Mini, GPT-4.1 Nano, o3, o4-mini; removed deprecated GPT-4, GPT-4 Turbo, GPT-3.5 Turbo, o1-preview, o1-mini. Default changed to gpt-4.1. PR #62 merged.
+- **GraphVisual** (fix_issue #44): Replaced dense O(n²) Laplacian in spectral bisection with sparse adjacency-based multiply O(m). Added convergence check (early exit at ||diff|| < 1e-10). Eliminates massive memory allocation for large graphs. PR #68 merged.
+
+### Builder #262 (sauravcode) - 2026-03-10
+- **sauravtranspile**: .srv to Python transpiler. All 36 AST node types, 83 builtins mapped, smart runtime preamble, --verify mode to compare outputs. Dispatch table architecture. 61 tests. PR #52 merged.
+### Builder #262 (everything) - 2026-03-10
+- **Debt Payoff Planner**: 3-tab interactive screen (Debts/Compare/Timeline). Track credit cards, loans, mortgage with balance/APR/minimum payments. Snowball vs avalanche strategy comparison with extra payment slider. Visual payoff timeline with debt-free date. DebtEntry model (7 categories), DebtPayoffService with full simulation engine. 30 tests.
+
+### Builder #261 (VoronoiMap) - 2026-03-10
+- **vormap_diffusion**: Spatial diffusion simulation on Voronoi networks. 3 models: heat (discrete Laplacian, energy-conserving), SIR epidemic (stochastic transmission, early termination), threshold adoption (deterministic, irreversible). Animated SVG/JSON/CSV export, CLI, text reports. 34 tests. PR #80 merged.
+
+### Gardener Run 915-916 — 2026-03-10, 4:00 PM PST
+- **Status:** All 29 task types completed on all 16 repos. Full saturation reached. No tasks to execute.
+
+## 2026-03-10
+
+### Run 261 — prompt (PromptStyleTransfer) — 3:45 PM PST
+- **Repo:** [prompt](https://github.com/sauravbhattacharya001/prompt)
+- **Feature:** PromptStyleTransfer — heuristic prompt tone/style rewriting
+- **Details:** Static class that transforms prompt text between 7 communication styles (Formal, Casual, Concise, Verbose, Technical, Instructional, Friendly) using regex-based rules. Includes style auto-detection, tracked changes, length delta, and round-trip support. No LLM required.
+- **Tests:** 29 xUnit tests, all passing
+- **Commit:** 462c3fb
+### Gardener #913 (open_issue, agenticchat) - 2026-03-10
+- Opened issue #64: SmartRetry module is never invoked — entire retry system is dead code
+
+### Gardener #914 (refactor, agenticchat) - 2026-03-10
+- Extracted _handleApiError() and _rollbackLastUserMessage() from ChatController.send(). Eliminated 2×5-line duplicated error handlers (streaming/non-streaming) and 3×3-line duplicated rollback blocks (abort/timeout/network). Fixed misaligned catch indentation. PR #65 merged.
+### Gardener Run 913-914 — 2026-03-10
+- **fix_issue (WinSentinel #74):** Fixed timestamp UTC normalization in AuditHistoryService — stored timestamps now normalized to UTC via `ToUniversalTime()`, added `CultureInfo.InvariantCulture` to all parse calls. PR #77.
+- **fix_issue (agenticchat #59):** Added `OfflineManager.isOffline()` guard in `send()` to prevent Enter key from bypassing offline protection. PR #63.
+### Builder #260 (FeedReader) - 2026-03-10
+- **ArticleRelationshipMapper**: User-curated knowledge graph between articles. 10 relationship types (contradicts, builds-on, inspired-by, supplements, updates, refutes, summarizes, exemplifies, related-to, custom), directional edges, 3 strength levels, BFS cluster detection, graph stats, JSON export/import. 40 XCTest cases. PR #63 merged.
+### Builder #46 (WinSentinel) - 2026-03-10
+- **Finding Notes Service**: Investigation notes & workflow tracking for security findings. 6 statuses (Open→FalsePositive), assignee/priority/due date, overdue detection, JSON persistence, export/import. 3 files, 498 lines, 22 tests passing. PR #76.
+### Gardener #911-912 (sauravbhattacharya001) - 2026-03-10
+- **refactor**: Extracted initApp() and _buildCompareRow(), fixed sanitizeURL inconsistency in compare panel. PR #25 merged.
+- **fix_issue**: Fixed #24 — keyboard dismiss (Escape), focus trap (Tab cycling), and focus restoration for quiz/compare overlays. PR #26 merged. WCAG 2.1 compliance.
+- Weight adjustment at run 912: all 29 task types done on all repos, weights reduced by 3 across the board.
+### Gardener #907-908 (agenticchat, Vidly) - 2026-03-10
+- **fix_issue (agenticchat #60)**: Updated hardcoded model list — removed deprecated models (gpt-4, gpt-3.5-turbo, o1-preview, o1-mini), added current models (gpt-4.1, gpt-4.1-mini, gpt-4.1-nano, o3, o4-mini, o1), updated pricing. PR #62.
+- **fix_issue (Vidly #72)**: Added IClock interface for deterministic time testing. Migrated 3 priority services (LostAndFoundService, SubscriptionService, SeasonalPromotionService) — 26 DateTime.Now calls replaced. Added TestClock with Advance() methods. PR #76.
+### Gardener #907-908 (WinSentinel) - 2026-03-10
+- **open_issue**: Filed #74 — AuditHistoryService string comparison of ISO 8601 timestamps breaks with different timezone offsets
+- **bug_fix**: Fixed double-escaping of single quotes in toast notifications (PR #75 merged)
+### Builder #259 (getagentbox) - 2026-03-10
+- **Memory Timeline**: Interactive animated timeline showing how AgentBox builds context over time. 3 scenarios (Daily Assistant, Project Helper, Health Coach), play/reset controls, brain panel with fact tags. PR #62 merged.
+### Builder #259 (getagentbox) - 2026-03-10
+- **Feature:** Capability Roulette — interactive spinning wheel for discovering agent capabilities
+- **PR:** https://github.com/sauravbhattacharya001/getagentbox/pull/61
+- **Details:** Canvas-based wheel with 12 capabilities (memory, search, reminders, image analysis, code help, weather, recipes, summarization, translation, data analysis, writing, decision making). Smooth ease-out animation, prefers-reduced-motion support, dark mode, responsive layout, discovery counter. 7 tests.
+- **Files:** app.js (+173), index.html (+27), styles.css (+94), roulette.test.js (+104)
+
+### Gardener Run 907-908 - 2026-03-10 (2:30 PM)
+- **Result:** SKIPPED — all 16 repos × 29 task types = 464 combinations fully completed in repoState. No eligible tasks remain.
+- **Note:** The gardener has completed every task type on every repo. Consider adding new repos or new task types to gardener-weights.json.
+
+### Builder #258 (BioBots) - 2026-03-10
+- **Cell Seeding Calculator** (seeding.html): Interactive 4-tab page — scaffold seeding (5 geometries, viability/efficiency), well plate planning (6-384 well), serial dilution plan, passage expansion timeline. PR #51 merged.
+### Builder #42 (BioBots) - 2026-03-10
+- **Feature:** Scaffold Geometry Calculator — porosity computation (grid/honeycomb/gyroid architectures), Gibson-Ashby effective modulus, Kozeny-Carman permeability, tissue compatibility assessment (bone/cartilage/skin/liver/vascular/neural), parameter sweeps. 8 material presets, 26 tests. Pushed to master.
+
+### Gardener #905-906 (agenticchat) - 2026-03-10
+- **Task 1 (open_issue):** Filed #60 — hardcoded model list is outdated (missing GPT-4.1, o3, o4-mini; includes deprecated gpt-3.5-turbo/gpt-4)
+- **Task 2 (perf_improvement):** CSS containment + content-visibility on 5 scrollable containers + .history-msg elements. PR #61 merged.
+### Gardener #905-906 (WinSentinel, everything) - 2026-03-10
+- **Task 1 (fix_issue):** WinSentinel — replaced 82 empty catch blocks with proper error handling across 18 files. Agent modules get LogTrace; Core audits get intent comments. PR #71 fixes #51.
+- **Task 2 (fix_issue):** everything — added TrackerPersistence utility + SharedPreferences persistence to 4 tracker services (water, expense, meal, habit). 8 files changed, 230 insertions. PR #56 partially addresses #42.
+### Gardener #903-904 (prompt) - 2026-03-10
+- **Task 1 (security_fix):** Added payload size guards (ThrowIfPayloadTooLarge) to 9 public deserialization methods missing CWE-400 protection. PR #66 merged.
+- **Task 2 (refactor):** Consolidated repeated null+size guard pattern into ValidateJsonInput() and SafeDeserialize<T>() in SerializationGuards. Simplified 14+ FromJson methods. PR #66 merged.
+### Builder #256 (WinSentinel) - 2026-03-10
+- **Finding Tag Manager** (FindingTagManager.cs): Custom labels, annotations, and search for security findings. Tag/untag/clear, annotate with author, rename/delete tags globally, query by tag/category/text, auto-tag by severity, bulk tag from reports, JSON export/import with merge support. 37 xUnit tests. PR #73 merged.
+### Builder Run 255 — 2026-03-10 (1:45 PM)
+- **Repo:** gif-captcha
+- **Feature:** CAPTCHA Statistics Collector — time-windowed solve metrics aggregation with percentiles (p50/p90/p95/p99), per-challenge-type breakdowns, CSV/JSON export, window eviction, lifetime tracking
+- **Files:** `src/captcha-stats-collector.js`, `tests/captcha-stats-collector.test.js` (23 tests, all pass)
+- **Commit:** ef5c35c → main
+
+### Gardener Run 903-904 - 2026-03-10 (1:30 PM)
+- **No tasks executed.** All 16 repos have all 29 task types completed. The gardener has fully covered the repository set. Consider adding new repos or new task types.
+
+### Builder #254 (WinSentinel) - 2026-03-10
+- **SLA Tracker** (SlaTracker.cs): Remediation deadline tracking with compliance reporting. Configurable policies (Enterprise/Strict/Relaxed/Custom), per-severity deadlines, SLA status assessment (OnTrack/Approaching/Overdue/Resolved), compliance metrics (% + MTTR), JSON export/import, text reports. 47 xUnit tests. PR #72 merged.
+### Builder #254 (everything) - 2026-03-10
+- **Net Worth Tracker Screen**: 4-tab UI (Accounts/Add/Report/Milestones) for existing NetWorthTrackerService. Summary card, balance updates with history, financial report with debt analysis & category breakdowns, milestone progress tracker, stale account warnings. Wired into home toolbar + command palette. 1095 lines added.
+
+### Gardener #901-902 - 2026-03-10
+- **Vidly** fix_issue #72: Introduced `IDateTimeProvider` interface to decouple 5 services from `DateTime.Now` (LostAndFoundService, NotificationService, MovieClubService, DisputeResolutionService, SubscriptionService). 47 direct calls replaced. PR #75.
+- **GraphVisual** fix_issue #44: Replaced dense O(n²) Laplacian with sparse adjacency-based mat-vec multiply in spectral bisection. Added convergence check (1e-10 tolerance) instead of fixed 200 iterations. PR #67.
+### Builder #253 (VoronoiMap) - 2026-03-10
+- **Voronoi Contour** (vormap_contour.py): Isoline extraction from cell values via marching squares + IDW interpolation. Saddle-point disambiguation, segment chaining, 4 colormaps (viridis/plasma/terrain/grayscale), SVG + GeoJSON export, CLI. 31 tests. PR #79 merged.
+### Builder #253 (FeedReader) - 2026-03-10
+- **Reading Rituals** — Named, recurring reading sessions with schedules, feed filters, and article goals. Tracks completions, streaks, adherence rates. Includes preset rituals (Morning Briefing, Weekend Deep Dive, Lunch Scan, Evening Wind-Down), suggested reading queue builder, and plain text/JSON export. 32 tests. Commit b32417b.
+
+### Gardener #899-900 (sauravbhattacharya001) - 2026-03-10
+- **code_cleanup:** Replaced 7 inline onclick handlers with data-action event delegation — CSP compliance fix (script-src 'self' blocked inline JS). Compare + quiz buttons were non-functional on live site. PR #23 merged. 412 tests pass.
+- **open_issue:** Opened #24 — Quiz and Compare overlays lack keyboard dismiss (Escape) and focus management. WCAG accessibility gap.
+### Gardener #899-900 (WinSentinel, getagentbox) - 2026-03-10
+- **fix_issue (WinSentinel):** Fixed #51 — replaced 69 empty catch blocks with System.Diagnostics.Debug.WriteLine logging across 17 files. Added SkippedChecks list to AuditResult model. Top fixes: BrowserAudit (24), BackupAudit (8), VirtualizationAudit (7). PR #71.
+- **fix_issue (getagentbox):** Fixed #42 — added 15 tests for ScrollProgress module covering init, progress bar calculation, back-to-top visibility, smooth/instant scroll, rAF throttling, and destroy safety. PR #60.
+### Gardener #897-898 (agenticchat) - 2026-03-10
+- **fix_issue:** Fixed #38 — offline support with service worker + PWA. sw.js (cache-first app shell), manifest.json, OfflineManager (offline detection + UI), CSP fix (worker-src). 8 tests. PR #58 merged.
+- **open_issue:** Opened #59 — Enter key bypasses offline send protection. send() has no navigator.onLine guard, keyboard shortcut bypasses disabled button.
+### Builder #253 (ai) - 2026-03-10
+- **Anomaly Replay**: Record & replay agent behavior traces against safety controls. 6 built-in controls (network exfiltration, resource hoarding, privilege escalation, self-replication, behavior drift, timing anomaly). TraceLibrary with 6 attack patterns. Coverage gap analysis, JSON serialization, formatted reports. CLI: `python -m replication replay`. 38 tests, docs page.
+### Gardener #895-896 - 2026-03-10
+- **Vidly** (fix_issue): Introduced `IClock` abstraction to decouple `SubscriptionService` and `SeasonalPromotionService` from `DateTime.Now`. Added `SystemClock`, `TestClock` with time-travel helpers. 14 `DateTime.Now` calls replaced. Backward-compatible (optional parameter). PR #74 (fixes #72).
+- **FeedReader** (bug_fix): Fixed `autoEscalate` over-escalation bug — items would jump low→normal→high→urgent in one call because age-from-savedAt exceeded every subsequent threshold. Fix: cumulative thresholds. PR #62.
+### Builder #252 (prompt) - 2026-03-10
+- **PromptMemoryIndex**: In-memory RAG retrieval index for conversation messages. BM25 + recency decay + importance weighting. Features: auto-eviction, JSON persistence, index merging, context formatting, novelty boost. 31 tests. PR #65.
+### Builder #251 (GraphVisual) - 2026-03-10
+- **Graph Benchmark Suite**: 7 classic network science benchmark graphs (Zachary, Petersen, Florentine, Cube Q3, Dodecahedron, Tutte, Friendship). 29 tests. PR #66 merged.
 ### Builder Run 32 — GraphVisual — 2026-03-09 10:45 PM
 
 ### Builder #224 (Vidly) - 2026-03-09
@@ -8333,6 +8613,45 @@ All sub-agent and cron job runs logged here. Most recent first.
 ### Gardener Run #486
 - **Task 1:** perf_improvement on Vidly � (1) `ReviewService.GetSummary()`: 8+ LINQ passes ? single foreach with inline accumulators (star sum, star distribution array, HashSets for distinct movies/customers, inline max-tracking for most-reviewed). (2) `ReviewService.Enrich()`: N+1 per-review `GetById` calls ? deduplicated lookups via HashSet of unique IDs, reducing from O(2R) to O(C+M). (3) `CustomerActivityService.BuildSummary()`: eliminated 2 extra `Min()`/`Max()` passes by tracking first/last rental dates inline. 619/634 tests (15 pre-existing). Commit `d5e5372`.
 - **Task 2:** perf_improvement on FeedReader � (1) `ReadingStatsManager.computeStats()`: 5 passes (3 `filter()` + 2 loops) ? single loop computing today/week/month counts, hourly distribution, and feed breakdown simultaneously. (2) `ReadingHistoryManager.historySummary()`: 4 passes (2 loops + 2 `reduce` properties) ? single loop with local accumulators. (3) `ReadingHistoryManager.recordVisit()`: O(n) `rebuildIndex()` ? O(index) incremental update of shifted entries only, with guard for index==0 empty-range crash. Commit `dd96b1e`.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
