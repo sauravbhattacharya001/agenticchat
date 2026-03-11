@@ -1084,24 +1084,30 @@ const ChatController = (() => {
       const sendStartTime = performance.now();
 
       if (ChatConfig.STREAMING_ENABLED) {
-        // Streaming path — show tokens as they arrive
+        // Streaming path — show tokens as they arrive, with automatic retry
         UIController.setChatOutput('');
-        const result = await callOpenAIStreaming(
-          ApiKeyManager.getOpenAIKey(),
-          ConversationManager.getMessages(),
-          (token) => UIController.appendChatOutput(token)
-        );
+        const result = await SmartRetry.withRetry(() => {
+          // Reset output on each retry attempt so partial streams don't accumulate
+          UIController.setChatOutput('');
+          return callOpenAIStreaming(
+            ApiKeyManager.getOpenAIKey(),
+            ConversationManager.getMessages(),
+            (token) => UIController.appendChatOutput(token)
+          );
+        });
 
         if (!result.ok) { _handleApiError(result); return; }
 
         reply = result.text || 'No response';
         usage = result.usage;
       } else {
-        // Non-streaming path — original behavior
+        // Non-streaming path — with automatic retry on transient failures
         UIController.setChatOutput('Thinking…');
-        const result = await callOpenAI(
-          ApiKeyManager.getOpenAIKey(),
-          ConversationManager.getMessages()
+        const result = await SmartRetry.withRetry(() =>
+          callOpenAI(
+            ApiKeyManager.getOpenAIKey(),
+            ConversationManager.getMessages()
+          )
         );
 
         if (!result.ok) { _handleApiError(result); return; }
