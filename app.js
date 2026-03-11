@@ -1,7 +1,7 @@
 /* ============================================================
  * Agentic Chat — Application Logic
  *
- * Architecture (43 modules, all revealing-module-pattern IIFEs):
+ * Architecture (44 modules, all revealing-module-pattern IIFEs):
  *
  *   Core:
  *   SafeStorage          — safe localStorage wrapper for restricted-storage environments
@@ -56,6 +56,7 @@
  *   SmartRetry           — automatic retry with exponential backoff for transient API failures
  *   UsageHeatmap         — GitHub-style 7×24 activity heatmap across all sessions
  *   ConversationAgenda   — per-session goal checklist with progress tracking
+ *   ClipboardHistory     — tracks copied text from chat with searchable panel (Ctrl+Shift+V)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -2865,6 +2866,8 @@ const SlashCommands = (() => {
           action: () => ConversationReplay.start() },
         { name: 'compare', description: 'Compare AI model responses side-by-side', icon: '⚔️',
           action: () => ModelComparePanel.toggle() },
+        { name: 'clips', description: 'Open clipboard history — browse copied text', icon: '📋',
+          action: () => ClipboardHistory.toggle() },
     ]);
 
     function init() {
@@ -16830,6 +16833,448 @@ const ConversationAgenda = (() => {
 })();
 
 document.addEventListener('DOMContentLoaded', ConversationAgenda.init);
+
+// ── Clipboard History ──────────────────────────────────────────────────
+/**
+ * ClipboardHistory — tracks text copied from the chat area and provides
+ * a searchable panel to browse, re-copy, or insert past clips.
+ *
+ * Features:
+ *   - Captures copy events from #chat-output (assistant responses, code blocks)
+ *   - Persistent localStorage storage (survives refresh)
+ *   - Searchable panel with fuzzy text matching
+ *   - One-click re-copy or insert into chat input
+ *   - Auto-deduplicates identical consecutive copies
+ *   - Configurable max entries (default 50)
+ *   - Keyboard shortcut: Ctrl+Shift+V to toggle panel
+ *
+ * @namespace ClipboardHistory
+ */
+const ClipboardHistory = (() => {
+  'use strict';
+
+  const STORAGE_KEY = 'ac_clipboard_history';
+  const MAX_ENTRIES = 50;
+  const MAX_TEXT_LENGTH = 5000;
+  const PREVIEW_LENGTH = 120;
+
+  let panelEl = null;
+  let listEl = null;
+  let searchInput = null;
+  let countEl = null;
+  let entries = []; // { text, timestamp, source }
+
+  // ── Persistence ──────────────────────────────────────────────────
+
+  function _load() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) entries = JSON.parse(raw);
+    } catch (_) {
+      entries = [];
+    }
+  }
+
+  function _save() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+    } catch (_) { /* quota exceeded — silently skip */ }
+  }
+
+  // ── Core API ─────────────────────────────────────────────────────
+
+  /**
+   * Record a copied text snippet.
+   * @param {string} text - The copied text
+   * @param {string} [source='manual'] - Source context ('code-block', 'message', 'manual')
+   */
+  function record(text, source) {
+    if (!text || typeof text !== 'string') return;
+    const trimmed = text.trim();
+    if (trimmed.length === 0) return;
+
+    // Deduplicate: skip if identical to most recent entry
+    if (entries.length > 0 && entries[0].text === trimmed) return;
+
+    const entry = {
+      text: trimmed.length > MAX_TEXT_LENGTH
+        ? trimmed.slice(0, MAX_TEXT_LENGTH) + '…'
+        : trimmed,
+      timestamp: Date.now(),
+      source: source || 'manual'
+    };
+
+    entries.unshift(entry);
+    if (entries.length > MAX_ENTRIES) entries.length = MAX_ENTRIES;
+    _save();
+    _renderList();
+  }
+
+  /** Get all entries (newest first). */
+  function getAll() { return entries.slice(); }
+
+  /** Get entry count. */
+  function count() { return entries.length; }
+
+  /** Remove a specific entry by index. */
+  function remove(index) {
+    if (index >= 0 && index < entries.length) {
+      entries.splice(index, 1);
+      _save();
+      _renderList();
+    }
+  }
+
+  /** Clear all entries. */
+  function clearAll() {
+    entries = [];
+    _save();
+    _renderList();
+  }
+
+  // ── Copy Event Listener ──────────────────────────────────────────
+
+  function _onCopy(e) {
+    // Only capture copies from within the chat output area
+    const chatOutput = document.getElementById('chat-output');
+    if (!chatOutput) return;
+
+    const sel = document.getSelection();
+    if (!sel || sel.isCollapsed) return;
+
+    // Check if selection is within or overlaps chat output
+    const range = sel.getRangeAt(0);
+    if (!chatOutput.contains(range.commonAncestorContainer)) return;
+
+    const text = sel.toString();
+    if (!text || text.trim().length === 0) return;
+
+    // Detect source: code block vs regular message text
+    const anchor = range.startContainer;
+    const isCodeBlock = !!(anchor && anchor.closest && anchor.closest('pre, code'))
+      || !!(anchor.parentElement && anchor.parentElement.closest && anchor.parentElement.closest('pre, code'));
+
+    record(text, isCodeBlock ? 'code-block' : 'message');
+  }
+
+  // ── UI: Panel ────────────────────────────────────────────────────
+
+  function _createPanel() {
+    if (panelEl) return;
+
+    panelEl = document.createElement('div');
+    panelEl.id = 'clipboard-history-panel';
+    panelEl.setAttribute('role', 'dialog');
+    panelEl.setAttribute('aria-label', 'Clipboard History');
+    panelEl.innerHTML = `
+      <div class="cbh-header">
+        <span class="cbh-title">📋 Clipboard History</span>
+        <span class="cbh-count" id="cbh-count"></span>
+        <button class="cbh-close" title="Close (Esc)" aria-label="Close">&times;</button>
+      </div>
+      <div class="cbh-search-row">
+        <input type="text" class="cbh-search" placeholder="Search clips…"
+               aria-label="Search clipboard history" />
+        <button class="cbh-clear-all" title="Clear all">🗑️</button>
+      </div>
+      <div class="cbh-list" id="cbh-list" role="list"></div>
+    `;
+
+    // Styles
+    const style = document.createElement('style');
+    style.textContent = `
+      #clipboard-history-panel {
+        position: fixed;
+        right: -380px;
+        top: 0;
+        width: 370px;
+        height: 100vh;
+        background: var(--bg-primary, #1a1a2e);
+        border-left: 1px solid var(--border-color, #333);
+        box-shadow: -4px 0 20px rgba(0,0,0,.3);
+        z-index: 10000;
+        display: flex;
+        flex-direction: column;
+        transition: right .25s ease;
+        font-family: inherit;
+      }
+      #clipboard-history-panel.cbh-open { right: 0; }
+      .cbh-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 14px 16px;
+        border-bottom: 1px solid var(--border-color, #333);
+        flex-shrink: 0;
+      }
+      .cbh-title { font-weight: 600; font-size: 15px; }
+      .cbh-count {
+        font-size: 12px;
+        color: var(--text-secondary, #888);
+        margin-left: auto;
+      }
+      .cbh-close {
+        background: none; border: none; color: inherit;
+        font-size: 20px; cursor: pointer; padding: 2px 6px;
+        border-radius: 4px;
+      }
+      .cbh-close:hover { background: var(--hover-bg, rgba(255,255,255,.1)); }
+      .cbh-search-row {
+        display: flex;
+        gap: 8px;
+        padding: 10px 16px;
+        border-bottom: 1px solid var(--border-color, #333);
+        flex-shrink: 0;
+      }
+      .cbh-search {
+        flex: 1;
+        padding: 6px 10px;
+        border: 1px solid var(--border-color, #444);
+        border-radius: 6px;
+        background: var(--bg-secondary, #16213e);
+        color: inherit;
+        font-size: 13px;
+        outline: none;
+      }
+      .cbh-search:focus { border-color: var(--accent-color, #4cc9f0); }
+      .cbh-clear-all {
+        background: none; border: none; cursor: pointer;
+        font-size: 16px; padding: 4px 6px; border-radius: 4px;
+        color: inherit;
+      }
+      .cbh-clear-all:hover { background: rgba(255,80,80,.15); }
+      .cbh-list {
+        flex: 1;
+        overflow-y: auto;
+        padding: 8px 0;
+      }
+      .cbh-entry {
+        padding: 10px 16px;
+        border-bottom: 1px solid var(--border-color, rgba(255,255,255,.05));
+        cursor: pointer;
+        transition: background .15s;
+      }
+      .cbh-entry:hover { background: var(--hover-bg, rgba(255,255,255,.06)); }
+      .cbh-entry-preview {
+        font-size: 13px;
+        line-height: 1.4;
+        white-space: pre-wrap;
+        word-break: break-word;
+        max-height: 4.2em;
+        overflow: hidden;
+        color: var(--text-primary, #e0e0e0);
+      }
+      .cbh-entry-meta {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 4px;
+        font-size: 11px;
+        color: var(--text-secondary, #888);
+      }
+      .cbh-source-badge {
+        padding: 1px 6px;
+        border-radius: 3px;
+        font-size: 10px;
+        background: var(--accent-color, #4cc9f0);
+        color: #000;
+        font-weight: 600;
+      }
+      .cbh-source-badge.code { background: #f0a500; }
+      .cbh-actions {
+        display: flex;
+        gap: 4px;
+        margin-top: 6px;
+      }
+      .cbh-actions button {
+        background: var(--bg-secondary, #16213e);
+        border: 1px solid var(--border-color, #444);
+        color: inherit;
+        padding: 3px 10px;
+        border-radius: 4px;
+        font-size: 11px;
+        cursor: pointer;
+      }
+      .cbh-actions button:hover { background: var(--hover-bg, rgba(255,255,255,.12)); }
+      .cbh-empty {
+        text-align: center;
+        padding: 40px 20px;
+        color: var(--text-secondary, #888);
+        font-size: 14px;
+      }
+    `;
+    document.head.appendChild(style);
+    document.body.appendChild(panelEl);
+
+    // Wire events
+    listEl = panelEl.querySelector('#cbh-list');
+    countEl = panelEl.querySelector('#cbh-count');
+    searchInput = panelEl.querySelector('.cbh-search');
+
+    panelEl.querySelector('.cbh-close').addEventListener('click', close);
+    panelEl.querySelector('.cbh-clear-all').addEventListener('click', () => {
+      if (entries.length > 0 && confirm('Clear all clipboard history?')) clearAll();
+    });
+    searchInput.addEventListener('input', _renderList);
+
+    // Close on Escape
+    panelEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { close(); e.stopPropagation(); }
+    });
+
+    _renderList();
+  }
+
+  function _renderList() {
+    if (!listEl || !countEl) return;
+
+    const query = searchInput ? searchInput.value.trim().toLowerCase() : '';
+    const filtered = query
+      ? entries.filter(e => e.text.toLowerCase().includes(query))
+      : entries;
+
+    countEl.textContent = `${filtered.length}/${entries.length}`;
+
+    if (filtered.length === 0) {
+      listEl.innerHTML = `<div class="cbh-empty">${
+        entries.length === 0
+          ? '📋 No clips yet.<br>Copy text from chat to start tracking.'
+          : 'No matches found.'
+      }</div>`;
+      return;
+    }
+
+    const frag = document.createDocumentFragment();
+    filtered.forEach((entry, idx) => {
+      const realIdx = entries.indexOf(entry);
+      const el = document.createElement('div');
+      el.className = 'cbh-entry';
+      el.setAttribute('role', 'listitem');
+
+      const preview = entry.text.length > PREVIEW_LENGTH
+        ? entry.text.slice(0, PREVIEW_LENGTH) + '…'
+        : entry.text;
+      const timeAgo = formatRelativeTime(new Date(entry.timestamp).toISOString());
+      const sourceClass = entry.source === 'code-block' ? 'code' : '';
+      const sourceLabel = entry.source === 'code-block' ? 'CODE' : 'TEXT';
+
+      el.innerHTML = `
+        <div class="cbh-entry-preview">${_escapeHtml(preview)}</div>
+        <div class="cbh-entry-meta">
+          <span class="cbh-source-badge ${sourceClass}">${sourceLabel}</span>
+          <span>${timeAgo}</span>
+          <span>·</span>
+          <span>${entry.text.length} chars</span>
+        </div>
+        <div class="cbh-actions">
+          <button class="cbh-copy-btn" title="Copy to clipboard">📋 Copy</button>
+          <button class="cbh-insert-btn" title="Insert into chat input">⬇️ Insert</button>
+          <button class="cbh-remove-btn" title="Remove">✕</button>
+        </div>
+      `;
+
+      el.querySelector('.cbh-copy-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        navigator.clipboard.writeText(entry.text).then(() => {
+          const btn = e.target;
+          btn.textContent = '✓ Copied';
+          setTimeout(() => { btn.textContent = '📋 Copy'; }, 1500);
+        });
+      });
+
+      el.querySelector('.cbh-insert-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        const input = document.getElementById('chat-input');
+        if (input) {
+          const start = input.selectionStart || input.value.length;
+          input.value = input.value.slice(0, start) + entry.text + input.value.slice(start);
+          input.focus();
+          close();
+        }
+      });
+
+      el.querySelector('.cbh-remove-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        remove(realIdx);
+      });
+
+      frag.appendChild(el);
+    });
+
+    listEl.innerHTML = '';
+    listEl.appendChild(frag);
+  }
+
+  function _escapeHtml(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  // ── Toggle / Open / Close ────────────────────────────────────────
+
+  function toggle() {
+    _createPanel();
+    if (panelEl.classList.contains('cbh-open')) {
+      close();
+    } else {
+      open();
+    }
+    return panelEl.classList.contains('cbh-open');
+  }
+
+  function open() {
+    _createPanel();
+    panelEl.classList.add('cbh-open');
+    if (searchInput) { searchInput.value = ''; searchInput.focus(); }
+    _renderList();
+  }
+
+  function close() {
+    if (panelEl) panelEl.classList.remove('cbh-open');
+  }
+
+  function isOpen() {
+    return panelEl ? panelEl.classList.contains('cbh-open') : false;
+  }
+
+  // ── Init ─────────────────────────────────────────────────────────
+
+  function init() {
+    _load();
+
+    // Listen for copy events on the chat output
+    document.addEventListener('copy', _onCopy);
+
+    // Register keyboard shortcut: Ctrl+Shift+V
+    document.addEventListener('keydown', (e) => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'V') {
+        e.preventDefault();
+        toggle();
+      }
+    });
+  }
+
+  return {
+    init,
+    record,
+    getAll,
+    count,
+    remove,
+    clearAll,
+    toggle,
+    open,
+    close,
+    isOpen,
+    // Exposed for testing
+    STORAGE_KEY,
+    MAX_ENTRIES,
+    MAX_TEXT_LENGTH,
+    PREVIEW_LENGTH
+  };
+})();
+
+document.addEventListener('DOMContentLoaded', ClipboardHistory.init);
 
 /* ── Offline Detection & Service Worker Registration ───────────────── */
 const OfflineManager = (function () {

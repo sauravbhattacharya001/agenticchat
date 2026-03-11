@@ -320,6 +320,7 @@ function loadApp() {
     'UsageHeatmap',
     'ContextWindowMeter',
     'ConversationAgenda',
+    'ClipboardHistory',
     'OfflineManager'
   ];
 
