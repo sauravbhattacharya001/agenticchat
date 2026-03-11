@@ -3340,40 +3340,53 @@ const KeyboardShortcuts = (() => {
   }
 
   /**
+   * Ctrl+key dispatch table — maps a key to its handler.
+   * Simple shortcuts that just call a single function go here;
+   * multi-step or conditional shortcuts stay in handleKeydown.
+   *
+   * Adding a new Ctrl shortcut is now a one-line table entry
+   * instead of a 5-line if-block.
+   */
+  const _ctrlBindings = {
+    'l': () => ChatController.clearHistory(),
+    'h': () => HistoryPanel.toggle(),
+    't': () => PromptTemplates.toggle(),
+    'j': () => SessionManager.toggle(),
+    'n': () => SessionManager.newSession(),
+    'b': () => ChatBookmarks.togglePanel(),
+    'f': () => MessageSearch.toggle(),
+    'd': () => ThemeManager.toggle(),
+    'p': () => PersonaPresets.toggle(),
+    'i': () => ChatStats.toggle(),
+    '.': () => Scratchpad.toggle(),
+  };
+
+  /**
    * Main keyboard handler.
-   * Ctrl+L: clear conversation
-   * Ctrl+H: toggle history
-   * Ctrl+T: toggle templates
-   * Ctrl+S: toggle snippets
-   * Ctrl+K: focus chat input
-   * ?: show shortcuts help (only when not typing)
-   * Escape: close any open panel/modal
+   * Simple Ctrl+key combos are dispatched via _ctrlBindings above.
+   * Complex shortcuts (shift variants, DOM checks) remain inline.
+   *
+   * Shortcut summary:
+   *   Ctrl+L: clear   Ctrl+H: history   Ctrl+T: templates
+   *   Ctrl+S: snippets (Shift: global search)   Ctrl+J: sessions
+   *   Ctrl+N: new session   Ctrl+K: focus input   Ctrl+B: bookmarks
+   *   Ctrl+F: search   Ctrl+M: voice   Ctrl+D: theme   Ctrl+P: persona
+   *   Ctrl+I: stats   Ctrl+.: scratchpad   ?: shortcuts help
    */
   function handleKeydown(e) {
     const ctrl = e.ctrlKey || e.metaKey;
 
-    // Ctrl+L — clear conversation
-    if (ctrl && e.key === 'l') {
-      e.preventDefault();
-      ChatController.clearHistory();
-      return;
+    // ── Dispatch simple Ctrl+key bindings ──
+    if (ctrl) {
+      const handler = _ctrlBindings[e.key];
+      if (handler) {
+        e.preventDefault();
+        handler();
+        return;
+      }
     }
 
-    // Ctrl+H — toggle history panel
-    if (ctrl && e.key === 'h') {
-      e.preventDefault();
-      HistoryPanel.toggle();
-      return;
-    }
-
-    // Ctrl+T — toggle templates panel
-    if (ctrl && e.key === 't') {
-      e.preventDefault();
-      PromptTemplates.toggle();
-      return;
-    }
-
-    // Ctrl+S — toggle snippets panel; Ctrl+Shift+S — global session search
+    // ── Ctrl+S / Ctrl+Shift+S — snippets vs global session search ──
     if (ctrl && e.key === 's') {
       e.preventDefault();
       if (e.shiftKey) {
@@ -3384,21 +3397,7 @@ const KeyboardShortcuts = (() => {
       return;
     }
 
-    // Ctrl+J — toggle sessions panel
-    if (ctrl && e.key === 'j') {
-      e.preventDefault();
-      SessionManager.toggle();
-      return;
-    }
-
-    // Ctrl+N — new session
-    if (ctrl && e.key === 'n') {
-      e.preventDefault();
-      SessionManager.newSession();
-      return;
-    }
-
-    // Ctrl+K — focus chat input
+    // ── Ctrl+K — focus chat input ──
     if (ctrl && e.key === 'k') {
       e.preventDefault();
       const input = document.getElementById('chat-input');
@@ -3406,21 +3405,7 @@ const KeyboardShortcuts = (() => {
       return;
     }
 
-    // Ctrl+B — toggle bookmarks panel
-    if (ctrl && e.key === 'b') {
-      e.preventDefault();
-      ChatBookmarks.togglePanel();
-      return;
-    }
-
-    // Ctrl+F — toggle message search
-    if (ctrl && e.key === 'f') {
-      e.preventDefault();
-      MessageSearch.toggle();
-      return;
-    }
-
-    // Ctrl+M — toggle voice input
+    // ── Ctrl+M — toggle voice input (skip if button disabled) ──
     if (ctrl && e.key === 'm') {
       e.preventDefault();
       const voiceBtn = document.getElementById('voice-btn');
@@ -3428,48 +3413,20 @@ const KeyboardShortcuts = (() => {
       return;
     }
 
-    // Ctrl+D — toggle dark/light theme
-    if (ctrl && e.key === 'd') {
-      e.preventDefault();
-      ThemeManager.toggle();
-      return;
-    }
-
-    // Ctrl+P — toggle persona presets
-    if (ctrl && e.key === 'p') {
-      e.preventDefault();
-      PersonaPresets.toggle();
-      return;
-    }
-
-    // Ctrl+I — toggle chat statistics
-    if (ctrl && e.key === 'i') {
-      e.preventDefault();
-      ChatStats.toggle();
-      return;
-    }
-
-    // Ctrl+. — toggle scratchpad
-    if (ctrl && e.key === '.') {
-      e.preventDefault();
-      Scratchpad.toggle();
-      return;
-    }
-
-    // ? — show shortcuts help (only when not typing in an input)
+    // ── ? — show shortcuts help (only when not typing in an input) ──
     if (e.key === '?' && !ctrl && !e.altKey && !isInputFocused()) {
       e.preventDefault();
       toggleHelp();
       return;
     }
 
-    // Escape — close shortcuts help (other panels handled by existing handler)
+    // ── Escape — close shortcuts help (other panels handled by existing handler) ──
     if (e.key === 'Escape' && isHelpOpen) {
       hideHelp();
       // Don't return — let existing Escape handler also close other panels
     }
 
-    // Escape — close search bar
+    // ── Escape — close search bar ──
     if (e.key === 'Escape' && MessageSearch.isSearchOpen()) {
       MessageSearch.close();
     }
