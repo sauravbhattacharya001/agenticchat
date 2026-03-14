@@ -54,10 +54,10 @@ describe('CostDashboard', () => {
 
   test('recordUsage defaults model to ChatConfig.MODEL', () => {
     const originalModel = ChatConfig.MODEL;
-    ChatConfig.MODEL = 'gpt-3.5-turbo';
+    ChatConfig.MODEL = 'gpt-4.1-mini';
     CostDashboard.recordUsage({ prompt_tokens: 50, completion_tokens: 30 });
     const log = CostDashboard.getLog();
-    expect(log[0].model).toBe('gpt-3.5-turbo');
+    expect(log[0].model).toBe('gpt-4.1-mini');
     ChatConfig.MODEL = originalModel;
   });
 
