@@ -1,8 +1,8 @@
 {
-  "lastRun": "2026-03-10T22:45:00-07:00",
-  "runsCompleted": 62,
-  "lastRepo": "agenticchat",
-  "lastFeature": "ClipboardHistory",
+  "lastRun": "2026-03-10T23:15:00-07:00",
+  "runsCompleted": 63,
+  "lastRepo": "FeedReader",
+  "lastFeature": "ArticleGeoTagger",
   "repoFeatures": {
     "Ocaml-sample-code": [
       "Zipper  -- functional cursor (list/tree/filesystem)",
@@ -85,7 +85,9 @@
       "Reading Speed Tracker  -- personalized WPM, length-adjusted estimates, trend analysis, feed/category breakdowns, population percentile",
       "Reading Rituals  -- named, recurring reading sessions with schedules, feed filters, goals, streaks, and analytics. 32 tests.",
       "ArticleRelationshipMapper -- user-curated knowledge graph between articles. 10 relationship types, directional edges, strength levels, BFS cluster detection, JSON export/import. 40 XCTest cases. (PR #63)",
-      "ArticleFreshnessTracker -- temporal reference detection, freshness classification, decay scoring, staleness alerts, batch analysis. 47 tests. (PR #65)"
+      "ArticleFreshnessTracker -- temporal reference detection, freshness classification, decay scoring, staleness alerts, batch analysis. 47 tests. (PR #65)",
+      "ArticleLanguageDetector -- trigram-based language detection (15 languages), feed language profiles, diversity scoring, multilingual feed detection, JSON export/import. 42 tests.",
+      "ArticleGeoTagger -- geographic location extraction using built-in gazetteer (~130 locations, 7 regions). Trigram fuzzy matching, aliases, region/country breakdowns, filter by geography, aggregate stats. 47 tests. (PR #68)"
     ],
     "prompt": [
       "PromptConditional  -- if/else/switch/case conditional logic for prompt templates (7 operators, nesting, validation, 33 tests)",
@@ -110,5 +112,5 @@
       "Maintenance Window Manager - scheduled finding suppression for planned maintenance. Create/cancel/extend windows, category/severity/title filters, recurring windows, apply to findings, purge expired, text reports, JSON export/import. 39 xUnit tests."
     ]
   },
-  "totalRuns": 275
+  "totalRuns": 276
 }

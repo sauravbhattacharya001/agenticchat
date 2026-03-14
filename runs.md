@@ -1,3 +1,15 @@
+### Builder #276 (FeedReader) - 2026-03-10
+- **ArticleGeoTagger**: Geographic location extraction using built-in gazetteer (~130 locations, 7 regions). Trigram fuzzy matching, aliases, region/country breakdowns, filter by geography, aggregate stats. 47 tests. PR #68 merged.
+### Builder Run 276 - 2026-03-10
+- **FeedReader**: ArticleLanguageDetector — trigram-based language detection for 15 languages (EN/ES/FR/DE/IT/PT/NL/SV/NO/DA/TR/PL/CS/RO/ID). Feed language profiles, diversity scoring, multilingual feed detection, confidence filtering, text reports, JSON export/import. 42 XCTest cases. Commit 0da840c.
+
+### Gardener Run 953-954 - 2026-03-10
+- **getagentbox** (fix_issue): Fixed #63 — 5 scroll modules (CommandPalette, ApiExplorer, WorkflowTemplates, PipelineBuilder, SectionMinimap) now respect `prefersReducedMotion` flag, using `behavior: 'auto'` instead of `'smooth'` when reduced motion is preferred. WCAG 2.3.3 compliance. Commit bd5ef3f.
+- **VoronoiMap** (fix_issue): Fixed #82 — `plan_path()` now validates SVG/JSON/CSV output paths via `vormap.validate_output_path()` before writing, matching the security pattern used in all other export functions. Commit 5a270d6.
+
+### Daily Memory Backup - 2026-03-10
+- Committed 6 files (incl. new memory/2026-03-10.md) and pushed to backup repo. Force-with-lease due to diverged remote.
+
 ### Builder #275 (agenticchat) - 2026-03-10
 - **ClipboardHistory**: Auto-captures copy events from chat output, searchable slide-out panel (Ctrl+Shift+V or /clips). Distinguishes code-block vs message text, deduplicates consecutive copies, persistent localStorage (50 entries max), one-click re-copy or insert. 33 tests. PR #71 merged.
 ### Builder #275 (Ocaml-sample-code) - 2026-03-10
@@ -8613,6 +8625,7 @@ All sub-agent and cron job runs logged here. Most recent first.
 ### Gardener Run #486
 - **Task 1:** perf_improvement on Vidly � (1) `ReviewService.GetSummary()`: 8+ LINQ passes ? single foreach with inline accumulators (star sum, star distribution array, HashSets for distinct movies/customers, inline max-tracking for most-reviewed). (2) `ReviewService.Enrich()`: N+1 per-review `GetById` calls ? deduplicated lookups via HashSet of unique IDs, reducing from O(2R) to O(C+M). (3) `CustomerActivityService.BuildSummary()`: eliminated 2 extra `Min()`/`Max()` passes by tracking first/last rental dates inline. 619/634 tests (15 pre-existing). Commit `d5e5372`.
 - **Task 2:** perf_improvement on FeedReader � (1) `ReadingStatsManager.computeStats()`: 5 passes (3 `filter()` + 2 loops) ? single loop computing today/week/month counts, hourly distribution, and feed breakdown simultaneously. (2) `ReadingHistoryManager.historySummary()`: 4 passes (2 loops + 2 `reduce` properties) ? single loop with local accumulators. (3) `ReadingHistoryManager.recordVisit()`: O(n) `rebuildIndex()` ? O(index) incremental update of shifted entries only, with guard for index==0 empty-range crash. Commit `dd96b1e`.
+
 
 
 
