@@ -1,185 +1,185 @@
 {
   "lastUpdated": "2026-03-11T07:00:00.000Z",
-  "totalRuns": 954,
+  "totalRuns": 972,
   "taskTypes": {
     "setup_copilot_agent": {
-      "weight": 8,
+      "weight": 2,
       "runs": 16,
       "successes": 16,
       "description": "Set up GitHub Copilot coding agent"
     },
     "bug_fix": {
-      "weight": 8,
+      "weight": 2,
       "runs": 86,
       "successes": 87
     },
     "security_fix": {
-      "weight": 8,
-      "runs": 70,
-      "successes": 70,
+      "weight": 2,
+      "runs": 71,
+      "successes": 71,
       "description": "Fix security vulnerability",
       "totalDone": 1
     },
     "perf_improvement": {
-      "weight": 8,
-      "runs": 69,
-      "successes": 69,
+      "weight": 2,
+      "runs": 70,
+      "successes": 70,
       "totalDone": 1,
       "attempts": 2
     },
     "refactor": {
-      "weight": 8,
+      "weight": 2,
       "runs": 52,
       "successes": 55,
       "description": "Architecture/code refactor",
       "attempts": 2
     },
     "add_tests": {
-      "weight": 8,
-      "runs": 65,
-      "successes": 65,
+      "weight": 2,
+      "runs": 66,
+      "successes": 66,
       "description": "Add meaningful tests",
       "attempts": 2
     },
     "readme_overhaul": {
-      "weight": 8,
+      "weight": 2,
       "runs": 20,
       "successes": 20,
       "description": "Overhaul repo README"
     },
     "doc_update": {
-      "weight": 8,
-      "runs": 61,
-      "successes": 63,
+      "weight": 2,
+      "runs": 62,
+      "successes": 64,
       "description": "Improve non-README documentation",
       "attempts": 1
     },
     "code_cleanup": {
-      "weight": 8,
-      "runs": 52,
-      "successes": 52,
+      "weight": 2,
+      "runs": 55,
+      "successes": 55,
       "description": "Remove dead code, unused deps",
       "totalDone": 1,
       "attempts": 4
     },
     "open_issue": {
-      "weight": 8,
-      "runs": 94,
-      "successes": 97,
+      "weight": 2,
+      "runs": 96,
+      "successes": 99,
       "description": "Open a thoughtful issue",
       "totalDone": 1,
       "attempts": 3
     },
     "fix_issue": {
-      "weight": 8,
-      "runs": 166,
-      "successes": 165,
+      "weight": 2,
+      "runs": 176,
+      "successes": 176,
       "description": "Fix an existing open issue"
     },
     "merge_dependabot": {
-      "weight": 13,
+      "weight": 7,
       "runs": 22,
       "successes": 19,
       "description": "Review and merge open Dependabot PRs"
     },
     "add_ci_cd": {
-      "weight": 8,
+      "weight": 2,
       "runs": 14,
       "successes": 14,
       "description": "Add GitHub Actions CI/CD workflow"
     },
     "add_codeql": {
-      "weight": 8,
+      "weight": 2,
       "runs": 15,
       "successes": 15,
       "description": "Add CodeQL security scanning"
     },
     "add_dependabot": {
-      "weight": 8,
+      "weight": 2,
       "runs": 16,
       "successes": 16,
       "description": "Add dependabot config"
     },
     "deploy_pages": {
-      "weight": 8,
+      "weight": 2,
       "runs": 16,
       "successes": 16,
       "description": "Deploy to GitHub Pages"
     },
     "create_release": {
-      "weight": 8,
+      "weight": 2,
       "runs": 21,
       "successes": 21,
       "description": "Create GitHub Release with tag + changelog"
     },
     "add_dockerfile": {
-      "weight": 8,
+      "weight": 2,
       "runs": 10,
       "successes": 10,
       "description": "Add Dockerfile"
     },
     "docker_workflow": {
-      "weight": 8,
+      "weight": 2,
       "runs": 17,
       "successes": 17,
       "description": "Add Docker build/push workflow"
     },
     "package_publish": {
-      "weight": 8,
+      "weight": 2,
       "runs": 17,
       "successes": 17,
       "description": "Set up package publishing (PyPI/npm/NuGet)"
     },
     "add_badges": {
-      "weight": 8,
+      "weight": 2,
       "runs": 11,
       "successes": 11,
       "description": "Add badges to README"
     },
     "add_license": {
-      "weight": 8,
+      "weight": 2,
       "runs": 8,
       "successes": 8,
       "description": "Add/update LICENSE file"
     },
     "issue_templates": {
-      "weight": 8,
+      "weight": 2,
       "runs": 16,
       "successes": 16,
       "description": "Add issue/PR templates"
     },
     "contributing_md": {
-      "weight": 8,
+      "weight": 2,
       "runs": 16,
       "successes": 16,
       "description": "Add CONTRIBUTING.md"
     },
     "repo_topics": {
-      "weight": 8,
+      "weight": 2,
       "runs": 12,
       "successes": 12,
       "description": "Add repo topics/tags"
     },
     "branch_protection": {
-      "weight": 8,
+      "weight": 2,
       "runs": 15,
       "successes": 15,
       "description": "Configure branch protection"
     },
     "code_coverage": {
-      "weight": 8,
+      "weight": 2,
       "runs": 19,
       "successes": 19,
       "description": "Add code coverage reporting"
     },
     "docs_site": {
-      "weight": 8,
+      "weight": 2,
       "runs": 16,
       "successes": 16,
       "description": "Generate & deploy docs site"
     },
     "auto_labeler": {
-      "weight": 8,
+      "weight": 2,
       "runs": 16,
       "successes": 16,
       "description": "Add auto-labeler or stale bot"
@@ -685,21 +685,21 @@
       "docs_site"
     ]
   },
-  "notes": "Run 953-954. getagentbox: fixed prefers-reduced-motion in 5 scroll modules (#63). VoronoiMap: added validate_output_path to plan_path (#82).",
-  "lastRepo": "VoronoiMap",
-  "lastRun": 954,
-  "runCount": 72,
-  "lastWeightAdjustment": 950,
+  "notes": "Run 971-972. prompt: consolidated 6 delimiter regex fields into array+loop (PR #71); added 36 PromptDiff tests 12->48 (PR #72).",
+  "lastRepo": "prompt",
+  "lastRun": 972,
+  "runCount": 77,
+  "lastWeightAdjustment": 970,
   "adjustmentHistory": [
     {
       "run": 650,
       "changes": {
-        "merge_dependabot": "94Ã¢â€ â€™72 (frequently re-rolled, no Dependabot PRs exist)",
-        "fix_issue": "80Ã¢â€ â€™75 (often no open issues, requires re-roll)",
-        "security_fix": "90Ã¢â€ â€™92 (consistently productive)",
-        "add_tests": "90Ã¢â€ â€™92 (consistently productive)",
-        "refactor": "81Ã¢â€ â€™83 (consistently productive)",
-        "perf_improvement": "86Ã¢â€ â€™88 (consistently productive)"
+        "merge_dependabot": "94\u00c3\u0192\u00c2\u00a2\u00c3\u00a2\u00e2\u201a\u00ac\u00c2\u00a0\u00c3\u00a2\u00e2\u201a\u00ac\u00e2\u201e\u00a272 (frequently re-rolled, no Dependabot PRs exist)",
+        "fix_issue": "80\u00c3\u0192\u00c2\u00a2\u00c3\u00a2\u00e2\u201a\u00ac\u00c2\u00a0\u00c3\u00a2\u00e2\u201a\u00ac\u00e2\u201e\u00a275 (often no open issues, requires re-roll)",
+        "security_fix": "90\u00c3\u0192\u00c2\u00a2\u00c3\u00a2\u00e2\u201a\u00ac\u00c2\u00a0\u00c3\u00a2\u00e2\u201a\u00ac\u00e2\u201e\u00a292 (consistently productive)",
+        "add_tests": "90\u00c3\u0192\u00c2\u00a2\u00c3\u00a2\u00e2\u201a\u00ac\u00c2\u00a0\u00c3\u00a2\u00e2\u201a\u00ac\u00e2\u201e\u00a292 (consistently productive)",
+        "refactor": "81\u00c3\u0192\u00c2\u00a2\u00c3\u00a2\u00e2\u201a\u00ac\u00c2\u00a0\u00c3\u00a2\u00e2\u201a\u00ac\u00e2\u201e\u00a283 (consistently productive)",
+        "perf_improvement": "86\u00c3\u0192\u00c2\u00a2\u00c3\u00a2\u00e2\u201a\u00ac\u00c2\u00a0\u00c3\u00a2\u00e2\u201a\u00ac\u00e2\u201e\u00a288 (consistently productive)"
       }
     },
     {
@@ -735,11 +735,46 @@
         "docs_site": "20 -> 17 (rate=100%, all_done=True)",
         "auto_labeler": "20 -> 17 (rate=100%, all_done=True)"
       }
+    },
+    {
+      "run": 970,
+      "changes": {
+        "setup_copilot_agent": "5 -> 2 (rate=100%, all_done=True)",
+        "bug_fix": "5 -> 2 (rate=101%, all_done=True)",
+        "security_fix": "5 -> 2 (rate=100%, all_done=True)",
+        "perf_improvement": "5 -> 2 (rate=100%, all_done=True)",
+        "refactor": "5 -> 2 (rate=106%, all_done=True)",
+        "add_tests": "5 -> 2 (rate=100%, all_done=True)",
+        "readme_overhaul": "5 -> 2 (rate=100%, all_done=True)",
+        "doc_update": "5 -> 2 (rate=103%, all_done=True)",
+        "code_cleanup": "5 -> 2 (rate=100%, all_done=True)",
+        "open_issue": "5 -> 2 (rate=103%, all_done=True)",
+        "fix_issue": "5 -> 2 (rate=100%, all_done=True)",
+        "merge_dependabot": "10 -> 7 (rate=86%, all_done=True)",
+        "add_ci_cd": "5 -> 2 (rate=100%, all_done=True)",
+        "add_codeql": "5 -> 2 (rate=100%, all_done=True)",
+        "add_dependabot": "5 -> 2 (rate=100%, all_done=True)",
+        "deploy_pages": "5 -> 2 (rate=100%, all_done=True)",
+        "create_release": "5 -> 2 (rate=100%, all_done=True)",
+        "add_dockerfile": "5 -> 2 (rate=100%, all_done=True)",
+        "docker_workflow": "5 -> 2 (rate=100%, all_done=True)",
+        "package_publish": "5 -> 2 (rate=100%, all_done=True)",
+        "add_badges": "5 -> 2 (rate=100%, all_done=True)",
+        "add_license": "5 -> 2 (rate=100%, all_done=True)",
+        "issue_templates": "5 -> 2 (rate=100%, all_done=True)",
+        "contributing_md": "5 -> 2 (rate=100%, all_done=True)",
+        "repo_topics": "5 -> 2 (rate=100%, all_done=True)",
+        "branch_protection": "5 -> 2 (rate=100%, all_done=True)",
+        "code_coverage": "5 -> 2 (rate=100%, all_done=True)",
+        "docs_site": "5 -> 2 (rate=100%, all_done=True)",
+        "auto_labeler": "5 -> 2 (rate=100%, all_done=True)"
+      }
     }
   ],
   "lastTasks": [
-    "fix_issue",
-    "fix_issue"
+    "code_cleanup",
+    "add_tests"
   ],
-  "lastAdjusted": 912
+  "lastAdjusted": 912,
+  "lastUpdated_human": "2026-03-13T22:55:00-07:00"
 }

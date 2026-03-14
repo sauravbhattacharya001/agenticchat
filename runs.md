@@ -1,3 +1,77 @@
+### Builder #281 (Ocaml-sample-code) - 2026-03-13
+- **signal_processing.ml**: Module #85. Cooley-Tukey radix-2 FFT/IFFT, magnitude/power/phase spectrum, spectral centroid, peak detection, 5 window functions (Hamming/Hann/Blackman/flat-top/rectangular), linear/circular convolution, cross-correlation, autocorrelation, 6 signal generators (sine/square/sawtooth/triangle/noise/chirp), time-domain analysis (ZCR, RMS, energy, peak-to-peak), moving average + EMA filters, ASCII waveform printer. 95+ test assertions. PR #41 merged.
+### Builder #281 (everything) - 2026-03-13
+- Added Meditation Tracker Screen — 3-tab UI (Log/History/Insights). Log tab: 9 technique types, duration slider with quick presets, emoji mood scale (1-10) before/after, guide name, notes, interrupted toggle. History: swipe-to-delete session list with detail dialogs. Insights: 6 stat cards (time, sessions, streak, best streak, avg duration, completion rate), technique breakdown bars, mood impact ranking, AI insights. Wired into home screen. Pushed to master.
+
+### Gardener #971 (code_cleanup, prompt) - 2026-03-13
+- Consolidated 6 delimiter Regex fields (`SystemDelimiterPattern`, `InstDelimiterPattern`, etc.) into single `DelimiterSanitizeRules` array + foreach loop. Adding new delimiters is now a one-liner. -3 net lines. 117 tests pass. PR #71 merged.
+
+### Gardener #972 (add_tests, prompt) - 2026-03-13
+- Added 36 tests for `PromptDiff` (12 -> 48 total). Covers: DiffChange.ToString(), DiffResult counters, similarity edge cases, LCS line diff, CompareEntries metadata transitions, CompareLibraries edge cases, formatting outputs, large text fallback, case insensitivity. PR #72 merged.
+### Gardener Run 971-972 — 2026-03-13
+- **agenticchat**: Fixed #59 — Enter key bypassed offline send protection. Added `OfflineManager.isOffline()` guard in `send()` to catch all entry points. PR #63 merged.
+- **gif-captcha**: Fixed #49 — `findSimilarSessions()` had O(n²) unbounded complexity. Added `maxCompare` (1000), `maxResults` (100), pagination (`offset`), and optional session TTL eviction. Backward compatible. PR #50 merged.
+### Builder #280 (GraphVisual) - 2026-03-13
+- **GraphSymmetryAnalyzer**: Automorphism orbit computation via Weisfeiler-Leman colour refinement (1-WL). Vertex/edge orbits, vertex/edge/arc transitivity detection, symmetry factor, symmetric vertex fraction, fixed points, orbit size distribution, distinguishing number lower bound, text report. Correctly classifies complete graphs, cycles, paths, stars, Petersen graph, K_{3,3}, Q3 cube. 45 tests. PR #71 merged.
+### Builder #280 (gif-captcha) - 2026-03-13
+- Added CAPTCHA Audit Log: structured, queryable event trail for all CAPTCHA lifecycle events. 17 event types, severity classification, rich query/filter API, challenge tracing, correlation grouping, CSV/JSON export/import, retention policies. 52 tests.
+
+### Gardener #969 (open_issue, everything) - 2026-03-13
+- Filed issue #59: SubscriptionTracker renewal calendar drifts — uses fixed day counts (monthly=30, quarterly=91, annual=365) instead of calendar months. Causes dates to drift by 5+ days over 12 monthly cycles.
+
+### Gardener #970 (fix_issue #59, everything) - 2026-03-13
+- Fixed subscription renewal drift with calendar-month arithmetic. Added `BillingCycle.advanceDate()` with proper month math + end-of-month clamping (Jan 31 -> Feb 28). Updated `getRenewalCalendar()` and `totalSpent`. 17 new tests. PR #60 merged.
+- **Weight adjustment at run 970**: All weights 5->2, merge_dependabot 10->7 (all repos fully gardened).
+### Gardener Run 967-968 - 2026-03-13
+- **Vidly** (fix_issue #72): Introduced `IClock` interface + `SystemClock`/`TestClock`. Replaced all 100 `DateTime.Now` calls across 24 services with injected `_clock.Now`. Optional constructor parameter ensures backward compatibility. Commit b92bbb5.
+- **WinSentinel** (fix_issue #51): Replaced all 102 empty `catch` blocks across 32 files with `System.Diagnostics.Debug.WriteLine` logging. Critical for a security auditing tool — failed checks no longer silently swallowed. Commit 368c4f4.
+### Builder #279 (VoronoiMap) - 2026-03-13
+- **vormap_shape**: Cell shape analysis module — compactness (IPQ), shape index, elongation (rotating calipers MBR), rectangularity, centroid displacement, orientation, shape classification. Aggregate stats, text report, JSON/CSV export, CLI. 64 tests. PR #84 merged.
+### Builder #279 (sauravcode) - 2026-03-13
+- **Syntax Highlighter (sauravhl.py)**: ANSI terminal + HTML output with 6 themes (default, monokai, solarized, dracula, github, nord). Semantic classification (control/decl/type keywords, builtins, strings, f-strings, comments). Line numbers, recursive directory processing, HTML fragments. 47 tests.
+
+### Gardener #965 (doc_update, ai) - 2026-03-13
+- **Missing API docs**: Added docs for dashboard.py (533 lines), safety_drill.py (913 lines), swarm.py (713 lines). Updated api/index.md tables + Quick Import. 59→62 documented modules. PR #54 merged.
+
+### Gardener #966 (perf_improvement, ai) - 2026-03-13
+- **O(n) → O(1) lookups**: covert_channels.py O(n²) `all_msgs.index()` → dict lookup. killchain.py 5× `STAGE_ORDER.index()` → `_STAGE_RANK` dict. 120/120 tests pass. PR #55 merged.
+### Gardener #963 (fix_issue, WinSentinel) - 2026-03-13
+- **UTC timestamp normalization**: Fixed #74 — AuditHistoryService stored timestamps with local timezone offsets, breaking string comparison for GetHistory/PurgeOldRuns. Now normalizes to UTC via `ToUniversalTime()` and uses `CultureInfo.InvariantCulture` for all `DateTimeOffset.Parse` calls.
+
+### Gardener #964 (fix_issue, agenticchat) - 2026-03-13
+- **Wire SmartRetry into send()**: Fixed #64 — SmartRetry module (280 lines with exponential backoff, visual countdown, cancel button) was never called. Wrapped both streaming and non-streaming `callOpenAI` paths with `SmartRetry.withRetry()`. Streaming retries reset chat output to prevent partial response accumulation.
+
+### Gardener #961 (security_fix, WinSentinel) - 2026-03-13
+- **CSV formula injection fix**: CsvEscape() in ReportGenerator.cs — values starting with = + - @ TAB CR now single-quote prefixed (CWE-1236). 8 new tests, 13/13 pass. PR #86 merged.
+
+### Gardener #962 (code_cleanup, WinSentinel) - 2026-03-13
+- **WriteHelpEntry() helper**: Extracted from PrintHelp() — 40+ entries used 4-line color save/restore pattern. -132 lines (1681→1549). 156/156 tests pass. PR #87 merged.
+### Builder #279 (everything) - 2026-03-13
+- **Feature:** Home Inventory Tracker — catalog belongings by room (13 rooms, 13 categories, 5 condition ratings), age+condition depreciation, insurance report generator, JSON export/import, 3-tab Flutter UI (Items/Rooms/Summary), 30 tests.
+- **Commit:** 257e395
+
+### Gardener #959-960 - 2026-03-13
+- **#959 (fix_issue, sauravcode):** Fixed #53 — changed `elif_branches` to `elif_chains` in sauravcc.py (walk_stmts) and sauravquery.py. Two-line fix for a bug that silently skipped elif branches during compiler analysis.
+- **#960 (fix_issue, getagentbox):** Fixed #42 — added 14 comprehensive tests for ScrollProgress module covering init/destroy lifecycle, progress bar width calculations, back-to-top visibility, rAF throttling, and cleanup safety.
+
+### Builder #278 (agentlens) - 2026-03-13
+- **CostAnalytics**: Aggregate cost breakdown by model + daily trend. New /analytics/costs endpoint + dashboard widgets (summary cards, stacked bar chart, doughnut chart, cost table). Fuzzy model matching, projected monthly cost. 10 backend tests, 13/13 pass. PR #76 merged.
+
+### Gardener #957-958 - 2026-03-13
+- **#957 (open_issue, sauravcode):** Filed issue #53 — compiler walk_stmts uses wrong field name lif_branches instead of lif_chains, silently skipping elif branches during dependency resolution.
+- **#958 (code_cleanup, agenticchat):** Removed duplicate _escapeHtml functions from SmartRetry (line ~15894) and ClipboardHistory (line ~17208) — both used DOM-based escaping instead of the shared file-scope string-replacement version. -10 lines. PR #72 merged.### Builder Run 278 — 2026-03-13 8:45 PM PST
+- **Ocaml-sample-code**: Cellular Automata module — Game of Life (patterns, RLE decoder, period detection, sparklines), Elementary CA (Wolfram rules 0-255, classification), Langton's Ant (toroidal simulation), Wireworld (multi-state logic circuits). Grid2D foundation with toroidal wrapping, analysis tools (bounding box, center of mass, population trace). 40 tests.
+
+### Builder Run 277 — 2026-03-13 8:31 PM PST
+- **WinSentinel**: SecurityChangelogService — versioned chronological changelog of security posture changes. Generates full changelog across multiple scans with 9 change types, 3 export formats (Markdown/text/JSON), 3 filters (empty/impact/date range), aggregate stats. 41 xUnit tests.
+
+### Gardener Run 955-956 — 2026-03-13 8:23 PM PST
+- **WinSentinel #74** (fix_issue): Fixed AuditHistoryService timestamp comparison bug. Normalized all stored timestamps to UTC via `ToUniversalTime()` and added `CultureInfo.InvariantCulture` to all `DateTimeOffset.Parse` calls. PR #77 updated.
+- **getagentbox #42** (fix_issue): Added 14 tests for ScrollProgress module covering init, progress bar width calculations (0%/50%/100%/no-scroll), back-to-top button visibility, and destroy/cleanup safety. PR #60 updated.
+
+### Daily Memory Backup - 2026-03-13
+- Committed & pushed 5 files (memory, runs, status, builder/gardener state). Commit `18f5220`.
+
 ### Builder #276 (FeedReader) - 2026-03-10
 - **ArticleGeoTagger**: Geographic location extraction using built-in gazetteer (~130 locations, 7 regions). Trigram fuzzy matching, aliases, region/country breakdowns, filter by geography, aggregate stats. 47 tests. PR #68 merged.
 ### Builder Run 276 - 2026-03-10
@@ -8625,6 +8699,15 @@ All sub-agent and cron job runs logged here. Most recent first.
 ### Gardener Run #486
 - **Task 1:** perf_improvement on Vidly � (1) `ReviewService.GetSummary()`: 8+ LINQ passes ? single foreach with inline accumulators (star sum, star distribution array, HashSets for distinct movies/customers, inline max-tracking for most-reviewed). (2) `ReviewService.Enrich()`: N+1 per-review `GetById` calls ? deduplicated lookups via HashSet of unique IDs, reducing from O(2R) to O(C+M). (3) `CustomerActivityService.BuildSummary()`: eliminated 2 extra `Min()`/`Max()` passes by tracking first/last rental dates inline. 619/634 tests (15 pre-existing). Commit `d5e5372`.
 - **Task 2:** perf_improvement on FeedReader � (1) `ReadingStatsManager.computeStats()`: 5 passes (3 `filter()` + 2 loops) ? single loop computing today/week/month counts, hourly distribution, and feed breakdown simultaneously. (2) `ReadingHistoryManager.historySummary()`: 4 passes (2 loops + 2 `reduce` properties) ? single loop with local accumulators. (3) `ReadingHistoryManager.recordVisit()`: O(n) `rebuildIndex()` ? O(index) incremental update of shifted entries only, with guard for index==0 empty-range crash. Commit `dd96b1e`.
+
+
+
+
+
+
+
+
+
 
 
 

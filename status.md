@@ -1,9 +1,10 @@
-# Status: Working
-Started: 2026-03-10 23:18 PDT
+# Status: Idle
+Last completed: 2026-03-13
 
-## Completed
-- **Builder #276** (FeedReader): ArticleGeoTagger — geographic location extraction. 47 tests. PR #68 merged.
+## Recent completions
+- **Builder #281** (Ocaml-sample-code): signal_processing.ml — FFT, convolution, spectral analysis. Module #85. 95+ tests. PR #41 merged.
+- **Gardener #971-972** (prompt): Delimiter regex cleanup + 36 PromptDiff tests. PRs #71, #72 merged.
+- **Builder #280** (GraphVisual): GraphSymmetryAnalyzer. 45 tests. PR #71 merged.
+- **Gardener #969-970** (everything): Subscription renewal drift fix. 17 tests. PR #60 merged.
 
-## In Progress
-- **Gardener #955**: security_fix on BioBots — ✅ XSS in anomaly.html. PR #55 merged.
-- **Gardener #956**: security_fix on GraphVisual — CSV formula injection fix. Needs commit/push/PR.
+Totals: gardener=972, builder=281.
