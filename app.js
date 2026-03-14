@@ -1028,6 +1028,10 @@ const ChatController = (() => {
    */
   async function send() {
     if (isSending) return;
+    if (typeof OfflineManager !== 'undefined' && OfflineManager.isOffline()) {
+      alert('You are offline. Messages cannot be sent without connectivity.');
+      return;
+    }
 
     const prompt = UIController.getChatInput();
 
