@@ -15890,12 +15890,7 @@ const SmartRetry = (() => {
     if (el) el.remove();
   }
 
-  /** Escape HTML for safe display. */
-  function _escapeHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
-  }
+  // Uses the shared _escapeHtml defined at file scope (line ~223).
 
   /**
    * Wrap an async API call with automatic retry logic.
@@ -17205,11 +17200,7 @@ const ClipboardHistory = (() => {
     listEl.appendChild(frag);
   }
 
-  function _escapeHtml(s) {
-    const d = document.createElement('div');
-    d.textContent = s;
-    return d.innerHTML;
-  }
+  // Uses the shared _escapeHtml defined at file scope (line ~223).
 
   // ── Toggle / Open / Close ────────────────────────────────────────
 
