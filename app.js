@@ -1,7 +1,7 @@
 /* ============================================================
  * Agentic Chat — Application Logic
  *
- * Architecture (44 modules, all revealing-module-pattern IIFEs):
+ * Architecture (45 modules, all revealing-module-pattern IIFEs):
  *
  *   Core:
  *   SafeStorage          — safe localStorage wrapper for restricted-storage environments
@@ -57,6 +57,7 @@
  *   UsageHeatmap         — GitHub-style 7×24 activity heatmap across all sessions
  *   ConversationAgenda   — per-session goal checklist with progress tracking
  *   ClipboardHistory     — tracks copied text from chat with searchable panel (Ctrl+Shift+V)
+ *   MessageFilter       — visual content-type filters (code/questions/links/errors/lists/role)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -17359,3 +17360,292 @@ const OfflineManager = (function () {
 })();
 
 document.addEventListener('DOMContentLoaded', OfflineManager.init);
+
+/* ============================================================
+ * MessageFilter — visual content-type filters for conversation view
+ *
+ * Shows/hides messages based on content type: code blocks, questions,
+ * links, errors, lists, images, or by role (user-only / assistant-only).
+ * Toggle via Ctrl+Shift+F or the filter button in the toolbar.
+ *
+ * API:
+ *   init()              - attach event listeners + inject UI
+ *   toggle()            - show/hide filter bar
+ *   applyFilter(type)   - filter messages by type ('code'|'question'|'link'|
+ *                         'error'|'list'|'user'|'assistant'|'all')
+ *   getActiveFilter()   - current filter type
+ *   getFilterCounts()   - count messages matching each filter type
+ * ============================================================ */
+const MessageFilter = (() => {
+  'use strict';
+
+  const FILTER_TYPES = [
+    { id: 'all',       label: 'All',       icon: '📋', desc: 'Show all messages' },
+    { id: 'code',      label: 'Code',      icon: '💻', desc: 'Messages with code blocks' },
+    { id: 'question',  label: 'Questions',  icon: '❓', desc: 'Messages containing questions' },
+    { id: 'link',      label: 'Links',      icon: '🔗', desc: 'Messages with URLs' },
+    { id: 'error',     label: 'Errors',     icon: '🔴', desc: 'Messages with error patterns' },
+    { id: 'list',      label: 'Lists',      icon: '📝', desc: 'Messages with bullet/numbered lists' },
+    { id: 'user',      label: 'You',        icon: '👤', desc: 'Your messages only' },
+    { id: 'assistant', label: 'Assistant',   icon: '🤖', desc: 'Assistant messages only' }
+  ];
+
+  let _active = 'all';
+  let _visible = false;
+  let _barEl = null;
+  let _countEls = {};
+
+  /* ── Content detection ──────────────────────────────────────── */
+
+  function _hasCode(text) {
+    return /```[\s\S]*?```/.test(text) || /`[^`]+`/.test(text);
+  }
+
+  function _hasQuestion(text) {
+    return /\?\s*$/.test(text) || /\?[\s"')\]]/.test(text) ||
+           /^(what|how|why|when|where|who|which|can|could|would|should|is|are|do|does|did|will|shall)\b/im.test(text);
+  }
+
+  function _hasLink(text) {
+    return /https?:\/\/\S+/i.test(text) || /\[.*?\]\(.*?\)/.test(text);
+  }
+
+  function _hasError(text) {
+    return /\b(error|exception|traceback|failed|failure|fatal|panic|segfault|ENOENT|EACCES|TypeError|ReferenceError|SyntaxError|ValueError|KeyError|NullPointerException|IndexOutOfBoundsException)\b/i.test(text);
+  }
+
+  function _hasList(text) {
+    return /^[\s]*[-*•]\s+/m.test(text) || /^[\s]*\d+[.)]\s+/m.test(text);
+  }
+
+  function _matchesFilter(msg, filterType) {
+    if (filterType === 'all') return true;
+    if (filterType === 'user') return msg.role === 'user';
+    if (filterType === 'assistant') return msg.role === 'assistant';
+
+    const text = msg.content || '';
+    switch (filterType) {
+      case 'code':     return _hasCode(text);
+      case 'question': return _hasQuestion(text);
+      case 'link':     return _hasLink(text);
+      case 'error':    return _hasError(text);
+      case 'list':     return _hasList(text);
+      default:         return true;
+    }
+  }
+
+  /* ── Filter counts ──────────────────────────────────────────── */
+
+  function getFilterCounts() {
+    const messages = typeof ConversationManager !== 'undefined'
+      ? ConversationManager.getHistory()
+      : [];
+    const counts = {};
+    FILTER_TYPES.forEach(ft => {
+      counts[ft.id] = ft.id === 'all'
+        ? messages.length
+        : messages.filter(m => _matchesFilter(m, ft.id)).length;
+    });
+    return counts;
+  }
+
+  /* ── Apply filter ───────────────────────────────────────────── */
+
+  function applyFilter(type) {
+    _active = type;
+
+    const container = document.getElementById('chat-output');
+    if (!container) return;
+
+    const messages = typeof ConversationManager !== 'undefined'
+      ? ConversationManager.getHistory()
+      : [];
+
+    const msgEls = container.querySelectorAll('.history-msg');
+    let visibleCount = 0;
+
+    msgEls.forEach((el, idx) => {
+      const msg = messages[idx];
+      if (!msg) return;
+
+      const matches = _matchesFilter(msg, type);
+      el.style.display = matches ? '' : 'none';
+      if (matches) visibleCount++;
+    });
+
+    // Update button states
+    _updateButtonStates();
+    _updateCounts();
+
+    // Show empty state if nothing matches
+    _showEmptyState(container, visibleCount === 0 && type !== 'all');
+  }
+
+  function _showEmptyState(container, show) {
+    let empty = container.querySelector('.msg-filter-empty');
+    if (show && !empty) {
+      empty = document.createElement('div');
+      empty.className = 'msg-filter-empty';
+      empty.textContent = 'No messages match this filter.';
+      empty.style.cssText = 'text-align:center;padding:2rem;color:var(--text-muted,#888);font-style:italic;';
+      container.appendChild(empty);
+    } else if (!show && empty) {
+      empty.remove();
+    }
+  }
+
+  /* ── UI ─────────────────────────────────────────────────────── */
+
+  function _injectStyles() {
+    if (document.getElementById('msg-filter-styles')) return;
+    const style = document.createElement('style');
+    style.id = 'msg-filter-styles';
+    style.textContent = `
+      .msg-filter-bar {
+        display:none; padding:0.5rem; gap:0.25rem; flex-wrap:wrap;
+        border-bottom:1px solid var(--border,#333);
+        background:var(--bg-secondary,#1a1a2e);
+        align-items:center;
+      }
+      .msg-filter-bar.visible { display:flex; }
+      .msg-filter-chip {
+        padding:4px 10px; border-radius:99px; border:1px solid var(--border,#444);
+        background:transparent; color:var(--text,#ccc); cursor:pointer;
+        font-size:0.75rem; transition:all 0.15s; display:inline-flex;
+        align-items:center; gap:4px; user-select:none;
+      }
+      .msg-filter-chip:hover { border-color:var(--accent,#6366f1); }
+      .msg-filter-chip.active {
+        background:var(--accent,#6366f1); color:#fff;
+        border-color:var(--accent,#6366f1);
+      }
+      .msg-filter-chip .chip-count {
+        font-size:0.65rem; opacity:0.7; margin-left:2px;
+      }
+      .msg-filter-chip.active .chip-count { opacity:0.9; }
+      .msg-filter-label {
+        font-size:0.7rem; text-transform:uppercase; font-weight:700;
+        color:var(--text-muted,#888); margin-right:0.25rem; letter-spacing:0.5px;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function _buildBar() {
+    if (_barEl) return _barEl;
+    _barEl = document.createElement('div');
+    _barEl.className = 'msg-filter-bar';
+    _barEl.setAttribute('role', 'toolbar');
+    _barEl.setAttribute('aria-label', 'Message filters');
+
+    const label = document.createElement('span');
+    label.className = 'msg-filter-label';
+    label.textContent = 'Filter:';
+    _barEl.appendChild(label);
+
+    FILTER_TYPES.forEach(ft => {
+      const chip = document.createElement('button');
+      chip.className = 'msg-filter-chip' + (ft.id === 'all' ? ' active' : '');
+      chip.setAttribute('data-filter', ft.id);
+      chip.setAttribute('title', ft.desc);
+      chip.setAttribute('aria-pressed', ft.id === 'all' ? 'true' : 'false');
+      chip.innerHTML = ft.icon + ' ' + _escHtml(ft.label) +
+        ' <span class="chip-count" data-count-for="' + ft.id + '"></span>';
+      chip.addEventListener('click', () => applyFilter(ft.id));
+      _barEl.appendChild(chip);
+
+      _countEls[ft.id] = chip.querySelector('.chip-count');
+    });
+
+    return _barEl;
+  }
+
+  function _updateButtonStates() {
+    if (!_barEl) return;
+    _barEl.querySelectorAll('.msg-filter-chip').forEach(chip => {
+      const isActive = chip.dataset.filter === _active;
+      chip.classList.toggle('active', isActive);
+      chip.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    });
+  }
+
+  function _updateCounts() {
+    const counts = getFilterCounts();
+    Object.keys(_countEls).forEach(id => {
+      const el = _countEls[id];
+      if (el) el.textContent = counts[id] > 0 ? '(' + counts[id] + ')' : '';
+    });
+  }
+
+  function _escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  /* ── Toggle ─────────────────────────────────────────────────── */
+
+  function toggle() {
+    _visible = !_visible;
+    if (_barEl) {
+      _barEl.classList.toggle('visible', _visible);
+    }
+    if (_visible) {
+      _updateCounts();
+    } else {
+      // Reset filter when hiding
+      applyFilter('all');
+    }
+  }
+
+  function getActiveFilter() { return _active; }
+
+  /* ── Init ───────────────────────────────────────────────────── */
+
+  function init() {
+    _injectStyles();
+    const bar = _buildBar();
+
+    // Insert before chat-output
+    const chatOutput = document.getElementById('chat-output');
+    if (chatOutput && chatOutput.parentNode) {
+      chatOutput.parentNode.insertBefore(bar, chatOutput);
+    }
+
+    // Keyboard shortcut: Ctrl+Shift+L to toggle filter bar
+    document.addEventListener('keydown', e => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'L') {
+        e.preventDefault();
+        toggle();
+      }
+    });
+  }
+
+  /* ── Export ──────────────────────────────────────────────────── */
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+      FILTER_TYPES: FILTER_TYPES,
+      _hasCode: _hasCode,
+      _hasQuestion: _hasQuestion,
+      _hasLink: _hasLink,
+      _hasError: _hasError,
+      _hasList: _hasList,
+      _matchesFilter: _matchesFilter,
+      getFilterCounts: getFilterCounts,
+      applyFilter: applyFilter,
+      toggle: toggle,
+      getActiveFilter: getActiveFilter,
+      init: init
+    };
+  }
+
+  return {
+    init: init,
+    toggle: toggle,
+    applyFilter: applyFilter,
+    getActiveFilter: getActiveFilter,
+    getFilterCounts: getFilterCounts
+  };
+})();
+
+document.addEventListener('DOMContentLoaded', OfflineManager.init);
+document.addEventListener('DOMContentLoaded', MessageFilter.init);
