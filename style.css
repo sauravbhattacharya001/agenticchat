@@ -3299,3 +3299,52 @@ body.light-theme #heatmap-panel {
   font-style: italic;
   padding: 40px 0;
 }
+
+/* ---------- Conversation Health Check ---------- */
+.health-panel {
+  position: fixed; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--bg-primary, #1e1e1e); color: var(--text-primary, #e0e0e0);
+  border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  width: 560px; max-width: 92vw; max-height: 80vh;
+  display: flex; flex-direction: column; z-index: 10000;
+  border: 1px solid var(--border-color, #333);
+}
+.health-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 16px 20px; border-bottom: 1px solid var(--border-color, #333);
+}
+.health-header h3 { margin: 0; font-size: 1.1rem; }
+.health-content {
+  padding: 20px; overflow-y: auto; flex: 1;
+  font-size: 0.9rem; line-height: 1.5;
+}
+.health-score-ring {
+  display: flex; align-items: center; gap: 16px;
+  margin-bottom: 20px; padding: 16px;
+  background: var(--bg-secondary, #252526); border-radius: 10px;
+}
+.health-score-ring svg { flex-shrink: 0; }
+.health-score-label { font-size: 0.82rem; color: var(--text-secondary, #aaa); }
+.health-score-value { font-size: 2rem; font-weight: 700; }
+.health-score-desc { font-size: 0.78rem; color: var(--text-secondary, #aaa); margin-top: 4px; }
+.health-checks { display: flex; flex-direction: column; gap: 10px; }
+.health-check-item {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 12px; border-radius: 8px;
+  background: var(--bg-secondary, #252526);
+  border-left: 3px solid var(--border-color, #444);
+}
+.health-check-item.pass { border-left-color: #4ade80; }
+.health-check-item.warn { border-left-color: #fbbf24; }
+.health-check-item.fail { border-left-color: #f87171; }
+.health-check-item.info { border-left-color: #60a5fa; }
+.health-check-icon { font-size: 1rem; flex-shrink: 0; margin-top: 1px; }
+.health-check-body { flex: 1; }
+.health-check-title { font-weight: 600; font-size: 0.85rem; margin-bottom: 2px; }
+.health-check-detail { font-size: 0.78rem; color: var(--text-secondary, #aaa); }
+.health-empty { text-align: center; padding: 40px 20px; color: var(--text-secondary, #aaa); }
+.health-section-title {
+  font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-secondary, #aaa); margin: 16px 0 8px; font-weight: 600;
+}
