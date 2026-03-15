@@ -18251,3 +18251,156 @@ const QuickSwitcher = (() => {
 
   return { show, hide, toggle };
 })();
+
+/* ---------- Word Cloud (module 46) ---------- */
+/**
+ * Generates an interactive word cloud visualization from the current
+ * conversation. Words are sized by frequency, colored by role (user vs
+ * assistant), and clickable to search for that term in messages.
+ * Toggle: Ctrl+Shift+W or the ☁️ button.
+ */
+const WordCloud = (() => {
+  let panelEl = null;
+  let isVisible = false;
+
+  /* ---- stop-words (common English words to filter out) ---- */
+  const STOP_WORDS = new Set([
+    'the','be','to','of','and','a','in','that','have','i','it','for','not','on',
+    'with','he','as','you','do','at','this','but','his','by','from','they','we',
+    'say','her','she','or','an','will','my','one','all','would','there','their',
+    'what','so','up','out','if','about','who','get','which','go','me','when',
+    'make','can','like','time','no','just','him','know','take','people','into',
+    'year','your','good','some','could','them','see','other','than','then','now',
+    'look','only','come','its','over','think','also','back','after','use','two',
+    'how','our','work','first','well','way','even','new','want','because','any',
+    'these','give','day','most','us','is','are','was','were','been','being','am',
+    'has','had','does','did','doing','done','got','getting','made','said','went',
+    'going','let','here','more','very','much','too','still','own','such','should',
+    'may','might','must','shall','need','dare','used','using','thing','things',
+    've','re','ll','don','doesn','didn','won','wouldn','couldn','shouldn','isn',
+    'aren','wasn','weren','hasn','haven','hadn','can','cannot','yes','yeah',
+    'okay','sure','right','oh','um','uh','ah','ok','well','code','data','function'
+  ]);
+
+  const MIN_WORD_LENGTH = 3;
+  const MAX_WORDS = 80;
+  const MIN_FONT = 12;
+  const MAX_FONT = 52;
+
+  function _extractWords() {
+    const history = ConversationManager.getHistory();
+    const freq = {};   // word -> { count, userCount, assistantCount }
+    for (const msg of history) {
+      const text = (msg.content || '').toLowerCase().replace(/```[\s\S]*?```/g, ' ')
+        .replace(/`[^`]+`/g, ' ')
+        .replace(/https?:\/\/\S+/g, ' ')
+        .replace(/[^a-z0-9\s'-]/g, ' ');
+      const words = text.split(/\s+/).filter(w => w.length >= MIN_WORD_LENGTH && !STOP_WORDS.has(w));
+      for (const w of words) {
+        if (!freq[w]) freq[w] = { count: 0, userCount: 0, assistantCount: 0 };
+        freq[w].count++;
+        if (msg.role === 'user') freq[w].userCount++;
+        else freq[w].assistantCount++;
+      }
+    }
+    return Object.entries(freq)
+      .sort((a, b) => b[1].count - a[1].count)
+      .slice(0, MAX_WORDS);
+  }
+
+  function _render() {
+    if (!panelEl) return;
+    const words = _extractWords();
+    const cloud = panelEl.querySelector('.wc-cloud');
+    cloud.innerHTML = '';
+
+    if (words.length === 0) {
+      cloud.innerHTML = '<p class="wc-empty">No words yet — start a conversation!</p>';
+      return;
+    }
+
+    const maxCount = words[0][1].count;
+    const minCount = words[words.length - 1][1].count;
+    const range = Math.max(maxCount - minCount, 1);
+
+    for (const [word, info] of words) {
+      const size = MIN_FONT + ((info.count - minCount) / range) * (MAX_FONT - MIN_FONT);
+      const userRatio = info.userCount / info.count;
+      // Blend: user = blue-ish (#4a90d9), assistant = green-ish (#50c878)
+      const r = Math.round(74 * userRatio + 80 * (1 - userRatio));
+      const g = Math.round(144 * userRatio + 200 * (1 - userRatio));
+      const b = Math.round(217 * userRatio + 120 * (1 - userRatio));
+      const opacity = 0.6 + 0.4 * ((info.count - minCount) / range);
+
+      const span = document.createElement('span');
+      span.className = 'wc-word';
+      span.textContent = word;
+      span.style.fontSize = size + 'px';
+      span.style.color = `rgba(${r},${g},${b},${opacity})`;
+      span.title = `"${word}" — ${info.count}× (user: ${info.userCount}, AI: ${info.assistantCount})`;
+      span.addEventListener('click', () => {
+        // Trigger message search if available
+        if (typeof MessageSearch !== 'undefined' && MessageSearch.open) {
+          close();
+          MessageSearch.open(word);
+        }
+      });
+      cloud.appendChild(span);
+      cloud.appendChild(document.createTextNode(' '));
+    }
+  }
+
+  function _createPanel() {
+    if (panelEl) return panelEl;
+    panelEl = document.createElement('div');
+    panelEl.id = 'word-cloud-panel';
+    panelEl.className = 'wc-panel';
+    panelEl.innerHTML = ''
+      + '<div class="wc-header">'
+      + '<span class="wc-title">☁️ Word Cloud</span>'
+      + '<div class="wc-actions">'
+      + '<button class="btn-sm wc-refresh" title="Refresh">🔄</button>'
+      + '<button class="btn-sm wc-close" title="Close">✕</button>'
+      + '</div></div>'
+      + '<div class="wc-legend">'
+      + '<span class="wc-legend-user">● You</span>'
+      + '<span class="wc-legend-ai">● AI</span>'
+      + '<span class="wc-legend-hint">Click a word to search</span>'
+      + '</div>'
+      + '<div class="wc-cloud"></div>';
+    document.body.appendChild(panelEl);
+    panelEl.querySelector('.wc-close').addEventListener('click', close);
+    panelEl.querySelector('.wc-refresh').addEventListener('click', _render);
+    return panelEl;
+  }
+
+  function open() {
+    _createPanel();
+    panelEl.classList.add('visible');
+    isVisible = true;
+    _render();
+  }
+
+  function close() {
+    if (panelEl) panelEl.classList.remove('visible');
+    isVisible = false;
+  }
+
+  function toggle() { isVisible ? close() : open(); }
+
+  function init() {
+    const btn = document.getElementById('wordcloud-btn');
+    if (btn) btn.addEventListener('click', toggle);
+
+    document.addEventListener('keydown', (e) => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'W') {
+        e.preventDefault();
+        toggle();
+      }
+    });
+  }
+
+  return { init, open, close, toggle };
+})();
+
+document.addEventListener('DOMContentLoaded', WordCloud.init);

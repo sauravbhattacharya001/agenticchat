@@ -3230,3 +3230,72 @@ body.light-theme #heatmap-panel {
   gap: 16px;
   justify-content: center;
 }
+
+/* ---------- Word Cloud Panel ---------- */
+.wc-panel {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.95);
+  width: 520px;
+  max-width: 90vw;
+  max-height: 70vh;
+  background: var(--bg, #1e1e2e);
+  border: 1px solid var(--border, #444);
+  border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+  z-index: 10100;
+  display: flex;
+  flex-direction: column;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s, transform 0.2s;
+}
+.wc-panel.visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(-50%, -50%) scale(1);
+}
+.wc-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border, #444);
+}
+.wc-title { font-weight: 600; font-size: 15px; }
+.wc-actions { display: flex; gap: 6px; }
+.wc-legend {
+  display: flex;
+  gap: 14px;
+  padding: 6px 16px;
+  font-size: 11px;
+  opacity: 0.7;
+}
+.wc-legend-user { color: #4a90d9; }
+.wc-legend-ai { color: #50c878; }
+.wc-legend-hint { margin-left: auto; font-style: italic; }
+.wc-cloud {
+  padding: 20px;
+  text-align: center;
+  line-height: 1.8;
+  overflow-y: auto;
+  flex: 1;
+}
+.wc-word {
+  display: inline-block;
+  cursor: pointer;
+  padding: 2px 5px;
+  border-radius: 4px;
+  transition: background 0.15s, transform 0.15s;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+}
+.wc-word:hover {
+  background: rgba(255,255,255,0.1);
+  transform: scale(1.1);
+}
+.wc-empty {
+  opacity: 0.5;
+  font-style: italic;
+  padding: 40px 0;
+}
