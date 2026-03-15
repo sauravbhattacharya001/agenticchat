@@ -1117,6 +1117,11 @@ kbd {
   flex-shrink: 0;
 }
 
+.session-badge-pin {
+  color: #e67e22;
+  background: rgba(230, 126, 34, 0.12);
+}
+
 .session-meta {
   font-size: 0.75rem;
   color: var(--text-dim);

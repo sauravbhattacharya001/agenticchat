@@ -23,7 +23,7 @@
  *   KeyboardShortcuts    — global keyboard shortcuts with help modal
  *   VoiceInput           — browser speech recognition with language selection
  *   ThemeManager         — dark/light theme with OS preference detection
- *   SessionManager       — multi-session persistence with auto-save and quota mgmt
+ *   SessionManager       — multi-session persistence with auto-save, pinning, and quota mgmt
  *   CrossTabSync         — multi-tab conflict detection via storage events + BroadcastChannel
  *   ChatStats            — conversation analytics (word counts, code blocks, timing)
  *   CostDashboard        — persistent API spend tracker with budget alerts
@@ -3730,6 +3730,7 @@ const SessionManager = (() => {
   const AUTO_SAVE_KEY = 'agenticchat_autosave';
   const MAX_SESSIONS = 50;
   const MAX_MESSAGE_AGE_DAYS = 90;
+  const PINNED_KEY = 'agenticchat_pinned_sessions';
   const QUOTA_WARNING_THRESHOLD = 0.8;  // 80% of estimated quota
   let isOpen = false;
   let autoSave = false;
@@ -3850,6 +3851,37 @@ const SessionManager = (() => {
     return usage;
   }
 
+  // ── Session Pinning ─────────────────────────────────────────
+  /** Get the set of pinned session IDs. */
+  function _getPinnedIds() {
+    try {
+      const raw = SafeStorage.get(PINNED_KEY);
+      return raw ? new Set(JSON.parse(raw)) : new Set();
+    } catch { return new Set(); }
+  }
+
+  /** Save the set of pinned session IDs. */
+  function _savePinnedIds(pinnedSet) {
+    try { SafeStorage.set(PINNED_KEY, JSON.stringify([...pinnedSet])); } catch {}
+  }
+
+  /** Check if a session is pinned. */
+  function isPinned(id) {
+    return _getPinnedIds().has(id);
+  }
+
+  /** Toggle pin state for a session. Returns new pin state. */
+  function togglePin(id) {
+    const pinned = _getPinnedIds();
+    if (pinned.has(id)) {
+      pinned.delete(id);
+    } else {
+      pinned.add(id);
+    }
+    _savePinnedIds(pinned);
+    return pinned.has(id);
+  }
+
   /** Get or set the active session ID. */
   function _getActiveId() {
     try { return SafeStorage.get(ACTIVE_KEY) || null; } catch { return null; }
@@ -3886,11 +3918,15 @@ const SessionManager = (() => {
     }
   }
 
-  /** Get all sessions sorted by updatedAt (newest first). */
+  /** Get all sessions sorted: pinned first, then by updatedAt (newest first). */
   function getAll() {
-    return _loadAll().sort((a, b) =>
-      new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-    );
+    const pinned = _getPinnedIds();
+    return _loadAll().sort((a, b) => {
+      const aPinned = pinned.has(a.id) ? 1 : 0;
+      const bPinned = pinned.has(b.id) ? 1 : 0;
+      if (aPinned !== bPinned) return bPinned - aPinned;
+      return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+    });
   }
 
   /** Get the count of saved sessions. */
@@ -4024,6 +4060,12 @@ const SessionManager = (() => {
     const sessions = _loadAll().filter(s => s.id !== id);
     _saveAll(sessions);
     if (_getActiveId() === id) _setActiveId(null);
+    // Clean up pinned state for deleted session
+    const pinned = _getPinnedIds();
+    if (pinned.has(id)) {
+      pinned.delete(id);
+      _savePinnedIds(pinned);
+    }
     // Clean up tags for deleted session
     if (typeof ConversationTags !== 'undefined') {
       ConversationTags.clearSession(id);
@@ -4265,6 +4307,13 @@ const SessionManager = (() => {
         header.appendChild(badge);
       }
 
+      if (isPinned(session.id)) {
+        const pinBadge = document.createElement('span');
+        pinBadge.className = 'session-badge session-badge-pin';
+        pinBadge.textContent = '📌 pinned';
+        header.appendChild(pinBadge);
+      }
+
       card.appendChild(header);
 
       // Meta: message count + time
@@ -4290,6 +4339,16 @@ const SessionManager = (() => {
       // Action buttons
       const actions = document.createElement('div');
       actions.className = 'session-card-actions';
+
+      const pinBtn = document.createElement('button');
+      pinBtn.className = 'btn-sm';
+      pinBtn.textContent = isPinned(session.id) ? '📌 Unpin' : '📌 Pin';
+      pinBtn.title = isPinned(session.id) ? 'Unpin from top' : 'Pin to top of list';
+      pinBtn.addEventListener('click', () => {
+        togglePin(session.id);
+        refresh();
+      });
+      actions.appendChild(pinBtn);
 
       const loadBtn = document.createElement('button');
       loadBtn.className = 'btn-sm';
@@ -4486,6 +4545,7 @@ const SessionManager = (() => {
     getAll, getCount, save, load, remove, rename, duplicate,
     newSession, exportSession, importSession, clearAll,
     isAutoSaveEnabled, toggleAutoSave, autoSaveIfEnabled, initAutoSave,
+    isPinned, togglePin,
     toggle, close, refresh,
     openSaveDialog, confirmSave, closeSaveDialog,
     handleImport, handleClearAll,
