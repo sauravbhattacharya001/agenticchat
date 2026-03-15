@@ -1,4 +1,4 @@
-/* ============================================================
+﻿﻿﻿/* ============================================================
  * Agentic Chat — Application Logic
  *
  * Architecture (45 modules, all revealing-module-pattern IIFEs):
@@ -60,6 +60,7 @@
  *   MessageFilter       — visual content-type filters (code/questions/links/errors/lists/role)
  *   ConversationSentiment — heuristic sentiment analysis with mood timeline (Ctrl+Shift+M)
  *   QuickSwitcher        — VS Code-style fuzzy session switcher (Ctrl+K)
+ *   ChatGPTImporter      — import ChatGPT exported conversations (conversations.json)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -2916,6 +2917,8 @@ const SlashCommands = (() => {
             SessionManager.setSortMode(modes[next]);
             UIController.setChatOutput(`Sessions sorted: ${labels[next]}`);
           } },
+            { name: 'import-chatgpt', description: 'Import conversations from ChatGPT export (conversations.json)', icon: '🤖',
+          action: () => ChatGPTImporter.openFilePicker() },
     ]);
 
     function init() {
@@ -18404,3 +18407,163 @@ const WordCloud = (() => {
 })();
 
 document.addEventListener('DOMContentLoaded', WordCloud.init);
+
+
+/* ---------- ChatGPT Importer ---------- */
+/**
+ * Import ChatGPT exported conversations (conversations.json).
+ * ChatGPT exports a JSON array of conversations, each with a nested
+ * `mapping` tree of message nodes. This module parses that format,
+ * walks the tree to extract messages in order, and creates sessions
+ * via SessionManager.importSession().
+ *
+ * Supports both single-conversation and multi-conversation files.
+ * Triggered from a dedicated button in the History panel or via
+ * the /import-chatgpt slash command.
+ *
+ * @namespace ChatGPTImporter
+ */
+const ChatGPTImporter = (() => {
+  const MAX_CONVERSATIONS = 200;
+  const MAX_MESSAGES_PER = 500;
+
+  /**
+   * Parse a ChatGPT conversations.json structure.
+   * @param {string} jsonString - raw JSON text
+   * @returns {{ imported: number, skipped: number, names: string[] }}
+   */
+  function importFromJSON(jsonString) {
+    let data;
+    try {
+      data = JSON.parse(jsonString);
+    } catch (_) {
+      throw new Error('Invalid JSON file');
+    }
+
+    // Accept both array (full export) and single object
+    const conversations = Array.isArray(data) ? data : [data];
+    if (conversations.length === 0) throw new Error('No conversations found');
+
+    let imported = 0, skipped = 0;
+    const names = [];
+    const limit = Math.min(conversations.length, MAX_CONVERSATIONS);
+
+    for (let i = 0; i < limit; i++) {
+      const conv = conversations[i];
+      if (!conv || typeof conv !== 'object') { skipped++; continue; }
+
+      const messages = _extractMessages(conv);
+      if (messages.length === 0) { skipped++; continue; }
+
+      const title = typeof conv.title === 'string' && conv.title.trim()
+        ? conv.title.trim().substring(0, 200)
+        : 'ChatGPT Import';
+
+      // Build a session object compatible with SessionManager.importSession
+      const sessionJSON = JSON.stringify({
+        session: { name: title + ' (ChatGPT)', messages }
+      });
+
+      const result = SessionManager.importSession(sessionJSON);
+      if (result) {
+        imported++;
+        names.push(title);
+      } else {
+        skipped++;
+      }
+    }
+
+    return { imported, skipped, names };
+  }
+
+  /**
+   * Walk the ChatGPT mapping tree and extract messages in order.
+   * @param {object} conv - a single conversation object
+   * @returns {Array<{role: string, content: string}>}
+   */
+  function _extractMessages(conv) {
+    const mapping = conv.mapping;
+    if (!mapping || typeof mapping !== 'object') return [];
+
+    // Find root node (no parent)
+    let rootId = null;
+    for (const [id, node] of Object.entries(mapping)) {
+      if (!node.parent) { rootId = id; break; }
+    }
+    if (!rootId) return [];
+
+    // Walk the tree depth-first following children[0] (main branch)
+    const messages = [];
+    let currentId = rootId;
+    let safety = 0;
+
+    while (currentId && safety++ < 2000) {
+      const node = mapping[currentId];
+      if (!node) break;
+
+      if (node.message) {
+        const msg = node.message;
+        const role = msg.author && msg.author.role;
+        let content = '';
+
+        // ChatGPT stores content in parts array or as string
+        if (msg.content) {
+          if (Array.isArray(msg.content.parts)) {
+            content = msg.content.parts
+              .filter(p => typeof p === 'string')
+              .join('\n');
+          } else if (typeof msg.content === 'string') {
+            content = msg.content;
+          } else if (typeof msg.content.text === 'string') {
+            content = msg.content.text;
+          }
+        }
+
+        // Only keep user and assistant messages with actual content
+        if ((role === 'user' || role === 'assistant') && content.trim()) {
+          messages.push({ role, content: content.trim() });
+          if (messages.length >= MAX_MESSAGES_PER) break;
+        }
+      }
+
+      // Follow first child (main conversation branch)
+      const children = node.children;
+      currentId = Array.isArray(children) && children.length > 0
+        ? children[0] : null;
+    }
+
+    return messages;
+  }
+
+  /**
+   * Open a file picker for ChatGPT's conversations.json and import all.
+   */
+  function openFilePicker() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.addEventListener('change', () => {
+      const file = input.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const result = importFromJSON(reader.result);
+          const msg = result.imported > 0
+            ? `Imported ${result.imported} ChatGPT conversation${result.imported !== 1 ? 's' : ''}${result.skipped > 0 ? ` (${result.skipped} skipped)` : ''}.`
+            : 'No conversations could be imported. Make sure this is a ChatGPT export file.';
+          alert(msg);
+          if (result.imported > 0 && typeof HistoryPanel !== 'undefined') {
+            HistoryPanel.refresh();
+          }
+        } catch (e) {
+          alert('Import failed: ' + e.message);
+        }
+      };
+      reader.readAsText(file);
+    });
+    input.click();
+  }
+
+  return { importFromJSON, openFilePicker, _extractMessages };
+})();
