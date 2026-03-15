@@ -3142,3 +3142,91 @@ body.light-theme #heatmap-panel {
   padding: 40px 20px;
   font-size: 14px;
 }
+
+/* ---------- Quick Session Switcher (Ctrl+K) ---------- */
+.quick-switcher-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 10000;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 15vh;
+}
+.quick-switcher-overlay.visible { display: flex; }
+.quick-switcher-modal {
+  background: var(--bg-secondary, #1e1e1e);
+  border: 1px solid var(--border, #444);
+  border-radius: 12px;
+  width: 480px;
+  max-width: 90vw;
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.4);
+  overflow: hidden;
+}
+.quick-switcher-input {
+  width: 100%;
+  padding: 14px 16px;
+  font-size: 16px;
+  border: none;
+  border-bottom: 1px solid var(--border, #444);
+  background: transparent;
+  color: var(--text-primary, #eee);
+  outline: none;
+  box-sizing: border-box;
+}
+.quick-switcher-input::placeholder { color: var(--text-secondary, #888); }
+.quick-switcher-results {
+  overflow-y: auto;
+  flex: 1;
+  max-height: 40vh;
+}
+.quick-switcher-item {
+  padding: 10px 16px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border, #333);
+  transition: background 0.1s;
+}
+.quick-switcher-item:hover,
+.quick-switcher-item.selected {
+  background: var(--bg-hover, #2a2d2e);
+}
+.quick-switcher-item-name {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-primary, #eee);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.quick-switcher-item-meta {
+  font-size: 12px;
+  color: var(--text-secondary, #888);
+  margin-top: 2px;
+}
+.quick-switcher-item-preview {
+  font-size: 12px;
+  color: var(--text-secondary, #999);
+  margin-top: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.quick-switcher-empty {
+  padding: 24px 16px;
+  text-align: center;
+  color: var(--text-secondary, #888);
+  font-size: 14px;
+}
+.quick-switcher-footer {
+  padding: 8px 16px;
+  font-size: 11px;
+  color: var(--text-secondary, #777);
+  border-top: 1px solid var(--border, #333);
+  display: flex;
+  gap: 16px;
+  justify-content: center;
+}

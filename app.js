@@ -59,6 +59,7 @@
  *   ClipboardHistory     — tracks copied text from chat with searchable panel (Ctrl+Shift+V)
  *   MessageFilter       — visual content-type filters (code/questions/links/errors/lists/role)
  *   ConversationSentiment — heuristic sentiment analysis with mood timeline (Ctrl+Shift+M)
+ *   QuickSwitcher        — VS Code-style fuzzy session switcher (Ctrl+K)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -3419,7 +3420,7 @@ const KeyboardShortcuts = (() => {
    * Shortcut summary:
    *   Ctrl+L: clear   Ctrl+H: history   Ctrl+T: templates
    *   Ctrl+S: snippets (Shift: global search)   Ctrl+J: sessions
-   *   Ctrl+N: new session   Ctrl+K: focus input   Ctrl+B: bookmarks
+   *   Ctrl+N: new session   Ctrl+K: quick switcher   Ctrl+B: bookmarks
    *   Ctrl+F: search   Ctrl+M: voice   Ctrl+D: theme   Ctrl+P: persona
    *   Ctrl+I: stats   Ctrl+.: scratchpad   ?: shortcuts help
    */
@@ -3447,11 +3448,10 @@ const KeyboardShortcuts = (() => {
       return;
     }
 
-    // ── Ctrl+K — focus chat input ──
+    // ── Ctrl+K — quick session switcher ──
     if (ctrl && e.key === 'k') {
       e.preventDefault();
-      const input = document.getElementById('chat-input');
-      if (input) input.focus();
+      QuickSwitcher.toggle();
       return;
     }
 
@@ -18083,3 +18083,171 @@ const ConversationSentiment = (() => {
 })();
 
 document.addEventListener('DOMContentLoaded', ConversationSentiment.init);
+
+/* ---------- Quick Session Switcher (Ctrl+K) ---------- */
+/**
+ * VS Code / Slack-style quick session switcher.
+ * Opens a fuzzy-search overlay to instantly jump between sessions.
+ * Supports keyboard navigation (Up/Down/Enter/Esc) and fuzzy matching.
+ *
+ * @namespace QuickSwitcher
+ */
+const QuickSwitcher = (() => {
+  let isVisible = false;
+  let selectedIndex = 0;
+  let filteredSessions = [];
+
+  function fuzzyMatch(query, text) {
+    const q = query.toLowerCase();
+    const t = text.toLowerCase();
+    let qi = 0;
+    for (let ti = 0; ti < t.length && qi < q.length; ti++) {
+      if (t[ti] === q[qi]) qi++;
+    }
+    return qi === q.length;
+  }
+
+  function fuzzyScore(query, text) {
+    const q = query.toLowerCase();
+    const t = text.toLowerCase();
+    if (t.startsWith(q)) return 0;
+    if (t.includes(q)) return 1;
+    return 2;
+  }
+
+  function _createOverlay() {
+    let overlay = document.getElementById('quick-switcher-overlay');
+    if (overlay) return overlay;
+
+    overlay = document.createElement('div');
+    overlay.id = 'quick-switcher-overlay';
+    overlay.className = 'quick-switcher-overlay';
+    overlay.innerHTML = ''
+      + '<div class="quick-switcher-modal">'
+      + '<input type="text" id="quick-switcher-input" class="quick-switcher-input"'
+      + ' placeholder="Switch to session\u2026 (type to filter)" autocomplete="off" />'
+      + '<div id="quick-switcher-results" class="quick-switcher-results"></div>'
+      + '<div class="quick-switcher-footer">'
+      + '<span>\u2191\u2193 navigate</span> <span>\u21b5 select</span> <span>esc close</span>'
+      + '</div></div>';
+    document.body.appendChild(overlay);
+
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) hide();
+    });
+
+    const input = document.getElementById('quick-switcher-input');
+    input.addEventListener('input', () => { _updateResults(input.value); });
+    input.addEventListener('keydown', _handleKeydown);
+
+    return overlay;
+  }
+
+  function _handleKeydown(e) {
+    if (e.key === 'Escape') { e.preventDefault(); hide(); return; }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      selectedIndex = Math.min(selectedIndex + 1, filteredSessions.length - 1);
+      _highlightSelected(); return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      selectedIndex = Math.max(selectedIndex - 1, 0);
+      _highlightSelected(); return;
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const session = filteredSessions[selectedIndex];
+      if (session) {
+        hide();
+        SessionManager.load(session.id);
+        if (typeof SessionManager.refresh === 'function') SessionManager.refresh();
+      }
+      return;
+    }
+  }
+
+  function _updateResults(query) {
+    const results = document.getElementById('quick-switcher-results');
+    if (!results) return;
+
+    let sessions;
+    try { sessions = SessionManager.getAll(); } catch { sessions = []; }
+
+    if (!query.trim()) {
+      filteredSessions = sessions.slice(0, 15);
+    } else {
+      filteredSessions = sessions
+        .filter(s => fuzzyMatch(query, s.name) || (s.preview && fuzzyMatch(query, s.preview)))
+        .sort((a, b) => fuzzyScore(query, a.name) - fuzzyScore(query, b.name))
+        .slice(0, 15);
+    }
+
+    selectedIndex = 0;
+
+    if (filteredSessions.length === 0) {
+      results.innerHTML = '<div class="quick-switcher-empty">No sessions found</div>';
+      return;
+    }
+
+    results.innerHTML = filteredSessions.map((s, i) => {
+      const date = new Date(s.updatedAt).toLocaleDateString();
+      const msgCount = s.messageCount || 0;
+      const preview = s.preview ? s.preview.substring(0, 80) : '';
+      return '<div class="quick-switcher-item' + (i === 0 ? ' selected' : '') + '" data-index="' + i + '">'
+        + '<div class="quick-switcher-item-name">' + _escapeHtml(s.name) + '</div>'
+        + '<div class="quick-switcher-item-meta">' + msgCount + ' msg' + (msgCount !== 1 ? 's' : '') + ' \u00b7 ' + date + '</div>'
+        + (preview ? '<div class="quick-switcher-item-preview">' + _escapeHtml(preview) + '</div>' : '')
+        + '</div>';
+    }).join('');
+
+    results.querySelectorAll('.quick-switcher-item').forEach(el => {
+      el.addEventListener('click', () => {
+        const idx = parseInt(el.dataset.index, 10);
+        const session = filteredSessions[idx];
+        if (session) {
+          hide();
+          SessionManager.load(session.id);
+          if (typeof SessionManager.refresh === 'function') SessionManager.refresh();
+        }
+      });
+    });
+  }
+
+  function _highlightSelected() {
+    const results = document.getElementById('quick-switcher-results');
+    if (!results) return;
+    results.querySelectorAll('.quick-switcher-item').forEach((el, i) => {
+      el.classList.toggle('selected', i === selectedIndex);
+      if (i === selectedIndex) el.scrollIntoView({ block: 'nearest' });
+    });
+  }
+
+  function _escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  function show() {
+    const overlay = _createOverlay();
+    overlay.classList.add('visible');
+    isVisible = true;
+    selectedIndex = 0;
+    const input = document.getElementById('quick-switcher-input');
+    if (input) { input.value = ''; input.focus(); }
+    _updateResults('');
+  }
+
+  function hide() {
+    const overlay = document.getElementById('quick-switcher-overlay');
+    if (overlay) overlay.classList.remove('visible');
+    isVisible = false;
+  }
+
+  function toggle() {
+    if (isVisible) hide(); else show();
+  }
+
+  return { show, hide, toggle };
+})();
