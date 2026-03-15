@@ -13226,14 +13226,20 @@ const ConversationMerge = (() => {
           // Add metadata for sorting — use timestamp if present, otherwise use order
           msg._sourceSession = session.name;
           msg._sourceOrder = i;
-          msg._sourceTime = session.createdAt ? new Date(session.createdAt).getTime() + i : Date.now();
+          // Use message timestamp for true chronological interleaving;
+          // fall back to session creation time + order index if unavailable
+          if (msg.timestamp) {
+            msg._sourceTime = new Date(msg.timestamp).getTime();
+          } else {
+            msg._sourceTime = session.createdAt ? new Date(session.createdAt).getTime() + i : Date.now();
+          }
           allMessages.push(msg);
         }
       }
     }
 
-    // Sort: group by source session creation time, keep internal order
-    // This preserves conversation flow within each session
+    // Sort chronologically by message timestamp when available,
+    // otherwise by source session creation order
     allMessages.sort((a, b) => a._sourceTime - b._sourceTime);
 
     // Build merged messages with separator markers
