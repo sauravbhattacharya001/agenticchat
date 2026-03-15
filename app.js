@@ -292,6 +292,11 @@ const ConversationManager = (() => {
         history.length = 0;
         history.push({ role: 'system', content: ChatConfig.SYSTEM_PROMPT }, ...trimmed);
         charCountDirty = true;
+        // Prune response times to match remaining assistant messages
+        const assistantCount = trimmed.filter(m => m.role === 'assistant').length;
+        if (responseTimes.length > assistantCount) {
+          responseTimes.splice(0, responseTimes.length - assistantCount);
+        }
       }
     },
 
