@@ -1049,6 +1049,37 @@ kbd {
   accent-color: var(--accent);
 }
 
+#sessions-filter-bar {
+  display: flex;
+  gap: 0.4rem;
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+#sessions-search {
+  flex: 1;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--input-bg, var(--bg));
+  color: var(--text);
+  outline: none;
+}
+#sessions-search:focus {
+  border-color: var(--accent, #2196f3);
+}
+
+#sessions-sort {
+  padding: 0.3rem 0.4rem;
+  font-size: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--input-bg, var(--bg));
+  color: var(--text);
+  cursor: pointer;
+}
+
 #sessions-count {
   padding: 0.25rem 0.75rem;
   font-size: 0.72rem;

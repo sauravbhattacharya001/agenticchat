@@ -173,6 +173,17 @@
         Auto-save
       </label>
     </div>
+    <div id="sessions-filter-bar">
+      <input id="sessions-search" type="text" placeholder="Search sessions…" autocomplete="off" aria-label="Filter sessions by name">
+      <select id="sessions-sort" aria-label="Sort sessions" title="Sort order">
+        <option value="newest">Newest first</option>
+        <option value="oldest">Oldest first</option>
+        <option value="name-az">Name A → Z</option>
+        <option value="name-za">Name Z → A</option>
+        <option value="most-msgs">Most messages</option>
+        <option value="least-msgs">Fewest messages</option>
+      </select>
+    </div>
     <div id="sessions-count"></div>
     <div id="sessions-list"></div>
   </div>

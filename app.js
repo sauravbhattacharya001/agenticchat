@@ -2900,6 +2900,16 @@ const SlashCommands = (() => {
           action: () => ModelComparePanel.toggle() },
         { name: 'clips', description: 'Open clipboard history — browse copied text', icon: '📋',
           action: () => ClipboardHistory.toggle() },
+        { name: 'sort', description: 'Cycle session sort order (newest/oldest/name/messages)', icon: '🔃',
+          action: () => {
+            const modes = ['newest', 'oldest', 'name-az', 'name-za', 'most-msgs', 'least-msgs'];
+            const labels = ['Newest first', 'Oldest first', 'Name A→Z', 'Name Z→A', 'Most messages', 'Fewest messages'];
+            const current = SafeStorage.get('agenticchat_session_sort') || 'newest';
+            const idx = modes.indexOf(current);
+            const next = (idx + 1) % modes.length;
+            SessionManager.setSortMode(modes[next]);
+            UIController.setChatOutput(`Sessions sorted: ${labels[next]}`);
+          } },
     ]);
 
     function init() {
@@ -3752,8 +3762,10 @@ const SessionManager = (() => {
   const MAX_MESSAGE_AGE_DAYS = 90;
   const PINNED_KEY = 'agenticchat_pinned_sessions';
   const QUOTA_WARNING_THRESHOLD = 0.8;  // 80% of estimated quota
+  const SORT_KEY = 'agenticchat_session_sort';
   let isOpen = false;
   let autoSave = false;
+  let _searchQuery = '';
 
   // ── In-memory cache (fixes #36) ─────────────────────────────
   // Avoids redundant JSON.parse on every operation. The cache is
@@ -3939,14 +3951,60 @@ const SessionManager = (() => {
   }
 
   /** Get all sessions sorted: pinned first, then by updatedAt (newest first). */
+  /** Get saved sort preference. */
+  function _getSortMode() {
+    try { return SafeStorage.get(SORT_KEY) || 'newest'; } catch { return 'newest'; }
+  }
+
+  /** Set sort preference. */
+  function setSortMode(mode) {
+    try { SafeStorage.set(SORT_KEY, mode); } catch {}
+    if (isOpen) refresh();
+  }
+
+  /** Set search query for filtering. */
+  function setSearchQuery(query) {
+    _searchQuery = (query || '').toLowerCase().trim();
+    if (isOpen) refresh();
+  }
+
   function getAll() {
     const pinned = _getPinnedIds();
-    return _loadAll().sort((a, b) => {
+    const sortMode = _getSortMode();
+    const sessions = _loadAll().slice();
+
+    sessions.sort((a, b) => {
+      // Pinned always float to top regardless of sort
       const aPinned = pinned.has(a.id) ? 1 : 0;
       const bPinned = pinned.has(b.id) ? 1 : 0;
       if (aPinned !== bPinned) return bPinned - aPinned;
-      return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+
+      switch (sortMode) {
+        case 'oldest':
+          return new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime();
+        case 'name-az':
+          return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+        case 'name-za':
+          return b.name.localeCompare(a.name, undefined, { sensitivity: 'base' });
+        case 'most-msgs':
+          return (b.messageCount || 0) - (a.messageCount || 0);
+        case 'least-msgs':
+          return (a.messageCount || 0) - (b.messageCount || 0);
+        case 'newest':
+        default:
+          return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+      }
     });
+
+    // Apply search filter
+    if (_searchQuery) {
+      return sessions.filter(s =>
+        s.name.toLowerCase().includes(_searchQuery) ||
+        (s.preview && s.preview.toLowerCase().includes(_searchQuery))
+      );
+    }
+
+    return sessions;
   }
 
   /** Get the count of saved sessions. */
@@ -4249,6 +4307,13 @@ const SessionManager = (() => {
     if (isOpen) {
       panel.classList.add('open');
       overlay.classList.add('visible');
+      // Restore sort dropdown to saved preference
+      const sortSelect = document.getElementById('sessions-sort');
+      if (sortSelect) sortSelect.value = _getSortMode();
+      // Clear search on open
+      const searchInput = document.getElementById('sessions-search');
+      if (searchInput) searchInput.value = '';
+      _searchQuery = '';
       refresh();
     } else {
       panel.classList.remove('open');
@@ -4565,7 +4630,7 @@ const SessionManager = (() => {
     getAll, getCount, save, load, remove, rename, duplicate,
     newSession, exportSession, importSession, clearAll,
     isAutoSaveEnabled, toggleAutoSave, autoSaveIfEnabled, initAutoSave,
-    isPinned, togglePin,
+    isPinned, togglePin, setSortMode, setSearchQuery,
     toggle, close, refresh,
     openSaveDialog, confirmSave, closeSaveDialog,
     handleImport, handleClearAll,
@@ -8450,6 +8515,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const tagsBtn = document.getElementById('sessions-tags-btn');
   if (tagsBtn) tagsBtn.addEventListener('click', ConversationTags.openManager);
   document.getElementById('sessions-autosave').addEventListener('change', SessionManager.toggleAutoSave);
+  document.getElementById('sessions-sort').addEventListener('change', (e) => SessionManager.setSortMode(e.target.value));
+  document.getElementById('sessions-search').addEventListener('input', (e) => SessionManager.setSearchQuery(e.target.value));
 
   // Session save dialog
   document.getElementById('session-save-confirm').addEventListener('click', SessionManager.confirmSave);
