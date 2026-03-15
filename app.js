@@ -941,6 +941,26 @@ const ChatController = (() => {
       }
     }
 
+    // Flush the TextDecoder (releases any buffered multi-byte chars)
+    // and process any remaining data left in buffer.
+    buffer += decoder.decode();
+    if (buffer.trim()) {
+      const trimmed = buffer.trim();
+      if (trimmed.startsWith('data: ')) {
+        const payload = trimmed.slice(6);
+        if (payload !== '[DONE]') {
+          try {
+            const parsed = JSON.parse(payload);
+            const delta = parsed.choices?.[0]?.delta?.content;
+            if (delta) {
+              chunks.push(delta);
+              onToken(delta);
+            }
+          } catch (_) { /* skip malformed */ }
+        }
+      }
+    }
+
     const fullText = chunks.join('');
 
     // Estimate tokens since streaming doesn't return usage
