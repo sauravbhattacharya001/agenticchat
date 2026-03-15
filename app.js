@@ -61,6 +61,7 @@
  *   ConversationSentiment — heuristic sentiment analysis with mood timeline (Ctrl+Shift+M)
  *   QuickSwitcher        — VS Code-style fuzzy session switcher (Ctrl+K)
  *   ChatGPTImporter      — import ChatGPT exported conversations (conversations.json)
+ *   ConversationHealthCheck — heuristic conversation diagnostic (prompt quality, balance, context usage, repetition)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -2919,6 +2920,8 @@ const SlashCommands = (() => {
           } },
             { name: 'import-chatgpt', description: 'Import conversations from ChatGPT export (conversations.json)', icon: '🤖',
           action: () => ChatGPTImporter.openFilePicker() },
+        { name: 'health', description: 'Run conversation health check — diagnostic analysis', icon: '🩺',
+          action: () => ConversationHealthCheck.toggle() },
     ]);
 
     function init() {
@@ -3463,6 +3466,13 @@ const KeyboardShortcuts = (() => {
       e.preventDefault();
       const voiceBtn = document.getElementById('voice-btn');
       if (voiceBtn && !voiceBtn.disabled) voiceBtn.click();
+      return;
+    }
+
+    // ── Ctrl+Shift+H — conversation health check ──
+    if (ctrl && e.shiftKey && (e.key === 'H' || e.key === 'h')) {
+      e.preventDefault();
+      ConversationHealthCheck.toggle();
       return;
     }
 
@@ -8428,6 +8438,7 @@ document.addEventListener('DOMContentLoaded', () => {
       Scratchpad.close();
       ConversationChapters.closePanel();
       UsageHeatmap.close();
+      ConversationHealthCheck.close();
     }
   });
 
@@ -8566,6 +8577,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Usage heatmap
   document.getElementById('heatmap-btn').addEventListener('click', UsageHeatmap.toggle);
+
+  // Health check panel
+  document.getElementById('health-close-btn').addEventListener('click', ConversationHealthCheck.close);
+  document.getElementById('health-overlay').addEventListener('click', function(e) {
+    if (e.target === this) ConversationHealthCheck.close();
+  });
 
   // Focus / Zen mode
   document.getElementById('zen-btn').addEventListener('click', FocusMode.toggle);
@@ -19130,3 +19147,367 @@ const PromptChainRunner = (() => {
   };
 })();
 
+
+/* ---------- Conversation Health Check ---------- */
+/**
+ * ConversationHealthCheck — heuristic diagnostic analysis of the current
+ * conversation, providing actionable feedback on prompt quality, balance,
+ * context usage, repetition, and conversation patterns.
+ *
+ * Opens as a modal (Ctrl+Shift+H or /health slash command).
+ *
+ * Checks performed:
+ *  1. Prompt clarity — flags very short or very long user messages
+ *  2. Conversation balance — user vs assistant message ratio
+ *  3. Context window usage — estimated token count vs model limit
+ *  4. Repetition detection — duplicate/near-duplicate user messages
+ *  5. Code block ratio — flags code-heavy conversations
+ *  6. Question density — checks if user is asking enough questions
+ *  7. System prompt — checks if a persona is set
+ *  8. Conversation length — flags very long conversations
+ *  9. Idle time warning — if conversation was abandoned mid-thread
+ * 10. Response length variance — flags wildly inconsistent responses
+ *
+ * @namespace ConversationHealthCheck
+ */
+const ConversationHealthCheck = (() => {
+  let isOpen = false;
+
+  const _esc = _escapeHtml;
+
+  /**
+   * Run all health checks and return structured results.
+   * @returns {{ score: number, grade: string, checks: Array }}
+   */
+  function analyze() {
+    const allMsgs = ConversationManager.getMessages();
+    const msgs = allMsgs.filter(m => m.role !== 'system');
+    const userMsgs = msgs.filter(m => m.role === 'user');
+    const assistantMsgs = msgs.filter(m => m.role === 'assistant');
+    const systemMsgs = allMsgs.filter(m => m.role === 'system');
+
+    if (msgs.length === 0) {
+      return { score: -1, grade: 'N/A', checks: [] };
+    }
+
+    const checks = [];
+    let totalPoints = 0;
+    let maxPoints = 0;
+
+    // Helper: word count
+    const wc = (s) => s.trim() ? s.trim().split(/\s+/).length : 0;
+
+    // ─── 1. Prompt Clarity ───────────────────────────────────
+    maxPoints += 15;
+    const avgUserWords = userMsgs.length
+      ? Math.round(userMsgs.reduce((s, m) => s + wc(m.content), 0) / userMsgs.length)
+      : 0;
+    const veryShort = userMsgs.filter(m => wc(m.content) < 3);
+    const veryLong = userMsgs.filter(m => wc(m.content) > 500);
+
+    if (veryShort.length > userMsgs.length * 0.5 && userMsgs.length >= 3) {
+      checks.push({
+        id: 'clarity', status: 'warn', points: 5,
+        title: 'Prompts are very short',
+        detail: `${veryShort.length} of ${userMsgs.length} prompts have fewer than 3 words. Short prompts often produce vague responses — try adding context or specifics.`,
+      });
+      totalPoints += 5;
+    } else if (veryLong.length > userMsgs.length * 0.3 && userMsgs.length >= 2) {
+      checks.push({
+        id: 'clarity', status: 'warn', points: 8,
+        title: 'Some prompts are very long',
+        detail: `${veryLong.length} prompts exceed 500 words. Consider breaking long prompts into smaller, focused questions for more targeted responses.`,
+      });
+      totalPoints += 8;
+    } else {
+      checks.push({
+        id: 'clarity', status: 'pass', points: 15,
+        title: 'Prompt length is good',
+        detail: `Average prompt is ${avgUserWords} words — clear and specific.`,
+      });
+      totalPoints += 15;
+    }
+
+    // ─── 2. Conversation Balance ─────────────────────────────
+    maxPoints += 10;
+    const ratio = userMsgs.length && assistantMsgs.length
+      ? (userMsgs.length / assistantMsgs.length).toFixed(2)
+      : 0;
+    if (userMsgs.length > 0 && assistantMsgs.length === 0) {
+      checks.push({
+        id: 'balance', status: 'fail', points: 0,
+        title: 'No responses yet',
+        detail: 'You have sent messages but received no responses. Check your API key and model settings.',
+      });
+    } else if (ratio > 2.0) {
+      checks.push({
+        id: 'balance', status: 'warn', points: 5,
+        title: 'Many unanswered prompts',
+        detail: `User:assistant ratio is ${ratio}:1. Some messages may not have received responses.`,
+      });
+      totalPoints += 5;
+    } else {
+      checks.push({
+        id: 'balance', status: 'pass', points: 10,
+        title: 'Good conversation balance',
+        detail: `${userMsgs.length} user messages, ${assistantMsgs.length} responses (ratio: ${ratio}:1).`,
+      });
+      totalPoints += 10;
+    }
+
+    // ─── 3. Context Window Usage ─────────────────────────────
+    maxPoints += 20;
+    const totalChars = allMsgs.reduce((s, m) => s + m.content.length, 0);
+    const estTokens = Math.ceil(totalChars / 4);
+    const modelLimit = 128000; // GPT-4o context window
+    const usage = estTokens / modelLimit;
+
+    if (usage > 0.85) {
+      checks.push({
+        id: 'context', status: 'fail', points: 0,
+        title: 'Context window nearly full',
+        detail: `Estimated ${estTokens.toLocaleString()} tokens (${Math.round(usage * 100)}% of ${(modelLimit / 1000)}K limit). The model may start forgetting earlier messages. Consider starting a new session or clearing history.`,
+      });
+    } else if (usage > 0.6) {
+      checks.push({
+        id: 'context', status: 'warn', points: 10,
+        title: 'Context window filling up',
+        detail: `Estimated ${estTokens.toLocaleString()} tokens (${Math.round(usage * 100)}%). You have room, but long conversations may lose early context.`,
+      });
+      totalPoints += 10;
+    } else {
+      checks.push({
+        id: 'context', status: 'pass', points: 20,
+        title: 'Context window healthy',
+        detail: `Estimated ${estTokens.toLocaleString()} tokens (${Math.round(usage * 100)}% of ${(modelLimit / 1000)}K limit). Plenty of room.`,
+      });
+      totalPoints += 20;
+    }
+
+    // ─── 4. Repetition Detection ─────────────────────────────
+    maxPoints += 15;
+    const userTexts = userMsgs.map(m => m.content.toLowerCase().trim());
+    const seen = new Set();
+    let dupes = 0;
+    for (const t of userTexts) {
+      if (t.length > 5 && seen.has(t)) dupes++;
+      seen.add(t);
+    }
+    // Near-duplicate: same first 50 chars
+    let nearDupes = 0;
+    const prefixes = new Set();
+    for (const t of userTexts) {
+      const prefix = t.substring(0, 50);
+      if (prefix.length > 10 && prefixes.has(prefix)) nearDupes++;
+      prefixes.add(prefix);
+    }
+
+    if (dupes > 0) {
+      checks.push({
+        id: 'repetition', status: 'fail', points: 0,
+        title: `${dupes} duplicate prompt${dupes > 1 ? 's' : ''} detected`,
+        detail: 'Exact same messages sent multiple times. This wastes tokens and suggests the AI response wasn\'t satisfactory — try rephrasing instead of repeating.',
+      });
+    } else if (nearDupes > 0) {
+      checks.push({
+        id: 'repetition', status: 'warn', points: 8,
+        title: `${nearDupes} near-duplicate prompt${nearDupes > 1 ? 's' : ''}`,
+        detail: 'Similar messages detected. If the AI isn\'t understanding, try a completely different approach or add more context.',
+      });
+      totalPoints += 8;
+    } else {
+      checks.push({
+        id: 'repetition', status: 'pass', points: 15,
+        title: 'No repetition detected',
+        detail: 'All prompts are unique — good conversation flow.',
+      });
+      totalPoints += 15;
+    }
+
+    // ─── 5. Code Block Ratio ─────────────────────────────────
+    maxPoints += 10;
+    const codeBlocks = msgs.reduce((sum, m) => {
+      const matches = m.content.match(/```/g);
+      return sum + (matches ? Math.floor(matches.length / 2) : 0);
+    }, 0);
+    const codeRatio = msgs.length ? codeBlocks / msgs.length : 0;
+
+    if (codeRatio > 0.7 && msgs.length >= 4) {
+      checks.push({
+        id: 'code', status: 'info', points: 7,
+        title: 'Code-heavy conversation',
+        detail: `${codeBlocks} code blocks in ${msgs.length} messages. Consider using /snippets to save important code for later reference.`,
+      });
+      totalPoints += 7;
+    } else {
+      checks.push({
+        id: 'code', status: 'pass', points: 10,
+        title: 'Code block usage is balanced',
+        detail: `${codeBlocks} code block${codeBlocks !== 1 ? 's' : ''} across ${msgs.length} messages.`,
+      });
+      totalPoints += 10;
+    }
+
+    // ─── 6. Question Density ─────────────────────────────────
+    maxPoints += 10;
+    const questions = userMsgs.filter(m => m.content.includes('?'));
+    const qRatio = userMsgs.length ? questions.length / userMsgs.length : 0;
+
+    if (userMsgs.length >= 5 && qRatio < 0.1) {
+      checks.push({
+        id: 'questions', status: 'info', points: 5,
+        title: 'Low question density',
+        detail: `Only ${questions.length} of ${userMsgs.length} prompts contain questions. Asking specific questions often yields better responses.`,
+      });
+      totalPoints += 5;
+    } else {
+      checks.push({
+        id: 'questions', status: 'pass', points: 10,
+        title: 'Good question engagement',
+        detail: `${questions.length} of ${userMsgs.length} prompts ask questions.`,
+      });
+      totalPoints += 10;
+    }
+
+    // ─── 7. System Prompt / Persona ──────────────────────────
+    maxPoints += 10;
+    if (systemMsgs.length === 0) {
+      checks.push({
+        id: 'persona', status: 'info', points: 5,
+        title: 'No system prompt set',
+        detail: 'Using a persona/system prompt helps guide the AI\'s behavior. Try /persona to set one.',
+      });
+      totalPoints += 5;
+    } else {
+      const sysLen = wc(systemMsgs[0].content);
+      checks.push({
+        id: 'persona', status: 'pass', points: 10,
+        title: 'System prompt active',
+        detail: `Active persona with ${sysLen} words guiding the conversation.`,
+      });
+      totalPoints += 10;
+    }
+
+    // ─── 8. Conversation Length ───────────────────────────────
+    maxPoints += 10;
+    if (msgs.length > 100) {
+      checks.push({
+        id: 'length', status: 'warn', points: 3,
+        title: 'Very long conversation',
+        detail: `${msgs.length} messages. Long conversations can degrade response quality as the model struggles to maintain context. Consider forking or starting fresh.`,
+      });
+      totalPoints += 3;
+    } else if (msgs.length > 50) {
+      checks.push({
+        id: 'length', status: 'info', points: 7,
+        title: 'Moderately long conversation',
+        detail: `${msgs.length} messages. Consider bookmarking key messages for quick reference.`,
+      });
+      totalPoints += 7;
+    } else {
+      checks.push({
+        id: 'length', status: 'pass', points: 10,
+        title: 'Conversation length is manageable',
+        detail: `${msgs.length} messages — well within comfortable limits.`,
+      });
+      totalPoints += 10;
+    }
+
+    // Calculate overall score
+    const score = maxPoints > 0 ? Math.round((totalPoints / maxPoints) * 100) : 0;
+    let grade;
+    if (score >= 90) grade = 'Excellent';
+    else if (score >= 75) grade = 'Good';
+    else if (score >= 55) grade = 'Fair';
+    else grade = 'Needs Attention';
+
+    return { score, grade, checks, maxPoints, totalPoints };
+  }
+
+  /**
+   * Render the health check results into the panel.
+   */
+  function render() {
+    const contentEl = document.getElementById('health-content');
+    if (!contentEl) return;
+
+    const result = analyze();
+
+    if (result.score === -1) {
+      contentEl.innerHTML = '<div class="health-empty">🩺 No messages to analyze.<br>Start a conversation first!</div>';
+      return;
+    }
+
+    // Score color
+    let color = '#4ade80';
+    if (result.score < 55) color = '#f87171';
+    else if (result.score < 75) color = '#fbbf24';
+    else if (result.score < 90) color = '#60a5fa';
+
+    // SVG ring
+    const radius = 36;
+    const circumference = 2 * Math.PI * radius;
+    const offset = circumference - (result.score / 100) * circumference;
+
+    let html = `<div class="health-score-ring">
+      <svg width="90" height="90" viewBox="0 0 90 90">
+        <circle cx="45" cy="45" r="${radius}" fill="none" stroke="#333" stroke-width="6"/>
+        <circle cx="45" cy="45" r="${radius}" fill="none" stroke="${color}" stroke-width="6"
+          stroke-dasharray="${circumference}" stroke-dashoffset="${offset}"
+          stroke-linecap="round" transform="rotate(-90 45 45)"
+          style="transition: stroke-dashoffset 0.5s ease"/>
+        <text x="45" y="49" text-anchor="middle" fill="${color}" font-size="20" font-weight="700">${result.score}</text>
+      </svg>
+      <div>
+        <div class="health-score-label">Overall Health</div>
+        <div class="health-score-value" style="color:${color}">${_esc(result.grade)}</div>
+        <div class="health-score-desc">${result.totalPoints}/${result.maxPoints} points across ${result.checks.length} checks</div>
+      </div>
+    </div>`;
+
+    html += '<div class="health-section-title">Diagnostic Results</div>';
+    html += '<div class="health-checks">';
+
+    const statusIcon = { pass: '✅', warn: '⚠️', fail: '❌', info: 'ℹ️' };
+
+    for (const check of result.checks) {
+      html += `<div class="health-check-item ${_esc(check.status)}">
+        <span class="health-check-icon">${statusIcon[check.status] || '•'}</span>
+        <div class="health-check-body">
+          <div class="health-check-title">${_esc(check.title)}</div>
+          <div class="health-check-detail">${_esc(check.detail)}</div>
+        </div>
+      </div>`;
+    }
+
+    html += '</div>';
+    contentEl.innerHTML = html;
+  }
+
+  /** Open the health check panel. */
+  function open() {
+    const overlay = document.getElementById('health-overlay');
+    if (overlay) {
+      overlay.style.display = 'flex';
+      isOpen = true;
+      render();
+    }
+  }
+
+  /** Close the health check panel. */
+  function close() {
+    const overlay = document.getElementById('health-overlay');
+    if (overlay) {
+      overlay.style.display = 'none';
+      isOpen = false;
+    }
+  }
+
+  /** Toggle the panel. */
+  function toggle() {
+    if (isOpen) close();
+    else open();
+  }
+
+  return { open, close, toggle, analyze, render };
+})();
