@@ -16601,7 +16601,7 @@ const ConversationAgenda = (() => {
   function _load() {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
-      agendas = raw ? JSON.parse(raw) : {};
+      agendas = raw ? sanitizeStorageObject(JSON.parse(raw)) : {};
     } catch (_) { agendas = {}; }
   }
 
@@ -16941,8 +16941,11 @@ const ClipboardHistory = (() => {
 
   function _load() {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) entries = JSON.parse(raw);
+      const raw = SafeStorage.get(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        entries = Array.isArray(parsed) ? sanitizeStorageObject(parsed) : [];
+      }
     } catch (_) {
       entries = [];
     }
@@ -16950,7 +16953,7 @@ const ClipboardHistory = (() => {
 
   function _save() {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+      SafeStorage.set(STORAGE_KEY, JSON.stringify(entries));
     } catch (_) { /* quota exceeded — silently skip */ }
   }
 
