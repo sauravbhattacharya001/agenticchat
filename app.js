@@ -8617,6 +8617,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Scheduled messages
   MessageScheduler.init();
+  // Connect MessageScheduler to ChatController so scheduled messages actually send
+  MessageScheduler.onSend(function(text) {
+    UIController.setChatInput(text);
+    ChatController.send();
+  });
   SmartRetry.init();
 
   // Prompt chain runner
@@ -15616,16 +15621,17 @@ const MessageScheduler = (() => {
     if (_onSendCallback) {
       _onSendCallback(item.text);
     } else {
-      // Fallback: inject into chat input and submit
-      const input = document.getElementById('messageInput');
-      if (input) {
-        input.value = item.text;
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        const form = input.closest('form');
-        if (form) {
-          form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-        } else {
-          const sendBtn = document.querySelector('.send-button, #sendButton, [data-send]');
+      // Fallback: use UIController + ChatController if available
+      if (typeof UIController !== 'undefined' && typeof ChatController !== 'undefined') {
+        UIController.setChatInput(item.text);
+        ChatController.send();
+      } else {
+        // Last resort: inject into chat input and click send
+        const input = document.getElementById('chat-input');
+        if (input) {
+          input.value = item.text;
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          const sendBtn = document.getElementById('send-btn');
           if (sendBtn) sendBtn.click();
         }
       }
