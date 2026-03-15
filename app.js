@@ -1,7 +1,7 @@
 ﻿﻿﻿/* ============================================================
  * Agentic Chat — Application Logic
  *
- * Architecture (45 modules, all revealing-module-pattern IIFEs):
+ * Architecture (46 modules, all revealing-module-pattern IIFEs):
  *
  *   Core:
  *   SafeStorage          — safe localStorage wrapper for restricted-storage environments
@@ -8618,6 +8618,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // Scheduled messages
   MessageScheduler.init();
   SmartRetry.init();
+
+  // Prompt chain runner
+  PromptChainRunner.init();
 });
 
 
@@ -18567,3 +18570,557 @@ const ChatGPTImporter = (() => {
 
   return { importFromJSON, openFilePicker, _extractMessages };
 })();
+
+/* ---------- Prompt Chain Runner (module 57) ---------- */
+/**
+ * Multi-step prompt chains — define a sequence of prompts that execute
+ * one after another, with each step able to reference the previous
+ * step's response via {{prev}}.  Great for multi-stage code generation
+ * workflows like "design data model" → "add API endpoints" → "write tests".
+ *
+ * Features:
+ *   - Create, edit, duplicate, delete, and run prompt chains
+ *   - {{prev}} placeholder substituted with the previous step's response
+ *   - {{step.N}} placeholder for a specific earlier step's response (1-based)
+ *   - Progress indicator during execution with stop button
+ *   - Chain history with timestamps and step outputs
+ *   - Import/export chains as JSON
+ *   - /chains and /run-chain slash commands
+ *
+ * Storage key: ac-prompt-chains
+ *
+ * @namespace PromptChainRunner
+ */
+const PromptChainRunner = (() => {
+  const STORAGE_KEY = 'ac-prompt-chains';
+  const HISTORY_KEY = 'ac-chain-runs';
+  const MAX_HISTORY = 20;
+
+  let _panelEl = null;
+  let _overlayEl = null;
+  let _isOpen = false;
+  let _isRunning = false;
+  let _shouldStop = false;
+  let _chains = [];
+  let _runHistory = [];
+
+  // ── Persistence ──
+
+  function _load() {
+    try {
+      const raw = SafeStorage.get(STORAGE_KEY);
+      _chains = raw ? JSON.parse(raw) : [];
+    } catch (_) { _chains = []; }
+    try {
+      const raw = SafeStorage.get(HISTORY_KEY);
+      _runHistory = raw ? JSON.parse(raw) : [];
+    } catch (_) { _runHistory = []; }
+  }
+
+  function _saveChains() {
+    SafeStorage.set(STORAGE_KEY, JSON.stringify(_chains));
+  }
+
+  function _saveHistory() {
+    while (_runHistory.length > MAX_HISTORY) _runHistory.pop();
+    SafeStorage.set(HISTORY_KEY, JSON.stringify(_runHistory));
+  }
+
+  // ── Chain CRUD ──
+
+  function _newId() {
+    return 'chain_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
+  }
+
+  function createChain(name, steps) {
+    const chain = { id: _newId(), name: name || 'Untitled Chain', steps: steps || [''], createdAt: Date.now() };
+    _chains.unshift(chain);
+    _saveChains();
+    return chain;
+  }
+
+  function updateChain(id, updates) {
+    const chain = _chains.find(c => c.id === id);
+    if (!chain) return null;
+    if (updates.name !== undefined) chain.name = updates.name;
+    if (updates.steps !== undefined) chain.steps = updates.steps;
+    chain.updatedAt = Date.now();
+    _saveChains();
+    return chain;
+  }
+
+  function deleteChain(id) {
+    _chains = _chains.filter(c => c.id !== id);
+    _saveChains();
+  }
+
+  function duplicateChain(id) {
+    const src = _chains.find(c => c.id === id);
+    if (!src) return null;
+    return createChain(src.name + ' (copy)', [...src.steps]);
+  }
+
+  function getChains() { return _chains.slice(); }
+
+  // ── Chain Execution ──
+
+  function _substitute(template, stepOutputs) {
+    let result = template;
+    // {{prev}} → last step output
+    if (stepOutputs.length > 0) {
+      result = result.replace(/\{\{prev\}\}/gi, stepOutputs[stepOutputs.length - 1]);
+    }
+    // {{step.N}} → specific step output (1-based)
+    result = result.replace(/\{\{step\.(\d+)\}\}/gi, (match, n) => {
+      const idx = parseInt(n, 10) - 1;
+      return idx >= 0 && idx < stepOutputs.length ? stepOutputs[idx] : match;
+    });
+    return result;
+  }
+
+  async function runChain(chainId) {
+    if (_isRunning) {
+      alert('A chain is already running. Stop it first.');
+      return null;
+    }
+
+    const chain = _chains.find(c => c.id === chainId);
+    if (!chain || chain.steps.length === 0) {
+      alert('Chain is empty or not found.');
+      return null;
+    }
+
+    // Check API key
+    if (typeof ApiKeyManager !== 'undefined' && !ApiKeyManager.getOpenAIKey()) {
+      alert('Set your OpenAI API key first.');
+      return null;
+    }
+
+    _isRunning = true;
+    _shouldStop = false;
+    const stepOutputs = [];
+    const runRecord = {
+      chainId: chain.id,
+      chainName: chain.name,
+      startedAt: Date.now(),
+      steps: [],
+      completed: false
+    };
+
+    _renderProgress(chain, 0, chain.steps.length);
+
+    for (let i = 0; i < chain.steps.length; i++) {
+      if (_shouldStop) {
+        runRecord.stoppedAt = Date.now();
+        break;
+      }
+
+      const promptText = _substitute(chain.steps[i], stepOutputs);
+      _renderProgress(chain, i + 1, chain.steps.length, promptText);
+
+      // Set input and send
+      UIController.setChatInput(promptText);
+
+      try {
+        await ChatController.send();
+      } catch (err) {
+        runRecord.steps.push({ step: i + 1, prompt: promptText, error: err.message });
+        break;
+      }
+
+      // Get the response (last assistant message)
+      const history = ConversationManager.getHistory();
+      const lastMsg = history.length > 0 ? history[history.length - 1] : null;
+      const response = lastMsg && lastMsg.role === 'assistant' ? lastMsg.content : '(no response)';
+
+      stepOutputs.push(response);
+      runRecord.steps.push({ step: i + 1, prompt: promptText, response: response.substring(0, 500) });
+
+      // Small delay between steps to avoid rate limiting
+      if (i < chain.steps.length - 1 && !_shouldStop) {
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
+
+    _isRunning = false;
+    _shouldStop = false;
+    runRecord.completedAt = Date.now();
+    runRecord.completed = runRecord.steps.length === chain.steps.length;
+
+    _runHistory.unshift(runRecord);
+    _saveHistory();
+
+    _renderPanel();
+    return runRecord;
+  }
+
+  function stopChain() {
+    if (_isRunning) {
+      _shouldStop = true;
+      if (typeof ChatController !== 'undefined') ChatController.cancelRequest();
+    }
+  }
+
+  // ── Import / Export ──
+
+  function exportChains() {
+    const json = JSON.stringify(_chains, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'prompt-chains-' + new Date().toISOString().slice(0, 10) + '.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function importChains() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.addEventListener('change', () => {
+      const file = input.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const imported = JSON.parse(reader.result);
+          if (!Array.isArray(imported)) throw new Error('Expected array');
+          let count = 0;
+          for (const c of imported) {
+            if (c.name && Array.isArray(c.steps)) {
+              createChain(c.name, c.steps);
+              count++;
+            }
+          }
+          alert(`Imported ${count} chain${count !== 1 ? 's' : ''}.`);
+          _renderPanel();
+        } catch (e) {
+          alert('Import failed: ' + e.message);
+        }
+      };
+      reader.readAsText(file);
+    });
+    input.click();
+  }
+
+  // ── UI ──
+
+  function _ensurePanel() {
+    if (_panelEl) return;
+
+    _overlayEl = document.createElement('div');
+    _overlayEl.id = 'chain-overlay';
+    _overlayEl.style.cssText = 'display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);z-index:9998;';
+    _overlayEl.addEventListener('click', close);
+
+    _panelEl = document.createElement('div');
+    _panelEl.id = 'chain-panel';
+    _panelEl.style.cssText = `
+      display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+      width:min(90vw,640px);max-height:80vh;overflow-y:auto;
+      background:var(--bg,#1e1e2e);color:var(--text,#cdd6f4);
+      border:1px solid var(--border,#45475a);border-radius:12px;
+      padding:24px;z-index:9999;font-family:inherit;
+      box-shadow:0 20px 60px rgba(0,0,0,0.3);
+    `;
+
+    document.body.appendChild(_overlayEl);
+    document.body.appendChild(_panelEl);
+  }
+
+  function toggle() {
+    if (_isOpen) close(); else open();
+  }
+
+  function open() {
+    _ensurePanel();
+    _isOpen = true;
+    _overlayEl.style.display = 'block';
+    _panelEl.style.display = 'block';
+    _renderPanel();
+  }
+
+  function close() {
+    _isOpen = false;
+    if (_overlayEl) _overlayEl.style.display = 'none';
+    if (_panelEl) _panelEl.style.display = 'none';
+  }
+
+  function _renderProgress(chain, current, total, currentPrompt) {
+    _ensurePanel();
+    if (!_isOpen) open();
+
+    const pct = Math.round((current / total) * 100);
+    _panelEl.innerHTML = `
+      <div style="text-align:center;">
+        <h3 style="margin:0 0 12px 0;">⛓️ Running: ${_esc(chain.name)}</h3>
+        <div style="background:var(--border,#45475a);border-radius:8px;height:24px;margin:16px 0;overflow:hidden;">
+          <div style="background:#89b4fa;height:100%;width:${pct}%;transition:width 0.3s;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;color:#1e1e2e;">
+            ${current}/${total}
+          </div>
+        </div>
+        ${currentPrompt ? `<p style="font-size:13px;opacity:0.7;margin:8px 0;max-height:60px;overflow:hidden;text-overflow:ellipsis;">${_esc(currentPrompt).substring(0, 120)}${currentPrompt.length > 120 ? '…' : ''}</p>` : ''}
+        <button onclick="PromptChainRunner.stopChain()" style="margin-top:12px;padding:8px 24px;background:#f38ba8;color:#1e1e2e;border:none;border-radius:6px;cursor:pointer;font-weight:600;">
+          ⏹ Stop Chain
+        </button>
+      </div>
+    `;
+  }
+
+  function _renderPanel() {
+    _ensurePanel();
+    const chainsHtml = _chains.length === 0
+      ? '<p style="opacity:0.5;text-align:center;margin:20px 0;">No chains yet. Create one to get started!</p>'
+      : _chains.map(c => `
+        <div style="background:var(--input-bg,#313244);border:1px solid var(--border,#45475a);border-radius:8px;padding:12px;margin:8px 0;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <strong style="font-size:15px;">${_esc(c.name)}</strong>
+            <span style="font-size:12px;opacity:0.5;">${c.steps.length} step${c.steps.length !== 1 ? 's' : ''}</span>
+          </div>
+          <div style="font-size:12px;opacity:0.6;margin:4px 0;">
+            ${c.steps.map((s, i) => `<span title="${_esc(s)}">Step ${i+1}: ${_esc(s.substring(0, 40))}${s.length > 40 ? '…' : ''}</span>`).join(' → ')}
+          </div>
+          <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">
+            <button onclick="PromptChainRunner.runChain('${c.id}')" style="padding:4px 12px;background:#a6e3a1;color:#1e1e2e;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600;" ${_isRunning ? 'disabled' : ''}>▶ Run</button>
+            <button onclick="PromptChainRunner._editChain('${c.id}')" style="padding:4px 12px;background:#89b4fa;color:#1e1e2e;border:none;border-radius:4px;cursor:pointer;font-size:12px;">✏️ Edit</button>
+            <button onclick="PromptChainRunner.duplicateChain('${c.id}');PromptChainRunner._renderPanel();" style="padding:4px 12px;background:#cba6f7;color:#1e1e2e;border:none;border-radius:4px;cursor:pointer;font-size:12px;">📋 Duplicate</button>
+            <button onclick="if(confirm('Delete this chain?')){PromptChainRunner.deleteChain('${c.id}');PromptChainRunner._renderPanel();}" style="padding:4px 12px;background:#f38ba8;color:#1e1e2e;border:none;border-radius:4px;cursor:pointer;font-size:12px;">🗑️ Delete</button>
+          </div>
+        </div>
+      `).join('');
+
+    const historyHtml = _runHistory.length === 0
+      ? ''
+      : `<details style="margin-top:16px;"><summary style="cursor:pointer;font-weight:600;opacity:0.8;">📜 Run History (${_runHistory.length})</summary>
+         ${_runHistory.slice(0, 10).map(r => `
+           <div style="background:var(--input-bg,#313244);border-radius:6px;padding:8px;margin:4px 0;font-size:12px;">
+             <strong>${_esc(r.chainName)}</strong> — ${new Date(r.startedAt).toLocaleString()}
+             — ${r.completed ? '✅ completed' : '⏹ stopped'} (${r.steps.length} steps)
+           </div>
+         `).join('')}
+         </details>`;
+
+    _panelEl.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <h2 style="margin:0;font-size:20px;">⛓️ Prompt Chains</h2>
+        <button onclick="PromptChainRunner.close()" style="background:none;border:none;color:var(--text,#cdd6f4);font-size:20px;cursor:pointer;padding:4px 8px;" title="Close">✕</button>
+      </div>
+      <p style="font-size:13px;opacity:0.6;margin:0 0 12px 0;">
+        Create multi-step prompt sequences. Use <code>{{prev}}</code> for the last step's output or <code>{{step.N}}</code> for a specific step.
+      </p>
+      <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;">
+        <button onclick="PromptChainRunner._newChainUI()" style="padding:6px 16px;background:#a6e3a1;color:#1e1e2e;border:none;border-radius:6px;cursor:pointer;font-weight:600;">+ New Chain</button>
+        <button onclick="PromptChainRunner.importChains()" style="padding:6px 16px;background:var(--border,#45475a);color:var(--text,#cdd6f4);border:none;border-radius:6px;cursor:pointer;">📥 Import</button>
+        <button onclick="PromptChainRunner.exportChains()" style="padding:6px 16px;background:var(--border,#45475a);color:var(--text,#cdd6f4);border:none;border-radius:6px;cursor:pointer;" ${_chains.length === 0 ? 'disabled' : ''}>📤 Export</button>
+      </div>
+      ${chainsHtml}
+      ${historyHtml}
+    `;
+  }
+
+  function _newChainUI() {
+    _panelEl.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <h2 style="margin:0;font-size:20px;">⛓️ New Chain</h2>
+        <button onclick="PromptChainRunner._renderPanel()" style="background:none;border:none;color:var(--text,#cdd6f4);font-size:20px;cursor:pointer;" title="Back">←</button>
+      </div>
+      <label style="font-size:13px;font-weight:600;">Chain Name</label>
+      <input id="chain-name-input" type="text" placeholder="e.g. Build REST API" style="width:100%;padding:8px;margin:4px 0 12px 0;background:var(--input-bg,#313244);color:var(--text,#cdd6f4);border:1px solid var(--border,#45475a);border-radius:6px;box-sizing:border-box;" />
+      <label style="font-size:13px;font-weight:600;">Steps</label>
+      <div id="chain-steps-container"></div>
+      <button onclick="PromptChainRunner._addStepInput()" style="margin:8px 0;padding:4px 12px;background:var(--border,#45475a);color:var(--text,#cdd6f4);border:none;border-radius:4px;cursor:pointer;font-size:12px;">+ Add Step</button>
+      <div style="margin-top:16px;display:flex;gap:8px;">
+        <button onclick="PromptChainRunner._saveNewChain()" style="padding:8px 20px;background:#a6e3a1;color:#1e1e2e;border:none;border-radius:6px;cursor:pointer;font-weight:600;">💾 Save Chain</button>
+        <button onclick="PromptChainRunner._renderPanel()" style="padding:8px 20px;background:var(--border,#45475a);color:var(--text,#cdd6f4);border:none;border-radius:6px;cursor:pointer;">Cancel</button>
+      </div>
+    `;
+    _addStepInput(); // Start with one step
+  }
+
+  let _stepCounter = 0;
+
+  function _addStepInput(value) {
+    _stepCounter++;
+    const container = document.getElementById('chain-steps-container');
+    if (!container) return;
+
+    const stepDiv = document.createElement('div');
+    stepDiv.style.cssText = 'display:flex;gap:6px;align-items:flex-start;margin:4px 0;';
+    stepDiv.innerHTML = `
+      <span style="font-size:12px;font-weight:600;padding-top:10px;min-width:20px;opacity:0.6;">${container.children.length + 1}.</span>
+      <textarea class="chain-step-input" rows="2" placeholder="Enter prompt for this step… (use {{prev}} for previous output)" style="flex:1;padding:8px;background:var(--input-bg,#313244);color:var(--text,#cdd6f4);border:1px solid var(--border,#45475a);border-radius:6px;resize:vertical;font-family:inherit;font-size:13px;">${_esc(value || '')}</textarea>
+      <button onclick="this.parentElement.remove();PromptChainRunner._renumberSteps()" style="background:none;border:none;color:#f38ba8;cursor:pointer;padding:8px;font-size:16px;" title="Remove step">✕</button>
+    `;
+    container.appendChild(stepDiv);
+  }
+
+  function _renumberSteps() {
+    const container = document.getElementById('chain-steps-container');
+    if (!container) return;
+    Array.from(container.children).forEach((div, i) => {
+      const num = div.querySelector('span');
+      if (num) num.textContent = (i + 1) + '.';
+    });
+  }
+
+  function _saveNewChain() {
+    const nameInput = document.getElementById('chain-name-input');
+    const name = nameInput ? nameInput.value.trim() : '';
+    const steps = Array.from(document.querySelectorAll('.chain-step-input'))
+      .map(ta => ta.value.trim())
+      .filter(s => s.length > 0);
+
+    if (steps.length === 0) {
+      alert('Add at least one step.');
+      return;
+    }
+
+    createChain(name || 'Untitled Chain', steps);
+    _renderPanel();
+  }
+
+  function _editChain(id) {
+    const chain = _chains.find(c => c.id === id);
+    if (!chain) return;
+
+    _panelEl.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <h2 style="margin:0;font-size:20px;">✏️ Edit: ${_esc(chain.name)}</h2>
+        <button onclick="PromptChainRunner._renderPanel()" style="background:none;border:none;color:var(--text,#cdd6f4);font-size:20px;cursor:pointer;" title="Back">←</button>
+      </div>
+      <label style="font-size:13px;font-weight:600;">Chain Name</label>
+      <input id="chain-name-input" type="text" value="${_esc(chain.name)}" style="width:100%;padding:8px;margin:4px 0 12px 0;background:var(--input-bg,#313244);color:var(--text,#cdd6f4);border:1px solid var(--border,#45475a);border-radius:6px;box-sizing:border-box;" />
+      <label style="font-size:13px;font-weight:600;">Steps</label>
+      <div id="chain-steps-container"></div>
+      <button onclick="PromptChainRunner._addStepInput()" style="margin:8px 0;padding:4px 12px;background:var(--border,#45475a);color:var(--text,#cdd6f4);border:none;border-radius:4px;cursor:pointer;font-size:12px;">+ Add Step</button>
+      <div style="margin-top:16px;display:flex;gap:8px;">
+        <button onclick="PromptChainRunner._saveEditedChain('${chain.id}')" style="padding:8px 20px;background:#a6e3a1;color:#1e1e2e;border:none;border-radius:6px;cursor:pointer;font-weight:600;">💾 Save</button>
+        <button onclick="PromptChainRunner._renderPanel()" style="padding:8px 20px;background:var(--border,#45475a);color:var(--text,#cdd6f4);border:none;border-radius:6px;cursor:pointer;">Cancel</button>
+      </div>
+    `;
+
+    // Populate existing steps
+    chain.steps.forEach(s => _addStepInput(s));
+  }
+
+  function _saveEditedChain(id) {
+    const nameInput = document.getElementById('chain-name-input');
+    const name = nameInput ? nameInput.value.trim() : '';
+    const steps = Array.from(document.querySelectorAll('.chain-step-input'))
+      .map(ta => ta.value.trim())
+      .filter(s => s.length > 0);
+
+    if (steps.length === 0) {
+      alert('Add at least one step.');
+      return;
+    }
+
+    updateChain(id, { name: name || 'Untitled Chain', steps });
+    _renderPanel();
+  }
+
+  // ── Presets ──
+
+  function _loadPresets() {
+    if (_chains.length > 0) return; // Don't overwrite existing chains
+
+    const presets = [
+      {
+        name: '🏗️ Build REST API',
+        steps: [
+          'Create a JavaScript data model for a simple todo list with id, title, completed, and createdAt fields. Include validation functions.',
+          'Using the data model from the previous response:\n\n{{prev}}\n\nCreate Express.js REST API routes for CRUD operations (GET all, GET by id, POST, PUT, DELETE). Use in-memory storage.',
+          'Using the API code from the previous response:\n\n{{prev}}\n\nWrite comprehensive unit tests using Jest. Cover all endpoints, edge cases, and error handling.'
+        ]
+      },
+      {
+        name: '🔍 Code Review Pipeline',
+        steps: [
+          'Analyze this code for potential bugs, security issues, and performance problems. List each issue with severity (critical/warning/info).',
+          'For each issue found in the previous analysis:\n\n{{prev}}\n\nProvide a concrete fix with before/after code snippets.',
+          'Based on the issues and fixes from steps 1-2:\n\n{{step.1}}\n\n{{step.2}}\n\nGenerate a code review summary report with a quality score (0-100) and prioritized action items.'
+        ]
+      },
+      {
+        name: '📊 Data Pipeline',
+        steps: [
+          'Generate a sample JSON dataset of 20 user records with fields: id, name, email, age, country, signupDate, lastLogin, purchases (array of {item, amount, date}).',
+          'Using this dataset:\n\n{{prev}}\n\nWrite JavaScript to clean the data (validate emails, normalize dates, handle missing fields) and compute aggregate statistics (avg age, purchases per country, monthly signups).',
+          'Using the cleaned data and statistics:\n\n{{prev}}\n\nCreate an HTML page with Chart.js that visualizes: signups over time (line), purchases by country (bar), and age distribution (histogram).'
+        ]
+      }
+    ];
+
+    presets.forEach(p => createChain(p.name, p.steps));
+  }
+
+  // ── Helpers ──
+
+  function _esc(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  // ── Init ──
+
+  function init() {
+    _load();
+    _loadPresets();
+
+    // Register slash commands
+    if (typeof SlashCommands !== 'undefined' && SlashCommands.register) {
+      SlashCommands.register({
+        name: 'chains',
+        description: 'Open prompt chain builder — multi-step workflows',
+        icon: '⛓️',
+        action: () => toggle()
+      });
+      SlashCommands.register({
+        name: 'run-chain',
+        description: 'Run a prompt chain by name',
+        icon: '▶',
+        action: () => {
+          if (_chains.length === 0) {
+            alert('No chains yet. Use /chains to create one.');
+            return;
+          }
+          const name = prompt('Enter chain name to run:');
+          if (!name) return;
+          const chain = _chains.find(c => c.name.toLowerCase().includes(name.toLowerCase()));
+          if (!chain) {
+            alert('Chain not found: ' + name);
+            return;
+          }
+          runChain(chain.id);
+        }
+      });
+    }
+  }
+
+  return {
+    init,
+    toggle,
+    open,
+    close,
+    createChain,
+    updateChain,
+    deleteChain,
+    duplicateChain,
+    getChains,
+    runChain,
+    stopChain,
+    exportChains,
+    importChains,
+    // Exposed for inline onclick handlers
+    _renderPanel: _renderPanel,
+    _newChainUI: _newChainUI,
+    _addStepInput: _addStepInput,
+    _editChain: _editChain,
+    _saveNewChain: _saveNewChain,
+    _saveEditedChain: _saveEditedChain,
+    _renumberSteps: _renumberSteps
+  };
+})();
+

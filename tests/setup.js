@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Test setup: provides the full DOM that app.js expects,
  * then evaluates app.js so all modules are available globally.
  *
@@ -323,7 +323,10 @@ function loadApp() {
     'ClipboardHistory',
     'OfflineManager',
     'MessageFilter',
-    'ConversationSentiment'
+    'ConversationSentiment',
+    'QuickSwitcher',
+    'ChatGPTImporter',
+    'PromptChainRunner'
   ];
 
   for (const mod of modules) {
