@@ -321,7 +321,9 @@ function loadApp() {
     'ContextWindowMeter',
     'ConversationAgenda',
     'ClipboardHistory',
-    'OfflineManager'
+    'OfflineManager',
+    'MessageFilter',
+    'ConversationSentiment'
   ];
 
   for (const mod of modules) {

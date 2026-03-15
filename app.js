@@ -58,6 +58,7 @@
  *   ConversationAgenda   — per-session goal checklist with progress tracking
  *   ClipboardHistory     — tracks copied text from chat with searchable panel (Ctrl+Shift+V)
  *   MessageFilter       — visual content-type filters (code/questions/links/errors/lists/role)
+ *   ConversationSentiment — heuristic sentiment analysis with mood timeline (Ctrl+Shift+M)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -17649,3 +17650,275 @@ const MessageFilter = (() => {
 
 document.addEventListener('DOMContentLoaded', OfflineManager.init);
 document.addEventListener('DOMContentLoaded', MessageFilter.init);
+
+/* ============================================================
+ * ConversationSentiment — heuristic sentiment analysis with mood timeline
+ *
+ * Analyses each message using keyword-based sentiment scoring and
+ * displays a live mood indicator + sparkline timeline showing how
+ * the conversation's emotional tone evolves.
+ *
+ * Features:
+ *   - Per-message sentiment score (-1 to +1)
+ *   - Rolling mood indicator (emoji + label)
+ *   - Sparkline timeline of sentiment over the conversation
+ *   - Overall conversation sentiment summary
+ *   - Toggle panel with Ctrl+Shift+M
+ *
+ * @namespace ConversationSentiment
+ * ============================================================ */
+const ConversationSentiment = (() => {
+
+  /* ── Sentiment lexicon ───────────────────────────────────── */
+  const POSITIVE_WORDS = new Set([
+    'good', 'great', 'excellent', 'amazing', 'wonderful', 'fantastic',
+    'awesome', 'love', 'happy', 'joy', 'perfect', 'brilliant', 'beautiful',
+    'thanks', 'thank', 'helpful', 'nice', 'cool', 'best', 'glad',
+    'appreciate', 'impressive', 'outstanding', 'superb', 'delightful',
+    'exciting', 'pleased', 'enjoy', 'success', 'win', 'solved', 'works',
+    'correct', 'right', 'yes', 'agree', 'exactly', 'indeed', 'sure',
+    'easy', 'simple', 'clear', 'fast', 'quick', 'efficient', 'elegant',
+    'clean', 'smooth', 'well', 'fine', 'interesting', 'useful', 'clever'
+  ]);
+
+  const NEGATIVE_WORDS = new Set([
+    'bad', 'terrible', 'awful', 'horrible', 'wrong', 'error', 'fail',
+    'failed', 'bug', 'broken', 'crash', 'issue', 'problem', 'difficult',
+    'hard', 'confusing', 'confused', 'frustrating', 'frustrated', 'angry',
+    'hate', 'worst', 'ugly', 'slow', 'mess', 'annoying', 'annoyed',
+    'disappointed', 'unfortunately', 'sadly', 'sorry', 'stuck', 'lost',
+    'impossible', 'never', 'useless', 'waste', 'complex', 'complicated',
+    'unclear', 'pain', 'painful', 'struggling', 'struggle', 'nightmare',
+    'ridiculous', 'stupid', 'nonsense', 'absurd', 'broken', 'cannot',
+    'unable', 'reject', 'denied', 'missing', 'lack', 'poor', 'weak'
+  ]);
+
+  const INTENSIFIERS = new Set([
+    'very', 'really', 'extremely', 'incredibly', 'absolutely', 'totally',
+    'completely', 'utterly', 'super', 'highly', 'remarkably', 'so'
+  ]);
+
+  const NEGATORS = new Set([
+    'not', 'no', 'never', 'neither', 'nor', 'none', "don't", "doesn't",
+    "didn't", "won't", "wouldn't", "couldn't", "shouldn't", "isn't",
+    "aren't", "wasn't", "weren't", "can't", "cannot", "hardly", "barely"
+  ]);
+
+  /* ── Mood mappings ───────────────────────────────────────── */
+  const MOODS = [
+    { min: 0.5,   emoji: '😄', label: 'Very Positive', color: '#27ae60' },
+    { min: 0.15,  emoji: '🙂', label: 'Positive',      color: '#2ecc71' },
+    { min: -0.15, emoji: '😐', label: 'Neutral',        color: '#95a5a6' },
+    { min: -0.5,  emoji: '😕', label: 'Negative',       color: '#e67e22' },
+    { min: -Infinity, emoji: '😞', label: 'Very Negative', color: '#e74c3c' }
+  ];
+
+  let visible = JSON.parse(SafeStorage.get('ac-sentiment-visible') ?? 'false');
+  let panel = null;
+
+  /* ── Core analysis ───────────────────────────────────────── */
+
+  /** Tokenize text into lowercase words. */
+  function tokenize(text) {
+    return String(text).toLowerCase().replace(/[^a-z'-]/g, ' ').split(/\s+/).filter(w => w.length > 1);
+  }
+
+  /**
+   * Score a single message's sentiment.
+   * @param {string} text
+   * @returns {number} Score from -1 to +1
+   */
+  function scoreMessage(text) {
+    const words = tokenize(text);
+    if (words.length === 0) return 0;
+
+    let score = 0;
+    let prevWord = '';
+
+    for (let i = 0; i < words.length; i++) {
+      const word = words[i];
+      let wordScore = 0;
+
+      if (POSITIVE_WORDS.has(word)) wordScore = 1;
+      else if (NEGATIVE_WORDS.has(word)) wordScore = -1;
+
+      if (wordScore !== 0) {
+        // Check for negation (flip sentiment)
+        if (i > 0 && NEGATORS.has(words[i - 1])) {
+          wordScore *= -0.5; // Negation partially flips
+        }
+        // Check for intensifier
+        if (i > 0 && INTENSIFIERS.has(words[i - 1])) {
+          wordScore *= 1.5;
+        }
+        score += wordScore;
+      }
+      prevWord = word;
+    }
+
+    // Normalize to -1..+1 range
+    const maxPossible = Math.max(1, words.length * 0.3); // assume max 30% sentiment words
+    return Math.max(-1, Math.min(1, score / maxPossible));
+  }
+
+  /**
+   * Analyse all messages in the conversation.
+   * @param {Array} [messages] - optional message array; defaults to ConversationManager history
+   * @returns {{ scores: number[], average: number, mood: Object, trend: string }}
+   */
+  function analyse(messages) {
+    const msgs = messages || (typeof ConversationManager !== 'undefined'
+      ? ConversationManager.getHistory().filter(m => m.role !== 'system')
+      : []);
+
+    const scores = msgs.map(m => scoreMessage(m.content || ''));
+
+    if (scores.length === 0) {
+      return {
+        scores: [],
+        average: 0,
+        mood: MOODS.find(m => 0 >= m.min),
+        trend: 'stable',
+        messageCount: 0
+      };
+    }
+
+    const average = scores.reduce((a, b) => a + b, 0) / scores.length;
+    const mood = MOODS.find(m => average >= m.min) || MOODS[MOODS.length - 1];
+
+    // Trend: compare first half vs second half
+    let trend = 'stable';
+    if (scores.length >= 4) {
+      const mid = Math.floor(scores.length / 2);
+      const firstHalf = scores.slice(0, mid).reduce((a, b) => a + b, 0) / mid;
+      const secondHalf = scores.slice(mid).reduce((a, b) => a + b, 0) / (scores.length - mid);
+      const diff = secondHalf - firstHalf;
+      if (diff > 0.1) trend = 'improving';
+      else if (diff < -0.1) trend = 'declining';
+    }
+
+    return { scores, average: Math.round(average * 100) / 100, mood, trend, messageCount: scores.length };
+  }
+
+  /**
+   * Get the mood object for a given score.
+   * @param {number} score
+   * @returns {Object}
+   */
+  function getMood(score) {
+    return MOODS.find(m => score >= m.min) || MOODS[MOODS.length - 1];
+  }
+
+  /* ── Sparkline rendering ─────────────────────────────────── */
+
+  /**
+   * Generate an SVG sparkline from scores.
+   * @param {number[]} scores
+   * @param {number} [width=200]
+   * @param {number} [height=30]
+   * @returns {string} SVG markup
+   */
+  function sparklineSVG(scores, width, height) {
+    width = width || 200;
+    height = height || 30;
+    if (!scores || scores.length === 0) {
+      return '<svg width="' + width + '" height="' + height + '"></svg>';
+    }
+
+    const mid = height / 2;
+    const xStep = scores.length > 1 ? width / (scores.length - 1) : width / 2;
+    const points = scores.map((s, i) => {
+      const x = scores.length > 1 ? i * xStep : width / 2;
+      const y = mid - (s * (mid - 2)); // -1 → bottom, +1 → top
+      return x.toFixed(1) + ',' + y.toFixed(1);
+    });
+
+    // Color gradient based on average
+    const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
+    const mood = getMood(avg);
+
+    return '<svg width="' + width + '" height="' + height + '" viewBox="0 0 ' + width + ' ' + height + '">' +
+      '<line x1="0" y1="' + mid + '" x2="' + width + '" y2="' + mid + '" ' +
+      'stroke="#ddd" stroke-width="0.5" stroke-dasharray="2,2"/>' +
+      '<polyline fill="none" stroke="' + mood.color + '" stroke-width="1.5" ' +
+      'stroke-linejoin="round" stroke-linecap="round" points="' + points.join(' ') + '"/>' +
+      '</svg>';
+  }
+
+  /* ── UI ──────────────────────────────────────────────────── */
+
+  function renderPanel() {
+    if (!panel) return;
+    const result = analyse();
+    const { scores, average, mood, trend, messageCount } = result;
+
+    const trendIcon = trend === 'improving' ? '📈' : trend === 'declining' ? '📉' : '➡️';
+    const trendLabel = trend.charAt(0).toUpperCase() + trend.slice(1);
+
+    panel.innerHTML = '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">' +
+      '<span style="font-size:20px;">' + mood.emoji + '</span>' +
+      '<span style="font-weight:600;color:' + mood.color + ';">' + mood.label + '</span>' +
+      '<span style="color:var(--text-secondary,#666);font-size:12px;">' +
+      'Score: ' + average.toFixed(2) + ' · ' + trendIcon + ' ' + trendLabel +
+      ' · ' + messageCount + ' messages</span></div>' +
+      '<div style="margin-top:4px;" title="Sentiment over conversation">' +
+      sparklineSVG(scores, panel.offsetWidth - 24 || 200, 30) + '</div>';
+  }
+
+  function toggle() {
+    visible = !visible;
+    SafeStorage.set('ac-sentiment-visible', JSON.stringify(visible));
+    if (panel) {
+      panel.style.display = visible ? 'block' : 'none';
+      if (visible) renderPanel();
+    }
+    return visible;
+  }
+
+  function isVisible() { return visible; }
+
+  function init() {
+    if (typeof document === 'undefined') return;
+
+    panel = document.createElement('div');
+    panel.id = 'conversation-sentiment';
+    panel.style.cssText = 'padding:8px 12px;font-size:12px;font-family:inherit;' +
+      'border-bottom:1px solid var(--border-color,#e0e0e0);' +
+      'background:var(--bg-secondary,#f8f9fa);display:' + (visible ? 'block' : 'none') + ';';
+
+    const chatOutput = document.getElementById('chat-output');
+    if (chatOutput && chatOutput.parentNode) {
+      chatOutput.parentNode.insertBefore(panel, chatOutput);
+    } else {
+      document.body.appendChild(panel);
+    }
+
+    // Keyboard shortcut: Ctrl+Shift+M
+    document.addEventListener('keydown', e => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'M') {
+        e.preventDefault();
+        toggle();
+      }
+    });
+
+    if (visible) renderPanel();
+  }
+
+  /* ── Exports ─────────────────────────────────────────────── */
+
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+      POSITIVE_WORDS, NEGATIVE_WORDS, INTENSIFIERS, NEGATORS, MOODS,
+      tokenize, scoreMessage, analyse, getMood, sparklineSVG,
+      toggle, isVisible, renderPanel, init
+    };
+  }
+
+  return {
+    MOODS,
+    tokenize, scoreMessage, analyse, getMood, sparklineSVG,
+    toggle, isVisible, init
+  };
+})();
+
+document.addEventListener('DOMContentLoaded', ConversationSentiment.init);
