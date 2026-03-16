@@ -86,9 +86,11 @@ const SafeStorage = (() => {
   } catch (_) { /* storage unavailable */ }
 
   return {
+    /** Retrieve a value by key, returning null when storage is unavailable. */
     get(key) {
       try { return available ? localStorage.getItem(key) : null; } catch (_) { return null; }
     },
+    /** Persist a key/value pair. Throws on quota exceeded; swallows SecurityError. */
     set(key, value) {
       if (!available) return;
       try {
@@ -100,15 +102,19 @@ const SafeStorage = (() => {
         throw e;
       }
     },
+    /** Remove a key from storage (no-op when unavailable). */
     remove(key) {
       try { if (available) localStorage.removeItem(key); } catch (_) { /* ignore */ }
     },
+    /** Number of entries currently stored (0 when unavailable). */
     get length() {
       try { return available ? localStorage.length : 0; } catch (_) { return 0; }
     },
+    /** Return the key at a given index, or null when unavailable. */
     key(i) {
       try { return available ? localStorage.key(i) : null; } catch (_) { return null; }
     },
+    /** Whether localStorage passed the availability probe. */
     isAvailable() { return available; },
   };
 })();
@@ -259,16 +265,27 @@ const ConversationManager = (() => {
   let showTimingBadges = JSON.parse(SafeStorage.get('ac-show-timing') || 'true');
 
   return {
+    /** Return the raw message history array (mutable reference). */
     getHistory()   { return history; },
+    /** Return a shallow copy of the message history. */
     getMessages()  { return [...history]; },
+    /** Return a copy of recorded response-time entries. */
     getResponseTimes() { return [...responseTimes]; },
+    /** Whether timing badges are currently shown in the UI. */
     isTimingVisible() { return showTimingBadges; },
+    /** Toggle response-time badge visibility; persists preference. */
     toggleTiming() {
       showTimingBadges = !showTimingBadges;
       try { SafeStorage.set('ac-show-timing', JSON.stringify(showTimingBadges)); } catch (_) {}
       return showTimingBadges;
     },
 
+    /**
+     * Append a message to history and track response timing metadata.
+     * @param {'system'|'user'|'assistant'} role - Message role.
+     * @param {string} content - Message body.
+     * @param {{ responseTimeMs?: number, timestamp?: number }} [meta] - Optional timing metadata.
+     */
     addMessage(role, content, meta) {
       const entry = { role, content, timestamp: Date.now() };
       if (meta && meta.responseTimeMs !== undefined) {
