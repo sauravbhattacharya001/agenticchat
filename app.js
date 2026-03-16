@@ -21289,3 +21289,257 @@ const SplitView = (() => {
     MAX_PREVIEW_CHARS
   };
 })();
+
+/* ---------- Session Streak Tracker ---------- */
+/**
+ * StreakTracker — tracks consecutive-day chat activity streaks,
+ * shows current/longest streak, 90-day activity calendar, and
+ * milestone achievements. Gamifies consistent usage.
+ *
+ * Shortcut: Ctrl+Shift+K
+ * Button: 🔥 in toolbar
+ */
+const StreakTracker = (() => {
+  let _overlay = null;
+  let _isOpen = false;
+
+  const MILESTONES = [
+    { days: 3, emoji: '🌱', label: 'Seedling', desc: 'Chat 3 days in a row' },
+    { days: 7, emoji: '🔥', label: 'On Fire', desc: 'One week streak' },
+    { days: 14, emoji: '⚡', label: 'Unstoppable', desc: 'Two week streak' },
+    { days: 30, emoji: '🏆', label: 'Champion', desc: '30-day streak' },
+    { days: 60, emoji: '💎', label: 'Diamond', desc: '60-day streak' },
+    { days: 100, emoji: '👑', label: 'Legend', desc: '100-day streak' },
+    { days: 365, emoji: '🌟', label: 'Eternal', desc: 'Full year streak' },
+  ];
+
+  function _getSessions() {
+    if (typeof SessionManager === 'undefined') return [];
+    try {
+      const all = SessionManager.getAll();
+      return Array.isArray(all) ? all : [];
+    } catch { return []; }
+  }
+
+  /** Get unique active dates (YYYY-MM-DD) from all sessions. */
+  function _getActiveDates() {
+    const sessions = _getSessions();
+    const dates = new Set();
+    for (const s of sessions) {
+      if (s.createdAt) dates.add(s.createdAt.substring(0, 10));
+      if (s.updatedAt) dates.add(s.updatedAt.substring(0, 10));
+      // Also check individual message timestamps if available
+      if (Array.isArray(s.messages)) {
+        for (const m of s.messages) {
+          if (m.timestamp) dates.add(new Date(m.timestamp).toISOString().substring(0, 10));
+        }
+      }
+    }
+    return dates;
+  }
+
+  /** Calculate streak info from a set of date strings. */
+  function _calcStreaks(dateSet) {
+    if (dateSet.size === 0) return { current: 0, longest: 0, totalDays: 0, streakDates: [] };
+
+    const sorted = [...dateSet].sort();
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayStr = today.toISOString().substring(0, 10);
+    const yesterdayDate = new Date(today);
+    yesterdayDate.setDate(yesterdayDate.getDate() - 1);
+    const yesterdayStr = yesterdayDate.toISOString().substring(0, 10);
+
+    // Calculate all streaks
+    let longest = 1;
+    let currentStreak = 1;
+    const streaks = [{ start: sorted[0], length: 1 }];
+
+    for (let i = 1; i < sorted.length; i++) {
+      const prev = new Date(sorted[i - 1]);
+      const curr = new Date(sorted[i]);
+      const diffDays = Math.round((curr - prev) / (1000 * 60 * 60 * 24));
+      if (diffDays === 1) {
+        currentStreak++;
+        streaks[streaks.length - 1].length = currentStreak;
+      } else {
+        currentStreak = 1;
+        streaks.push({ start: sorted[i], length: 1 });
+      }
+      if (currentStreak > longest) longest = currentStreak;
+    }
+
+    // Current streak: must include today or yesterday
+    const lastDate = sorted[sorted.length - 1];
+    let current = 0;
+    if (lastDate === todayStr || lastDate === yesterdayStr) {
+      current = streaks[streaks.length - 1].length;
+    }
+
+    return {
+      current,
+      longest,
+      totalDays: dateSet.size,
+      streaks,
+    };
+  }
+
+  function _escapeHtml(str) {
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+  }
+
+  function _buildCalendar(dateSet) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const cells = [];
+
+    // 90 days back
+    for (let i = 89; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      const ds = d.toISOString().substring(0, 10);
+      const active = dateSet.has(ds);
+      const dayName = d.toLocaleDateString('en-US', { weekday: 'short' });
+      const fullDate = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      cells.push(
+        `<div class="streak-cal-cell ${active ? 'streak-cal-active' : ''}" title="${fullDate} (${dayName})${active ? ' — active' : ''}"></div>`
+      );
+    }
+
+    // Month labels
+    const months = [];
+    let lastMonth = -1;
+    for (let i = 89; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      const m = d.getMonth();
+      if (m !== lastMonth) {
+        months.push(`<span style="grid-column: ${90 - i}">${d.toLocaleDateString('en-US', { month: 'short' })}</span>`);
+        lastMonth = m;
+      }
+    }
+
+    return `
+      <div class="streak-cal-months">${months.join('')}</div>
+      <div class="streak-cal-grid">${cells.join('')}</div>
+    `;
+  }
+
+  function _buildMilestones(longestStreak) {
+    return MILESTONES.map(m => {
+      const achieved = longestStreak >= m.days;
+      return `<div class="streak-milestone ${achieved ? 'streak-milestone-achieved' : ''}">
+        <span class="streak-milestone-emoji">${m.emoji}</span>
+        <div class="streak-milestone-info">
+          <strong>${m.label}</strong> — ${m.desc}
+          ${achieved ? '<span class="streak-milestone-check">✅</span>' : `<span class="streak-milestone-remaining">${m.days - longestStreak} days to go</span>`}
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  function _buildWeekdayStats(dateSet) {
+    const counts = [0, 0, 0, 0, 0, 0, 0]; // Sun-Sat
+    const names = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    for (const ds of dateSet) {
+      const d = new Date(ds + 'T00:00:00');
+      counts[d.getDay()]++;
+    }
+    const max = Math.max(...counts, 1);
+    return `<div class="streak-weekday-chart">${counts.map((c, i) =>
+      `<div class="streak-weekday-bar-wrap">
+        <div class="streak-weekday-bar" style="height:${Math.round((c / max) * 100)}%" title="${c} days"></div>
+        <span class="streak-weekday-label">${names[i]}</span>
+      </div>`
+    ).join('')}</div>`;
+  }
+
+  function open() {
+    if (_overlay) _overlay.remove();
+
+    const dateSet = _getActiveDates();
+    const info = _calcStreaks(dateSet);
+
+    _overlay = document.createElement('div');
+    _overlay.id = 'streak-overlay';
+    _overlay.className = 'modal-overlay';
+    _overlay.setAttribute('role', 'dialog');
+    _overlay.setAttribute('aria-modal', 'true');
+    _overlay.setAttribute('aria-label', 'Session Streak Tracker');
+
+    const panel = document.createElement('div');
+    panel.className = 'streak-panel';
+    panel.innerHTML = `
+      <div class="streak-header">
+        <h3>🔥 Session Streak Tracker</h3>
+        <button class="streak-close btn-sm" title="Close">✕</button>
+      </div>
+      <div class="streak-stats-row">
+        <div class="streak-stat-card streak-stat-current">
+          <div class="streak-stat-value">${info.current}</div>
+          <div class="streak-stat-label">Current Streak</div>
+        </div>
+        <div class="streak-stat-card streak-stat-longest">
+          <div class="streak-stat-value">${info.longest}</div>
+          <div class="streak-stat-label">Longest Streak</div>
+        </div>
+        <div class="streak-stat-card streak-stat-total">
+          <div class="streak-stat-value">${info.totalDays}</div>
+          <div class="streak-stat-label">Active Days</div>
+        </div>
+      </div>
+      <div class="streak-section">
+        <h4>📅 Last 90 Days</h4>
+        ${_buildCalendar(dateSet)}
+      </div>
+      <div class="streak-section">
+        <h4>📊 Most Active Days</h4>
+        ${_buildWeekdayStats(dateSet)}
+      </div>
+      <div class="streak-section">
+        <h4>🏅 Milestones</h4>
+        <div class="streak-milestones">${_buildMilestones(info.longest)}</div>
+      </div>
+    `;
+
+    _overlay.appendChild(panel);
+    document.body.appendChild(_overlay);
+    _isOpen = true;
+
+    panel.querySelector('.streak-close').addEventListener('click', close);
+    _overlay.addEventListener('click', (e) => { if (e.target === _overlay) close(); });
+    document.addEventListener('keydown', _onKey);
+  }
+
+  function _onKey(e) {
+    if (e.key === 'Escape' && _isOpen) {
+      e.preventDefault();
+      close();
+    }
+  }
+
+  function close() {
+    if (_overlay) { _overlay.remove(); _overlay = null; }
+    _isOpen = false;
+    document.removeEventListener('keydown', _onKey);
+  }
+
+  function toggle() { _isOpen ? close() : open(); }
+  function isOpen() { return _isOpen; }
+
+  // Keyboard shortcut: Ctrl+Shift+K
+  document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.shiftKey && e.key === 'K') {
+      e.preventDefault();
+      toggle();
+    }
+  });
+
+  return {
+    open, close, toggle, isOpen,
+    _getActiveDates, _calcStreaks, _buildCalendar, _buildMilestones, _buildWeekdayStats,
+    MILESTONES
+  };
+})();
