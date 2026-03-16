@@ -62,6 +62,7 @@
  *   QuickSwitcher        — VS Code-style fuzzy session switcher (Ctrl+K)
  *   ChatGPTImporter      — import ChatGPT exported conversations (conversations.json)
  *   ConversationHealthCheck — heuristic conversation diagnostic (prompt quality, balance, context usage, repetition)
+ *   TypingSpeedMonitor   — live WPM indicator with sparkline dashboard (Ctrl+Shift+T)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -8439,6 +8440,7 @@ document.addEventListener('DOMContentLoaded', () => {
       ConversationChapters.closePanel();
       UsageHeatmap.close();
       ConversationHealthCheck.close();
+      TypingSpeedMonitor.close();
     }
   });
 
@@ -19510,4 +19512,268 @@ const ConversationHealthCheck = (() => {
   }
 
   return { open, close, toggle, analyze, render };
+})();
+
+/* ── Typing Speed Monitor ── */
+const TypingSpeedMonitor = (() => {
+  const STORAGE_KEY = 'ac_typing_speed';
+  const WORD_CHARS = /[\S]+/g;
+  const SAMPLE_WINDOW_MS = 3000; // rolling 3-second window
+
+  let _keystrokes = [];   // timestamps of recent keystrokes
+  let _wordTimestamps = []; // { wpm, ts } samples
+  let _currentWpm = 0;
+  let _peakWpm = 0;
+  let _totalWords = 0;
+  let _totalChars = 0;
+  let _sessionStart = Date.now();
+  let _lastInputLength = 0;
+  let _updateTimer = null;
+  let _isOpen = false;
+
+  function init() {
+    _loadStats();
+    _createDashboardHTML();
+
+    const input = document.getElementById('chat-input');
+    if (input) {
+      input.addEventListener('keydown', _onKeydown);
+      input.addEventListener('input', _onInput);
+    }
+
+    const indicator = document.getElementById('wpm-indicator');
+    if (indicator) indicator.addEventListener('click', toggle);
+
+    // Periodic WPM update
+    _updateTimer = setInterval(_updateWpm, 500);
+
+    // Keyboard shortcut Ctrl+Shift+T
+    document.addEventListener('keydown', (e) => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'T') {
+        e.preventDefault();
+        toggle();
+      }
+    });
+
+    // Count words on send
+    const sendBtn = document.getElementById('send-btn');
+    if (sendBtn) {
+      sendBtn.addEventListener('click', _onSend);
+    }
+  }
+
+  function _onKeydown(e) {
+    if (e.key.length === 1 || e.key === 'Backspace' || e.key === 'Delete') {
+      _keystrokes.push(Date.now());
+      _totalChars++;
+    }
+  }
+
+  function _onInput() {
+    const input = document.getElementById('chat-input');
+    if (!input) return;
+    const len = input.value.length;
+    _lastInputLength = len;
+  }
+
+  function _onSend() {
+    const input = document.getElementById('chat-input');
+    if (!input) return;
+    const words = (input.value.match(WORD_CHARS) || []).length;
+    _totalWords += words;
+    _saveStats();
+  }
+
+  function _updateWpm() {
+    const now = Date.now();
+    // Remove keystrokes older than sample window
+    _keystrokes = _keystrokes.filter(t => now - t < SAMPLE_WINDOW_MS);
+
+    if (_keystrokes.length < 2) {
+      _currentWpm = 0;
+      _updateIndicator();
+      return;
+    }
+
+    // Calculate chars per minute from keystroke rate
+    const elapsed = (now - _keystrokes[0]) / 1000; // seconds
+    if (elapsed <= 0) { _currentWpm = 0; _updateIndicator(); return; }
+
+    const charsPerSec = _keystrokes.length / elapsed;
+    // Average word length ~5 chars
+    const wpm = Math.round((charsPerSec * 60) / 5);
+
+    _currentWpm = wpm;
+    if (wpm > _peakWpm) {
+      _peakWpm = wpm;
+      _saveStats();
+    }
+
+    // Record sample for sparkline
+    _wordTimestamps.push({ wpm, ts: now });
+    // Keep last 60 samples (30 seconds of history at 500ms interval)
+    if (_wordTimestamps.length > 60) _wordTimestamps.shift();
+
+    _updateIndicator();
+    if (_isOpen) _renderDashboard();
+  }
+
+  function _updateIndicator() {
+    const valEl = document.getElementById('wpm-value');
+    const indicator = document.getElementById('wpm-indicator');
+    if (!valEl || !indicator) return;
+
+    valEl.textContent = _currentWpm;
+
+    indicator.classList.remove('wpm-active', 'wpm-fast', 'wpm-blazing');
+    if (_currentWpm >= 80) indicator.classList.add('wpm-blazing');
+    else if (_currentWpm >= 50) indicator.classList.add('wpm-fast');
+    else if (_currentWpm > 0) indicator.classList.add('wpm-active');
+  }
+
+  function _createDashboardHTML() {
+    if (document.getElementById('wpm-dashboard-overlay')) return;
+    const overlay = document.createElement('div');
+    overlay.id = 'wpm-dashboard-overlay';
+    overlay.className = 'wpm-dashboard-overlay';
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    overlay.innerHTML = 
+      <div class="wpm-dashboard">
+        <button class="wpm-close" id="wpm-close">&times;</button>
+        <h2>⌨️ Typing Speed</h2>
+        <div class="wpm-stat-grid">
+          <div class="wpm-stat-card">
+            <div class="wpm-stat-value" id="wpm-live">0</div>
+            <div class="wpm-stat-label">Current WPM</div>
+          </div>
+          <div class="wpm-stat-card">
+            <div class="wpm-stat-value" id="wpm-peak">0</div>
+            <div class="wpm-stat-label">Peak WPM</div>
+          </div>
+          <div class="wpm-stat-card">
+            <div class="wpm-stat-value" id="wpm-words">0</div>
+            <div class="wpm-stat-label">Words Sent</div>
+          </div>
+          <div class="wpm-stat-card">
+            <div class="wpm-stat-value" id="wpm-chars">0</div>
+            <div class="wpm-stat-label">Keystrokes</div>
+          </div>
+        </div>
+        <div class="wpm-history-label">Speed History (last 30s)</div>
+        <div class="wpm-sparkline"><canvas id="wpm-canvas"></canvas></div>
+        <button class="wpm-reset-btn" id="wpm-reset">Reset Stats</button>
+      </div>;
+    document.body.appendChild(overlay);
+    document.getElementById('wpm-close').addEventListener('click', close);
+    document.getElementById('wpm-reset').addEventListener('click', reset);
+  }
+
+  function _renderDashboard() {
+    const liveEl = document.getElementById('wpm-live');
+    const peakEl = document.getElementById('wpm-peak');
+    const wordsEl = document.getElementById('wpm-words');
+    const charsEl = document.getElementById('wpm-chars');
+    if (liveEl) liveEl.textContent = _currentWpm;
+    if (peakEl) peakEl.textContent = _peakWpm;
+    if (wordsEl) wordsEl.textContent = _totalWords;
+    if (charsEl) charsEl.textContent = _totalChars;
+    _drawSparkline();
+  }
+
+  function _drawSparkline() {
+    const canvas = document.getElementById('wpm-canvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const rect = canvas.parentElement.getBoundingClientRect();
+    canvas.width = rect.width - 16;
+    canvas.height = rect.height - 16;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (_wordTimestamps.length < 2) return;
+
+    const maxWpm = Math.max(..._wordTimestamps.map(s => s.wpm), 10);
+    const w = canvas.width;
+    const h = canvas.height;
+    const step = w / (_wordTimestamps.length - 1);
+
+    // Gradient fill
+    const grad = ctx.createLinearGradient(0, 0, 0, h);
+    grad.addColorStop(0, 'rgba(79,195,247,0.3)');
+    grad.addColorStop(1, 'rgba(79,195,247,0)');
+
+    ctx.beginPath();
+    ctx.moveTo(0, h);
+    _wordTimestamps.forEach((s, i) => {
+      const x = i * step;
+      const y = h - (s.wpm / maxWpm) * h;
+      if (i === 0) ctx.lineTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.lineTo(w, h);
+    ctx.closePath();
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // Line
+    ctx.beginPath();
+    _wordTimestamps.forEach((s, i) => {
+      const x = i * step;
+      const y = h - (s.wpm / maxWpm) * h;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.strokeStyle = '#4fc3f7';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
+  function _loadStats() {
+    try {
+      const raw = SafeStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const data = JSON.parse(raw);
+        _peakWpm = data.peakWpm || 0;
+        _totalWords = data.totalWords || 0;
+        _totalChars = data.totalChars || 0;
+      }
+    } catch (_) {}
+  }
+
+  function _saveStats() {
+    try {
+      SafeStorage.setItem(STORAGE_KEY, JSON.stringify({
+        peakWpm: _peakWpm,
+        totalWords: _totalWords,
+        totalChars: _totalChars,
+      }));
+    } catch (_) {}
+  }
+
+  function open() {
+    const overlay = document.getElementById('wpm-dashboard-overlay');
+    if (overlay) { overlay.style.display = 'flex'; _isOpen = true; _renderDashboard(); }
+  }
+
+  function close() {
+    const overlay = document.getElementById('wpm-dashboard-overlay');
+    if (overlay) { overlay.style.display = 'none'; _isOpen = false; }
+  }
+
+  function toggle() { if (_isOpen) close(); else open(); }
+
+  function reset() {
+    _peakWpm = 0; _totalWords = 0; _totalChars = 0;
+    _wordTimestamps = []; _keystrokes = [];
+    _currentWpm = 0;
+    _saveStats(); _updateIndicator(); _renderDashboard();
+  }
+
+  function getCurrentWpm() { return _currentWpm; }
+  function getPeakWpm() { return _peakWpm; }
+  function getTotalWords() { return _totalWords; }
+  function getTotalChars() { return _totalChars; }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  return { open, close, toggle, reset, getCurrentWpm, getPeakWpm, getTotalWords, getTotalChars };
 })();
