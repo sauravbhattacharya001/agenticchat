@@ -20978,3 +20978,314 @@ const CommandPalette = (() => {
 
   return { register, registerMany, unregister, open, close, toggle, getCommands, getFiltered, isOpen, init };
 })();
+
+/* ---------- Split View ---------- */
+/**
+ * Side-by-side session comparison view. Pick two saved sessions and view
+ * their messages in parallel panes with synchronized scrolling, message
+ * counts, and role highlighting.
+ *
+ * Shortcut: Ctrl+Shift+2
+ * Slash command: /splitview
+ *
+ * @namespace SplitView
+ */
+const SplitView = (() => {
+  const MAX_PREVIEW_CHARS = 300;
+  let _overlay = null;
+  let _isOpen = false;
+  let _leftSession = null;
+  let _rightSession = null;
+  let _syncScroll = true;
+
+  function _escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  function _truncate(text, max) {
+    if (!text) return '';
+    return text.length > max ? text.substring(0, max) + '…' : text;
+  }
+
+  function _getSessions() {
+    if (typeof SessionManager === 'undefined') return [];
+    try {
+      const all = SessionManager.getAll();
+      return Array.isArray(all) ? all : [];
+    } catch { return []; }
+  }
+
+  function _createOverlay() {
+    if (_overlay) { _overlay.remove(); }
+    _overlay = document.createElement('div');
+    _overlay.id = 'splitview-overlay';
+    _overlay.className = 'modal-overlay splitview-overlay';
+    _overlay.setAttribute('role', 'dialog');
+    _overlay.setAttribute('aria-modal', 'true');
+    _overlay.setAttribute('aria-label', 'Split View — Compare Sessions');
+
+    const panel = document.createElement('div');
+    panel.className = 'splitview-panel';
+
+    // Header
+    const header = document.createElement('div');
+    header.className = 'splitview-header';
+    header.innerHTML = `
+      <h3>📖 Split View — Compare Sessions</h3>
+      <div class="splitview-controls">
+        <label class="splitview-sync-label" title="Synchronize scrolling between panes">
+          <input type="checkbox" id="splitview-sync" ${_syncScroll ? 'checked' : ''}> Sync scroll
+        </label>
+        <button id="splitview-swap-btn" class="btn-sm" title="Swap left and right sessions">⇄ Swap</button>
+        <button id="splitview-close-btn" class="btn-sm" title="Close split view">✕</button>
+      </div>
+    `;
+    panel.appendChild(header);
+
+    // Session selectors
+    const selectors = document.createElement('div');
+    selectors.className = 'splitview-selectors';
+    const sessions = _getSessions();
+    const optionsHtml = sessions.map((s, i) => {
+      const name = _escapeHtml(s.name || `Session ${i + 1}`);
+      const count = Array.isArray(s.messages) ? s.messages.length : 0;
+      return `<option value="${i}">${name} (${count} msgs)</option>`;
+    }).join('');
+
+    selectors.innerHTML = `
+      <div class="splitview-selector">
+        <label for="splitview-left-select">Left:</label>
+        <select id="splitview-left-select">
+          <option value="">— select session —</option>
+          ${optionsHtml}
+        </select>
+      </div>
+      <div class="splitview-selector">
+        <label for="splitview-right-select">Right:</label>
+        <select id="splitview-right-select">
+          <option value="">— select session —</option>
+          ${optionsHtml}
+        </select>
+      </div>
+    `;
+    panel.appendChild(selectors);
+
+    // Stats bar
+    const stats = document.createElement('div');
+    stats.className = 'splitview-stats';
+    stats.id = 'splitview-stats';
+    panel.appendChild(stats);
+
+    // Split panes
+    const panes = document.createElement('div');
+    panes.className = 'splitview-panes';
+    panes.innerHTML = `
+      <div class="splitview-pane" id="splitview-left-pane">
+        <div class="splitview-pane-empty">Select a session on the left</div>
+      </div>
+      <div class="splitview-divider"></div>
+      <div class="splitview-pane" id="splitview-right-pane">
+        <div class="splitview-pane-empty">Select a session on the right</div>
+      </div>
+    `;
+    panel.appendChild(panes);
+
+    _overlay.appendChild(panel);
+    document.body.appendChild(_overlay);
+
+    // Event listeners
+    const closeBtn = _overlay.querySelector('#splitview-close-btn');
+    closeBtn.addEventListener('click', close);
+
+    const swapBtn = _overlay.querySelector('#splitview-swap-btn');
+    swapBtn.addEventListener('click', _swap);
+
+    const syncCheck = _overlay.querySelector('#splitview-sync');
+    syncCheck.addEventListener('change', (e) => { _syncScroll = e.target.checked; _setupSyncScroll(); });
+
+    const leftSelect = _overlay.querySelector('#splitview-left-select');
+    const rightSelect = _overlay.querySelector('#splitview-right-select');
+    leftSelect.addEventListener('change', () => { _selectSession('left', leftSelect.value); });
+    rightSelect.addEventListener('change', () => { _selectSession('right', rightSelect.value); });
+
+    _overlay.addEventListener('click', (e) => { if (e.target === _overlay) close(); });
+
+    document.addEventListener('keydown', _onKey);
+  }
+
+  function _onKey(e) {
+    if (e.key === 'Escape' && _isOpen) { close(); e.preventDefault(); }
+  }
+
+  function _selectSession(side, indexStr) {
+    const sessions = _getSessions();
+    const idx = parseInt(indexStr, 10);
+    const session = isNaN(idx) ? null : sessions[idx] || null;
+
+    if (side === 'left') _leftSession = session;
+    else _rightSession = session;
+
+    _renderPane(side, session);
+    _renderStats();
+    _setupSyncScroll();
+  }
+
+  function _renderPane(side, session) {
+    const paneId = side === 'left' ? 'splitview-left-pane' : 'splitview-right-pane';
+    const pane = document.getElementById(paneId);
+    if (!pane) return;
+    pane.innerHTML = '';
+
+    if (!session || !Array.isArray(session.messages) || session.messages.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'splitview-pane-empty';
+      empty.textContent = session ? 'This session has no messages.' : `Select a session on the ${side}`;
+      pane.appendChild(empty);
+      return;
+    }
+
+    session.messages.forEach((msg, i) => {
+      const el = document.createElement('div');
+      const role = (msg.role || 'user').toLowerCase();
+      el.className = `splitview-msg splitview-msg-${role}`;
+
+      const badge = document.createElement('span');
+      badge.className = 'splitview-msg-role';
+      badge.textContent = role === 'user' ? '👤' : role === 'system' ? '⚙️' : '🤖';
+
+      const num = document.createElement('span');
+      num.className = 'splitview-msg-num';
+      num.textContent = `#${i + 1}`;
+
+      const content = document.createElement('div');
+      content.className = 'splitview-msg-content';
+      content.textContent = _truncate(msg.content || '', MAX_PREVIEW_CHARS);
+
+      el.appendChild(badge);
+      el.appendChild(num);
+      el.appendChild(content);
+      pane.appendChild(el);
+    });
+  }
+
+  function _renderStats() {
+    const el = document.getElementById('splitview-stats');
+    if (!el) return;
+
+    const leftMsgs = _leftSession && Array.isArray(_leftSession.messages) ? _leftSession.messages : [];
+    const rightMsgs = _rightSession && Array.isArray(_rightSession.messages) ? _rightSession.messages : [];
+
+    if (leftMsgs.length === 0 && rightMsgs.length === 0) {
+      el.innerHTML = '';
+      return;
+    }
+
+    const leftWords = leftMsgs.reduce((sum, m) => sum + ((m.content || '').split(/\s+/).filter(Boolean).length), 0);
+    const rightWords = rightMsgs.reduce((sum, m) => sum + ((m.content || '').split(/\s+/).filter(Boolean).length), 0);
+    const leftUser = leftMsgs.filter(m => m.role === 'user').length;
+    const rightUser = rightMsgs.filter(m => m.role === 'user').length;
+    const leftAI = leftMsgs.filter(m => m.role === 'assistant').length;
+    const rightAI = rightMsgs.filter(m => m.role === 'assistant').length;
+
+    el.innerHTML = `
+      <div class="splitview-stat-group">
+        <span class="splitview-stat-label">Left:</span>
+        <span>${leftMsgs.length} msgs (${leftUser} user, ${leftAI} AI) · ${leftWords.toLocaleString()} words</span>
+      </div>
+      <div class="splitview-stat-group">
+        <span class="splitview-stat-label">Right:</span>
+        <span>${rightMsgs.length} msgs (${rightUser} user, ${rightAI} AI) · ${rightWords.toLocaleString()} words</span>
+      </div>
+    `;
+  }
+
+  function _setupSyncScroll() {
+    const left = document.getElementById('splitview-left-pane');
+    const right = document.getElementById('splitview-right-pane');
+    if (!left || !right) return;
+
+    // Remove old listeners
+    left.onscroll = null;
+    right.onscroll = null;
+
+    if (!_syncScroll) return;
+
+    let syncing = false;
+    left.onscroll = () => {
+      if (syncing) return;
+      syncing = true;
+      const ratio = left.scrollTop / (left.scrollHeight - left.clientHeight || 1);
+      right.scrollTop = ratio * (right.scrollHeight - right.clientHeight || 1);
+      syncing = false;
+    };
+    right.onscroll = () => {
+      if (syncing) return;
+      syncing = true;
+      const ratio = right.scrollTop / (right.scrollHeight - right.clientHeight || 1);
+      left.scrollTop = ratio * (left.scrollHeight - left.clientHeight || 1);
+      syncing = false;
+    };
+  }
+
+  function _swap() {
+    const leftSelect = document.getElementById('splitview-left-select');
+    const rightSelect = document.getElementById('splitview-right-select');
+    if (!leftSelect || !rightSelect) return;
+
+    const temp = leftSelect.value;
+    leftSelect.value = rightSelect.value;
+    rightSelect.value = temp;
+
+    const tempSession = _leftSession;
+    _leftSession = _rightSession;
+    _rightSession = tempSession;
+
+    _renderPane('left', _leftSession);
+    _renderPane('right', _rightSession);
+    _renderStats();
+    _setupSyncScroll();
+  }
+
+  function open() {
+    _createOverlay();
+    _overlay.style.display = '';
+    _isOpen = true;
+    _leftSession = null;
+    _rightSession = null;
+  }
+
+  function close() {
+    if (_overlay) {
+      _overlay.remove();
+      _overlay = null;
+    }
+    _isOpen = false;
+    _leftSession = null;
+    _rightSession = null;
+    document.removeEventListener('keydown', _onKey);
+  }
+
+  function toggle() { _isOpen ? close() : open(); }
+  function isOpen() { return _isOpen; }
+
+  function getLeftSession() { return _leftSession; }
+  function getRightSession() { return _rightSession; }
+  function isSyncScrollEnabled() { return _syncScroll; }
+
+  // Keyboard shortcut: Ctrl+Shift+2
+  document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.shiftKey && e.key === '2') {
+      e.preventDefault();
+      toggle();
+    }
+  });
+
+  return {
+    open, close, toggle, isOpen,
+    getLeftSession, getRightSession, isSyncScrollEnabled,
+    _escapeHtml, _truncate, _getSessions, _renderStats, _swap,
+    MAX_PREVIEW_CHARS
+  };
+})();
