@@ -63,6 +63,7 @@
  *   ChatGPTImporter      — import ChatGPT exported conversations (conversations.json)
  *   ConversationHealthCheck — heuristic conversation diagnostic (prompt quality, balance, context usage, repetition)
  *   TypingSpeedMonitor   — live WPM indicator with sparkline dashboard (Ctrl+Shift+T)
+ *   FocusTimer           — Pomodoro-style focus timer with work/break cycles (Alt+P)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -2923,6 +2924,8 @@ const SlashCommands = (() => {
           action: () => ChatGPTImporter.openFilePicker() },
         { name: 'health', description: 'Run conversation health check — diagnostic analysis', icon: '🩺',
           action: () => ConversationHealthCheck.toggle() },
+        { name: 'pomodoro', description: 'Focus timer — Pomodoro work/break cycles with tracking', icon: '🍅',
+          action: () => FocusTimer.toggle() },
     ]);
 
     function init() {
@@ -19776,4 +19779,384 @@ const TypingSpeedMonitor = (() => {
   document.addEventListener('DOMContentLoaded', init);
 
   return { open, close, toggle, reset, getCurrentWpm, getPeakWpm, getTotalWords, getTotalChars };
+})();
+
+/* ============================================================
+ * FocusTimer — Pomodoro-style focus timer with work/break cycles,
+ * session tracking, and persistent statistics.
+ *
+ * Toggle via Alt+P, the 🍅 toolbar button, or /pomodoro slash command.
+ * Supports configurable work/break durations and long breaks.
+ *
+ * @namespace FocusTimer
+ * ============================================================ */
+const FocusTimer = (() => {
+  const STORAGE_KEY = 'ac_focus_timer';
+  const DEFAULTS = { work: 25, short: 5, long: 15, longAfter: 4 };
+
+  let _state = 'idle'; // idle | work | short-break | long-break
+  let _remaining = 0;  // seconds
+  let _interval = null;
+  let _sessionsCompleted = 0;
+  let _totalFocusSeconds = 0;
+  let _todaySessions = 0;
+  let _todayDate = '';
+  let _isOpen = false;
+  let _settings = { ...DEFAULTS };
+  let _history = []; // { date, sessions, focusMinutes }
+
+  function _load() {
+    try {
+      const raw = SafeStorage.get(STORAGE_KEY);
+      if (raw) {
+        const d = JSON.parse(raw);
+        _sessionsCompleted = d.sessionsCompleted || 0;
+        _totalFocusSeconds = d.totalFocusSeconds || 0;
+        _todaySessions = d.todaySessions || 0;
+        _todayDate = d.todayDate || '';
+        if (d.settings) Object.assign(_settings, d.settings);
+        _history = d.history || [];
+      }
+    } catch (_) {}
+    const today = new Date().toISOString().slice(0, 10);
+    if (_todayDate !== today) {
+      if (_todayDate && _todaySessions > 0) {
+        _history.push({ date: _todayDate, sessions: _todaySessions, focusMinutes: Math.round(_todaySessions * _settings.work) });
+        if (_history.length > 30) _history = _history.slice(-30);
+      }
+      _todaySessions = 0;
+      _todayDate = today;
+    }
+  }
+
+  function _save() {
+    SafeStorage.set(STORAGE_KEY, JSON.stringify({
+      sessionsCompleted: _sessionsCompleted,
+      totalFocusSeconds: _totalFocusSeconds,
+      todaySessions: _todaySessions,
+      todayDate: _todayDate,
+      settings: _settings,
+      history: _history
+    }));
+  }
+
+  function _formatTime(s) {
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return `${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
+  }
+
+  function _stateLabel() {
+    if (_state === 'work') return '🍅 Focus';
+    if (_state === 'short-break') return '☕ Short Break';
+    if (_state === 'long-break') return '🌴 Long Break';
+    return '⏸️ Idle';
+  }
+
+  function _createUI() {
+    if (document.getElementById('focus-timer-overlay')) return;
+
+    const overlay = document.createElement('div');
+    overlay.id = 'focus-timer-overlay';
+    overlay.style.cssText = 'display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:10100;justify-content:center;align-items:center;';
+    overlay.innerHTML = `
+      <div id="focus-timer-panel" style="background:var(--bg-color,#1e1e1e);color:var(--text-color,#d4d4d4);border-radius:16px;padding:28px 32px;max-width:420px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.4);font-family:system-ui,sans-serif;position:relative;">
+        <button id="focus-timer-close" style="position:absolute;top:10px;right:14px;background:none;border:none;color:var(--text-color,#d4d4d4);font-size:20px;cursor:pointer;" title="Close">✕</button>
+        <h2 style="margin:0 0 16px;font-size:18px;">🍅 Focus Timer</h2>
+        <div id="ft-display" style="text-align:center;margin:16px 0;">
+          <div id="ft-state-label" style="font-size:14px;opacity:0.7;margin-bottom:8px;">⏸️ Idle</div>
+          <div id="ft-time" style="font-size:56px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:2px;">25:00</div>
+        </div>
+        <div id="ft-controls" style="display:flex;gap:10px;justify-content:center;margin:16px 0;">
+          <button id="ft-start" style="padding:8px 20px;border:none;border-radius:8px;background:#e74c3c;color:#fff;font-size:14px;cursor:pointer;font-weight:600;">▶ Start</button>
+          <button id="ft-pause" style="padding:8px 20px;border:none;border-radius:8px;background:#f39c12;color:#fff;font-size:14px;cursor:pointer;font-weight:600;display:none;">⏸ Pause</button>
+          <button id="ft-skip" style="padding:8px 20px;border:none;border-radius:8px;background:#3498db;color:#fff;font-size:14px;cursor:pointer;font-weight:600;display:none;">⏭ Skip</button>
+          <button id="ft-reset" style="padding:8px 20px;border:none;border-radius:8px;background:#555;color:#fff;font-size:14px;cursor:pointer;font-weight:600;">↺ Reset</button>
+        </div>
+        <div id="ft-progress" style="display:flex;gap:6px;justify-content:center;margin:12px 0;">
+        </div>
+        <div style="border-top:1px solid rgba(128,128,128,0.3);margin:16px 0;padding-top:12px;">
+          <div id="ft-stats" style="display:flex;justify-content:space-around;font-size:13px;opacity:0.8;">
+            <div><strong id="ft-today-count">0</strong><br>Today</div>
+            <div><strong id="ft-total-count">0</strong><br>Total</div>
+            <div><strong id="ft-total-hours">0h</strong><br>Focus Time</div>
+            <div><strong id="ft-streak">0</strong><br>Streak</div>
+          </div>
+        </div>
+        <details style="margin-top:12px;font-size:13px;opacity:0.8;">
+          <summary style="cursor:pointer;font-weight:600;">⚙️ Settings</summary>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;">
+            <label>Work (min): <input id="ft-set-work" type="number" min="1" max="120" style="width:50px;background:rgba(128,128,128,0.2);border:1px solid rgba(128,128,128,0.3);border-radius:4px;color:inherit;padding:2px 6px;"></label>
+            <label>Short break: <input id="ft-set-short" type="number" min="1" max="30" style="width:50px;background:rgba(128,128,128,0.2);border:1px solid rgba(128,128,128,0.3);border-radius:4px;color:inherit;padding:2px 6px;"></label>
+            <label>Long break: <input id="ft-set-long" type="number" min="1" max="60" style="width:50px;background:rgba(128,128,128,0.2);border:1px solid rgba(128,128,128,0.3);border-radius:4px;color:inherit;padding:2px 6px;"></label>
+            <label>Long after: <input id="ft-set-after" type="number" min="2" max="10" style="width:50px;background:rgba(128,128,128,0.2);border:1px solid rgba(128,128,128,0.3);border-radius:4px;color:inherit;padding:2px 6px;"></label>
+          </div>
+          <button id="ft-save-settings" style="margin-top:8px;padding:4px 14px;border:none;border-radius:6px;background:#27ae60;color:#fff;font-size:12px;cursor:pointer;">Save Settings</button>
+        </details>
+        <details style="margin-top:8px;font-size:13px;opacity:0.8;">
+          <summary style="cursor:pointer;font-weight:600;">📊 History (last 7 days)</summary>
+          <div id="ft-history" style="margin-top:8px;"></div>
+        </details>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    document.getElementById('focus-timer-close').addEventListener('click', close);
+    document.getElementById('ft-start').addEventListener('click', start);
+    document.getElementById('ft-pause').addEventListener('click', pause);
+    document.getElementById('ft-skip').addEventListener('click', skip);
+    document.getElementById('ft-reset').addEventListener('click', reset);
+    document.getElementById('ft-save-settings').addEventListener('click', _saveSettings);
+
+    // Keyboard shortcut: Alt+P
+    document.addEventListener('keydown', e => {
+      if (e.altKey && (e.key === 'p' || e.key === 'P') && !e.ctrlKey && !e.shiftKey && !e.metaKey) {
+        e.preventDefault();
+        toggle();
+      }
+    });
+
+    _createIndicator();
+  }
+
+  function _createIndicator() {
+    if (document.getElementById('ft-indicator')) return;
+    const ind = document.createElement('div');
+    ind.id = 'ft-indicator';
+    ind.style.cssText = 'display:none;position:fixed;bottom:12px;left:12px;background:var(--bg-color,#1e1e1e);color:var(--text-color,#d4d4d4);border:1px solid rgba(128,128,128,0.3);border-radius:10px;padding:6px 14px;font-size:13px;font-family:system-ui,sans-serif;cursor:pointer;z-index:10050;box-shadow:0 2px 8px rgba(0,0,0,0.3);font-variant-numeric:tabular-nums;';
+    ind.title = 'Focus Timer (Alt+P)';
+    ind.addEventListener('click', toggle);
+    document.body.appendChild(ind);
+  }
+
+  function _updateUI() {
+    const timeEl = document.getElementById('ft-time');
+    const labelEl = document.getElementById('ft-state-label');
+    const startBtn = document.getElementById('ft-start');
+    const pauseBtn = document.getElementById('ft-pause');
+    const skipBtn = document.getElementById('ft-skip');
+    const todayEl = document.getElementById('ft-today-count');
+    const totalEl = document.getElementById('ft-total-count');
+    const hoursEl = document.getElementById('ft-total-hours');
+    const streakEl = document.getElementById('ft-streak');
+
+    if (timeEl) timeEl.textContent = _formatTime(_state === 'idle' ? _settings.work * 60 : _remaining);
+    if (labelEl) labelEl.textContent = _stateLabel();
+
+    if (startBtn && pauseBtn && skipBtn) {
+      if (_state === 'idle') {
+        startBtn.style.display = ''; pauseBtn.style.display = 'none'; skipBtn.style.display = 'none';
+      } else if (_interval) {
+        startBtn.style.display = 'none'; pauseBtn.style.display = ''; skipBtn.style.display = '';
+      } else {
+        startBtn.style.display = ''; startBtn.textContent = '▶ Resume'; pauseBtn.style.display = 'none'; skipBtn.style.display = '';
+      }
+    }
+
+    if (todayEl) todayEl.textContent = _todaySessions;
+    if (totalEl) totalEl.textContent = _sessionsCompleted;
+    if (hoursEl) {
+      const h = _totalFocusSeconds / 3600;
+      hoursEl.textContent = h >= 1 ? `${h.toFixed(1)}h` : `${Math.round(_totalFocusSeconds / 60)}m`;
+    }
+    if (streakEl) streakEl.textContent = _calcStreak();
+
+    _renderProgress();
+    _renderHistory();
+    _updateIndicator();
+    _updateSettingsInputs();
+  }
+
+  function _renderProgress() {
+    const el = document.getElementById('ft-progress');
+    if (!el) return;
+    const total = _settings.longAfter;
+    const done = _todaySessions % total;
+    el.innerHTML = '';
+    for (let i = 0; i < total; i++) {
+      const dot = document.createElement('div');
+      dot.style.cssText = `width:14px;height:14px;border-radius:50%;border:2px solid ${i < done ? '#e74c3c' : 'rgba(128,128,128,0.4)'};background:${i < done ? '#e74c3c' : 'transparent'};`;
+      el.appendChild(dot);
+    }
+  }
+
+  function _renderHistory() {
+    const el = document.getElementById('ft-history');
+    if (!el) return;
+    const recent = [..._history].slice(-6);
+    const today = { date: _todayDate, sessions: _todaySessions, focusMinutes: Math.round(_todaySessions * _settings.work) };
+    const rows = [...recent, today].slice(-7);
+    if (rows.length === 0) { el.textContent = 'No history yet.'; return; }
+    el.innerHTML = rows.map(r =>
+      `<div style="display:flex;justify-content:space-between;padding:2px 0;"><span>${r.date}</span><span>${r.sessions} 🍅 · ${r.focusMinutes}m</span></div>`
+    ).join('');
+  }
+
+  function _updateIndicator() {
+    const ind = document.getElementById('ft-indicator');
+    if (!ind) return;
+    if (_state === 'idle') { ind.style.display = 'none'; return; }
+    ind.style.display = '';
+    const emoji = _state === 'work' ? '🍅' : '☕';
+    ind.textContent = `${emoji} ${_formatTime(_remaining)}`;
+  }
+
+  function _updateSettingsInputs() {
+    const w = document.getElementById('ft-set-work');
+    const s = document.getElementById('ft-set-short');
+    const l = document.getElementById('ft-set-long');
+    const a = document.getElementById('ft-set-after');
+    if (w && !w.matches(':focus')) w.value = _settings.work;
+    if (s && !s.matches(':focus')) s.value = _settings.short;
+    if (l && !l.matches(':focus')) l.value = _settings.long;
+    if (a && !a.matches(':focus')) a.value = _settings.longAfter;
+  }
+
+  function _saveSettings() {
+    const w = parseInt(document.getElementById('ft-set-work')?.value) || DEFAULTS.work;
+    const s = parseInt(document.getElementById('ft-set-short')?.value) || DEFAULTS.short;
+    const l = parseInt(document.getElementById('ft-set-long')?.value) || DEFAULTS.long;
+    const a = parseInt(document.getElementById('ft-set-after')?.value) || DEFAULTS.longAfter;
+    _settings = { work: Math.max(1, Math.min(120, w)), short: Math.max(1, Math.min(30, s)), long: Math.max(1, Math.min(60, l)), longAfter: Math.max(2, Math.min(10, a)) };
+    _save();
+    if (_state === 'idle') _updateUI();
+  }
+
+  function _calcStreak() {
+    let streak = _todaySessions > 0 ? 1 : 0;
+    const today = new Date();
+    for (let i = _history.length - 1; i >= 0; i--) {
+      const d = new Date(_history[i].date);
+      const expected = new Date(today);
+      expected.setDate(expected.getDate() - (streak));
+      if (d.toISOString().slice(0, 10) === expected.toISOString().slice(0, 10) && _history[i].sessions > 0) {
+        streak++;
+      } else { break; }
+    }
+    return streak;
+  }
+
+  function _tick() {
+    _remaining--;
+    if (_state === 'work') _totalFocusSeconds++;
+    if (_remaining <= 0) {
+      clearInterval(_interval);
+      _interval = null;
+      _onComplete();
+    }
+    _updateUI();
+    _save();
+  }
+
+  function _onComplete() {
+    if (_state === 'work') {
+      _sessionsCompleted++;
+      _todaySessions++;
+      _save();
+      _notify('Focus session complete! Time for a break. 🎉');
+      // Auto-start break
+      const isLong = _todaySessions % _settings.longAfter === 0;
+      _state = isLong ? 'long-break' : 'short-break';
+      _remaining = (isLong ? _settings.long : _settings.short) * 60;
+      _startInterval();
+    } else {
+      _notify('Break is over! Ready to focus? 🍅');
+      _state = 'idle';
+    }
+    _updateUI();
+  }
+
+  function _notify(msg) {
+    // Try browser notification
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      new Notification('Focus Timer', { body: msg, icon: '🍅' });
+    } else if (typeof Notification !== 'undefined' && Notification.permission !== 'denied') {
+      Notification.requestPermission();
+    }
+    // Also play a subtle sound via AudioContext
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.frequency.value = 800; gain.gain.value = 0.15;
+      osc.start(); osc.stop(ctx.currentTime + 0.2);
+      setTimeout(() => {
+        const o2 = ctx.createOscillator();
+        const g2 = ctx.createGain();
+        o2.connect(g2); g2.connect(ctx.destination);
+        o2.frequency.value = 1000; g2.gain.value = 0.15;
+        o2.start(); o2.stop(ctx.currentTime + 0.3);
+      }, 250);
+    } catch (_) {}
+  }
+
+  function _startInterval() {
+    if (_interval) clearInterval(_interval);
+    _interval = setInterval(_tick, 1000);
+  }
+
+  function start() {
+    if (_state === 'idle') {
+      _state = 'work';
+      _remaining = _settings.work * 60;
+    }
+    _startInterval();
+    _updateUI();
+  }
+
+  function pause() {
+    if (_interval) { clearInterval(_interval); _interval = null; }
+    _updateUI();
+  }
+
+  function skip() {
+    if (_interval) { clearInterval(_interval); _interval = null; }
+    if (_state === 'work') {
+      // Don't count skipped work sessions
+      const isLong = (_todaySessions + 1) % _settings.longAfter === 0;
+      _state = isLong ? 'long-break' : 'short-break';
+      _remaining = (isLong ? _settings.long : _settings.short) * 60;
+      _startInterval();
+    } else {
+      _state = 'idle';
+    }
+    _updateUI();
+  }
+
+  function reset() {
+    if (_interval) { clearInterval(_interval); _interval = null; }
+    _state = 'idle';
+    _remaining = 0;
+    _updateUI();
+  }
+
+  function open() {
+    const overlay = document.getElementById('focus-timer-overlay');
+    if (overlay) { overlay.style.display = 'flex'; _isOpen = true; _updateUI(); }
+  }
+
+  function close() {
+    const overlay = document.getElementById('focus-timer-overlay');
+    if (overlay) { overlay.style.display = 'none'; _isOpen = false; }
+  }
+
+  function toggle() { if (_isOpen) close(); else open(); }
+
+  function getState() { return _state; }
+  function getRemaining() { return _remaining; }
+  function getTodaySessions() { return _todaySessions; }
+  function getTotalSessions() { return _sessionsCompleted; }
+  function getSettings() { return { ..._settings }; }
+
+  function init() {
+    _load();
+    _createUI();
+    _updateUI();
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  return { open, close, toggle, start, pause, skip, reset, getState, getRemaining, getTodaySessions, getTotalSessions, getSettings };
 })();
