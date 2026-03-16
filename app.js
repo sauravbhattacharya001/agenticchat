@@ -20160,3 +20160,511 @@ const FocusTimer = (() => {
 
   return { open, close, toggle, start, pause, skip, reset, getState, getRemaining, getTodaySessions, getTotalSessions, getSettings };
 })();
+
+
+/* ---------- Conversation Mind Map ---------- */
+/**
+ * Interactive force-directed topic graph visualization.
+ * Extracts key topics from conversation messages, finds co-occurring
+ * topics within messages, and renders them as an interactive network.
+ * Shortcut: Ctrl+Shift+G  |  Button: 🧠
+ *
+ * Features:
+ * - Topic extraction with TF-IDF-like scoring
+ * - Co-occurrence edge detection (topics in same message)
+ * - Force-directed layout with canvas rendering
+ * - Drag nodes, zoom, hover for details
+ * - Color-coded by dominant speaker (user vs AI)
+ * - Click topic to search messages
+ * - Export as PNG
+ */
+const ConversationMindMap = (() => {
+  let _overlay = null;
+  let _canvas = null;
+  let _ctx = null;
+  let _isOpen = false;
+  let _nodes = [];
+  let _edges = [];
+  let _animId = null;
+  let _drag = null;
+  let _hover = null;
+  let _zoom = 1;
+  let _panX = 0;
+  let _panY = 0;
+  let _lastPan = null;
+
+  const STOP_WORDS = new Set([
+    'the','be','to','of','and','a','in','that','have','i','it','for','not','on',
+    'with','he','as','you','do','at','this','but','his','by','from','they','we',
+    'say','her','she','or','an','will','my','one','all','would','there','their',
+    'what','so','up','out','if','about','who','get','which','go','me','when',
+    'make','can','like','time','no','just','him','know','take','people','into',
+    'year','your','good','some','could','them','see','other','than','then','now',
+    'look','only','come','its','over','think','also','back','after','use','two',
+    'how','our','work','first','well','way','even','new','want','because','any',
+    'these','give','day','most','us','is','are','was','were','been','being','am',
+    'has','had','does','did','doing','done','got','getting','made','said','went',
+    'going','let','here','more','very','much','too','still','own','such','should',
+    'may','might','must','shall','need','dare','used','using','thing','things',
+    've','re','ll','don','doesn','didn','won','wouldn','couldn','shouldn','isn',
+    'aren','wasn','weren','hasn','haven','hadn','can','cannot','yes','yeah',
+    'okay','sure','right','oh','um','uh','ah','ok','well','code','data','function',
+    'really','keep','tell','help','try','call','put','show','ask','seem','feel',
+    'kind','actually','pretty','quite','maybe','something','anything','everything',
+    'nothing','someone','anyone','everyone','already','always','never','often'
+  ]);
+
+  const MIN_WORD_LEN = 3;
+  const MAX_TOPICS = 40;
+  const MIN_OCCURRENCES = 2;
+
+  /* ---- Topic extraction ---- */
+  function _extractTopics() {
+    const history = (typeof ConversationManager !== 'undefined' && ConversationManager.getHistory)
+      ? ConversationManager.getHistory() : [];
+    if (history.length === 0) return { topics: [], cooccur: [] };
+
+    // Per-message word sets (for co-occurrence)
+    const wordFreq = {};    // word -> { count, user, ai, msgs: Set<idx> }
+    const msgWords = [];    // per message: Set of significant words
+
+    history.forEach((msg, idx) => {
+      const text = (msg.content || '').toLowerCase()
+        .replace(/```[\s\S]*?```/g, ' ')
+        .replace(/`[^`]+`/g, ' ')
+        .replace(/https?:\/\/\S+/g, ' ')
+        .replace(/[^a-z0-9\s'-]/g, ' ');
+      const words = text.split(/\s+/).filter(w => w.length >= MIN_WORD_LEN && !STOP_WORDS.has(w));
+      const unique = new Set(words);
+      msgWords.push(unique);
+
+      for (const w of words) {
+        if (!wordFreq[w]) wordFreq[w] = { count: 0, user: 0, ai: 0, msgs: new Set() };
+        wordFreq[w].count++;
+        wordFreq[w].msgs.add(idx);
+        if (msg.role === 'user') wordFreq[w].user++;
+        else wordFreq[w].ai++;
+      }
+    });
+
+    // Filter and rank by TF-IDF-like score (frequent but not in every message)
+    const totalMsgs = history.length;
+    const scored = Object.entries(wordFreq)
+      .filter(([, v]) => v.count >= MIN_OCCURRENCES)
+      .map(([word, v]) => {
+        const tf = v.count;
+        const df = v.msgs.size;
+        const idf = Math.log((totalMsgs + 1) / (df + 1));
+        return { word, score: tf * idf, ...v };
+      })
+      .sort((a, b) => b.score - a.score)
+      .slice(0, MAX_TOPICS);
+
+    // Build co-occurrence edges
+    const topicSet = new Set(scored.map(t => t.word));
+    const edgeMap = {};
+
+    for (const mw of msgWords) {
+      const relevant = [...mw].filter(w => topicSet.has(w));
+      for (let i = 0; i < relevant.length; i++) {
+        for (let j = i + 1; j < relevant.length; j++) {
+          const key = [relevant[i], relevant[j]].sort().join('||');
+          edgeMap[key] = (edgeMap[key] || 0) + 1;
+        }
+      }
+    }
+
+    const edges = Object.entries(edgeMap)
+      .filter(([, w]) => w >= 1)
+      .map(([key, weight]) => {
+        const [a, b] = key.split('||');
+        return { a, b, weight };
+      })
+      .sort((a, b) => b.weight - a.weight)
+      .slice(0, 120);
+
+    return { topics: scored, cooccur: edges };
+  }
+
+  /* ---- Force-directed layout ---- */
+  function _initLayout(topics, cooccur, w, h) {
+    const maxScore = topics.length > 0 ? topics[0].score : 1;
+    _nodes = topics.map((t, i) => {
+      const angle = (2 * Math.PI * i) / topics.length;
+      const r = Math.min(w, h) * 0.3;
+      return {
+        id: t.word,
+        x: w / 2 + r * Math.cos(angle) + (Math.random() - 0.5) * 40,
+        y: h / 2 + r * Math.sin(angle) + (Math.random() - 0.5) * 40,
+        vx: 0, vy: 0,
+        radius: 8 + 22 * (t.score / maxScore),
+        score: t.score,
+        count: t.count,
+        user: t.user,
+        ai: t.ai,
+        userRatio: t.user / t.count
+      };
+    });
+
+    const nodeMap = {};
+    _nodes.forEach((n, i) => nodeMap[n.id] = i);
+
+    _edges = cooccur
+      .filter(e => nodeMap[e.a] !== undefined && nodeMap[e.b] !== undefined)
+      .map(e => ({ source: nodeMap[e.a], target: nodeMap[e.b], weight: e.weight }));
+  }
+
+  function _simulate() {
+    const alpha = 0.3;
+    const repulsion = 2000;
+    const attraction = 0.005;
+    const damping = 0.85;
+    const centerGravity = 0.01;
+    const cw = _canvas.width;
+    const ch = _canvas.height;
+    const cx = cw / 2;
+    const cy = ch / 2;
+
+    // Repulsion
+    for (let i = 0; i < _nodes.length; i++) {
+      for (let j = i + 1; j < _nodes.length; j++) {
+        const a = _nodes[i], b = _nodes[j];
+        let dx = b.x - a.x, dy = b.y - a.y;
+        let dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        const force = repulsion / (dist * dist);
+        const fx = (dx / dist) * force;
+        const fy = (dy / dist) * force;
+        a.vx -= fx; a.vy -= fy;
+        b.vx += fx; b.vy += fy;
+      }
+    }
+
+    // Attraction (edges)
+    for (const e of _edges) {
+      const a = _nodes[e.source], b = _nodes[e.target];
+      let dx = b.x - a.x, dy = b.y - a.y;
+      const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+      const force = attraction * dist * (1 + e.weight * 0.3);
+      const fx = (dx / dist) * force;
+      const fy = (dy / dist) * force;
+      a.vx += fx; a.vy += fy;
+      b.vx -= fx; b.vy -= fy;
+    }
+
+    // Center gravity
+    for (const n of _nodes) {
+      n.vx += (cx - n.x) * centerGravity;
+      n.vy += (cy - n.y) * centerGravity;
+    }
+
+    // Integrate
+    for (const n of _nodes) {
+      if (n === (_drag && _drag.node)) continue;
+      n.vx *= damping;
+      n.vy *= damping;
+      n.x += n.vx * alpha;
+      n.y += n.vy * alpha;
+      // Boundary
+      n.x = Math.max(n.radius, Math.min(cw - n.radius, n.x));
+      n.y = Math.max(n.radius, Math.min(ch - n.radius, n.y));
+    }
+  }
+
+  /* ---- Rendering ---- */
+  function _draw() {
+    if (!_ctx || !_canvas) return;
+    const w = _canvas.width, h = _canvas.height;
+    _ctx.clearRect(0, 0, w, h);
+    _ctx.save();
+    _ctx.translate(_panX, _panY);
+    _ctx.scale(_zoom, _zoom);
+
+    // Edges
+    for (const e of _edges) {
+      const a = _nodes[e.source], b = _nodes[e.target];
+      _ctx.beginPath();
+      _ctx.moveTo(a.x, a.y);
+      _ctx.lineTo(b.x, b.y);
+      const maxW = 6;
+      _ctx.lineWidth = Math.min(maxW, 0.5 + e.weight * 0.8);
+      _ctx.strokeStyle = `rgba(150,150,200,${Math.min(0.6, 0.1 + e.weight * 0.1)})`;
+      _ctx.stroke();
+    }
+
+    // Nodes
+    for (const n of _nodes) {
+      // Color by user/ai ratio
+      const ur = n.userRatio;
+      const r = Math.round(74 * ur + 80 * (1 - ur));
+      const g = Math.round(144 * ur + 200 * (1 - ur));
+      const b = Math.round(217 * ur + 120 * (1 - ur));
+
+      _ctx.beginPath();
+      _ctx.arc(n.x, n.y, n.radius, 0, Math.PI * 2);
+      _ctx.fillStyle = `rgba(${r},${g},${b},0.85)`;
+      _ctx.fill();
+
+      if (_hover === n) {
+        _ctx.lineWidth = 3;
+        _ctx.strokeStyle = '#fff';
+        _ctx.stroke();
+      }
+
+      // Label
+      const fontSize = Math.max(10, Math.min(16, n.radius * 0.8));
+      _ctx.font = `bold ${fontSize}px -apple-system, BlinkMacSystemFont, sans-serif`;
+      _ctx.fillStyle = '#fff';
+      _ctx.textAlign = 'center';
+      _ctx.textBaseline = 'middle';
+      _ctx.fillText(n.id, n.x, n.y);
+    }
+
+    // Tooltip for hovered node
+    if (_hover) {
+      const n = _hover;
+      const tip = `"${n.id}" — ${n.count}× (you: ${n.user}, AI: ${n.ai})`;
+      _ctx.font = '13px -apple-system, BlinkMacSystemFont, sans-serif';
+      const tw = _ctx.measureText(tip).width;
+      const tx = Math.min(n.x - tw / 2, (w / _zoom) - tw - 16);
+      const ty = n.y - n.radius - 28;
+      _ctx.fillStyle = 'rgba(0,0,0,0.85)';
+      _ctx.beginPath();
+      _ctx.roundRect(tx - 6, ty - 14, tw + 12, 24, 6);
+      _ctx.fill();
+      _ctx.fillStyle = '#fff';
+      _ctx.fillText(tip, tx + tw / 2, ty);
+    }
+
+    _ctx.restore();
+  }
+
+  function _loop() {
+    _simulate();
+    _draw();
+    _animId = requestAnimationFrame(_loop);
+  }
+
+  /* ---- Mouse interaction ---- */
+  function _toWorld(cx, cy) {
+    return { x: (cx - _panX) / _zoom, y: (cy - _panY) / _zoom };
+  }
+
+  function _hitTest(mx, my) {
+    const { x, y } = _toWorld(mx, my);
+    for (let i = _nodes.length - 1; i >= 0; i--) {
+      const n = _nodes[i];
+      const dx = n.x - x, dy = n.y - y;
+      if (dx * dx + dy * dy <= n.radius * n.radius) return n;
+    }
+    return null;
+  }
+
+  function _onMouseDown(e) {
+    const rect = _canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    const node = _hitTest(mx, my);
+    if (node) {
+      _drag = { node, offsetX: 0, offsetY: 0 };
+      _canvas.style.cursor = 'grabbing';
+    } else {
+      _lastPan = { x: e.clientX, y: e.clientY };
+      _canvas.style.cursor = 'move';
+    }
+  }
+
+  function _onMouseMove(e) {
+    const rect = _canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+
+    if (_drag) {
+      const { x, y } = _toWorld(mx, my);
+      _drag.node.x = x;
+      _drag.node.y = y;
+      _drag.node.vx = 0;
+      _drag.node.vy = 0;
+    } else if (_lastPan) {
+      _panX += e.clientX - _lastPan.x;
+      _panY += e.clientY - _lastPan.y;
+      _lastPan = { x: e.clientX, y: e.clientY };
+    } else {
+      const node = _hitTest(mx, my);
+      _hover = node;
+      _canvas.style.cursor = node ? 'pointer' : 'default';
+    }
+  }
+
+  function _onMouseUp(e) {
+    if (_drag) {
+      _canvas.style.cursor = 'pointer';
+      _drag = null;
+    } else if (_lastPan) {
+      _canvas.style.cursor = 'default';
+      _lastPan = null;
+    }
+  }
+
+  function _onClick(e) {
+    if (_drag || _lastPan) return;
+    const rect = _canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    const node = _hitTest(mx, my);
+    if (node && typeof MessageSearch !== 'undefined' && MessageSearch.open) {
+      close();
+      MessageSearch.open(node.id);
+    }
+  }
+
+  function _onWheel(e) {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? 0.9 : 1.1;
+    _zoom = Math.max(0.3, Math.min(3, _zoom * delta));
+  }
+
+  /* ---- Export PNG ---- */
+  function _exportPNG() {
+    if (!_canvas) return;
+    const link = document.createElement('a');
+    link.download = 'mindmap.png';
+    link.href = _canvas.toDataURL('image/png');
+    link.click();
+  }
+
+  /* ---- UI ---- */
+  function _createUI() {
+    if (_overlay) return;
+    _overlay = document.createElement('div');
+    _overlay.id = 'mindmap-overlay';
+    _overlay.innerHTML = ''
+      + '<div class="mm-container">'
+      + '<div class="mm-header">'
+      + '<span class="mm-title">🧠 Conversation Mind Map</span>'
+      + '<div class="mm-controls">'
+      + '<button class="btn-sm mm-export" title="Export PNG">📷</button>'
+      + '<button class="btn-sm mm-refresh" title="Refresh">🔄</button>'
+      + '<button class="btn-sm mm-close" title="Close">✕</button>'
+      + '</div></div>'
+      + '<div class="mm-legend">'
+      + '<span class="mm-leg-user">● You</span> '
+      + '<span class="mm-leg-ai">● AI</span> '
+      + '<span class="mm-leg-hint">Drag nodes · Scroll to zoom · Click topic to search</span>'
+      + '</div>'
+      + '<canvas class="mm-canvas"></canvas>'
+      + '</div>';
+
+    // Styles
+    const style = document.createElement('style');
+    style.textContent = `
+      #mindmap-overlay {
+        display:none; position:fixed; inset:0; z-index:10000;
+        background:rgba(0,0,0,0.75); justify-content:center; align-items:center;
+      }
+      #mindmap-overlay.visible { display:flex; }
+      .mm-container {
+        width:90vw; max-width:1000px; height:80vh; background:var(--bg-primary,#0f0f23);
+        border-radius:12px; border:1px solid var(--border,#333); display:flex;
+        flex-direction:column; overflow:hidden; box-shadow:0 20px 60px rgba(0,0,0,0.5);
+      }
+      .mm-header {
+        display:flex; justify-content:space-between; align-items:center;
+        padding:12px 16px; border-bottom:1px solid var(--border,#333);
+      }
+      .mm-title { font-weight:700; font-size:1rem; color:var(--text,#e0e0e0); }
+      .mm-controls { display:flex; gap:6px; }
+      .mm-controls .btn-sm {
+        background:transparent; border:1px solid var(--border,#444); color:var(--text,#ccc);
+        border-radius:6px; padding:4px 8px; cursor:pointer; font-size:0.85rem;
+      }
+      .mm-controls .btn-sm:hover { background:var(--accent,#6366f1); color:#fff; }
+      .mm-legend {
+        padding:6px 16px; font-size:0.75rem; color:var(--text-muted,#888);
+        border-bottom:1px solid var(--border,#222);
+      }
+      .mm-leg-user { color:rgb(74,144,217); }
+      .mm-leg-ai { color:rgb(80,200,120); }
+      .mm-leg-hint { margin-left:12px; opacity:0.7; }
+      .mm-canvas { flex:1; width:100%; cursor:default; }
+      .mm-empty {
+        flex:1; display:flex; align-items:center; justify-content:center;
+        color:var(--text-muted,#888); font-size:1.1rem;
+      }
+    `;
+    document.head.appendChild(style);
+    document.body.appendChild(_overlay);
+
+    _overlay.querySelector('.mm-close').addEventListener('click', close);
+    _overlay.querySelector('.mm-refresh').addEventListener('click', _refresh);
+    _overlay.querySelector('.mm-export').addEventListener('click', _exportPNG);
+    _overlay.addEventListener('click', (e) => { if (e.target === _overlay) close(); });
+  }
+
+  function _refresh() {
+    if (_animId) { cancelAnimationFrame(_animId); _animId = null; }
+    const { topics, cooccur } = _extractTopics();
+    const container = _overlay.querySelector('.mm-container');
+
+    // Remove existing empty message if any
+    const existingEmpty = container.querySelector('.mm-empty');
+    if (existingEmpty) existingEmpty.remove();
+
+    _canvas = _overlay.querySelector('.mm-canvas');
+
+    if (topics.length === 0) {
+      _canvas.style.display = 'none';
+      const empty = document.createElement('div');
+      empty.className = 'mm-empty';
+      empty.textContent = 'No topics yet — start a conversation!';
+      container.appendChild(empty);
+      return;
+    }
+
+    _canvas.style.display = 'block';
+    const rect = _canvas.parentElement.getBoundingClientRect();
+    _canvas.width = _canvas.clientWidth || rect.width || 800;
+    _canvas.height = _canvas.clientHeight || rect.height || 500;
+    _ctx = _canvas.getContext('2d');
+
+    _zoom = 1; _panX = 0; _panY = 0;
+    _initLayout(topics, cooccur, _canvas.width, _canvas.height);
+
+    // Attach events
+    _canvas.onmousedown = _onMouseDown;
+    _canvas.onmousemove = _onMouseMove;
+    _canvas.onmouseup = _onMouseUp;
+    _canvas.onclick = _onClick;
+    _canvas.onwheel = _onWheel;
+    window.onmouseleave = _onMouseUp;
+
+    _loop();
+  }
+
+  function open() {
+    _createUI();
+    _overlay.classList.add('visible');
+    _isOpen = true;
+    // Delay refresh to let layout settle
+    setTimeout(_refresh, 50);
+  }
+
+  function close() {
+    if (_overlay) _overlay.classList.remove('visible');
+    _isOpen = false;
+    if (_animId) { cancelAnimationFrame(_animId); _animId = null; }
+  }
+
+  function toggle() { _isOpen ? close() : open(); }
+
+  function init() {
+    const btn = document.getElementById('mindmap-btn');
+    if (btn) btn.addEventListener('click', toggle);
+    document.addEventListener('keydown', (e) => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'G') {
+        e.preventDefault();
+        toggle();
+      }
+    });
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  return { open, close, toggle, init };
+})();
