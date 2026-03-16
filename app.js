@@ -235,8 +235,10 @@ function sanitizeStorageObject(obj) {
  * ConversationTimeline, and GlobalSessionSearch.
  */
 function _escapeHtml(str) {
-  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  const s = String(str);
+  if (!/[&<>"']/.test(s)) return s; // fast path: no special chars
+  const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+  return s.replace(/[&<>"']/g, c => map[c]);
 }
 
 /* ---------- Conversation Manager ---------- */
