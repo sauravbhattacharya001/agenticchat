@@ -64,6 +64,7 @@
  *   ConversationHealthCheck — heuristic conversation diagnostic (prompt quality, balance, context usage, repetition)
  *   TypingSpeedMonitor   — live WPM indicator with sparkline dashboard (Ctrl+Shift+T)
  *   FocusTimer           — Pomodoro-style focus timer with work/break cycles (Alt+P)
+ *   CommandPalette       — VS Code-style universal command launcher (Ctrl+Shift+P)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -11598,14 +11599,13 @@ const GlobalSessionSearch = (() => {
       });
     });
 
-    // Keyboard shortcut: Ctrl+Shift+S — handled by central KeyboardShortcuts dispatcher
+    // Keyboard shortcut: Ctrl+Shift+G — handled by central KeyboardShortcuts dispatcher
   }
 
   document.addEventListener('DOMContentLoaded', init);
 
   return { open, close, toggle, init };
 })();
-
 // ── Formatting Toolbar ────────────────────────────────────────────
 /**
  * @namespace FormattingToolbar
@@ -20684,4 +20684,297 @@ const ConversationMindMap = (() => {
   document.addEventListener('DOMContentLoaded', init);
 
   return { open, close, toggle, init };
+})();
+
+/* ============================================================
+ * Command Palette — VS Code-style universal command launcher
+ *
+ * Ctrl+Shift+P opens a fuzzy-searchable palette of all app commands.
+ * Modules register commands via CommandPalette.register(). Each command
+ * has a label, optional category/icon/shortcut, and an action callback.
+ *
+ * Features:
+ *   - Fuzzy search across all registered commands
+ *   - Category grouping with headers
+ *   - Recent commands tracked and shown first
+ *   - Keyboard navigation (↑/↓/Enter/Escape)
+ *   - Shortcut hints displayed per command
+ *   - Fuzzy match highlighting in results
+ *   - 36 built-in commands for all app modules
+ *   - Extensible: any module can register custom commands
+ *
+ * @namespace CommandPalette
+ * ============================================================ */
+const CommandPalette = (() => {
+  const _commands = [];
+  let _overlay = null;
+  let _input = null;
+  let _list = null;
+  let _filtered = [];
+  let _selectedIndex = 0;
+  let _isOpen = false;
+  let _recentIds = [];
+  const MAX_RECENT = 10;
+
+  function register(cmd) {
+    if (!cmd || !cmd.id || !cmd.label || typeof cmd.action !== 'function') return;
+    const idx = _commands.findIndex(c => c.id === cmd.id);
+    if (idx !== -1) { _commands[idx] = cmd; return; }
+    _commands.push(cmd);
+  }
+
+  function registerMany(cmds) {
+    if (!Array.isArray(cmds)) return;
+    cmds.forEach(register);
+  }
+
+  function unregister(id) {
+    const idx = _commands.findIndex(c => c.id === id);
+    if (idx !== -1) _commands.splice(idx, 1);
+  }
+
+  function _fuzzyMatch(query, text) {
+    const q = query.toLowerCase();
+    const t = text.toLowerCase();
+    let qi = 0;
+    for (let ti = 0; ti < t.length && qi < q.length; ti++) {
+      if (t[ti] === q[qi]) qi++;
+    }
+    return qi === q.length;
+  }
+
+  function _fuzzyScore(query, text) {
+    const q = query.toLowerCase();
+    const t = text.toLowerCase();
+    if (t.startsWith(q)) return 0;
+    if (t.includes(q)) return 1;
+    return 2;
+  }
+
+  function _loadRecent() {
+    try {
+      const raw = (typeof SafeStorage !== 'undefined' ? SafeStorage : localStorage).getItem('cp_recent');
+      if (raw) _recentIds = JSON.parse(raw);
+    } catch (e) { _recentIds = []; }
+  }
+
+  function _saveRecent() {
+    try {
+      (typeof SafeStorage !== 'undefined' ? SafeStorage : localStorage).setItem('cp_recent', JSON.stringify(_recentIds));
+    } catch (e) { /* ignore */ }
+  }
+
+  function _addRecent(id) {
+    _recentIds = _recentIds.filter(r => r !== id);
+    _recentIds.unshift(id);
+    if (_recentIds.length > MAX_RECENT) _recentIds.length = MAX_RECENT;
+    _saveRecent();
+  }
+
+  function _filter(query) {
+    if (!query) {
+      const recent = _recentIds
+        .map(id => _commands.find(c => c.id === id))
+        .filter(Boolean)
+        .map(c => ({ ...c, _recent: true }));
+      const recentIds = new Set(_recentIds);
+      const rest = _commands.filter(c => !recentIds.has(c.id));
+      _filtered = [...recent, ...rest];
+    } else {
+      const searchText = (c) => `${c.category || ''} ${c.label}`;
+      _filtered = _commands
+        .filter(c => _fuzzyMatch(query, searchText(c)))
+        .sort((a, b) => _fuzzyScore(query, searchText(a)) - _fuzzyScore(query, searchText(b)));
+    }
+    _selectedIndex = 0;
+  }
+
+  function _highlightMatch(text, query) {
+    if (!query) return text;
+    const q = query.toLowerCase();
+    const t = text.toLowerCase();
+    let result = '';
+    let qi = 0;
+    for (let i = 0; i < text.length; i++) {
+      if (qi < q.length && t[i] === q[qi]) {
+        result += '<b>' + text[i] + '</b>';
+        qi++;
+      } else {
+        result += text[i];
+      }
+    }
+    return result;
+  }
+
+  function _render() {
+    if (!_list) return;
+    const query = _input ? _input.value : '';
+    _list.innerHTML = '';
+    if (_filtered.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'cp-empty';
+      empty.textContent = 'No matching commands';
+      _list.appendChild(empty);
+      return;
+    }
+    let lastCategory = null;
+    _filtered.forEach((cmd, i) => {
+      const cat = cmd._recent ? '\u23F1\uFE0F Recent' : (cmd.category || 'General');
+      if (cat !== lastCategory && !query) {
+        const header = document.createElement('div');
+        header.className = 'cp-category';
+        header.textContent = cat;
+        _list.appendChild(header);
+        lastCategory = cat;
+      }
+      const item = document.createElement('div');
+      item.className = 'cp-item' + (i === _selectedIndex ? ' cp-selected' : '');
+      item.setAttribute('role', 'option');
+      item.setAttribute('aria-selected', i === _selectedIndex ? 'true' : 'false');
+
+      const icon = cmd.icon ? '<span class="cp-icon">' + cmd.icon + '</span>' : '';
+      const label = _highlightMatch(cmd.label, query);
+      const shortcut = cmd.shortcut ? '<span class="cp-shortcut">' + cmd.shortcut + '</span>' : '';
+      item.innerHTML = icon + '<span class="cp-label">' + label + '</span>' + shortcut;
+
+      item.addEventListener('click', () => _execute(i));
+      item.addEventListener('mouseenter', () => {
+        _selectedIndex = i;
+        _render();
+      });
+      _list.appendChild(item);
+    });
+    const selected = _list.querySelector('.cp-selected');
+    if (selected) selected.scrollIntoView({ block: 'nearest' });
+  }
+
+  function _execute(index) {
+    const cmd = _filtered[index];
+    if (!cmd) return;
+    _addRecent(cmd.id);
+    close();
+    try { cmd.action(); } catch (e) { /* ignore */ }
+  }
+
+  function _createUI() {
+    if (_overlay) return;
+    _overlay = document.createElement('div');
+    _overlay.id = 'command-palette-overlay';
+    _overlay.className = 'cp-overlay';
+    _overlay.setAttribute('role', 'dialog');
+    _overlay.setAttribute('aria-label', 'Command Palette');
+    _overlay.innerHTML =
+      '<div class="cp-dialog">' +
+        '<input class="cp-input" type="text" placeholder="Type a command\u2026" aria-label="Search commands" autocomplete="off" />' +
+        '<div class="cp-list" role="listbox"></div>' +
+      '</div>';
+    document.body.appendChild(_overlay);
+    _input = _overlay.querySelector('.cp-input');
+    _list = _overlay.querySelector('.cp-list');
+
+    _input.addEventListener('input', () => {
+      _filter(_input.value.trim());
+      _render();
+    });
+
+    _input.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        _selectedIndex = Math.min(_selectedIndex + 1, _filtered.length - 1);
+        _render();
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        _selectedIndex = Math.max(_selectedIndex - 1, 0);
+        _render();
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        _execute(_selectedIndex);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        close();
+      }
+    });
+
+    _overlay.addEventListener('click', (e) => {
+      if (e.target === _overlay) close();
+    });
+  }
+
+  function open() {
+    _createUI();
+    _loadRecent();
+    _overlay.classList.add('cp-visible');
+    _isOpen = true;
+    _input.value = '';
+    _filter('');
+    _render();
+    _input.focus();
+  }
+
+  function close() {
+    if (_overlay) _overlay.classList.remove('cp-visible');
+    _isOpen = false;
+  }
+
+  function toggle() { _isOpen ? close() : open(); }
+
+  function getCommands() { return _commands.slice(); }
+  function getFiltered() { return _filtered.slice(); }
+  function isOpen() { return _isOpen; }
+
+  function _registerBuiltInCommands() {
+    const builtIn = [
+      { id: 'cp:theme', label: 'Toggle Theme (Dark/Light)', icon: '\u2600\uFE0F', shortcut: 'Ctrl+D', category: 'Appearance', action: () => { if (typeof ThemeManager !== 'undefined') ThemeManager.toggle(); } },
+      { id: 'cp:zen', label: 'Toggle Focus Mode', icon: '\uD83E\uDDD8', shortcut: 'Ctrl+Shift+F', category: 'Appearance', action: () => { if (typeof FocusMode !== 'undefined') FocusMode.toggle(); } },
+      { id: 'cp:new-session', label: 'New Session', icon: '\u2795', category: 'Sessions', action: () => { if (typeof SessionManager !== 'undefined') SessionManager.newSession(); } },
+      { id: 'cp:switch-session', label: 'Quick Switch Session', icon: '\u26A1', shortcut: 'Ctrl+K', category: 'Sessions', action: () => { if (typeof QuickSwitcher !== 'undefined') QuickSwitcher.toggle(); } },
+      { id: 'cp:search', label: 'Search Messages', icon: '\uD83D\uDD0D', shortcut: 'Ctrl+F', category: 'Search', action: () => { if (typeof MessageSearch !== 'undefined') MessageSearch.toggle(); } },
+      { id: 'cp:global-search', label: 'Search All Sessions', icon: '\uD83D\uDD0E', shortcut: 'Ctrl+Shift+S', category: 'Search', action: () => { if (typeof GlobalSessionSearch !== 'undefined') GlobalSessionSearch.toggle(); } },
+      { id: 'cp:history', label: 'Conversation History', icon: '\uD83D\uDCDC', shortcut: 'Ctrl+H', category: 'Navigation', action: () => { if (typeof HistoryPanel !== 'undefined') HistoryPanel.toggle(); } },
+      { id: 'cp:bookmarks', label: 'View Bookmarks', icon: '\uD83D\uDD16', shortcut: 'Ctrl+B', category: 'Navigation', action: () => { if (typeof ChatBookmarks !== 'undefined') ChatBookmarks.toggle(); } },
+      { id: 'cp:stats', label: 'Chat Statistics', icon: '\uD83D\uDCCA', shortcut: 'Ctrl+I', category: 'Analytics', action: () => { if (typeof ChatStats !== 'undefined') ChatStats.toggle(); } },
+      { id: 'cp:cost', label: 'Cost Dashboard', icon: '\uD83D\uDCB0', category: 'Analytics', action: () => { if (typeof CostDashboard !== 'undefined') CostDashboard.toggle(); } },
+      { id: 'cp:heatmap', label: 'Usage Heatmap', icon: '\uD83D\uDCC5', category: 'Analytics', action: () => { if (typeof UsageHeatmap !== 'undefined') UsageHeatmap.toggle(); } },
+      { id: 'cp:summary', label: 'Conversation Summary', icon: '\uD83D\uDCCB', shortcut: 'Alt+S', category: 'Tools', action: () => { if (typeof ConversationSummarizer !== 'undefined') ConversationSummarizer.toggle(); } },
+      { id: 'cp:scratchpad', label: 'Open Scratchpad', icon: '\uD83D\uDCDD', shortcut: 'Ctrl+.', category: 'Tools', action: () => { if (typeof Scratchpad !== 'undefined') Scratchpad.toggle(); } },
+      { id: 'cp:snippets', label: 'Snippet Library', icon: '\u2702\uFE0F', shortcut: 'Ctrl+Shift+L', category: 'Tools', action: () => { if (typeof SnippetLibrary !== 'undefined') SnippetLibrary.toggle(); } },
+      { id: 'cp:prompt-library', label: 'Prompt Library', icon: '\uD83D\uDCDA', shortcut: 'Ctrl+L', category: 'Tools', action: () => { if (typeof PromptLibrary !== 'undefined') PromptLibrary.toggle(); } },
+      { id: 'cp:templates', label: 'Prompt Templates', icon: '\uD83D\uDCC4', category: 'Tools', action: () => { if (typeof PromptTemplates !== 'undefined') PromptTemplates.toggle(); } },
+      { id: 'cp:chains', label: 'Prompt Chains', icon: '\u26D3\uFE0F', category: 'Tools', action: () => { if (typeof PromptChainRunner !== 'undefined') PromptChainRunner.toggle(); } },
+      { id: 'cp:agenda', label: 'Conversation Agenda', icon: '\uD83C\uDFAF', shortcut: 'Alt+G', category: 'Tools', action: () => { if (typeof ConversationAgenda !== 'undefined') ConversationAgenda.toggle(); } },
+      { id: 'cp:chapters', label: 'Conversation Chapters', icon: '\uD83D\uDCD1', shortcut: 'Alt+Shift+C', category: 'Tools', action: () => { if (typeof ConversationChapters !== 'undefined') ConversationChapters.toggle(); } },
+      { id: 'cp:annotations', label: 'Message Annotations', icon: '\uD83C\uDFF7\uFE0F', category: 'Tools', action: () => { if (typeof MessageAnnotations !== 'undefined') MessageAnnotations.toggle(); } },
+      { id: 'cp:tags', label: 'Manage Tags', icon: '\uD83C\uDFF7\uFE0F', category: 'Sessions', action: () => { if (typeof ConversationTags !== 'undefined') ConversationTags.toggle(); } },
+      { id: 'cp:wordcloud', label: 'Word Cloud', icon: '\u2601\uFE0F', shortcut: 'Ctrl+Shift+W', category: 'Visualization', action: () => { if (typeof WordCloudPanel !== 'undefined') WordCloudPanel.toggle(); } },
+      { id: 'cp:mindmap', label: 'Mind Map', icon: '\uD83E\uDDE0', shortcut: 'Ctrl+Shift+G', category: 'Visualization', action: () => { if (typeof ConversationMindMap !== 'undefined') ConversationMindMap.toggle(); } },
+      { id: 'cp:timeline', label: 'Conversation Timeline', icon: '\uD83D\uDCC8', category: 'Visualization', action: () => { if (typeof ConversationTimeline !== 'undefined') ConversationTimeline.toggle(); } },
+      { id: 'cp:sentiment', label: 'Sentiment Analysis', icon: '\uD83D\uDE0A', shortcut: 'Ctrl+Shift+M', category: 'Analytics', action: () => { if (typeof ConversationSentiment !== 'undefined') ConversationSentiment.toggle(); } },
+      { id: 'cp:health', label: 'Conversation Health Check', icon: '\uD83E\uDE7A', shortcut: 'Ctrl+Shift+H', category: 'Analytics', action: () => { if (typeof ConversationHealthCheck !== 'undefined') ConversationHealthCheck.toggle(); } },
+      { id: 'cp:typing', label: 'Typing Speed Dashboard', icon: '\u2328\uFE0F', shortcut: 'Ctrl+Shift+T', category: 'Analytics', action: () => { if (typeof TypingSpeedMonitor !== 'undefined') TypingSpeedMonitor.toggleDashboard(); } },
+      { id: 'cp:pomodoro', label: 'Focus Timer (Pomodoro)', icon: '\uD83C\uDF45', shortcut: 'Alt+P', category: 'Tools', action: () => { if (typeof FocusTimer !== 'undefined') FocusTimer.toggle(); } },
+      { id: 'cp:ratings', label: 'Response Ratings', icon: '\u2B50', category: 'Analytics', action: () => { if (typeof ResponseRating !== 'undefined') ResponseRating.toggle(); } },
+      { id: 'cp:clipboard', label: 'Clipboard History', icon: '\uD83D\uDCCB', shortcut: 'Ctrl+Shift+V', category: 'Tools', action: () => { if (typeof ClipboardHistory !== 'undefined') ClipboardHistory.toggle(); } },
+      { id: 'cp:readaloud', label: 'Read Aloud', icon: '\uD83D\uDD0A', category: 'Tools', action: () => { if (typeof ReadAloud !== 'undefined') ReadAloud.toggle(); } },
+      { id: 'cp:replay', label: 'Conversation Replay', icon: '\u25B6\uFE0F', category: 'Tools', action: () => { if (typeof ConversationReplay !== 'undefined') ConversationReplay.toggle(); } },
+      { id: 'cp:import-chatgpt', label: 'Import ChatGPT Conversations', icon: '\uD83D\uDCE5', category: 'Import/Export', action: () => { if (typeof ChatGPTImporter !== 'undefined') ChatGPTImporter.toggle(); } },
+      { id: 'cp:filter', label: 'Message Filters', icon: '\uD83D\uDD3D', category: 'Search', action: () => { if (typeof MessageFilter !== 'undefined') MessageFilter.toggle(); } },
+      { id: 'cp:clear', label: 'Clear Conversation', icon: '\uD83D\uDDD1\uFE0F', category: 'Sessions', action: () => { if (typeof ConversationManager !== 'undefined') ConversationManager.clear(); if (typeof UIController !== 'undefined') UIController.clearMessages(); } },
+      { id: 'cp:shortcuts', label: 'Keyboard Shortcuts', icon: '\u2328\uFE0F', shortcut: '?', category: 'Help', action: () => { if (typeof KeyboardShortcuts !== 'undefined') KeyboardShortcuts.showHelp(); } },
+    ];
+    registerMany(builtIn);
+  }
+
+  function init() {
+    _registerBuiltInCommands();
+    document.addEventListener('keydown', (e) => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'P') {
+        e.preventDefault();
+        toggle();
+      }
+    });
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  return { register, registerMany, unregister, open, close, toggle, getCommands, getFiltered, isOpen, init };
 })();
