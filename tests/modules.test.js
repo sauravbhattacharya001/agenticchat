@@ -614,18 +614,18 @@ describe('ModelSelector', () => {
     test('clicking a model updates ChatConfig.MODEL', () => {
       ModelSelector.toggle();
       const buttons = document.querySelectorAll('.model-option');
-      const gpt35btn = Array.from(buttons).find(b => b.title === 'gpt-3.5-turbo');
-      expect(gpt35btn).toBeDefined();
-      gpt35btn.click();
-      expect(ChatConfig.MODEL).toBe('gpt-3.5-turbo');
+      const miniBtn = Array.from(buttons).find(b => b.title === 'gpt-4.1-mini');
+      expect(miniBtn).toBeDefined();
+      miniBtn.click();
+      expect(ChatConfig.MODEL).toBe('gpt-4.1-mini');
     });
 
     test('clicking a model updates label', () => {
       ModelSelector.toggle();
       const buttons = document.querySelectorAll('.model-option');
-      const gpt4btn = Array.from(buttons).find(b => b.title === 'gpt-4');
-      gpt4btn.click();
-      expect(document.getElementById('model-label').textContent).toBe('GPT-4');
+      const gpt41btn = Array.from(buttons).find(b => b.title === 'gpt-4.1');
+      gpt41btn.click();
+      expect(document.getElementById('model-label').textContent).toBe('GPT-4.1');
     });
 
     test('clicking a model closes the panel', () => {

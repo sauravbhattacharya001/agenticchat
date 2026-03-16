@@ -218,11 +218,11 @@ describe('ModelCompare', () => {
       const three = Object.assign({}, mockComparison, {
         responses: [
           ...mockComparison.responses,
-          { modelId: 'gpt-3.5-turbo', modelLabel: 'GPT-3.5', content: 'Four', latencyMs: 50, tokens: null, error: null }
+          { modelId: 'gpt-4.1-nano', modelLabel: 'GPT-4.1 Nano', content: 'Four', latencyMs: 50, tokens: null, error: null }
         ]
       });
       const html = ModelCompare.buildComparisonView(three);
-      expect(html).toContain('GPT-3.5');
+      expect(html).toContain('GPT-4.1 Nano');
       expect(html).toContain('Four');
       // Grid should have 3 columns
       expect(html).toContain('repeat(3,1fr)');

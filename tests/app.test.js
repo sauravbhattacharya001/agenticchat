@@ -382,27 +382,27 @@ describe('UIController', () => {
   });
 
   test('showTokenUsage uses per-model pricing, not hardcoded gpt-4o rates', () => {
-    // gpt-3.5-turbo: $0.50/$1.50 per 1M tokens
-    ChatConfig.MODEL = 'gpt-3.5-turbo';
+    // gpt-4.1-nano: $0.10/$0.40 per 1M tokens
+    ChatConfig.MODEL = 'gpt-4.1-nano';
     UIController.showTokenUsage({
       prompt_tokens: 1000000,
       completion_tokens: 1000000,
       total_tokens: 2000000
     });
     var text = document.getElementById('token-usage').textContent;
-    // gpt-3.5-turbo cost: (1M * 0.50 + 1M * 1.50) / 1M = $2.0000
-    expect(text).toContain('$2.0000');
+    // gpt-4.1-nano cost: (1M * 0.10 + 1M * 0.40) / 1M = $0.5000
+    expect(text).toContain('$0.5000');
 
-    // gpt-4: $30/$60 per 1M tokens — most expensive model
-    ChatConfig.MODEL = 'gpt-4';
+    // gpt-4o: $2.50/$10.00 per 1M tokens
+    ChatConfig.MODEL = 'gpt-4o';
     UIController.showTokenUsage({
       prompt_tokens: 1000000,
       completion_tokens: 1000000,
       total_tokens: 2000000
     });
     text = document.getElementById('token-usage').textContent;
-    // gpt-4 cost: (1M * 30 + 1M * 60) / 1M = $90.0000
-    expect(text).toContain('$90.0000');
+    // gpt-4o cost: (1M * 2.50 + 1M * 10.00) / 1M = $12.5000
+    expect(text).toContain('$12.5000');
 
     // Reset
     ChatConfig.MODEL = 'gpt-4o';
