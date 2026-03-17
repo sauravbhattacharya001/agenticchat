@@ -326,7 +326,8 @@ function loadApp() {
     'ConversationSentiment',
     'QuickSwitcher',
     'ChatGPTImporter',
-    'PromptChainRunner'
+    'PromptChainRunner',
+    'CustomThemeCreator'
   ];
 
   for (const mod of modules) {

@@ -2945,6 +2945,8 @@ const SlashCommands = (() => {
           action: () => ConversationHealthCheck.toggle() },
         { name: 'pomodoro', description: 'Focus timer — Pomodoro work/break cycles with tracking', icon: '🍅',
           action: () => FocusTimer.toggle() },
+        { name: 'theme-creator', description: 'Custom theme creator — color pickers, presets, save/load themes', icon: '🎨',
+          action: () => CustomThemeCreator.toggle() },
     ]);
 
     function init() {
@@ -20964,6 +20966,7 @@ const CommandPalette = (() => {
       { id: 'cp:health', label: 'Conversation Health Check', icon: '\uD83E\uDE7A', shortcut: 'Ctrl+Shift+H', category: 'Analytics', action: () => { if (typeof ConversationHealthCheck !== 'undefined') ConversationHealthCheck.toggle(); } },
       { id: 'cp:typing', label: 'Typing Speed Dashboard', icon: '\u2328\uFE0F', shortcut: 'Ctrl+Shift+T', category: 'Analytics', action: () => { if (typeof TypingSpeedMonitor !== 'undefined') TypingSpeedMonitor.toggleDashboard(); } },
       { id: 'cp:pomodoro', label: 'Focus Timer (Pomodoro)', icon: '\uD83C\uDF45', shortcut: 'Alt+P', category: 'Tools', action: () => { if (typeof FocusTimer !== 'undefined') FocusTimer.toggle(); } },
+      { id: 'cp:theme-creator', label: 'Custom Theme Creator', icon: '\uD83C\uDFA8', shortcut: 'Ctrl+Shift+E', category: 'Tools', action: () => { if (typeof CustomThemeCreator !== 'undefined') CustomThemeCreator.toggle(); } },
       { id: 'cp:ratings', label: 'Response Ratings', icon: '\u2B50', category: 'Analytics', action: () => { if (typeof ResponseRating !== 'undefined') ResponseRating.toggle(); } },
       { id: 'cp:clipboard', label: 'Clipboard History', icon: '\uD83D\uDCCB', shortcut: 'Ctrl+Shift+V', category: 'Tools', action: () => { if (typeof ClipboardHistory !== 'undefined') ClipboardHistory.toggle(); } },
       { id: 'cp:readaloud', label: 'Read Aloud', icon: '\uD83D\uDD0A', category: 'Tools', action: () => { if (typeof ReadAloud !== 'undefined') ReadAloud.toggle(); } },
@@ -21766,3 +21769,517 @@ const DraftRecovery = (() => {
     _loadDrafts, _saveDrafts, _sessionId, _formatAge, _onInput
   };
 })();
+
+/* ---------- Custom Theme Creator ---------- */
+/**
+ * Interactive theme builder with live color pickers for all CSS variables,
+ * preset themes, save/load custom themes, and import/export.
+ *
+ * Toggle: Ctrl+Shift+E or /theme-creator slash command.
+ *
+ * Extends ThemeManager with custom theme support. Custom themes are stored
+ * in localStorage and applied via CSS custom properties.
+ */
+const CustomThemeCreator = (() => {
+  const STORAGE_KEY = 'agenticchat_custom_themes';
+  const ACTIVE_KEY = 'agenticchat_active_custom_theme';
+  let panel = null;
+  let isOpen = false;
+
+  /* All CSS variables the theme system uses */
+  const THEME_VARS = [
+    { key: '--bg-primary',         label: 'Background Primary',    group: 'Background' },
+    { key: '--bg-secondary',       label: 'Background Secondary',  group: 'Background' },
+    { key: '--bg-blackbox',        label: 'Background Blackbox',   group: 'Background' },
+    { key: '--bg-console',         label: 'Background Console',    group: 'Background' },
+    { key: '--text-primary',       label: 'Text Primary',          group: 'Text' },
+    { key: '--text-muted',         label: 'Text Muted',            group: 'Text' },
+    { key: '--text-dim',           label: 'Text Dim',              group: 'Text' },
+    { key: '--accent',             label: 'Accent',                group: 'Colors' },
+    { key: '--accent-hover',       label: 'Accent Hover',          group: 'Colors' },
+    { key: '--danger',             label: 'Danger',                group: 'Colors' },
+    { key: '--success',            label: 'Success',               group: 'Colors' },
+    { key: '--border',             label: 'Border',                group: 'Borders' },
+    { key: '--border-box',         label: 'Border Box',            group: 'Borders' },
+    { key: '--disabled-bg',        label: 'Disabled Background',   group: 'States' },
+    { key: '--disabled-text',      label: 'Disabled Text',         group: 'States' },
+    { key: '--msg-user-bg',        label: 'User Message BG',       group: 'Messages' },
+    { key: '--msg-assistant-bg',   label: 'Assistant Message BG',  group: 'Messages' },
+  ];
+
+  /* Preset themes beyond dark/light */
+  const PRESETS = {
+    'Nord': {
+      '--bg-primary': '#2e3440', '--bg-secondary': '#3b4252', '--bg-blackbox': '#272c36',
+      '--bg-console': '#434c5e', '--text-primary': '#eceff4', '--text-muted': '#d8dee9',
+      '--text-dim': '#7b88a1', '--accent': '#88c0d0', '--accent-hover': '#81a1c1',
+      '--danger': '#bf616a', '--success': '#a3be8c', '--border': '#4c566a',
+      '--border-box': '#434c5e', '--disabled-bg': '#4c566a', '--disabled-text': '#7b88a1',
+      '--msg-user-bg': '#2e3a4d', '--msg-assistant-bg': '#2e3e2e',
+    },
+    'Solarized Dark': {
+      '--bg-primary': '#002b36', '--bg-secondary': '#073642', '--bg-blackbox': '#001f27',
+      '--bg-console': '#0a4050', '--text-primary': '#fdf6e3', '--text-muted': '#93a1a1',
+      '--text-dim': '#586e75', '--accent': '#268bd2', '--accent-hover': '#2aa198',
+      '--danger': '#dc322f', '--success': '#859900', '--border': '#586e75',
+      '--border-box': '#073642', '--disabled-bg': '#586e75', '--disabled-text': '#657b83',
+      '--msg-user-bg': '#0a3d5c', '--msg-assistant-bg': '#1a3a1a',
+    },
+    'Solarized Light': {
+      '--bg-primary': '#fdf6e3', '--bg-secondary': '#eee8d5', '--bg-blackbox': '#f5efdc',
+      '--bg-console': '#eee8d5', '--text-primary': '#073642', '--text-muted': '#586e75',
+      '--text-dim': '#93a1a1', '--accent': '#268bd2', '--accent-hover': '#2aa198',
+      '--danger': '#dc322f', '--success': '#859900', '--border': '#93a1a1',
+      '--border-box': '#eee8d5', '--disabled-bg': '#d3cdb8', '--disabled-text': '#93a1a1',
+      '--msg-user-bg': '#d4e6f1', '--msg-assistant-bg': '#d5f5d0',
+    },
+    'Monokai': {
+      '--bg-primary': '#272822', '--bg-secondary': '#2e2f2a', '--bg-blackbox': '#1e1f1c',
+      '--bg-console': '#3e3d32', '--text-primary': '#f8f8f2', '--text-muted': '#c0bfb4',
+      '--text-dim': '#75715e', '--accent': '#66d9ef', '--accent-hover': '#a6e22e',
+      '--danger': '#f92672', '--success': '#a6e22e', '--border': '#49483e',
+      '--border-box': '#3e3d32', '--disabled-bg': '#49483e', '--disabled-text': '#75715e',
+      '--msg-user-bg': '#2a3a4a', '--msg-assistant-bg': '#2a3e2a',
+    },
+    'Dracula': {
+      '--bg-primary': '#282a36', '--bg-secondary': '#343746', '--bg-blackbox': '#21222c',
+      '--bg-console': '#3c3f58', '--text-primary': '#f8f8f2', '--text-muted': '#bfbfbf',
+      '--text-dim': '#6272a4', '--accent': '#bd93f9', '--accent-hover': '#ff79c6',
+      '--danger': '#ff5555', '--success': '#50fa7b', '--border': '#6272a4',
+      '--border-box': '#44475a', '--disabled-bg': '#44475a', '--disabled-text': '#6272a4',
+      '--msg-user-bg': '#2e3350', '--msg-assistant-bg': '#253325',
+    },
+    'Gruvbox': {
+      '--bg-primary': '#282828', '--bg-secondary': '#3c3836', '--bg-blackbox': '#1d2021',
+      '--bg-console': '#504945', '--text-primary': '#ebdbb2', '--text-muted': '#bdae93',
+      '--text-dim': '#7c6f64', '--accent': '#83a598', '--accent-hover': '#b8bb26',
+      '--danger': '#fb4934', '--success': '#b8bb26', '--border': '#665c54',
+      '--border-box': '#504945', '--disabled-bg': '#665c54', '--disabled-text': '#7c6f64',
+      '--msg-user-bg': '#3c4a3c', '--msg-assistant-bg': '#3a3c2e',
+    },
+    'Catppuccin Mocha': {
+      '--bg-primary': '#1e1e2e', '--bg-secondary': '#302d41', '--bg-blackbox': '#181825',
+      '--bg-console': '#3b3850', '--text-primary': '#cdd6f4', '--text-muted': '#a6adc8',
+      '--text-dim': '#6c7086', '--accent': '#89b4fa', '--accent-hover': '#cba6f7',
+      '--danger': '#f38ba8', '--success': '#a6e3a1', '--border': '#585b70',
+      '--border-box': '#45475a', '--disabled-bg': '#45475a', '--disabled-text': '#6c7086',
+      '--msg-user-bg': '#2a3050', '--msg-assistant-bg': '#253528',
+    },
+    'High Contrast': {
+      '--bg-primary': '#000000', '--bg-secondary': '#0a0a0a', '--bg-blackbox': '#000000',
+      '--bg-console': '#111111', '--text-primary': '#ffffff', '--text-muted': '#e0e0e0',
+      '--text-dim': '#999999', '--accent': '#00ffff', '--accent-hover': '#00cccc',
+      '--danger': '#ff0000', '--success': '#00ff00', '--border': '#ffffff',
+      '--border-box': '#666666', '--disabled-bg': '#333333', '--disabled-text': '#666666',
+      '--msg-user-bg': '#001a33', '--msg-assistant-bg': '#001a00',
+    },
+  };
+
+  function _loadCustomThemes() {
+    try {
+      const raw = SafeStorage.get(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch (_) { return {}; }
+  }
+
+  function _saveCustomThemes(themes) {
+    try { SafeStorage.set(STORAGE_KEY, JSON.stringify(themes)); } catch (_) {}
+  }
+
+  function _getActiveCustomTheme() {
+    try { return SafeStorage.get(ACTIVE_KEY) || null; } catch (_) { return null; }
+  }
+
+  function _setActiveCustomTheme(name) {
+    try { SafeStorage.set(ACTIVE_KEY, name || ''); } catch (_) {}
+  }
+
+  function _getCurrentValues() {
+    const vals = {};
+    if (typeof document === 'undefined') return vals;
+    const style = getComputedStyle(document.documentElement);
+    THEME_VARS.forEach(v => {
+      vals[v.key] = style.getPropertyValue(v.key).trim();
+    });
+    return vals;
+  }
+
+  function _applyThemeValues(values) {
+    if (typeof document === 'undefined') return;
+    const root = document.documentElement;
+    Object.entries(values).forEach(([key, val]) => {
+      root.style.setProperty(key, val);
+    });
+  }
+
+  function _clearCustomProperties() {
+    if (typeof document === 'undefined') return;
+    const root = document.documentElement;
+    THEME_VARS.forEach(v => {
+      root.style.removeProperty(v.key);
+    });
+  }
+
+  /** Convert any CSS color to hex for the color picker */
+  function _toHex(cssColor) {
+    if (!cssColor) return '#000000';
+    if (cssColor.startsWith('#') && (cssColor.length === 7 || cssColor.length === 4)) {
+      if (cssColor.length === 4) {
+        return '#' + cssColor[1]+cssColor[1] + cssColor[2]+cssColor[2] + cssColor[3]+cssColor[3];
+      }
+      return cssColor;
+    }
+    // Use canvas to resolve
+    if (typeof document !== 'undefined') {
+      const ctx = document.createElement('canvas').getContext('2d');
+      ctx.fillStyle = cssColor;
+      return ctx.fillStyle; // returns hex
+    }
+    return '#000000';
+  }
+
+  function toggle() {
+    if (isOpen) { close(); } else { open(); }
+    return isOpen;
+  }
+
+  function open() {
+    if (isOpen && panel) return;
+    isOpen = true;
+    _buildPanel();
+  }
+
+  function close() {
+    if (panel && panel.parentNode) panel.parentNode.removeChild(panel);
+    panel = null;
+    isOpen = false;
+  }
+
+  function _buildPanel() {
+    if (panel && panel.parentNode) panel.parentNode.removeChild(panel);
+
+    panel = document.createElement('div');
+    panel.id = 'theme-creator-panel';
+    panel.style.cssText = `
+      position: fixed; top: 0; right: 0; bottom: 0; width: 360px; max-width: 90vw;
+      background: var(--bg-secondary); color: var(--text-primary);
+      border-left: 2px solid var(--accent); z-index: 100000;
+      display: flex; flex-direction: column; font-family: system-ui, sans-serif;
+      box-shadow: -4px 0 20px var(--shadow); overflow: hidden;
+    `;
+
+    /* Header */
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border);flex-shrink:0;';
+    header.innerHTML = `<span style="font-weight:700;font-size:16px;">🎨 Theme Creator</span>`;
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = '✕';
+    closeBtn.style.cssText = 'background:none;border:none;color:var(--text-primary);font-size:18px;cursor:pointer;padding:4px 8px;';
+    closeBtn.onclick = close;
+    header.appendChild(closeBtn);
+    panel.appendChild(header);
+
+    /* Toolbar: presets, save, import/export */
+    const toolbar = document.createElement('div');
+    toolbar.style.cssText = 'padding:8px 16px;border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap;gap:6px;flex-shrink:0;';
+
+    // Preset dropdown
+    const presetSelect = document.createElement('select');
+    presetSelect.style.cssText = 'flex:1;min-width:100px;padding:4px 8px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border);border-radius:4px;font-size:12px;';
+    presetSelect.innerHTML = '<option value="">— Apply Preset —</option>';
+    Object.keys(PRESETS).forEach(name => {
+      presetSelect.innerHTML += `<option value="${name}">${name}</option>`;
+    });
+    // Add saved custom themes
+    const customs = _loadCustomThemes();
+    Object.keys(customs).forEach(name => {
+      presetSelect.innerHTML += `<option value="custom:${name}">★ ${name}</option>`;
+    });
+    presetSelect.onchange = () => {
+      const val = presetSelect.value;
+      if (!val) return;
+      if (val.startsWith('custom:')) {
+        const name = val.slice(7);
+        const themes = _loadCustomThemes();
+        if (themes[name]) {
+          _applyThemeValues(themes[name]);
+          _setActiveCustomTheme(name);
+          _refreshPickers();
+        }
+      } else if (PRESETS[val]) {
+        _applyThemeValues(PRESETS[val]);
+        _setActiveCustomTheme('');
+        _refreshPickers();
+      }
+      presetSelect.value = '';
+    };
+    toolbar.appendChild(presetSelect);
+
+    // Save button
+    const saveBtn = document.createElement('button');
+    saveBtn.textContent = '💾 Save';
+    saveBtn.title = 'Save current colors as custom theme';
+    saveBtn.style.cssText = 'padding:4px 10px;background:var(--accent);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;';
+    saveBtn.onclick = () => _saveCurrentTheme();
+    toolbar.appendChild(saveBtn);
+
+    // Delete button
+    const delBtn = document.createElement('button');
+    delBtn.textContent = '🗑️';
+    delBtn.title = 'Delete saved custom theme';
+    delBtn.style.cssText = 'padding:4px 8px;background:var(--danger);color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px;';
+    delBtn.onclick = () => _deleteThemePrompt();
+    toolbar.appendChild(delBtn);
+
+    // Export button
+    const exportBtn = document.createElement('button');
+    exportBtn.textContent = '📤';
+    exportBtn.title = 'Export all custom themes as JSON';
+    exportBtn.style.cssText = 'padding:4px 8px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border);border-radius:4px;cursor:pointer;font-size:12px;';
+    exportBtn.onclick = _exportThemes;
+    toolbar.appendChild(exportBtn);
+
+    // Import button
+    const importBtn = document.createElement('button');
+    importBtn.textContent = '📥';
+    importBtn.title = 'Import custom themes from JSON';
+    importBtn.style.cssText = 'padding:4px 8px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border);border-radius:4px;cursor:pointer;font-size:12px;';
+    importBtn.onclick = _importThemes;
+    toolbar.appendChild(importBtn);
+
+    // Reset button
+    const resetBtn = document.createElement('button');
+    resetBtn.textContent = '↺';
+    resetBtn.title = 'Reset to default dark/light theme';
+    resetBtn.style.cssText = 'padding:4px 8px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border);border-radius:4px;cursor:pointer;font-size:12px;';
+    resetBtn.onclick = () => {
+      _clearCustomProperties();
+      _setActiveCustomTheme('');
+      ThemeManager.setTheme(ThemeManager.getTheme());
+      _refreshPickers();
+    };
+    toolbar.appendChild(resetBtn);
+
+    panel.appendChild(toolbar);
+
+    /* Color pickers area */
+    const body = document.createElement('div');
+    body.id = 'theme-creator-body';
+    body.style.cssText = 'flex:1;overflow-y:auto;padding:12px 16px;';
+
+    const groups = {};
+    THEME_VARS.forEach(v => {
+      if (!groups[v.group]) groups[v.group] = [];
+      groups[v.group].push(v);
+    });
+
+    const currentVals = _getCurrentValues();
+
+    Object.entries(groups).forEach(([groupName, vars]) => {
+      const section = document.createElement('div');
+      section.style.cssText = 'margin-bottom:16px;';
+      const heading = document.createElement('div');
+      heading.textContent = groupName;
+      heading.style.cssText = 'font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text-muted);margin-bottom:8px;';
+      section.appendChild(heading);
+
+      vars.forEach(v => {
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:6px;';
+
+        const colorInput = document.createElement('input');
+        colorInput.type = 'color';
+        colorInput.value = _toHex(currentVals[v.key] || '#000000');
+        colorInput.dataset.varKey = v.key;
+        colorInput.className = 'theme-creator-picker';
+        colorInput.style.cssText = 'width:32px;height:28px;border:1px solid var(--border);border-radius:4px;cursor:pointer;padding:0;background:none;';
+        colorInput.oninput = (e) => {
+          document.documentElement.style.setProperty(v.key, e.target.value);
+          hexInput.value = e.target.value;
+        };
+
+        const label = document.createElement('span');
+        label.textContent = v.label;
+        label.style.cssText = 'flex:1;font-size:13px;';
+
+        const hexInput = document.createElement('input');
+        hexInput.type = 'text';
+        hexInput.value = _toHex(currentVals[v.key] || '#000000');
+        hexInput.dataset.varKey = v.key;
+        hexInput.className = 'theme-creator-hex';
+        hexInput.style.cssText = 'width:72px;padding:3px 6px;font-size:11px;font-family:monospace;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border);border-radius:3px;';
+        hexInput.onchange = (e) => {
+          let val = e.target.value.trim();
+          if (!val.startsWith('#')) val = '#' + val;
+          if (/^#[0-9a-fA-F]{3,8}$/.test(val)) {
+            document.documentElement.style.setProperty(v.key, val);
+            colorInput.value = _toHex(val);
+          }
+        };
+
+        row.appendChild(colorInput);
+        row.appendChild(label);
+        row.appendChild(hexInput);
+        section.appendChild(row);
+      });
+
+      body.appendChild(section);
+    });
+
+    panel.appendChild(body);
+    document.body.appendChild(panel);
+  }
+
+  function _refreshPickers() {
+    if (!panel) return;
+    const vals = _getCurrentValues();
+    panel.querySelectorAll('.theme-creator-picker').forEach(input => {
+      const key = input.dataset.varKey;
+      if (vals[key]) input.value = _toHex(vals[key]);
+    });
+    panel.querySelectorAll('.theme-creator-hex').forEach(input => {
+      const key = input.dataset.varKey;
+      if (vals[key]) input.value = _toHex(vals[key]);
+    });
+  }
+
+  function _saveCurrentTheme() {
+    const name = prompt('Theme name:');
+    if (!name || !name.trim()) return;
+    const themes = _loadCustomThemes();
+    themes[name.trim()] = _getCurrentValues();
+    _saveCustomThemes(themes);
+    _setActiveCustomTheme(name.trim());
+    if (typeof UIController !== 'undefined') {
+      UIController.setChatOutput(`Custom theme "${name.trim()}" saved! 🎨`);
+    }
+    // Rebuild panel to refresh preset list
+    _buildPanel();
+  }
+
+  function _deleteThemePrompt() {
+    const themes = _loadCustomThemes();
+    const names = Object.keys(themes);
+    if (names.length === 0) {
+      alert('No custom themes saved.');
+      return;
+    }
+    const name = prompt('Delete which theme?\n\n' + names.join('\n'));
+    if (!name || !themes[name]) return;
+    delete themes[name];
+    _saveCustomThemes(themes);
+    const active = _getActiveCustomTheme();
+    if (active === name) _setActiveCustomTheme('');
+    if (typeof UIController !== 'undefined') {
+      UIController.setChatOutput(`Custom theme "${name}" deleted.`);
+    }
+    _buildPanel();
+  }
+
+  function _exportThemes() {
+    const themes = _loadCustomThemes();
+    if (Object.keys(themes).length === 0) {
+      alert('No custom themes to export.');
+      return;
+    }
+    const json = JSON.stringify(themes, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'agenticchat-themes.json';
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+  }
+
+  function _importThemes() {
+    const input = document.createElement('input');
+    input.type = 'file'; input.accept = '.json';
+    input.onchange = () => {
+      const file = input.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const imported = JSON.parse(e.target.result);
+          if (typeof imported !== 'object' || Array.isArray(imported)) {
+            alert('Invalid theme file format.');
+            return;
+          }
+          const existing = _loadCustomThemes();
+          let count = 0;
+          Object.entries(imported).forEach(([name, vars]) => {
+            if (typeof vars === 'object' && !Array.isArray(vars)) {
+              existing[name] = vars;
+              count++;
+            }
+          });
+          _saveCustomThemes(existing);
+          if (typeof UIController !== 'undefined') {
+            UIController.setChatOutput(`Imported ${count} custom theme${count !== 1 ? 's' : ''}! 🎨`);
+          }
+          _buildPanel();
+        } catch (err) {
+          alert('Error parsing theme file: ' + err.message);
+        }
+      };
+      reader.readAsText(file);
+    };
+    input.click();
+  }
+
+  /** Apply saved custom theme on startup */
+  function init() {
+    const activeName = _getActiveCustomTheme();
+    if (activeName) {
+      const themes = _loadCustomThemes();
+      if (themes[activeName]) {
+        _applyThemeValues(themes[activeName]);
+      }
+    }
+
+    // Keyboard shortcut: Ctrl+Shift+E
+    document.addEventListener('keydown', (e) => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'E') {
+        e.preventDefault();
+        toggle();
+      }
+    });
+  }
+
+  /** Get list of all available themes (built-in presets + custom) */
+  function getAvailableThemes() {
+    const result = { presets: Object.keys(PRESETS), custom: Object.keys(_loadCustomThemes()) };
+    return result;
+  }
+
+  /** Apply a preset by name */
+  function applyPreset(name) {
+    if (PRESETS[name]) {
+      _applyThemeValues(PRESETS[name]);
+      _setActiveCustomTheme('');
+      return true;
+    }
+    return false;
+  }
+
+  /** Apply a saved custom theme by name */
+  function applyCustom(name) {
+    const themes = _loadCustomThemes();
+    if (themes[name]) {
+      _applyThemeValues(themes[name]);
+      _setActiveCustomTheme(name);
+      return true;
+    }
+    return false;
+  }
+
+  return {
+    init, toggle, open, close,
+    getAvailableThemes, applyPreset, applyCustom,
+    PRESETS, THEME_VARS,
+    _loadCustomThemes, _saveCustomThemes, _getCurrentValues,
+    _applyThemeValues, _toHex, _getActiveCustomTheme, _setActiveCustomTheme
+  };
+})();
+
+document.addEventListener('DOMContentLoaded', CustomThemeCreator.init);
