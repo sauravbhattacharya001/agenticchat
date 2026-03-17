@@ -393,6 +393,23 @@ const SandboxRunner = (() => {
    * If a previous sandbox is still running, it is cancelled first
    * to prevent promise/timer/listener leaks.
    */
+  /**
+   * Extract all HTTPS origins from code to build a restrictive connect-src CSP.
+   * This prevents sandboxed code from exfiltrating data (e.g. API keys) to
+   * arbitrary domains — only domains explicitly referenced in the code are allowed.
+   */
+  function _extractConnectOrigins(code) {
+    const originSet = new Set();
+    const re = /https:\/\/([a-zA-Z0-9._-]+)/g;
+    let m;
+    while ((m = re.exec(code)) !== null) {
+      originSet.add('https://' + m[1]);
+    }
+    return originSet.size > 0
+      ? Array.from(originSet).join(' ')
+      : "'none'";
+  }
+
   function run(code) {
     // Cancel any in-flight execution to prevent leaking the old
     // promise, its setTimeout, and its message-event listener.
@@ -401,9 +418,14 @@ const SandboxRunner = (() => {
     return new Promise((resolve) => {
       const nonce = crypto.randomUUID();
 
+      // Build a restrictive CSP: only allow connections to domains
+      // explicitly referenced in the code, preventing exfiltration
+      // of API keys or other sensitive data to attacker-controlled servers.
+      const connectSrc = _extractConnectOrigins(code);
+
       const iframeHTML = `<!DOCTYPE html><html><head>` +
         `<meta http-equiv="Content-Security-Policy" ` +
-        `content="default-src 'none'; script-src 'unsafe-inline'; connect-src https:;">` +
+        `content="default-src 'none'; script-src 'unsafe-inline'; connect-src ${connectSrc};">` +
         `</head><body><script>
         window.addEventListener('message', async function handler(evt) {
           if (!evt.data || evt.data.type !== 'sandbox-exec') return;
