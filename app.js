@@ -451,7 +451,14 @@ const SandboxRunner = (() => {
       };
 
       function onMessage(e) {
+        // Verify both origin and source: origin 'null' is expected for
+        // sandboxed iframes, but we must also confirm e.source is our
+        // specific iframe's contentWindow.  Without the source check,
+        // any other frame with a null origin (e.g. another sandboxed
+        // iframe injected by a malicious extension or ad) could spoof
+        // sandbox-result messages and inject arbitrary output.
         if (e.origin !== 'null') return;
+        if (e.source !== iframe.contentWindow) return;
 
         if (e.data && e.data.type === 'sandbox-ready') {
           iframe.contentWindow.postMessage({
@@ -461,6 +468,8 @@ const SandboxRunner = (() => {
         }
 
         if (e.data && e.data.type === 'sandbox-result' && e.data.nonce === nonce) {
+          // Validate result shape before trusting the payload
+          if (typeof e.data.ok !== 'boolean' || typeof e.data.value !== 'string') return;
           cleanup();
           resolve({ ok: e.data.ok, value: e.data.value });
         }
