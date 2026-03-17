@@ -17732,7 +17732,7 @@ const OfflineManager = (function () {
     }
     if (_wasOffline) {
       _wasOffline = false;
-      console.log('[OfflineManager] Connection restored');
+      /* [OfflineManager] Connection restored */
     }
   }
 
@@ -17740,13 +17740,13 @@ const OfflineManager = (function () {
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/sw.js')
         .then(function (reg) {
-          console.log('[SW] Registered, scope:', reg.scope);
+          /* [SW] Registered */
           reg.addEventListener('updatefound', function () {
             var newWorker = reg.installing;
             if (newWorker) {
               newWorker.addEventListener('statechange', function () {
                 if (newWorker.state === 'activated') {
-                  console.log('[SW] New version activated');
+                  /* [SW] New version activated */
                 }
               });
             }
