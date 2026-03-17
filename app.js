@@ -1,4 +1,4 @@
-﻿﻿﻿/* ============================================================
+/* ============================================================
  * Agentic Chat — Application Logic
  *
  * Architecture (46 modules, all revealing-module-pattern IIFEs):
@@ -119,6 +119,39 @@ const SafeStorage = (() => {
     },
     /** Whether localStorage passed the availability probe. */
     isAvailable() { return available; },
+  };
+})();
+
+/* ---------- DOM element cache ---------- */
+/**
+ * Lazy-caching wrapper around document.getElementById.
+ * Frequently accessed elements (chat-input, chat-output, etc.) are looked up
+ * dozens of times during a session.  Caching the reference avoids redundant
+ * DOM tree traversals — the two most common IDs alone accounted for 54 lookups.
+ *
+ * Usage:  DOMCache.get('chat-input')   // cached getElementById
+ *         DOMCache.clear()             // flush after dynamic DOM rebuild
+ */
+const DOMCache = (() => {
+  /** @type {Map<string, Element|null>} */
+  const cache = new Map();
+  return {
+    /**
+     * Return the element for `id`, caching on first access.
+     * Returns null (and caches null) when the element does not exist.
+     * @param {string} id
+     * @returns {Element|null}
+     */
+    get(id) {
+      if (cache.has(id)) return cache.get(id);
+      const el = document.getElementById(id);
+      cache.set(id, el);
+      return el;
+    },
+    /** Flush the entire cache (call after large DOM mutations). */
+    clear() { cache.clear(); },
+    /** Remove a single entry so the next `get` re-queries the DOM. */
+    invalidate(id) { cache.delete(id); },
   };
 })();
 
@@ -1483,7 +1516,7 @@ const PromptTemplates = (() => {
   }
 
   function selectTemplate(item) {
-    const input = document.getElementById('chat-input');
+    const input = DOMCache.get('chat-input');
     if (input) {
       input.value = item.prompt;
       input.focus();
@@ -2389,7 +2422,7 @@ const MessageSearch = (() => {
       return;
     }
 
-    const output = document.getElementById('chat-output');
+    const output = DOMCache.get('chat-output');
     if (!output) return;
 
     const messageDivs = output.querySelectorAll('.chat-msg, .code-block, [class*="msg"]');
@@ -2473,7 +2506,7 @@ const MessageSearch = (() => {
    * Remove all <mark> highlights and restore original text nodes.
    */
   function clearHighlights() {
-    const output = document.getElementById('chat-output');
+    const output = DOMCache.get('chat-output');
     if (!output) return;
 
     const marks = output.querySelectorAll('mark.search-highlight');
@@ -2704,7 +2737,7 @@ const ChatBookmarks = (() => {
   }
 
   function jumpTo(messageIndex) {
-    const output = document.getElementById('chat-output');
+    const output = DOMCache.get('chat-output');
     if (!output) return;
     const msgs = output.querySelectorAll('.chat-msg');
     if (messageIndex >= 0 && messageIndex < msgs.length) {
@@ -2713,7 +2746,7 @@ const ChatBookmarks = (() => {
   }
 
   function decorateMessages() {
-    const output = document.getElementById('chat-output');
+    const output = DOMCache.get('chat-output');
     if (!output) return;
     const msgs = output.querySelectorAll('.chat-msg');
     msgs.forEach((msg, idx) => {
@@ -2964,7 +2997,7 @@ const SlashCommands = (() => {
     ]);
 
     function init() {
-        const input = document.getElementById('chat-input');
+        const input = DOMCache.get('chat-input');
         if (!input) return;
         input.addEventListener('input', function () {
             handleInput(this.value);
@@ -3071,14 +3104,14 @@ const SlashCommands = (() => {
             }
         } else if (e.key === 'Escape') {
             e.preventDefault();
-            const input = document.getElementById('chat-input');
+            const input = DOMCache.get('chat-input');
             if (input) input.value = '';
             hideDropdown();
         }
     }
 
     function executeCommand(command) {
-        const input = document.getElementById('chat-input');
+        const input = DOMCache.get('chat-input');
         if (input) input.value = '';
         hideDropdown();
         command.action();
@@ -3313,7 +3346,7 @@ const MessageReactions = (() => {
     
     // Decorate all history messages with reaction bars
     function decorateMessages() {
-        const container = document.getElementById('history-messages');
+        const container = DOMCache.get('history-messages');
         if (!container) return;
         const msgs = container.querySelectorAll('.history-msg');
         // Message index = index in ConversationManager (skip system at 0)
@@ -6174,7 +6207,7 @@ const FileDropZone = (() => {
     if (results.length === 0) return;
 
     // Build the text to insert into the chat input
-    const input = document.getElementById('chat-input');
+    const input = DOMCache.get('chat-input');
     if (!input) return;
 
     const existing = input.value;
@@ -6477,7 +6510,7 @@ const Scratchpad = (() => {
 
   /** Update the word/char count display. */
   function _updateCount() {
-    const textarea = document.getElementById('scratchpad-textarea');
+    const textarea = DOMCache.get('scratchpad-textarea');
     const countEl = document.getElementById('scratchpad-wordcount');
     if (!textarea || !countEl) return;
     const text = textarea.value.trim();
@@ -6499,14 +6532,14 @@ const Scratchpad = (() => {
     _updateCount();
     if (saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
-      const textarea = document.getElementById('scratchpad-textarea');
+      const textarea = DOMCache.get('scratchpad-textarea');
       if (textarea) _save(textarea.value);
     }, 300);
   }
 
   /** Copy notes to clipboard. */
   function copy() {
-    const textarea = document.getElementById('scratchpad-textarea');
+    const textarea = DOMCache.get('scratchpad-textarea');
     if (!textarea || !textarea.value.trim()) return;
     navigator.clipboard.writeText(textarea.value).then(() => {
       _showStatus('Copied!');
@@ -6519,8 +6552,8 @@ const Scratchpad = (() => {
 
   /** Insert notes into the chat input. */
   function insertToChat() {
-    const textarea = document.getElementById('scratchpad-textarea');
-    const chatInput = document.getElementById('chat-input');
+    const textarea = DOMCache.get('scratchpad-textarea');
+    const chatInput = DOMCache.get('chat-input');
     if (!textarea || !chatInput || !textarea.value.trim()) return;
     const existing = chatInput.value;
     const sep = existing.trim() ? '\n' : '';
@@ -6532,7 +6565,7 @@ const Scratchpad = (() => {
 
   /** Download notes as a .txt file. */
   function download() {
-    const textarea = document.getElementById('scratchpad-textarea');
+    const textarea = DOMCache.get('scratchpad-textarea');
     if (!textarea || !textarea.value.trim()) return;
     const blob = new Blob([textarea.value], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
@@ -6548,7 +6581,7 @@ const Scratchpad = (() => {
 
   /** Clear all notes. */
   function clear() {
-    const textarea = document.getElementById('scratchpad-textarea');
+    const textarea = DOMCache.get('scratchpad-textarea');
     if (!textarea) return;
     if (!textarea.value.trim()) return;
     if (!confirm('Clear all scratchpad notes?')) return;
@@ -6563,7 +6596,7 @@ const Scratchpad = (() => {
     isOpen = true;
     const panel = document.getElementById('scratchpad-panel');
     const overlay = document.getElementById('scratchpad-overlay');
-    const textarea = document.getElementById('scratchpad-textarea');
+    const textarea = DOMCache.get('scratchpad-textarea');
     if (panel) panel.classList.add('open');
     if (overlay) overlay.classList.add('open');
     if (textarea) {
@@ -6581,7 +6614,7 @@ const Scratchpad = (() => {
     if (panel) panel.classList.remove('open');
     if (overlay) overlay.classList.remove('open');
     // Save on close
-    const textarea = document.getElementById('scratchpad-textarea');
+    const textarea = DOMCache.get('scratchpad-textarea');
     if (textarea) _save(textarea.value);
   }
 
@@ -6760,7 +6793,7 @@ const ConversationFork = (() => {
    * Called after HistoryPanel.refresh() renders messages.
    */
   function decorateMessages() {
-    const container = document.getElementById('history-messages');
+    const container = DOMCache.get('history-messages');
     if (!container) return;
     const msgs = container.querySelectorAll('.history-msg');
     const history = ConversationManager.getHistory();
@@ -6912,7 +6945,7 @@ const QuickReplies = (() => {
    * @param {Object} suggestion  The selected { label, prompt } object.
    */
   function _selectSuggestion(suggestion) {
-    const input = document.getElementById('chat-input');
+    const input = DOMCache.get('chat-input');
     if (input) {
       input.value = suggestion.prompt;
       input.focus();
@@ -6950,7 +6983,7 @@ const MessagePinning = (() => {
 
   /** Build the floating pin bar (injected above chat-output). */
   function buildBar() {
-    const output = document.getElementById('chat-output');
+    const output = DOMCache.get('chat-output');
     if (!output || !output.parentNode) return;
 
     // Don't double-create
@@ -7103,7 +7136,7 @@ const MessagePinning = (() => {
 
   /** Jump to a pinned message in the chat output. */
   function jumpTo(messageIndex) {
-    const output = document.getElementById('chat-output');
+    const output = DOMCache.get('chat-output');
     if (!output) return;
 
     // Find the message element — messages are child divs of chat-output
@@ -7466,7 +7499,7 @@ const ReadAloud = (() => {
 
   /** Highlight or un-highlight a message in the history panel. */
   function highlightMessage(msgIndex, on) {
-    let container = document.getElementById('history-messages');
+    let container = DOMCache.get('history-messages');
     if (!container) return;
     let msgs = container.querySelectorAll('.history-msg');
     let history = ConversationManager.getHistory();
@@ -7622,7 +7655,7 @@ const ReadAloud = (() => {
     panel.appendChild(speedLabel);
     panel.appendChild(speedSlider);
 
-    let output = document.getElementById('chat-output');
+    let output = DOMCache.get('chat-output');
     if (output && output.parentNode) {
       output.parentNode.insertBefore(panel, output);
     } else {
@@ -7633,7 +7666,7 @@ const ReadAloud = (() => {
 
   /** Decorate assistant messages in the history panel with speak buttons. */
   function decorateMessages() {
-    let container = document.getElementById('history-messages');
+    let container = DOMCache.get('history-messages');
     if (!container) return;
     let msgs = container.querySelectorAll('.history-msg');
     let history = ConversationManager.getHistory();
@@ -7856,7 +7889,7 @@ const MessageDiff = (() => {
 
   /** Highlight/unhighlight a message element. */
   function highlightSelected(msgIndex, on) {
-    let chatOutput = document.getElementById('chat-output');
+    let chatOutput = DOMCache.get('chat-output');
     if (!chatOutput) return;
     let msgs = chatOutput.querySelectorAll('.msg');
     let history = ConversationManager.getHistory();
@@ -8065,7 +8098,7 @@ const MessageDiff = (() => {
    * Called after messages are rendered or selection changes.
    */
   function decorateMessages() {
-    let chatOutput = document.getElementById('chat-output');
+    let chatOutput = DOMCache.get('chat-output');
     if (!chatOutput) return;
 
     let msgs = chatOutput.querySelectorAll('.msg');
@@ -8266,7 +8299,7 @@ const ConversationTimeline = (() => {
     // Listen for chat output changes via MutationObserver.
     // Debounce to avoid excessive rebuilds during streaming responses
     // where mutations fire on every text chunk (potentially hundreds/sec).
-    let chatOutput = document.getElementById('chat-output');
+    let chatOutput = DOMCache.get('chat-output');
     if (chatOutput) {
       const observer = new MutationObserver(function () { scheduleRefresh(); });
       observer.observe(chatOutput, { childList: true, subtree: true });
@@ -8455,7 +8488,7 @@ const ConversationTimeline = (() => {
   // ── Viewport indicator ───────────────────────────────────
 
   function getChatScrollParent() {
-    let chatOutput = document.getElementById('chat-output');
+    let chatOutput = DOMCache.get('chat-output');
     if (!chatOutput) return null;
     // chat-output itself is typically the scroll container
     return chatOutput;
@@ -8518,7 +8551,7 @@ const ConversationTimeline = (() => {
   }
 
   function scrollToMessage(domIndex) {
-    let chatOutput = document.getElementById('chat-output');
+    let chatOutput = DOMCache.get('chat-output');
     if (!chatOutput) return;
     let msgs = chatOutput.querySelectorAll('.msg');
     if (domIndex >= 0 && domIndex < msgs.length) {
@@ -8591,21 +8624,21 @@ const ConversationTimeline = (() => {
 })();
 
 document.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('send-btn').addEventListener('click', ChatController.send);
+  DOMCache.get('send-btn').addEventListener('click', ChatController.send);
   document.getElementById('cancel-btn').addEventListener('click', () => {
     ChatController.cancelRequest();
     SandboxRunner.cancel();
   });
   document.getElementById('clear-btn').addEventListener('click', ChatController.clearHistory);
 
-  document.getElementById('chat-input').addEventListener('keydown', (e) => {
+  DOMCache.get('chat-input').addEventListener('keydown', (e) => {
     // Input history navigation (Up/Down)
-    const input = document.getElementById('chat-input');
+    const input = DOMCache.get('chat-input');
     if (InputHistory.handleKeydown(e, input)) { e.preventDefault(); return; }
     if (e.key === 'Enter') { e.preventDefault(); ChatController.send(); }
   });
 
-  document.getElementById('chat-input').addEventListener('input', function () {
+  DOMCache.get('chat-input').addEventListener('input', function () {
     InputHistory.resetCursor(); // typing resets history navigation
     UIController.updateCharCount(this.value.length);
   });
@@ -8666,7 +8699,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Wire up result callback: update chat input in real-time
   VoiceInput.onResult((finalText, interimText) => {
-    const input = document.getElementById('chat-input');
+    const input = DOMCache.get('chat-input');
     if (input) {
       // Show final + interim (interim in progress)
       const combined = (finalText + interimText).trim();
@@ -8692,7 +8725,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const result = VoiceInput.toggle();
     // If stopped, the transcript is already in the input field
     if (!result.listening && result.transcript) {
-      const input = document.getElementById('chat-input');
+      const input = DOMCache.get('chat-input');
       if (input) input.focus();
     }
   });
@@ -8807,7 +8840,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('scratchpad-btn').addEventListener('click', Scratchpad.toggle);
   document.getElementById('scratchpad-close-btn').addEventListener('click', Scratchpad.close);
   document.getElementById('scratchpad-overlay').addEventListener('click', Scratchpad.close);
-  document.getElementById('scratchpad-textarea').addEventListener('input', Scratchpad._onInput);
+  DOMCache.get('scratchpad-textarea').addEventListener('input', Scratchpad._onInput);
   document.getElementById('scratchpad-copy-btn').addEventListener('click', Scratchpad.copy);
   document.getElementById('scratchpad-insert-btn').addEventListener('click', Scratchpad.insertToChat);
   document.getElementById('scratchpad-download-btn').addEventListener('click', Scratchpad.download);
@@ -9865,7 +9898,7 @@ const MessageAnnotations = (() => {
   // ── UI: Badge + Tooltip on messages ──
 
   function renderBadges() {
-    const output = document.getElementById('chat-output');
+    const output = DOMCache.get('chat-output');
     if (!output) return;
     const msgs = output.querySelectorAll('.chat-msg');
 
@@ -10187,7 +10220,7 @@ const MessageAnnotations = (() => {
         e.stopPropagation();
         closePanel();
         // Find message element to anchor editor
-        const output = document.getElementById('chat-output');
+        const output = DOMCache.get('chat-output');
         if (output) {
           const allMsgs = output.querySelectorAll('.chat-msg');
           const el = allMsgs[domIndex];
@@ -10213,7 +10246,7 @@ const MessageAnnotations = (() => {
   }
 
   function jumpToMessage(messageIndex) {
-    const output = document.getElementById('chat-output');
+    const output = DOMCache.get('chat-output');
     if (!output) return;
     const allMsgs = output.querySelectorAll('.chat-msg');
     const domIndex = messageIndex - 1;
@@ -10272,7 +10305,7 @@ const MessageAnnotations = (() => {
     renderBadges();
 
     // Re-render badges when messages are added
-    const output = document.getElementById('chat-output');
+    const output = DOMCache.get('chat-output');
     if (output) {
       const observer = new MutationObserver(() => {
         renderBadges();
@@ -10696,7 +10729,7 @@ const ConversationChapters = (() => {
 
   function scrollToMessageIndex(targetIndex) {
     // Try history panel messages first
-    var historyPanel = document.getElementById('history-messages');
+    var historyPanel = DOMCache.get('history-messages');
     if (historyPanel) {
       var msgs = historyPanel.querySelectorAll('.history-msg');
       var history = ConversationManager.getHistory();
@@ -10744,7 +10777,7 @@ const ConversationChapters = (() => {
   // -- History Panel Dividers --
 
   function renderDividers() {
-    var historyPanel = document.getElementById('history-messages');
+    var historyPanel = DOMCache.get('history-messages');
     if (!historyPanel) return;
 
     // Remove existing dividers
@@ -10799,7 +10832,7 @@ const ConversationChapters = (() => {
   // -- Add-chapter buttons on history messages --
 
   function renderAddButtons() {
-    var historyPanel = document.getElementById('history-messages');
+    var historyPanel = DOMCache.get('history-messages');
     if (!historyPanel) return;
 
     // Remove old buttons
@@ -11989,7 +12022,7 @@ const FormattingToolbar = (() => {
    * Initialize the formatting toolbar.
    */
   function init() {
-    input = document.getElementById('chat-input');
+    input = DOMCache.get('chat-input');
     if (!input) return;
 
     // Create and insert toolbar above the input's parent toolbar
@@ -13287,7 +13320,7 @@ const ResponseRating = (() => {
   }
 
   function decorateMessages() {
-    const container = document.getElementById('chat-output');
+    const container = DOMCache.get('chat-output');
     if (!container) return;
 
     const msgDivs = container.querySelectorAll('.history-msg.assistant');
@@ -13782,7 +13815,7 @@ const ConversationReplay = (() => {
   // ── Message visibility ──
 
   function _getMsgElements() {
-    var output = document.getElementById('chat-output');
+    var output = DOMCache.get('chat-output');
     if (!output) return [];
     return Array.prototype.slice.call(output.children);
   }
@@ -13816,7 +13849,7 @@ const ConversationReplay = (() => {
   }
 
   function _showTypingIndicator() {
-    var output = document.getElementById('chat-output');
+    var output = DOMCache.get('chat-output');
     if (!output) return;
     var existing = output.querySelector('.replay-typing-container');
     if (existing) existing.remove();
@@ -13828,7 +13861,7 @@ const ConversationReplay = (() => {
   }
 
   function _removeTypingIndicator() {
-    var output = document.getElementById('chat-output');
+    var output = DOMCache.get('chat-output');
     if (!output) return;
     var indicator = output.querySelector('.replay-typing-container');
     if (indicator) indicator.remove();
@@ -14213,7 +14246,7 @@ const PromptLibrary = (() => {
         prompts[i].lastUsedAt = Date.now();
         _save();
         // Insert into chat input
-        var input = document.getElementById('chat-input');
+        var input = DOMCache.get('chat-input');
         if (input) {
           input.value = prompts[i].text;
           input.focus();
@@ -14355,7 +14388,7 @@ const PromptLibrary = (() => {
   }
 
   function saveCurrentInput() {
-    var input = document.getElementById('chat-input');
+    var input = DOMCache.get('chat-input');
     var text = input ? input.value.trim() : '';
     if (!text) return;
     openSaveModal(text);
@@ -14729,7 +14762,7 @@ const MessageTranslator = (() => {
   }
 
   function showLoading(msgIndex) {
-    var container = document.getElementById('chat-output');
+    var container = DOMCache.get('chat-output');
     if (!container) return;
     var msgs = container.querySelectorAll('.history-msg');
     if (msgIndex >= msgs.length) return;
@@ -14747,7 +14780,7 @@ const MessageTranslator = (() => {
   }
 
   function showTranslation(msgIndex, langCode, langName, text) {
-    var container = document.getElementById('chat-output');
+    var container = DOMCache.get('chat-output');
     if (!container) return;
     var msgs = container.querySelectorAll('.history-msg');
     if (msgIndex >= msgs.length) return;
@@ -14829,7 +14862,7 @@ const MessageTranslator = (() => {
   }
 
   function decorateMessages() {
-    var container = document.getElementById('chat-output');
+    var container = DOMCache.get('chat-output');
     if (!container) return;
 
     var msgs = container.querySelectorAll('.history-msg');
@@ -15681,7 +15714,7 @@ const MessageEditor = (() => {
    * in HistoryPanel uses decorateOne directly.
    */
   function decorateMessages() {
-    const container = document.getElementById('history-messages');
+    const container = DOMCache.get('history-messages');
     if (!container) return;
 
     const msgs = container.querySelectorAll('.history-msg');
@@ -15859,11 +15892,11 @@ const MessageScheduler = (() => {
         ChatController.send();
       } else {
         // Last resort: inject into chat input and click send
-        const input = document.getElementById('chat-input');
+        const input = DOMCache.get('chat-input');
         if (input) {
           input.value = item.text;
           input.dispatchEvent(new Event('input', { bubbles: true }));
-          const sendBtn = document.getElementById('send-btn');
+          const sendBtn = DOMCache.get('send-btn');
           if (sendBtn) sendBtn.click();
         }
       }
@@ -16251,7 +16284,7 @@ const SmartRetry = (() => {
 
   /** Show retry indicator in chat output. */
   function _showRetryIndicator(attempt, delayMs, error) {
-    const container = document.getElementById('chat-output');
+    const container = DOMCache.get('chat-output');
     if (!container) return;
 
     let remaining = Math.ceil(delayMs / 1000);
@@ -17348,7 +17381,7 @@ const ClipboardHistory = (() => {
 
   function _onCopy(e) {
     // Only capture copies from within the chat output area
-    const chatOutput = document.getElementById('chat-output');
+    const chatOutput = DOMCache.get('chat-output');
     if (!chatOutput) return;
 
     const sel = document.getSelection();
@@ -17596,7 +17629,7 @@ const ClipboardHistory = (() => {
 
       el.querySelector('.cbh-insert-btn').addEventListener('click', (e) => {
         e.stopPropagation();
-        const input = document.getElementById('chat-input');
+        const input = DOMCache.get('chat-input');
         if (input) {
           const start = input.selectionStart || input.value.length;
           input.value = input.value.slice(0, start) + entry.text + input.value.slice(start);
@@ -17694,7 +17727,7 @@ const OfflineManager = (function () {
 
   function init() {
     banner = document.getElementById('offline-banner');
-    sendBtn = document.getElementById('send-btn');
+    sendBtn = DOMCache.get('send-btn');
     var dismissBtn = document.getElementById('offline-dismiss');
 
     if (dismissBtn) {
@@ -17860,7 +17893,7 @@ const MessageFilter = (() => {
   function applyFilter(type) {
     _active = type;
 
-    const container = document.getElementById('chat-output');
+    const container = DOMCache.get('chat-output');
     if (!container) return;
 
     const messages = typeof ConversationManager !== 'undefined'
@@ -18011,7 +18044,7 @@ const MessageFilter = (() => {
     const bar = _buildBar();
 
     // Insert before chat-output
-    const chatOutput = document.getElementById('chat-output');
+    const chatOutput = DOMCache.get('chat-output');
     if (chatOutput && chatOutput.parentNode) {
       chatOutput.parentNode.insertBefore(bar, chatOutput);
     }
@@ -18291,7 +18324,7 @@ const ConversationSentiment = (() => {
       'border-bottom:1px solid var(--border-color,#e0e0e0);' +
       'background:var(--bg-secondary,#f8f9fa);display:' + (visible ? 'block' : 'none') + ';';
 
-    const chatOutput = document.getElementById('chat-output');
+    const chatOutput = DOMCache.get('chat-output');
     if (chatOutput && chatOutput.parentNode) {
       chatOutput.parentNode.insertBefore(panel, chatOutput);
     } else {
@@ -19748,7 +19781,7 @@ const TypingSpeedMonitor = (() => {
     _loadStats();
     _createDashboardHTML();
 
-    const input = document.getElementById('chat-input');
+    const input = DOMCache.get('chat-input');
     if (input) {
       input.addEventListener('keydown', _onKeydown);
       input.addEventListener('input', _onInput);
@@ -19769,7 +19802,7 @@ const TypingSpeedMonitor = (() => {
     });
 
     // Count words on send
-    const sendBtn = document.getElementById('send-btn');
+    const sendBtn = DOMCache.get('send-btn');
     if (sendBtn) {
       sendBtn.addEventListener('click', _onSend);
     }
@@ -19783,14 +19816,14 @@ const TypingSpeedMonitor = (() => {
   }
 
   function _onInput() {
-    const input = document.getElementById('chat-input');
+    const input = DOMCache.get('chat-input');
     if (!input) return;
     const len = input.value.length;
     _lastInputLength = len;
   }
 
   function _onSend() {
-    const input = document.getElementById('chat-input');
+    const input = DOMCache.get('chat-input');
     if (!input) return;
     const words = (input.value.match(WORD_CHARS) || []).length;
     _totalWords += words;
@@ -21777,7 +21810,7 @@ const DraftRecovery = (() => {
 
   /** Save the current input text as a draft. */
   function saveDraft() {
-    const input = document.getElementById('chat-input');
+    const input = DOMCache.get('chat-input');
     if (!input) return;
     const text = input.value.trim();
     const sid = _sessionId();
@@ -21794,7 +21827,7 @@ const DraftRecovery = (() => {
 
   /** Restore draft for the current session. Returns true if recovered. */
   function restoreDraft() {
-    const input = document.getElementById('chat-input');
+    const input = DOMCache.get('chat-input');
     if (!input) return false;
     const sid = _sessionId();
     const drafts = _loadDrafts();
@@ -21822,7 +21855,7 @@ const DraftRecovery = (() => {
 
   /** Discard draft and clear input. */
   function discardDraft() {
-    const input = document.getElementById('chat-input');
+    const input = DOMCache.get('chat-input');
     if (input) input.value = '';
     clearDraft();
     _showDiscardToast();
@@ -21900,7 +21933,7 @@ const DraftRecovery = (() => {
   function _onInput() {
     if (_timer) clearTimeout(_timer);
     _timer = setTimeout(() => {
-      const input = document.getElementById('chat-input');
+      const input = DOMCache.get('chat-input');
       if (input && input.value.trim() !== _lastSavedText) {
         saveDraft();
       }
@@ -21909,19 +21942,19 @@ const DraftRecovery = (() => {
 
   /** Initialize — attach listeners and restore draft. */
   function load() {
-    const input = document.getElementById('chat-input');
+    const input = DOMCache.get('chat-input');
     if (input) {
       input.addEventListener('input', _onInput);
     }
 
     // Clear draft when a message is sent (Enter key is handled by ChatController,
     // so we listen for the input being cleared after send)
-    const sendBtn = document.getElementById('send-btn');
+    const sendBtn = DOMCache.get('send-btn');
     if (sendBtn) {
       sendBtn.addEventListener('click', () => {
         // Delay slightly so ChatController processes first
         setTimeout(() => {
-          const inp = document.getElementById('chat-input');
+          const inp = DOMCache.get('chat-input');
           if (inp && !inp.value.trim()) clearDraft();
         }, 100);
       });
