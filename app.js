@@ -19886,7 +19886,7 @@ const TypingSpeedMonitor = (() => {
     overlay.id = 'wpm-dashboard-overlay';
     overlay.className = 'wpm-dashboard-overlay';
     overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-    overlay.innerHTML = 
+    overlay.innerHTML = `
       <div class="wpm-dashboard">
         <button class="wpm-close" id="wpm-close">&times;</button>
         <h2>⌨️ Typing Speed</h2>
@@ -19911,7 +19911,7 @@ const TypingSpeedMonitor = (() => {
         <div class="wpm-history-label">Speed History (last 30s)</div>
         <div class="wpm-sparkline"><canvas id="wpm-canvas"></canvas></div>
         <button class="wpm-reset-btn" id="wpm-reset">Reset Stats</button>
-      </div>;
+      </div>`;
     document.body.appendChild(overlay);
     document.getElementById('wpm-close').addEventListener('click', close);
     document.getElementById('wpm-reset').addEventListener('click', reset);

@@ -245,6 +245,8 @@ function setupDOM() {
       <button id="heatmap-refresh-btn"></button>
     </div>
     <div id="file-drop-overlay"></div>
+    <div id="preferences-overlay" style="display:none;"></div>
+    <div id="preferences-panel" style="display:none;"></div>
   `;
 }
 
@@ -266,6 +268,7 @@ function loadApp() {
   // Replace `const` with `globalThis.X =` for the top-level module declarations
   // so they become accessible in test scope.
   const modules = [
+    'DOMCache',
     'SafeStorage',
     'ChatConfig',
     'ConversationManager',
@@ -282,6 +285,8 @@ function loadApp() {
     'VoiceInput',
     'ThemeManager',
     'SessionManager',
+    'SessionNotes',
+    'CrossTabSync',
     'ConversationSessions',
     'SlashCommands',
     'MessageReactions',
@@ -313,6 +318,7 @@ function loadApp() {
     'ConversationReplay',
     'PromptLibrary',
     'ModelCompare',
+    'ModelComparePanel',
     'MessageTranslator',
     'MessageEditor',
     'MessageScheduler',
@@ -327,7 +333,18 @@ function loadApp() {
     'QuickSwitcher',
     'ChatGPTImporter',
     'PromptChainRunner',
-    'CustomThemeCreator'
+    'CustomThemeCreator',
+    'WordCloud',
+    'ConversationHealthCheck',
+    'TypingSpeedMonitor',
+    'FocusTimer',
+    'ConversationMindMap',
+    'CommandPalette',
+    'SplitView',
+    'StreakTracker',
+    'DraftRecovery',
+    'TextExpander',
+    'PreferencesPanel'
   ];
 
   for (const mod of modules) {
