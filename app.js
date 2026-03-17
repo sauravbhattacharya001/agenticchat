@@ -67,6 +67,7 @@
  *   FocusTimer           — Pomodoro-style focus timer with work/break cycles (Alt+P)
  *   CommandPalette       — VS Code-style universal command launcher (Ctrl+Shift+P)
  *   DraftRecovery        — auto-save/restore unsent message drafts per session
+ *   PreferencesPanel     — centralised settings panel with toggles, ranges, and reset
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -2911,6 +2912,8 @@ const SlashCommands = (() => {
           action: () => SessionManager.save() },
         { name: 'help', description: 'Show available commands', icon: '❓',
           action: () => { /* opening dropdown is the action */ } },
+        { name: 'preferences', description: 'Open preferences panel (Ctrl+,)', icon: '⚙️',
+          action: () => PreferencesPanel.toggle() },
         { name: 'stats', description: 'Show chat statistics', icon: '📊',
           action: () => ChatStats.toggle() },
         { name: 'sessions', description: 'Toggle sessions panel', icon: '📋',
@@ -22852,3 +22855,229 @@ const TextExpander = (() => {
 })();
 
 document.addEventListener('DOMContentLoaded', TextExpander.init);
+
+/* ---------- Preferences Panel (module 57) ---------- */
+/**
+ * Centralised settings panel for configuring app behaviour.
+ * Consolidates scattered settings into one discoverable UI.
+ * Toggle via Ctrl+, or /preferences slash command or ⚙️ button.
+ *
+ * @namespace PreferencesPanel
+ */
+const PreferencesPanel = (() => {
+  let _overlay = null;
+  let _panel = null;
+  let _isOpen = false;
+
+  const STORAGE_KEY = 'ac-preferences';
+
+  const DEFAULTS = Object.freeze({
+    autoSave: true,
+    maxHistoryPairs: 20,
+    maxInputChars: 50000,
+    streaming: true,
+    sandboxTimeoutMs: 30000,
+    fontSize: 14,
+    messageSounds: false,
+    compactMode: false,
+    codeLineNumbers: false,
+    timestampFormat: '12h'  // '12h' or '24h'
+  });
+
+  let _prefs = { ...DEFAULTS };
+
+  function _load() {
+    try {
+      const raw = SafeStorage.get(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+          Object.assign(_prefs, parsed);
+        }
+      }
+    } catch (_) { /* use defaults */ }
+  }
+
+  function _save() {
+    try { SafeStorage.set(STORAGE_KEY, JSON.stringify(_prefs)); } catch (_) {}
+  }
+
+  /** Apply preferences to the running config. */
+  function _apply() {
+    ChatConfig.MAX_HISTORY_PAIRS = _prefs.maxHistoryPairs;
+    ChatConfig.MAX_INPUT_CHARS = _prefs.maxInputChars;
+    ChatConfig.STREAMING_ENABLED = _prefs.streaming;
+    ChatConfig.SANDBOX_TIMEOUT_MS = _prefs.sandboxTimeoutMs;
+    try { SafeStorage.set('ac-streaming', JSON.stringify(_prefs.streaming)); } catch (_) {}
+    document.documentElement.style.setProperty('--ac-font-size', _prefs.fontSize + 'px');
+    document.body.classList.toggle('ac-compact', _prefs.compactMode);
+  }
+
+  function _row(label, desc, inputHTML) {
+    return `<div class="pref-row">
+      <div class="pref-label">
+        <strong>${label}</strong>
+        <small>${desc}</small>
+      </div>
+      <div class="pref-control">${inputHTML}</div>
+    </div>`;
+  }
+
+  function _buildPanel() {
+    if (!_panel) return;
+    _panel.innerHTML = `
+      <div class="pref-header">
+        <span>⚙️ Preferences</span>
+        <button class="btn-sm pref-close" title="Close (Escape)">✕</button>
+      </div>
+      <div class="pref-body">
+        <div class="pref-section">
+          <h4>💬 Chat</h4>
+          ${_row('Streaming', 'Stream responses token-by-token',
+            `<label class="pref-toggle"><input type="checkbox" id="pref-streaming" ${_prefs.streaming ? 'checked' : ''}><span class="pref-slider"></span></label>`)}
+          ${_row('Auto-save', 'Automatically save sessions after each message',
+            `<label class="pref-toggle"><input type="checkbox" id="pref-autosave" ${_prefs.autoSave ? 'checked' : ''}><span class="pref-slider"></span></label>`)}
+          ${_row('History pairs', 'Max user+assistant exchanges to keep (1-50)',
+            `<input type="number" id="pref-history" min="1" max="50" value="${_prefs.maxHistoryPairs}" class="pref-number">`)}
+          ${_row('Max input chars', 'Character limit for input field',
+            `<input type="number" id="pref-maxinput" min="1000" max="200000" step="1000" value="${_prefs.maxInputChars}" class="pref-number">`)}
+        </div>
+        <div class="pref-section">
+          <h4>🎨 Appearance</h4>
+          ${_row('Font size', 'Base font size in pixels (10-24)',
+            `<input type="range" id="pref-fontsize" min="10" max="24" value="${_prefs.fontSize}" class="pref-range"><span id="pref-fontsize-val">${_prefs.fontSize}px</span>`)}
+          ${_row('Compact mode', 'Reduce padding and spacing',
+            `<label class="pref-toggle"><input type="checkbox" id="pref-compact" ${_prefs.compactMode ? 'checked' : ''}><span class="pref-slider"></span></label>`)}
+          ${_row('Timestamp format', '12-hour or 24-hour clock',
+            `<select id="pref-timestamp" class="pref-select"><option value="12h" ${_prefs.timestampFormat === '12h' ? 'selected' : ''}>12h (3:45 PM)</option><option value="24h" ${_prefs.timestampFormat === '24h' ? 'selected' : ''}>24h (15:45)</option></select>`)}
+        </div>
+        <div class="pref-section">
+          <h4>🔧 Advanced</h4>
+          ${_row('Sandbox timeout', 'Code execution timeout in seconds',
+            `<input type="number" id="pref-timeout" min="5" max="120" value="${Math.round(_prefs.sandboxTimeoutMs / 1000)}" class="pref-number">`)}
+          ${_row('Notification sounds', 'Play sound on response complete',
+            `<label class="pref-toggle"><input type="checkbox" id="pref-sounds" ${_prefs.messageSounds ? 'checked' : ''}><span class="pref-slider"></span></label>`)}
+          ${_row('Code line numbers', 'Show line numbers in code blocks',
+            `<label class="pref-toggle"><input type="checkbox" id="pref-linenums" ${_prefs.codeLineNumbers ? 'checked' : ''}><span class="pref-slider"></span></label>`)}
+        </div>
+        <div class="pref-actions">
+          <button id="pref-reset" class="btn-sm btn-danger" title="Reset all preferences to defaults">Reset to defaults</button>
+          <span class="pref-saved-msg" id="pref-saved" style="display:none">✓ Saved</span>
+        </div>
+      </div>
+    `;
+
+    // Wire up events
+    _panel.querySelector('.pref-close').addEventListener('click', close);
+
+    // Checkboxes
+    const wire = (id, key) => {
+      const el = _panel.querySelector('#' + id);
+      if (el) el.addEventListener('change', () => { _prefs[key] = el.checked; _saveAndApply(); });
+    };
+    wire('pref-streaming', 'streaming');
+    wire('pref-autosave', 'autoSave');
+    wire('pref-compact', 'compactMode');
+    wire('pref-sounds', 'messageSounds');
+    wire('pref-linenums', 'codeLineNumbers');
+
+    // Number inputs
+    const wireNum = (id, key, transform) => {
+      const el = _panel.querySelector('#' + id);
+      if (el) el.addEventListener('change', () => {
+        const v = parseInt(el.value, 10);
+        if (!isNaN(v)) { _prefs[key] = transform ? transform(v) : v; _saveAndApply(); }
+      });
+    };
+    wireNum('pref-history', 'maxHistoryPairs');
+    wireNum('pref-maxinput', 'maxInputChars');
+    wireNum('pref-timeout', 'sandboxTimeoutMs', v => v * 1000);
+
+    // Range (font size)
+    const fontRange = _panel.querySelector('#pref-fontsize');
+    const fontVal = _panel.querySelector('#pref-fontsize-val');
+    if (fontRange) fontRange.addEventListener('input', () => {
+      const v = parseInt(fontRange.value, 10);
+      if (fontVal) fontVal.textContent = v + 'px';
+      _prefs.fontSize = v;
+      _saveAndApply();
+    });
+
+    // Select (timestamp format)
+    const tsSelect = _panel.querySelector('#pref-timestamp');
+    if (tsSelect) tsSelect.addEventListener('change', () => {
+      _prefs.timestampFormat = tsSelect.value;
+      _saveAndApply();
+    });
+
+    // Reset button
+    const resetBtn = _panel.querySelector('#pref-reset');
+    if (resetBtn) resetBtn.addEventListener('click', () => {
+      if (confirm('Reset all preferences to defaults?')) {
+        Object.assign(_prefs, DEFAULTS);
+        _saveAndApply();
+        _buildPanel(); // re-render with defaults
+      }
+    });
+  }
+
+  function _saveAndApply() {
+    _save();
+    _apply();
+    // Flash saved indicator
+    const msg = _panel && _panel.querySelector('#pref-saved');
+    if (msg) {
+      msg.style.display = 'inline';
+      clearTimeout(msg._t);
+      msg._t = setTimeout(() => { msg.style.display = 'none'; }, 1500);
+    }
+  }
+
+  function _createOverlay() {
+    _overlay = document.createElement('div');
+    _overlay.className = 'pref-overlay';
+    _overlay.addEventListener('click', (e) => { if (e.target === _overlay) close(); });
+    _panel = document.createElement('div');
+    _panel.className = 'pref-panel';
+    _overlay.appendChild(_panel);
+    document.body.appendChild(_overlay);
+  }
+
+  function toggle() { _isOpen ? close() : open(); }
+
+  function open() {
+    if (!_overlay) _createOverlay();
+    _buildPanel();
+    _overlay.classList.add('pref-visible');
+    _isOpen = true;
+  }
+
+  function close() {
+    if (_overlay) _overlay.classList.remove('pref-visible');
+    _isOpen = false;
+  }
+
+  /** Get a preference value by key. */
+  function get(key) { return _prefs[key]; }
+
+  function init() {
+    _load();
+    _apply();
+
+    // Ctrl+, shortcut
+    document.addEventListener('keydown', (e) => {
+      if (e.ctrlKey && e.key === ',') {
+        e.preventDefault();
+        toggle();
+      }
+    });
+
+    // Button
+    const btn = document.getElementById('preferences-btn');
+    if (btn) btn.addEventListener('click', toggle);
+  }
+
+  return { init, toggle, open, close, get, _prefs, DEFAULTS };
+})();
+
+document.addEventListener('DOMContentLoaded', PreferencesPanel.init);
