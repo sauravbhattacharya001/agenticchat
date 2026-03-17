@@ -24,6 +24,7 @@
  *   VoiceInput           — browser speech recognition with language selection
  *   ThemeManager         — dark/light theme with OS preference detection
  *   SessionManager       — multi-session persistence with auto-save, pinning, and quota mgmt
+ *   SessionNotes         — per-session notes/memos with inline editing
  *   CrossTabSync         — multi-tab conflict detection via storage events + BroadcastChannel
  *   ChatStats            — conversation analytics (word counts, code blocks, timing)
  *   CostDashboard        — persistent API spend tracker with budget alerts
@@ -2908,6 +2909,10 @@ const SlashCommands = (() => {
           action: () => {
             ConversationTags.openManager();
           } },
+        { name: 'note', description: 'Add or update a note for the current session', icon: '📝',
+          action: (args) => {
+            SessionNotes.setCurrentNote(args || '');
+          } },
         { name: 'input-history', description: 'Clear prompt history (↑/↓ navigation)', icon: '🕐',
           action: () => {
             const count = InputHistory.getCount();
@@ -4197,6 +4202,10 @@ const SessionManager = (() => {
     if (typeof ConversationTags !== 'undefined') {
       ConversationTags.clearSession(id);
     }
+    // Clean up notes for deleted session
+    if (typeof SessionNotes !== 'undefined') {
+      SessionNotes.remove(id);
+    }
     return sessions;
   }
 
@@ -4472,6 +4481,11 @@ const SessionManager = (() => {
         card.appendChild(preview);
       }
 
+      // Session note
+      if (typeof SessionNotes !== 'undefined') {
+        card.appendChild(SessionNotes.renderForCard(session.id));
+      }
+
       // Action buttons
       const actions = document.createElement('div');
       actions.className = 'session-card-actions';
@@ -4694,6 +4708,156 @@ const SessionManager = (() => {
     _loadAll, _saveAll, _getActiveId, _setActiveId,
     _evictOldest, _enforceSessionLimit, _estimateQuotaUsage, _checkQuota
   };
+})();
+
+/* ---------- Session Notes ---------- */
+/**
+ * Per-session notes/memos that let users add short descriptions to saved
+ * conversations. Notes are stored separately from session data to keep
+ * the main sessions lightweight. Each note is a free-text string (max
+ * 500 chars) keyed by session ID.
+ *
+ * Notes appear in session cards below the preview text and can be edited
+ * inline via a 📝 button. Also accessible via the `/note` slash command.
+ *
+ * @namespace SessionNotes
+ */
+const SessionNotes = (() => {
+  const STORAGE_KEY = 'agenticchat_session_notes';
+  const MAX_NOTE_LENGTH = 500;
+
+  /** Load all notes from storage. */
+  function _loadAll() {
+    try {
+      const raw = SafeStorage.get(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch { return {}; }
+  }
+
+  /** Save all notes to storage. */
+  function _saveAll(notes) {
+    try { SafeStorage.set(STORAGE_KEY, JSON.stringify(notes)); } catch {}
+  }
+
+  /** Get the note for a session. */
+  function get(sessionId) {
+    const notes = _loadAll();
+    return notes[sessionId] || '';
+  }
+
+  /** Set or update the note for a session. Pass empty string to clear. */
+  function set(sessionId, text) {
+    const notes = _loadAll();
+    const trimmed = (text || '').trim().substring(0, MAX_NOTE_LENGTH);
+    if (trimmed) {
+      notes[sessionId] = trimmed;
+    } else {
+      delete notes[sessionId];
+    }
+    _saveAll(notes);
+    return trimmed;
+  }
+
+  /** Remove the note for a session (cleanup on delete). */
+  function remove(sessionId) {
+    const notes = _loadAll();
+    delete notes[sessionId];
+    _saveAll(notes);
+  }
+
+  /** Clear all notes (used in data reset). */
+  function clearAll() {
+    try { SafeStorage.remove(STORAGE_KEY); } catch {}
+  }
+
+  /**
+   * Render a note element for a session card.
+   * Returns a DOM element showing the note (if any) with an edit button.
+   */
+  function renderForCard(sessionId) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'session-note-wrapper';
+
+    const noteText = get(sessionId);
+
+    const display = document.createElement('div');
+    display.className = 'session-note-display';
+    if (noteText) {
+      display.textContent = noteText;
+    } else {
+      display.textContent = '';
+      display.classList.add('session-note-empty');
+    }
+
+    const editBtn = document.createElement('button');
+    editBtn.className = 'btn-sm session-note-edit-btn';
+    editBtn.textContent = '📝';
+    editBtn.title = noteText ? 'Edit note' : 'Add note';
+    editBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      _startInlineEdit(sessionId, wrapper);
+    });
+
+    wrapper.appendChild(display);
+    wrapper.appendChild(editBtn);
+    return wrapper;
+  }
+
+  /** Start inline editing of a note. */
+  function _startInlineEdit(sessionId, wrapper) {
+    const currentNote = get(sessionId);
+
+    wrapper.innerHTML = '';
+    const textarea = document.createElement('textarea');
+    textarea.className = 'session-note-input';
+    textarea.value = currentNote;
+    textarea.placeholder = 'Add a note about this session…';
+    textarea.maxLength = MAX_NOTE_LENGTH;
+    textarea.rows = 2;
+
+    const charCount = document.createElement('span');
+    charCount.className = 'session-note-charcount';
+    charCount.textContent = `${currentNote.length}/${MAX_NOTE_LENGTH}`;
+
+    textarea.addEventListener('input', () => {
+      charCount.textContent = `${textarea.value.length}/${MAX_NOTE_LENGTH}`;
+    });
+
+    function finish() {
+      const newNote = set(sessionId, textarea.value);
+      // Re-render the card's note section
+      wrapper.innerHTML = '';
+      const fresh = renderForCard(sessionId);
+      wrapper.parentNode.replaceChild(fresh, wrapper);
+    }
+
+    textarea.addEventListener('blur', finish);
+    textarea.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); textarea.blur(); }
+      if (e.key === 'Escape') { textarea.value = currentNote; textarea.blur(); }
+    });
+
+    wrapper.appendChild(textarea);
+    wrapper.appendChild(charCount);
+    textarea.focus();
+  }
+
+  /**
+   * Set note for the currently active session via slash command.
+   * @param {string} text - The note text to set.
+   */
+  function setCurrentNote(text) {
+    const activeId = SessionManager.getActiveId();
+    if (!activeId) {
+      UIController.setLastPrompt('No active session. Save a session first.');
+      return;
+    }
+    const saved = set(activeId, text);
+    UIController.setLastPrompt(saved ? `Note saved (${saved.length} chars)` : 'Note cleared');
+    if (SessionManager._isOpen()) SessionManager.refresh();
+  }
+
+  return { get, set, remove, clearAll, renderForCard, setCurrentNote };
 })();
 
 /* ---------- Cross-Tab Sync ---------- */
@@ -4962,6 +5126,11 @@ const ConversationSessions = (function () {
     let sessions = SessionManager.getAll();
     return sessions.filter(function (s) {
       if (s.name && s.name.toLowerCase().indexOf(q) !== -1) return true;
+      // Search session notes
+      if (typeof SessionNotes !== 'undefined') {
+        var note = SessionNotes.get(s.id);
+        if (note && note.toLowerCase().indexOf(q) !== -1) return true;
+      }
       if (Array.isArray(s.messages)) {
         for (var i = 0; i < s.messages.length; i++) {
           if (s.messages[i].content && s.messages[i].content.toLowerCase().indexOf(q) !== -1) return true;
@@ -12449,6 +12618,7 @@ const DataBackup = (() => {
     annotations:     'agenticchat_annotations',
     chapters:        'agenticchat_chapters',
     sessionTags:     'agenticchat_session_tags',
+    sessionNotes:    'agenticchat_session_notes',
     fmtToolbar:      'agentic_fmt_toolbar_visible',
     selectedModel:   'ac-selected-model',
     streaming:       'ac-streaming',
