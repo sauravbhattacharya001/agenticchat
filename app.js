@@ -22283,3 +22283,360 @@ const CustomThemeCreator = (() => {
 })();
 
 document.addEventListener('DOMContentLoaded', CustomThemeCreator.init);
+
+/* ============================================================
+ * TextExpander — auto-expanding text shortcuts in chat input.
+ *
+ * Users define trigger → expansion pairs (e.g. "/sig" → full signature).
+ * Triggers expand automatically when followed by Space or Tab.
+ * Built-in dynamic expansions: /date, /time, /now, /shrug.
+ * Manage snippets via panel (Ctrl+Shift+X): add, edit, delete,
+ * import/export JSON, search, usage tracking.
+ *
+ * @namespace TextExpander
+ * ============================================================ */
+const TextExpander = (() => {
+  const STORAGE_KEY = 'agenticchat_text_expander';
+  const USAGE_KEY = 'agenticchat_text_expander_usage';
+  let _overlay = null;
+  let _panel = null;
+  let _visible = false;
+
+  /* --- Built-in dynamic expansions --- */
+  const BUILTINS = {
+    '/date': () => new Date().toLocaleDateString(),
+    '/time': () => new Date().toLocaleTimeString(),
+    '/now':  () => new Date().toLocaleString(),
+    '/shrug': () => '¯\\_(ツ)_/¯',
+    '/tableflip': () => '(╯°□°)╯︵ ┻━┻',
+    '/lenny': () => '( ͡° ͜ʖ ͡°)',
+  };
+
+  /* --- Storage helpers --- */
+  function _load() {
+    try {
+      const raw = SafeStorage.get(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch { return {}; }
+  }
+
+  function _save(snippets) {
+    try { SafeStorage.set(STORAGE_KEY, JSON.stringify(snippets)); } catch {}
+  }
+
+  function _loadUsage() {
+    try {
+      const raw = SafeStorage.get(USAGE_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch { return {}; }
+  }
+
+  function _saveUsage(usage) {
+    try { SafeStorage.set(USAGE_KEY, JSON.stringify(usage)); } catch {}
+  }
+
+  function _trackUsage(trigger) {
+    const usage = _loadUsage();
+    usage[trigger] = (usage[trigger] || 0) + 1;
+    _saveUsage(usage);
+  }
+
+  /* --- Core expansion --- */
+
+  /** Get expansion for a trigger. Returns string or null. */
+  function getExpansion(trigger) {
+    if (BUILTINS[trigger]) return BUILTINS[trigger]();
+    const snippets = _load();
+    return snippets[trigger] || null;
+  }
+
+  /** Get all triggers (user + builtin). */
+  function getAllTriggers() {
+    const snippets = _load();
+    return [...new Set([...Object.keys(snippets), ...Object.keys(BUILTINS)])];
+  }
+
+  /** Add or update a user snippet. */
+  function set(trigger, expansion) {
+    if (!trigger || !expansion) return false;
+    const t = trigger.startsWith('/') ? trigger : '/' + trigger;
+    if (BUILTINS[t]) return false; // can't override builtins
+    const snippets = _load();
+    snippets[t] = expansion;
+    _save(snippets);
+    return true;
+  }
+
+  /** Remove a user snippet. */
+  function remove(trigger) {
+    const snippets = _load();
+    if (!snippets[trigger]) return false;
+    delete snippets[trigger];
+    _save(snippets);
+    return true;
+  }
+
+  /** Get user snippets (not builtins). */
+  function getUserSnippets() {
+    return _load();
+  }
+
+  /** Get usage stats. */
+  function getUsage() {
+    return _loadUsage();
+  }
+
+  /** Export all user snippets as JSON string. */
+  function exportJSON() {
+    return JSON.stringify(_load(), null, 2);
+  }
+
+  /** Import snippets from JSON string. Returns count imported. */
+  function importJSON(jsonStr) {
+    try {
+      const data = JSON.parse(jsonStr);
+      if (typeof data !== 'object' || Array.isArray(data)) return 0;
+      const snippets = _load();
+      let count = 0;
+      for (const [k, v] of Object.entries(data)) {
+        if (typeof v === 'string' && v.trim()) {
+          const t = k.startsWith('/') ? k : '/' + k;
+          if (!BUILTINS[t]) {
+            snippets[t] = v;
+            count++;
+          }
+        }
+      }
+      _save(snippets);
+      return count;
+    } catch { return 0; }
+  }
+
+  /** Clear all user snippets. */
+  function clearAll() {
+    _save({});
+  }
+
+  /** Clear usage stats. */
+  function clearUsage() {
+    _saveUsage({});
+  }
+
+  /* --- Input handler (auto-expand on Space/Tab) --- */
+  function _handleInput(e) {
+    if (e.key !== ' ' && e.key !== 'Tab') return;
+    const input = e.target;
+    if (input.id !== 'chat-input') return;
+
+    const cursorPos = input.selectionStart;
+    const text = input.value.substring(0, cursorPos);
+    // Find last word (trigger candidate)
+    const match = text.match(/(\/\S+)$/);
+    if (!match) return;
+
+    const trigger = match[1];
+    const expansion = getExpansion(trigger);
+    if (!expansion) return;
+
+    e.preventDefault();
+    const before = text.substring(0, text.length - trigger.length);
+    const after = input.value.substring(cursorPos);
+    const suffix = e.key === ' ' ? ' ' : '';
+    input.value = before + expansion + suffix + after;
+    const newPos = before.length + expansion.length + suffix.length;
+    input.selectionStart = input.selectionEnd = newPos;
+    _trackUsage(trigger);
+
+    // Dispatch input event for other listeners
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  /* --- Panel UI --- */
+  function _buildPanel() {
+    const snippets = _load();
+    const usage = _loadUsage();
+    const allTriggers = [...Object.entries(snippets), ...Object.entries(BUILTINS).map(([k]) => [k, null])];
+
+    let rows = '';
+    for (const [trigger, expansion] of allTriggers) {
+      const isBuiltin = !!BUILTINS[trigger];
+      const display = isBuiltin ? BUILTINS[trigger]() : expansion;
+      const usageCount = usage[trigger] || 0;
+      const escapedExpansion = (display || '').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+      const escapedTrigger = trigger.replace(/</g, '&lt;');
+      rows += `<tr class="te-row${isBuiltin ? ' te-builtin' : ''}">
+        <td class="te-trigger"><code>${escapedTrigger}</code></td>
+        <td class="te-expansion" title="${escapedExpansion}">${escapedExpansion.length > 60 ? escapedExpansion.substring(0, 57) + '...' : escapedExpansion}</td>
+        <td class="te-usage">${usageCount}</td>
+        <td class="te-actions">${isBuiltin ? '<span class="te-builtin-badge">built-in</span>' : `<button class="te-edit-btn" data-trigger="${escapedTrigger}">✏️</button><button class="te-del-btn" data-trigger="${escapedTrigger}">🗑️</button>`}</td>
+      </tr>`;
+    }
+
+    if (!allTriggers.length) {
+      rows = '<tr><td colspan="4" style="text-align:center;color:var(--muted,#6c7086);padding:24px;">No snippets yet. Add one below!</td></tr>';
+    }
+
+    _panel.innerHTML = `
+      <div class="te-header">
+        <h3>⚡ Text Expander</h3>
+        <button class="te-close" aria-label="Close">✕</button>
+      </div>
+      <p class="te-desc">Type a trigger in chat and press <kbd>Space</kbd> or <kbd>Tab</kbd> to expand it.</p>
+      <div class="te-search-row">
+        <input type="text" class="te-search" placeholder="Search snippets..." />
+      </div>
+      <div class="te-table-wrap">
+        <table class="te-table">
+          <thead><tr><th>Trigger</th><th>Expansion</th><th>Used</th><th></th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <div class="te-add-section">
+        <h4>Add Snippet</h4>
+        <div class="te-add-row">
+          <input type="text" class="te-add-trigger" placeholder="/trigger" />
+          <input type="text" class="te-add-expansion" placeholder="Expansion text..." />
+          <button class="te-add-btn">Add</button>
+        </div>
+      </div>
+      <div class="te-footer">
+        <button class="te-export-btn">📤 Export</button>
+        <button class="te-import-btn">📥 Import</button>
+        <span class="te-count">${Object.keys(snippets).length} custom · ${Object.keys(BUILTINS).length} built-in</span>
+      </div>
+    `;
+
+    // Event listeners
+    _panel.querySelector('.te-close').addEventListener('click', close);
+    _panel.querySelector('.te-add-btn').addEventListener('click', _handleAdd);
+    _panel.querySelector('.te-export-btn').addEventListener('click', _handleExport);
+    _panel.querySelector('.te-import-btn').addEventListener('click', _handleImport);
+    _panel.querySelector('.te-search').addEventListener('input', _handleSearch);
+
+    _panel.querySelectorAll('.te-del-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const t = btn.dataset.trigger;
+        if (remove(t)) _buildPanel();
+      });
+    });
+
+    _panel.querySelectorAll('.te-edit-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const t = btn.dataset.trigger;
+        const snippets = _load();
+        const newVal = prompt('Edit expansion for ' + t + ':', snippets[t] || '');
+        if (newVal !== null && newVal.trim()) {
+          set(t, newVal.trim());
+          _buildPanel();
+        }
+      });
+    });
+
+    // Enter key in add fields
+    const addTrigger = _panel.querySelector('.te-add-trigger');
+    const addExpansion = _panel.querySelector('.te-add-expansion');
+    [addTrigger, addExpansion].forEach(el => {
+      el.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') _handleAdd();
+      });
+    });
+  }
+
+  function _handleAdd() {
+    const triggerInput = _panel.querySelector('.te-add-trigger');
+    const expansionInput = _panel.querySelector('.te-add-expansion');
+    const t = triggerInput.value.trim();
+    const exp = expansionInput.value.trim();
+    if (!t || !exp) return;
+    if (set(t, exp)) {
+      _buildPanel();
+    }
+  }
+
+  function _handleSearch(e) {
+    const q = e.target.value.toLowerCase();
+    _panel.querySelectorAll('.te-row').forEach(row => {
+      const trigger = row.querySelector('.te-trigger')?.textContent?.toLowerCase() || '';
+      const expansion = row.querySelector('.te-expansion')?.textContent?.toLowerCase() || '';
+      row.style.display = (!q || trigger.includes(q) || expansion.includes(q)) ? '' : 'none';
+    });
+  }
+
+  function _handleExport() {
+    const json = exportJSON();
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'text-expander-snippets.json'; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function _handleImport() {
+    const input = document.createElement('input');
+    input.type = 'file'; input.accept = '.json';
+    input.onchange = (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        const count = importJSON(ev.target.result);
+        if (typeof UIController !== 'undefined') {
+          UIController.setChatOutput(`Imported ${count} text expander snippet${count !== 1 ? 's' : ''}! ⚡`);
+        }
+        _buildPanel();
+      };
+      reader.readAsText(file);
+    };
+    input.click();
+  }
+
+  /* --- Toggle / Open / Close --- */
+  function toggle() { _visible ? close() : open(); }
+
+  function open() {
+    if (!_overlay) _createOverlay();
+    _buildPanel();
+    _overlay.classList.add('te-visible');
+    _visible = true;
+  }
+
+  function close() {
+    if (_overlay) _overlay.classList.remove('te-visible');
+    _visible = false;
+  }
+
+  function _createOverlay() {
+    _overlay = document.createElement('div');
+    _overlay.className = 'te-overlay';
+    _overlay.addEventListener('click', (e) => { if (e.target === _overlay) close(); });
+    _panel = document.createElement('div');
+    _panel.className = 'te-panel';
+    _overlay.appendChild(_panel);
+    document.body.appendChild(_overlay);
+  }
+
+  /* --- Init --- */
+  function init() {
+    document.addEventListener('keydown', _handleInput, true);
+
+    // Ctrl+Shift+X shortcut
+    document.addEventListener('keydown', (e) => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'X') {
+        e.preventDefault();
+        toggle();
+      }
+    });
+  }
+
+  return {
+    init, toggle, open, close,
+    getExpansion, getAllTriggers,
+    set, remove, getUserSnippets,
+    getUsage, clearUsage,
+    exportJSON, importJSON, clearAll,
+    BUILTINS,
+    _load, _save, _loadUsage, _saveUsage, _trackUsage, _handleInput
+  };
+})();
+
+document.addEventListener('DOMContentLoaded', TextExpander.init);
