@@ -65,6 +65,7 @@
  *   TypingSpeedMonitor   — live WPM indicator with sparkline dashboard (Ctrl+Shift+T)
  *   FocusTimer           — Pomodoro-style focus timer with work/break cycles (Alt+P)
  *   CommandPalette       — VS Code-style universal command launcher (Ctrl+Shift+P)
+ *   DraftRecovery        — auto-save/restore unsent message drafts per session
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -774,7 +775,7 @@ const UIController = (() => {
   /** Get the trimmed value of the chat input field. */
   function getChatInput()   { return el('chat-input').value.trim(); }
   /** Clear the chat input field and return focus to it. */
-  function clearChatInput() { const inp = el('chat-input'); inp.value = ''; inp.focus(); }
+  function clearChatInput() { const inp = el('chat-input'); inp.value = ''; inp.focus(); if (typeof DraftRecovery !== 'undefined') DraftRecovery.clearDraft(); }
   /** Set the chat input field value and return focus to it. */
   function setChatInput(text) { const inp = el('chat-input'); inp.value = text; inp.focus(); }
   /** Get the trimmed API key input value, or empty string if field is absent. */
@@ -4151,6 +4152,9 @@ const SessionManager = (() => {
 
     _autoSaveCurrent();
 
+    // Save current draft before switching, then restore for new session
+    if (typeof DraftRecovery !== 'undefined') DraftRecovery.saveDraft();
+
     // Clear third-party service keys from the previous session context.
     // Different sessions may interact with different APIs; lingering keys
     // from session A should not auto-apply when running code in session B.
@@ -4169,6 +4173,9 @@ const SessionManager = (() => {
 
     _setActiveId(session.id);
     _resetUI(`Loaded: ${session.name}`);
+
+    // Restore draft for the loaded session
+    if (typeof DraftRecovery !== 'undefined') DraftRecovery.restoreDraft();
 
     return session;
   }
@@ -4206,6 +4213,8 @@ const SessionManager = (() => {
 
   /** Start a new empty session. Optionally saves current first. */
   function newSession() {
+    // Save draft for current session before switching
+    if (typeof DraftRecovery !== 'undefined') DraftRecovery.saveDraft();
     _autoSaveCurrent();
 
     ConversationManager.clear();
@@ -8663,6 +8672,9 @@ document.addEventListener('DOMContentLoaded', () => {
     ChatController.send();
   });
   SmartRetry.init();
+
+  // Draft recovery (must come after SessionManager init)
+  DraftRecovery.load();
 
   // Prompt chain runner
   PromptChainRunner.init();
@@ -21541,5 +21553,216 @@ const StreakTracker = (() => {
     open, close, toggle, isOpen,
     _getActiveDates, _calcStreaks, _buildCalendar, _buildMilestones, _buildWeekdayStats,
     MILESTONES
+  };
+})();
+
+/* ============================================================
+ * DraftRecovery — auto-save unsent message drafts per session
+ *
+ * Saves the chat input text as you type (debounced 500ms) and
+ * restores it when switching sessions or reloading the page.
+ * Shows a subtle toast when a draft is recovered.
+ *
+ * Keyboard shortcut: Ctrl+Shift+D — discard current draft
+ * ============================================================ */
+const DraftRecovery = (() => {
+  const STORAGE_KEY = 'agenticchat_drafts';
+  const DEBOUNCE_MS = 500;
+  let _timer = null;
+  let _lastSavedText = '';
+  let _toastEl = null;
+
+  /** Load all drafts from storage. */
+  function _loadDrafts() {
+    try {
+      const raw = SafeStorage.get(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch { return {}; }
+  }
+
+  /** Save all drafts to storage. */
+  function _saveDrafts(drafts) {
+    try { SafeStorage.set(STORAGE_KEY, JSON.stringify(drafts)); } catch {}
+  }
+
+  /** Get the current session ID (or '__default__' if none). */
+  function _sessionId() {
+    try {
+      const id = SafeStorage.get('agenticchat_active_session');
+      return id || '__default__';
+    } catch { return '__default__'; }
+  }
+
+  /** Save the current input text as a draft. */
+  function saveDraft() {
+    const input = document.getElementById('chat-input');
+    if (!input) return;
+    const text = input.value.trim();
+    const sid = _sessionId();
+    const drafts = _loadDrafts();
+
+    if (text) {
+      drafts[sid] = { text, ts: Date.now() };
+    } else {
+      delete drafts[sid];
+    }
+    _saveDrafts(drafts);
+    _lastSavedText = text;
+  }
+
+  /** Restore draft for the current session. Returns true if recovered. */
+  function restoreDraft() {
+    const input = document.getElementById('chat-input');
+    if (!input) return false;
+    const sid = _sessionId();
+    const drafts = _loadDrafts();
+    const draft = drafts[sid];
+
+    if (draft && draft.text) {
+      // Don't overwrite if user already typed something
+      if (input.value.trim()) return false;
+      input.value = draft.text;
+      _lastSavedText = draft.text;
+      _showToast(draft.ts);
+      return true;
+    }
+    return false;
+  }
+
+  /** Clear draft for the current session. */
+  function clearDraft() {
+    const sid = _sessionId();
+    const drafts = _loadDrafts();
+    delete drafts[sid];
+    _saveDrafts(drafts);
+    _lastSavedText = '';
+  }
+
+  /** Discard draft and clear input. */
+  function discardDraft() {
+    const input = document.getElementById('chat-input');
+    if (input) input.value = '';
+    clearDraft();
+    _showDiscardToast();
+  }
+
+  /** Get draft for a specific session ID. */
+  function getDraft(sessionId) {
+    const drafts = _loadDrafts();
+    return drafts[sessionId || _sessionId()] || null;
+  }
+
+  /** Get count of saved drafts. */
+  function getDraftCount() {
+    return Object.keys(_loadDrafts()).length;
+  }
+
+  /** Remove drafts older than maxAgeDays. */
+  function pruneOldDrafts(maxAgeDays) {
+    const cutoff = Date.now() - (maxAgeDays || 30) * 86400000;
+    const drafts = _loadDrafts();
+    let pruned = 0;
+    for (const sid of Object.keys(drafts)) {
+      if (drafts[sid].ts < cutoff) {
+        delete drafts[sid];
+        pruned++;
+      }
+    }
+    if (pruned > 0) _saveDrafts(drafts);
+    return pruned;
+  }
+
+  /** Show a subtle toast when a draft is recovered. */
+  function _showToast(ts) {
+    _removeToast();
+    const age = _formatAge(ts);
+    _toastEl = document.createElement('div');
+    _toastEl.className = 'draft-toast';
+    _toastEl.setAttribute('role', 'status');
+    _toastEl.setAttribute('aria-live', 'polite');
+    _toastEl.innerHTML = `📝 Draft recovered <span class="draft-toast-age">${age}</span> <button class="draft-toast-discard" title="Discard draft">✕</button>`;
+    _toastEl.querySelector('.draft-toast-discard').addEventListener('click', () => {
+      discardDraft();
+      _removeToast();
+    });
+    document.body.appendChild(_toastEl);
+    // Auto-dismiss after 4 seconds
+    setTimeout(() => _removeToast(), 4000);
+  }
+
+  /** Show discard confirmation toast. */
+  function _showDiscardToast() {
+    _removeToast();
+    _toastEl = document.createElement('div');
+    _toastEl.className = 'draft-toast draft-toast-discard-confirm';
+    _toastEl.setAttribute('role', 'status');
+    _toastEl.textContent = '🗑️ Draft discarded';
+    document.body.appendChild(_toastEl);
+    setTimeout(() => _removeToast(), 2000);
+  }
+
+  function _removeToast() {
+    if (_toastEl) { _toastEl.remove(); _toastEl = null; }
+  }
+
+  /** Format age as human-readable relative time. */
+  function _formatAge(ts) {
+    const diff = Date.now() - ts;
+    if (diff < 60000) return 'just now';
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+    return `${Math.floor(diff / 86400000)}d ago`;
+  }
+
+  /** Debounced save handler for input events. */
+  function _onInput() {
+    if (_timer) clearTimeout(_timer);
+    _timer = setTimeout(() => {
+      const input = document.getElementById('chat-input');
+      if (input && input.value.trim() !== _lastSavedText) {
+        saveDraft();
+      }
+    }, DEBOUNCE_MS);
+  }
+
+  /** Initialize — attach listeners and restore draft. */
+  function load() {
+    const input = document.getElementById('chat-input');
+    if (input) {
+      input.addEventListener('input', _onInput);
+    }
+
+    // Clear draft when a message is sent (Enter key is handled by ChatController,
+    // so we listen for the input being cleared after send)
+    const sendBtn = document.getElementById('send-btn');
+    if (sendBtn) {
+      sendBtn.addEventListener('click', () => {
+        // Delay slightly so ChatController processes first
+        setTimeout(() => {
+          const inp = document.getElementById('chat-input');
+          if (inp && !inp.value.trim()) clearDraft();
+        }, 100);
+      });
+    }
+
+    // Prune old drafts on startup
+    pruneOldDrafts(30);
+
+    // Restore draft for current session
+    restoreDraft();
+
+    // Keyboard shortcut: Ctrl+Shift+D to discard
+    document.addEventListener('keydown', (e) => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'D') {
+        e.preventDefault();
+        discardDraft();
+      }
+    });
+  }
+
+  return {
+    load, saveDraft, restoreDraft, clearDraft, discardDraft,
+    getDraft, getDraftCount, pruneOldDrafts,
+    _loadDrafts, _saveDrafts, _sessionId, _formatAge, _onInput
   };
 })();
