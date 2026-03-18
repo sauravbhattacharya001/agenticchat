@@ -20014,7 +20014,7 @@ const TypingSpeedMonitor = (() => {
 
   function _loadStats() {
     try {
-      const raw = SafeStorage.getItem(STORAGE_KEY);
+      const raw = SafeStorage.get(STORAGE_KEY);
       if (raw) {
         const data = JSON.parse(raw);
         _peakWpm = data.peakWpm || 0;
@@ -20026,7 +20026,7 @@ const TypingSpeedMonitor = (() => {
 
   function _saveStats() {
     try {
-      SafeStorage.setItem(STORAGE_KEY, JSON.stringify({
+      SafeStorage.set(STORAGE_KEY, JSON.stringify({
         peakWpm: _peakWpm,
         totalWords: _totalWords,
         totalChars: _totalChars,
@@ -23799,11 +23799,11 @@ const ConversationFlashcards = (() => {
   /* ---- persistence ---- */
   function _loadDecks() {
     try {
-      return JSON.parse(SafeStorage.getItem(STORAGE_KEY)) || [];
+      return JSON.parse(SafeStorage.get(STORAGE_KEY)) || [];
     } catch (e) { return []; }
   }
   function _saveDecks(decks) {
-    SafeStorage.setItem(STORAGE_KEY, JSON.stringify(decks.slice(0, MAX_DECKS)));
+    SafeStorage.set(STORAGE_KEY, JSON.stringify(decks.slice(0, MAX_DECKS)));
   }
 
   /* ---- extraction ---- */
