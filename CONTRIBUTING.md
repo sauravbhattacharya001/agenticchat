@@ -184,6 +184,18 @@ Open an [issue](https://github.com/sauravbhattacharya001/agenticchat/issues/new)
 3. **Alternatives considered** — What else did you think about?
 4. **Scope** — Is this a small tweak or a significant change?
 
+## AI Coding Agents
+
+This repo is configured for **GitHub Copilot coding agents** (Claude, Codex). If you're assigned an issue or want to experiment:
+
+- The `.github/copilot-setup-steps.yml` handles dependency installation and build automatically
+- `.github/copilot-instructions.md` provides repo-specific architecture context to the agent
+- AI agents can open PRs against issues — review them like any other PR
+- When reviewing AI-generated PRs, pay extra attention to:
+  - **Sandbox security** — any changes to iframe isolation or CSP must be scrutinized
+  - **Zero-dependency policy** — agents sometimes add runtime dependencies
+  - **Test coverage** — ensure new behavior has corresponding tests
+
 ## Security Vulnerabilities
 
 If you discover a security vulnerability, **do not open a public issue.** Instead, email the maintainer directly or use GitHub's [private vulnerability reporting](https://github.com/sauravbhattacharya001/agenticchat/security/advisories/new). Security issues in the sandbox isolation, CSP enforcement, or API key handling are especially critical.
