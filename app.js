@@ -4167,8 +4167,17 @@ const SessionManager = (() => {
     if (isOpen) refresh();
   }
 
-  /** Generate a session name from the first user message. */
+  /** Generate a session name from conversation content using SmartTitle. */
   function _generateName(messages) {
+    // Use SmartTitle if available for intelligent title generation
+    if (typeof SmartTitle !== 'undefined' && SmartTitle.generate) {
+      try {
+        const title = SmartTitle.generate(messages);
+        if (title && title !== 'Empty Conversation' && title !== 'Chat Session') {
+          return title.length <= 60 ? title : title.substring(0, 57) + '…';
+        }
+      } catch (_) { /* fall through to basic generation */ }
+    }
     const firstUser = messages.find(m => m.role === 'user');
     if (firstUser) {
       const text = firstUser.content.trim();
@@ -23081,3 +23090,209 @@ const PreferencesPanel = (() => {
 })();
 
 document.addEventListener('DOMContentLoaded', PreferencesPanel.init);
+
+/* ---------- Smart Title Generator ---------- */
+/**
+ * Generates concise, descriptive session titles from conversation content
+ * using heuristic text analysis (no LLM call). Extracts key topics,
+ * programming languages, and question types to produce human-readable
+ * titles like "Python Sorting Algorithm Help" instead of truncated first messages.
+ *
+ * Public API:
+ *   SmartTitle.generate(messages?)  → string title
+ *   SmartTitle.init()               → wire up suggest button
+ */
+const SmartTitle = (() => {
+  /* ── Stop words to filter out ─────────────────────────────── */
+  const STOP_WORDS = new Set([
+    'a','an','the','is','are','was','were','be','been','being','have','has','had',
+    'do','does','did','will','would','shall','should','may','might','must','can',
+    'could','i','me','my','mine','we','us','our','ours','you','your','yours',
+    'he','him','his','she','her','hers','it','its','they','them','their','theirs',
+    'this','that','these','those','what','which','who','whom','whose','where',
+    'when','why','how','not','no','nor','but','or','and','so','if','then','else',
+    'than','too','very','just','about','above','after','again','all','also','am',
+    'any','as','at','back','because','before','below','between','both','by','came',
+    'come','could','each','even','every','for','from','get','got','go','goes',
+    'going','gone','good','great','had','here','her','him','how','in','into','it',
+    'its','know','like','look','make','many','more','most','much','need','new',
+    'now','of','off','on','one','only','or','other','out','over','own','part',
+    'people','place','point','right','said','same','see','some','still','such',
+    'take','tell','thing','think','to','try','up','use','want','way','well',
+    'what','with','work','write','yeah','yes','ok','okay','sure','thanks',
+    'thank','please','help','hi','hello','hey','um','uh','like','really',
+    'actually','basically','something','anything','everything','nothing',
+    'able','let','using','used','dont','doesnt','cant','wont','im','ive',
+    'id','youre','youve','youd','hes','shes','theyre','theyve','theyd',
+    'were','weve','wed','thats','whats','hows','whys','wheres','whos',
+    'there','here','then','when','while','where','code','function','example',
+    'question','problem','issue','error','message','result','output','input',
+    'data','file','line','number','string','value','type','name','list',
+    'array','object','class','method','variable','return','true','false',
+    'null','undefined','const','let','var','def','import','from','print'
+  ]);
+
+  /* ── Programming language detection ───────────────────────── */
+  const LANG_PATTERNS = [
+    { lang: 'Python', re: /\b(python|pandas|numpy|django|flask|pip|pytest|scipy|matplotlib|pytorch|tensorflow)\b/i },
+    { lang: 'JavaScript', re: /\b(javascript|js|node\.?js|react|vue|angular|express|npm|typescript|ts|webpack|nextjs|next\.js)\b/i },
+    { lang: 'Java', re: /\b(java(?!script)|spring|maven|gradle|jvm|junit|hibernate)\b/i },
+    { lang: 'C\+\+', re: /\b(c\+\+|cpp|cmake|stl|boost|gcc|clang)\b/i },
+    { lang: 'C#', re: /\b(c#|csharp|dotnet|\.net|asp\.net|blazor|unity)\b/i },
+    { lang: 'Rust', re: /\b(rust|cargo|rustc|tokio|serde)\b/i },
+    { lang: 'Go', re: /\b(golang|go\s+(?:module|routine|func))\b/i },
+    { lang: 'SQL', re: /\b(sql|mysql|postgres|sqlite|database|query|select\s+from|insert\s+into)\b/i },
+    { lang: 'HTML\/CSS', re: /\b(html|css|scss|sass|tailwind|bootstrap|flexbox|grid\s+layout)\b/i },
+    { lang: 'Ruby', re: /\b(ruby|rails|gem|bundler|rake)\b/i },
+    { lang: 'Swift', re: /\b(swift|swiftui|xcode|ios\s+app|uikit)\b/i },
+    { lang: 'Kotlin', re: /\b(kotlin|android\s+studio|jetpack\s+compose)\b/i },
+    { lang: 'PHP', re: /\b(php|laravel|composer|wordpress|symfony)\b/i },
+    { lang: 'Shell', re: /\b(bash|shell|zsh|powershell|terminal|command\s+line|cli)\b/i },
+  ];
+
+  /* ── Topic/domain keywords ────────────────────────────────── */
+  const TOPIC_PATTERNS = [
+    { topic: 'API', re: /\b(api|rest|graphql|endpoint|webhook|http|request|response|fetch|axios)\b/i },
+    { topic: 'Algorithm', re: /\b(algorithm|sort|search|binary|tree|graph|dynamic\s+programming|recursion|bfs|dfs|hash)\b/i },
+    { topic: 'Testing', re: /\b(test|testing|unit\s+test|integration\s+test|mock|assert|coverage|tdd|jest|mocha)\b/i },
+    { topic: 'Debugging', re: /\b(debug|bug|fix|error|exception|traceback|stack\s+trace|breakpoint)\b/i },
+    { topic: 'Database', re: /\b(database|db|schema|migration|orm|model|table|index|query|join)\b/i },
+    { topic: 'DevOps', re: /\b(docker|kubernetes|ci\/cd|deploy|pipeline|jenkins|github\s+actions|terraform|aws|azure|gcp)\b/i },
+    { topic: 'Security', re: /\b(security|auth|authentication|authorization|oauth|jwt|encrypt|ssl|csrf|xss|vulnerability)\b/i },
+    { topic: 'UI\/UX', re: /\b(ui|ux|design|layout|responsive|animation|component|modal|form|button|styling)\b/i },
+    { topic: 'Machine Learning', re: /\b(machine\s+learning|ml|neural|deep\s+learning|model\s+training|classification|regression|nlp|llm|gpt|transformer)\b/i },
+    { topic: 'Performance', re: /\b(performance|optimize|optimization|cache|memory|latency|profil|benchmark|speed)\b/i },
+    { topic: 'Architecture', re: /\b(architecture|design\s+pattern|microservice|monolith|mvc|clean\s+code|solid|refactor)\b/i },
+    { topic: 'Math', re: /\b(math|equation|formula|calculus|algebra|statistics|probability|matrix|vector|integral)\b/i },
+    { topic: 'Writing', re: /\b(write|writing|essay|article|blog|story|poem|letter|email\s+draft|content)\b/i },
+    { topic: 'Data Analysis', re: /\b(data\s+analysis|visualization|chart|plot|csv|excel|dashboard|report|analytics)\b/i },
+  ];
+
+  /* ── Action verbs that describe what the conversation is about ── */
+  const ACTION_PATTERNS = [
+    { action: 'Setup', re: /\b(setup|install|configure|initialization|getting\s+started|scaffold)\b/i },
+    { action: 'Migration', re: /\b(migrat|upgrad|convert|port|transition)\b/i },
+    { action: 'Comparison', re: /\b(compar|vs\.?|versus|difference|which\s+is\s+better|pros\s+and\s+cons)\b/i },
+    { action: 'Tutorial', re: /\b(tutorial|how\s+to|step\s+by\s+step|guide|walkthrough|learn)\b/i },
+    { action: 'Review', re: /\b(review|feedback|critique|improve|suggestion|refactor)\b/i },
+    { action: 'Troubleshooting', re: /\b(troubleshoot|not\s+working|broken|fail|crash|issue|problem|stuck)\b/i },
+    { action: 'Explanation', re: /\b(explain|what\s+is|what\s+are|how\s+does|why\s+does|concept|understand)\b/i },
+    { action: 'Implementation', re: /\b(implement|build|create|develop|make|code\s+for|program|construct)\b/i },
+  ];
+
+  /**
+   * Extract significant words from text (lowercased, deduplicated, no stop words).
+   */
+  function _extractKeywords(text, maxWords) {
+    const words = text.toLowerCase().replace(/[^a-z0-9\s\-\_\.\/\+\#]/g, ' ').split(/\s+/);
+    const freq = {};
+    for (const w of words) {
+      if (w.length < 2 || STOP_WORDS.has(w) || /^\d+$/.test(w)) continue;
+      freq[w] = (freq[w] || 0) + 1;
+    }
+    return Object.entries(freq)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, maxWords || 10)
+      .map(e => e[0]);
+  }
+
+  /**
+   * Capitalize a word (first letter uppercase).
+   */
+  function _capitalize(w) {
+    if (!w) return '';
+    return w.charAt(0).toUpperCase() + w.slice(1);
+  }
+
+  /**
+   * Generate a smart title from conversation messages.
+   * @param {Array} [messages] - Array of {role, content}. Defaults to current conversation.
+   * @returns {string} Generated title (3-8 words).
+   */
+  function generate(messages) {
+    const msgs = messages || ConversationManager.getMessages().filter(m => m.role !== 'system');
+    if (!msgs || msgs.length === 0) return 'Empty Conversation';
+
+    // Combine all text
+    const allText = msgs.map(m => m.content || '').join(' ');
+    if (allText.trim().length === 0) return 'Empty Conversation';
+
+    // Detect programming language
+    let detectedLang = null;
+    for (const lp of LANG_PATTERNS) {
+      if (lp.re.test(allText)) { detectedLang = lp.lang; break; }
+    }
+
+    // Detect topics (up to 2)
+    const detectedTopics = [];
+    for (const tp of TOPIC_PATTERNS) {
+      if (tp.re.test(allText)) {
+        detectedTopics.push(tp.topic);
+        if (detectedTopics.length >= 2) break;
+      }
+    }
+
+    // Detect action type
+    let detectedAction = null;
+    for (const ap of ACTION_PATTERNS) {
+      if (ap.re.test(allText)) { detectedAction = ap.action; break; }
+    }
+
+    // Extract top keywords
+    const keywords = _extractKeywords(allText, 8);
+
+    // Build title parts
+    const parts = [];
+
+    if (detectedLang) parts.push(detectedLang);
+    if (detectedTopics.length > 0) parts.push(detectedTopics[0]);
+    if (detectedTopics.length > 1 && parts.length < 4) parts.push(detectedTopics[1]);
+    if (detectedAction && parts.length < 4) parts.push(detectedAction);
+
+    // Fill with keywords if title is too short
+    if (parts.length < 2) {
+      for (const kw of keywords) {
+        if (parts.length >= 4) break;
+        const cap = _capitalize(kw);
+        if (!parts.includes(cap) && !parts.some(p => p.toLowerCase() === kw)) {
+          parts.push(cap);
+        }
+      }
+    }
+
+    // Fallback: use first user message
+    if (parts.length === 0) {
+      const firstUser = msgs.find(m => m.role === 'user');
+      if (firstUser) {
+        const text = firstUser.content.trim();
+        return text.length <= 50 ? text : text.substring(0, 47) + '…';
+      }
+      return 'Chat Session';
+    }
+
+    const title = parts.join(' ');
+    return title.length > 60 ? title.substring(0, 57) + '…' : title;
+  }
+
+  /**
+   * Initialize: wire up the suggest button.
+   */
+  function init() {
+    const btn = document.getElementById('session-suggest-title');
+    if (!btn) return;
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const input = document.getElementById('session-name-input');
+      if (input) {
+        const title = generate();
+        input.value = title;
+        input.focus();
+        input.select();
+      }
+    });
+  }
+
+  return { generate, init, _extractKeywords, _capitalize };
+})();
+
+document.addEventListener('DOMContentLoaded', SmartTitle.init);

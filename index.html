@@ -215,7 +215,10 @@
     <div id="session-save-content">
       <p id="session-modal-title"><strong>Save Session</strong></p>
       <label for="session-name-input">Session Name</label>
-      <input id="session-name-input" type="text" placeholder="e.g. API Integration Test" autocomplete="off">
+      <div style="display:flex;gap:6px;align-items:center">
+        <input id="session-name-input" type="text" placeholder="e.g. API Integration Test" autocomplete="off" style="flex:1">
+        <button id="session-suggest-title" class="btn-secondary btn-sm" title="Auto-generate a title from conversation content" type="button">✨ Suggest</button>
+      </div>
       <div id="session-modal-buttons">
         <button id="session-save-cancel" class="btn-secondary">Cancel</button>
         <button id="session-save-confirm">Save</button>
