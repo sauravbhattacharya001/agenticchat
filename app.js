@@ -69,6 +69,7 @@
  *   DraftRecovery        — auto-save/restore unsent message drafts per session
  *   PreferencesPanel     — centralised settings panel with toggles, ranges, and reset
  *   SessionTemplates     — save/load reusable session setups (persona, model, tags, starters)
+ *   ConversationFlashcards — extract Q&A pairs as study flashcards with flip animation
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -23771,3 +23772,389 @@ const SessionTemplates = (() => {
 })();
 
 document.addEventListener('DOMContentLoaded', SessionTemplates.init);
+
+
+/* ---------- Conversation Flashcards ---------- */
+/**
+ * Extract Q&A pairs from conversation history and present them as
+ * interactive study flashcards with flip animation.
+ *
+ * Heuristically pairs user questions with assistant answers, lets users
+ * curate the deck, and supports keyboard navigation (arrow keys, Space to flip).
+ * Persists custom decks to localStorage.
+ *
+ * Shortcut: Alt+F  |  Slash command: /flashcards
+ * @namespace ConversationFlashcards
+ */
+const ConversationFlashcards = (() => {
+  const STORAGE_KEY = 'ac-flashcard-decks';
+  const MAX_DECKS = 20;
+  const MAX_CARDS_PER_DECK = 100;
+  let _panel = null;
+  let _visible = false;
+  let _currentDeck = [];
+  let _cardIndex = 0;
+  let _flipped = false;
+
+  /* ---- persistence ---- */
+  function _loadDecks() {
+    try {
+      return JSON.parse(SafeStorage.getItem(STORAGE_KEY)) || [];
+    } catch (e) { return []; }
+  }
+  function _saveDecks(decks) {
+    SafeStorage.setItem(STORAGE_KEY, JSON.stringify(decks.slice(0, MAX_DECKS)));
+  }
+
+  /* ---- extraction ---- */
+  function extractFromConversation() {
+    if (typeof ConversationManager === 'undefined') return [];
+    var msgs = ConversationManager.getMessages ? ConversationManager.getMessages() : [];
+    var cards = [];
+    var qPattern = /^(what|how|why|when|where|who|which|can|could|would|should|is|are|do|does|did|explain|describe|tell)/i;
+    for (var i = 0; i < msgs.length - 1; i++) {
+      if (msgs[i].role !== 'user') continue;
+      var text = (msgs[i].content || '').trim();
+      if (!text) continue;
+      var isQuestion = text.endsWith('?') || qPattern.test(text);
+      if (!isQuestion) continue;
+      for (var j = i + 1; j < msgs.length; j++) {
+        if (msgs[j].role === 'assistant') {
+          var answer = (msgs[j].content || '').trim();
+          if (answer) {
+            cards.push({
+              id: 'fc-' + Date.now() + '-' + cards.length,
+              front: text.length > 200 ? text.slice(0, 197) + '...' : text,
+              back: answer.length > 500 ? answer.slice(0, 497) + '...' : answer,
+              created: Date.now()
+            });
+          }
+          break;
+        }
+      }
+    }
+    return cards.slice(0, MAX_CARDS_PER_DECK);
+  }
+
+  /* ---- helpers ---- */
+  function _escHtml(s) {
+    var d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  function _css(obj) {
+    return Object.keys(obj).map(function(k) { return k + ':' + obj[k]; }).join(';');
+  }
+
+  /* ---- UI ---- */
+  function _createPanel() {
+    if (_panel) return _panel;
+    _panel = document.createElement('div');
+    _panel.id = 'flashcard-panel';
+    _panel.style.cssText = 'position:fixed;top:0;right:0;width:480px;height:100vh;background:var(--bg-primary,#1e1e2e);color:var(--text-primary,#cdd6f4);border-left:1px solid var(--border-color,#45475a);z-index:9200;display:none;flex-direction:column;font-family:inherit;box-shadow:-4px 0 20px rgba(0,0,0,0.3)';
+
+    // Build header
+    var header = document.createElement('div');
+    header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border-color,#45475a)';
+    var title = document.createElement('h3');
+    title.style.cssText = 'margin:0;font-size:16px';
+    title.textContent = '\uD83C\uDCCF Flashcards';
+    header.appendChild(title);
+
+    var btnGroup = document.createElement('div');
+    btnGroup.style.cssText = 'display:flex;gap:8px';
+
+    var extractBtn = document.createElement('button');
+    extractBtn.id = 'fc-extract-btn';
+    extractBtn.textContent = 'Extract Q&A';
+    extractBtn.title = 'Extract from conversation';
+    extractBtn.style.cssText = 'background:var(--accent,#89b4fa);color:#1e1e2e;border:none;border-radius:6px;padding:6px 12px;cursor:pointer;font-size:13px';
+
+    var saveBtn = document.createElement('button');
+    saveBtn.id = 'fc-save-btn';
+    saveBtn.textContent = 'Save Deck';
+    saveBtn.title = 'Save current deck';
+    saveBtn.style.cssText = 'background:var(--success,#a6e3a1);color:#1e1e2e;border:none;border-radius:6px;padding:6px 12px;cursor:pointer;font-size:13px';
+
+    var closeBtn = document.createElement('button');
+    closeBtn.id = 'fc-close-btn';
+    closeBtn.textContent = '\u2715';
+    closeBtn.title = 'Close';
+    closeBtn.style.cssText = 'background:none;border:none;color:var(--text-primary,#cdd6f4);font-size:20px;cursor:pointer';
+
+    btnGroup.appendChild(extractBtn);
+    btnGroup.appendChild(saveBtn);
+    btnGroup.appendChild(closeBtn);
+    header.appendChild(btnGroup);
+    _panel.appendChild(header);
+
+    // Deck selector
+    var deckSel = document.createElement('div');
+    deckSel.id = 'fc-deck-selector';
+    deckSel.style.cssText = 'padding:8px 20px;border-bottom:1px solid var(--border-color,#45475a);display:flex;gap:8px;align-items:center;flex-wrap:wrap';
+    var label = document.createElement('label');
+    label.style.cssText = 'font-size:12px;opacity:0.7';
+    label.textContent = 'Saved Decks:';
+    var select = document.createElement('select');
+    select.id = 'fc-deck-list';
+    select.style.cssText = 'flex:1;background:var(--bg-secondary,#313244);color:var(--text-primary,#cdd6f4);border:1px solid var(--border-color,#45475a);border-radius:4px;padding:4px 8px;font-size:13px';
+    var defOpt = document.createElement('option');
+    defOpt.value = '';
+    defOpt.textContent = '— current extraction —';
+    select.appendChild(defOpt);
+    var delBtn = document.createElement('button');
+    delBtn.id = 'fc-delete-deck-btn';
+    delBtn.title = 'Delete selected deck';
+    delBtn.textContent = '\uD83D\uDDD1';
+    delBtn.style.cssText = 'background:var(--error,#f38ba8);color:#1e1e2e;border:none;border-radius:4px;padding:4px 8px;cursor:pointer;font-size:12px';
+    deckSel.appendChild(label);
+    deckSel.appendChild(select);
+    deckSel.appendChild(delBtn);
+    _panel.appendChild(deckSel);
+
+    // Card area
+    var cardArea = document.createElement('div');
+    cardArea.id = 'fc-card-area';
+    cardArea.style.cssText = 'flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;overflow-y:auto';
+
+    var emptyEl = document.createElement('div');
+    emptyEl.id = 'fc-empty';
+    emptyEl.style.cssText = 'text-align:center;opacity:0.5;font-size:14px';
+    emptyEl.innerHTML = '<p>No flashcards yet.</p><p>Click <strong>Extract Q&amp;A</strong> to generate cards from your conversation.</p>';
+
+    var cardEl = document.createElement('div');
+    cardEl.id = 'fc-card';
+    cardEl.style.cssText = 'display:none;width:100%;max-width:400px;min-height:220px;perspective:800px;cursor:pointer';
+
+    var cardInner = document.createElement('div');
+    cardInner.id = 'fc-card-inner';
+    cardInner.style.cssText = 'position:relative;width:100%;min-height:220px;transition:transform 0.5s;transform-style:preserve-3d';
+
+    var front = document.createElement('div');
+    front.id = 'fc-front';
+    front.style.cssText = 'position:absolute;width:100%;min-height:220px;backface-visibility:hidden;background:var(--bg-secondary,#313244);border-radius:12px;padding:24px;display:flex;align-items:center;justify-content:center;text-align:center;font-size:15px;line-height:1.5;border:2px solid var(--accent,#89b4fa);box-sizing:border-box';
+
+    var back = document.createElement('div');
+    back.id = 'fc-back';
+    back.style.cssText = 'position:absolute;width:100%;min-height:220px;backface-visibility:hidden;background:var(--bg-secondary,#313244);border-radius:12px;padding:24px;display:flex;align-items:center;justify-content:center;text-align:center;font-size:13px;line-height:1.5;border:2px solid var(--success,#a6e3a1);transform:rotateY(180deg);box-sizing:border-box;overflow-y:auto;max-height:350px';
+
+    cardInner.appendChild(front);
+    cardInner.appendChild(back);
+    cardEl.appendChild(cardInner);
+    cardArea.appendChild(emptyEl);
+    cardArea.appendChild(cardEl);
+    _panel.appendChild(cardArea);
+
+    // Controls
+    var controls = document.createElement('div');
+    controls.id = 'fc-controls';
+    controls.style.cssText = 'display:none;padding:12px 20px;border-top:1px solid var(--border-color,#45475a);text-align:center';
+
+    var navRow = document.createElement('div');
+    navRow.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:16px;margin-bottom:8px';
+    var prevBtn = document.createElement('button');
+    prevBtn.id = 'fc-prev';
+    prevBtn.textContent = '\u2190 Prev';
+    prevBtn.style.cssText = 'background:none;border:1px solid var(--border-color,#45475a);color:var(--text-primary,#cdd6f4);border-radius:6px;padding:6px 16px;cursor:pointer;font-size:14px';
+    var counter = document.createElement('span');
+    counter.id = 'fc-counter';
+    counter.style.cssText = 'font-size:13px;opacity:0.7';
+    counter.textContent = '0 / 0';
+    var nextBtn = document.createElement('button');
+    nextBtn.id = 'fc-next';
+    nextBtn.textContent = 'Next \u2192';
+    nextBtn.style.cssText = 'background:none;border:1px solid var(--border-color,#45475a);color:var(--text-primary,#cdd6f4);border-radius:6px;padding:6px 16px;cursor:pointer;font-size:14px';
+    navRow.appendChild(prevBtn);
+    navRow.appendChild(counter);
+    navRow.appendChild(nextBtn);
+    controls.appendChild(navRow);
+
+    var hint = document.createElement('div');
+    hint.style.cssText = 'font-size:11px;opacity:0.5';
+    hint.textContent = 'Space to flip \u00b7 \u2190 \u2192 to navigate \u00b7 Del to remove card';
+    controls.appendChild(hint);
+    _panel.appendChild(controls);
+
+    // Event listeners
+    closeBtn.addEventListener('click', close);
+    extractBtn.addEventListener('click', function() {
+      var cards = extractFromConversation();
+      if (cards.length === 0) {
+        _showEmpty('No Q&A pairs found. Try asking some questions first!');
+        return;
+      }
+      _currentDeck = cards;
+      _cardIndex = 0;
+      _flipped = false;
+      _renderCard();
+    });
+    saveBtn.addEventListener('click', _saveDeck);
+    delBtn.addEventListener('click', _deleteSelectedDeck);
+    select.addEventListener('change', _loadSelectedDeck);
+    cardEl.addEventListener('click', _flipCard);
+    prevBtn.addEventListener('click', _prevCard);
+    nextBtn.addEventListener('click', _nextCard);
+
+    document.body.appendChild(_panel);
+    return _panel;
+  }
+
+  function _showEmpty(msg) {
+    var emptyEl = _panel.querySelector('#fc-empty');
+    var cardEl = _panel.querySelector('#fc-card');
+    var controls = _panel.querySelector('#fc-controls');
+    emptyEl.innerHTML = '<p>' + _escHtml(msg) + '</p>';
+    emptyEl.style.display = 'block';
+    cardEl.style.display = 'none';
+    controls.style.display = 'none';
+  }
+
+  function _renderCard() {
+    if (!_panel || _currentDeck.length === 0) return;
+    _panel.querySelector('#fc-empty').style.display = 'none';
+    _panel.querySelector('#fc-card').style.display = 'block';
+    _panel.querySelector('#fc-controls').style.display = 'block';
+    var card = _currentDeck[_cardIndex];
+    _panel.querySelector('#fc-front').textContent = card.front;
+    _panel.querySelector('#fc-back').textContent = card.back;
+    _panel.querySelector('#fc-counter').textContent = (_cardIndex + 1) + ' / ' + _currentDeck.length;
+    _flipped = false;
+    _panel.querySelector('#fc-card-inner').style.transform = '';
+  }
+
+  function _flipCard() {
+    _flipped = !_flipped;
+    _panel.querySelector('#fc-card-inner').style.transform = _flipped ? 'rotateY(180deg)' : '';
+  }
+
+  function _prevCard() {
+    if (_currentDeck.length === 0) return;
+    _cardIndex = (_cardIndex - 1 + _currentDeck.length) % _currentDeck.length;
+    _flipped = false;
+    _renderCard();
+  }
+
+  function _nextCard() {
+    if (_currentDeck.length === 0) return;
+    _cardIndex = (_cardIndex + 1) % _currentDeck.length;
+    _flipped = false;
+    _renderCard();
+  }
+
+  function _removeCurrentCard() {
+    if (_currentDeck.length === 0) return;
+    _currentDeck.splice(_cardIndex, 1);
+    if (_currentDeck.length === 0) {
+      _showEmpty('All cards removed from this deck.');
+      return;
+    }
+    if (_cardIndex >= _currentDeck.length) _cardIndex = _currentDeck.length - 1;
+    _renderCard();
+  }
+
+  function _saveDeck() {
+    if (_currentDeck.length === 0) return;
+    var name = prompt('Deck name:');
+    if (!name || !name.trim()) return;
+    var decks = _loadDecks();
+    decks.unshift({ name: name.trim(), cards: _currentDeck.slice(), created: Date.now(), count: _currentDeck.length });
+    _saveDecks(decks);
+    _refreshDeckList();
+  }
+
+  function _refreshDeckList() {
+    if (!_panel) return;
+    var sel = _panel.querySelector('#fc-deck-list');
+    var decks = _loadDecks();
+    sel.innerHTML = '<option value="">\u2014 current extraction \u2014</option>';
+    decks.forEach(function(d, i) {
+      var opt = document.createElement('option');
+      opt.value = String(i);
+      opt.textContent = d.name + ' (' + d.count + ' cards)';
+      sel.appendChild(opt);
+    });
+  }
+
+  function _loadSelectedDeck() {
+    var sel = _panel.querySelector('#fc-deck-list');
+    var idx = parseInt(sel.value, 10);
+    if (isNaN(idx)) return;
+    var decks = _loadDecks();
+    if (!decks[idx]) return;
+    _currentDeck = decks[idx].cards.slice();
+    _cardIndex = 0;
+    _flipped = false;
+    if (_currentDeck.length === 0) { _showEmpty('This deck is empty.'); }
+    else { _renderCard(); }
+  }
+
+  function _deleteSelectedDeck() {
+    var sel = _panel.querySelector('#fc-deck-list');
+    var idx = parseInt(sel.value, 10);
+    if (isNaN(idx)) return;
+    var decks = _loadDecks();
+    if (!decks[idx]) return;
+    if (!confirm('Delete deck "' + decks[idx].name + '"?')) return;
+    decks.splice(idx, 1);
+    _saveDecks(decks);
+    _refreshDeckList();
+    sel.value = '';
+  }
+
+  /* ---- keyboard ---- */
+  function _onKey(e) {
+    if (!_visible) return;
+    if (e.key === ' ' || e.code === 'Space') { e.preventDefault(); _flipCard(); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); _prevCard(); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); _nextCard(); }
+    else if (e.key === 'Delete') { e.preventDefault(); _removeCurrentCard(); }
+    else if (e.key === 'Escape') { e.preventDefault(); close(); }
+  }
+
+  /* ---- public ---- */
+  function open() {
+    _createPanel();
+    _panel.style.display = 'flex';
+    _visible = true;
+    _refreshDeckList();
+    document.addEventListener('keydown', _onKey);
+  }
+
+  function close() {
+    if (_panel) _panel.style.display = 'none';
+    _visible = false;
+    document.removeEventListener('keydown', _onKey);
+  }
+
+  function toggle() { _visible ? close() : open(); }
+
+  function getDecks() { return _loadDecks(); }
+  function getCurrentDeck() { return _currentDeck.slice(); }
+  function getCardCount() { return _currentDeck.length; }
+
+  function init() {
+    if (typeof SlashCommands !== 'undefined' && SlashCommands.register) {
+      SlashCommands.register({
+        command: '/flashcards',
+        description: 'Open flashcard study deck from conversation Q&A',
+        action: open
+      });
+    }
+    document.addEventListener('keydown', function(e) {
+      if (e.altKey && e.key === 'f') { e.preventDefault(); toggle(); }
+    });
+    if (typeof CommandPalette !== 'undefined' && CommandPalette.registerCommand) {
+      CommandPalette.registerCommand({ id: 'flashcards', label: '\uD83C\uDCCF Conversation Flashcards', action: open });
+    }
+  }
+
+  return {
+    init: init, open: open, close: close, toggle: toggle,
+    extractFromConversation: extractFromConversation,
+    getDecks: getDecks, getCurrentDeck: getCurrentDeck, getCardCount: getCardCount,
+    _loadDecks: _loadDecks, _saveDecks: _saveDecks
+  };
+})();
+
+document.addEventListener('DOMContentLoaded', ConversationFlashcards.init);
