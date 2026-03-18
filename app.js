@@ -604,7 +604,14 @@ const ApiKeyManager = (() => {
 
     const domain = extractDomain(code);
     if (serviceKeys[domain]) {
-      return code.replace(/YOUR_API_KEY/g, sanitizeKeyForCodeInjection(serviceKeys[domain]));
+      // Use a replacer function instead of a replacement string to prevent
+      // String.prototype.replace() from interpreting special $-patterns
+      // ($&, $`, $', $<name>) in the sanitized key.  Without this, a key
+      // containing e.g. "$&" would expand to the matched text "YOUR_API_KEY"
+      // in the output, corrupting the substitution and potentially leaking
+      // the placeholder into executable code.
+      const sanitized = sanitizeKeyForCodeInjection(serviceKeys[domain]);
+      return code.replace(/YOUR_API_KEY/g, () => sanitized);
     }
 
     // Show modal — store pending state
@@ -637,7 +644,8 @@ const ApiKeyManager = (() => {
   function submitServiceKey(key) {
     if (!key || !pendingDomain) return null;
     serviceKeys[pendingDomain] = key;
-    const code = pendingCode.replace(/YOUR_API_KEY/g, sanitizeKeyForCodeInjection(key));
+    const sanitized = sanitizeKeyForCodeInjection(key);
+    const code = pendingCode.replace(/YOUR_API_KEY/g, () => sanitized);
     pendingCode = pendingDomain = null;
     return code;
   }
