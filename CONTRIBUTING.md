@@ -184,6 +184,18 @@ Open an [issue](https://github.com/sauravbhattacharya001/agenticchat/issues/new)
 3. **Alternatives considered** — What else did you think about?
 4. **Scope** — Is this a small tweak or a significant change?
 
+## Security Vulnerabilities
+
+If you discover a security vulnerability, **do not open a public issue.** Instead, email the maintainer directly or use GitHub's [private vulnerability reporting](https://github.com/sauravbhattacharya001/agenticchat/security/advisories/new). Security issues in the sandbox isolation, CSP enforcement, or API key handling are especially critical.
+
+## Local Development Tips
+
+- **Quick start:** Open `index.html` directly with `file://` protocol — no server needed for basic development.
+- **Live reload:** Use any static server with watch mode (e.g., `npx serve .` or VS Code Live Server extension).
+- **Debugging sandbox:** The iframe sandbox uses `srcdoc` — inspect it via browser DevTools → Elements → find the `<iframe>` and switch to its context in the console.
+- **API mocking:** For testing without burning API credits, mock `fetch` in your test setup (see `tests/setup.js` for examples).
+- **Service Worker:** Changes to `sw.js` require clearing the SW cache in DevTools → Application → Service Workers → Unregister, then hard refresh.
+
 ---
 
 ## License
