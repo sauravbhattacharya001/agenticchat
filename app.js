@@ -68,6 +68,7 @@
  *   CommandPalette       — VS Code-style universal command launcher (Ctrl+Shift+P)
  *   DraftRecovery        — auto-save/restore unsent message drafts per session
  *   PreferencesPanel     — centralised settings panel with toggles, ranges, and reset
+ *   SessionTemplates     — save/load reusable session setups (persona, model, tags, starters)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -23321,3 +23322,452 @@ const SmartTitle = (() => {
 })();
 
 document.addEventListener('DOMContentLoaded', SmartTitle.init);
+
+/* ---------- Session Templates (Ctrl+Shift+N) ---------- */
+/**
+ * Save and load reusable session templates. A template captures:
+ * - Name & description
+ * - System prompt / persona preset
+ * - Model selection
+ * - Tags
+ * - Optional starter messages (first N messages from the session)
+ *
+ * Templates are stored in localStorage and can be exported/imported as JSON.
+ * Slash command: /templates
+ * Keyboard shortcut: Ctrl+Shift+N
+ *
+ * @namespace SessionTemplates
+ */
+const SessionTemplates = (() => {
+  const STORAGE_KEY = 'agenticchat_session_templates';
+  let _overlay = null;
+  let _isOpen = false;
+
+  const _esc = (s) => {
+    if (typeof s !== 'string') return '';
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  };
+
+  /* ---- Storage ---- */
+  function _loadTemplates() {
+    try {
+      const raw = SafeStorage.get(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch { return []; }
+  }
+
+  function _saveTemplates(templates) {
+    SafeStorage.set(STORAGE_KEY, JSON.stringify(templates));
+  }
+
+  /* ---- Capture current session config as template ---- */
+  function captureFromCurrent(opts = {}) {
+    const template = {
+      id: 'tpl_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+      name: opts.name || 'Untitled Template',
+      description: opts.description || '',
+      createdAt: new Date().toISOString(),
+      // Capture persona / system prompt
+      persona: SafeStorage.get('agenticchat_persona') || 'default',
+      // Capture model
+      model: ChatConfig.MODEL || 'gpt-4o',
+      // Capture tags from current session
+      tags: _getCurrentTags(),
+      // Optionally capture starter messages
+      starterMessages: opts.includeStarters ? _getStarterMessages(opts.starterCount || 4) : [],
+    };
+    return template;
+  }
+
+  function _getCurrentTags() {
+    try {
+      if (typeof ConversationTags !== 'undefined' && ConversationTags.getSessionTags) {
+        const activeId = SessionManager.getActiveId();
+        if (activeId) return ConversationTags.getSessionTags(activeId) || [];
+      }
+    } catch {}
+    return [];
+  }
+
+  function _getStarterMessages(count) {
+    try {
+      const history = ConversationManager.getHistory ? ConversationManager.getHistory() : [];
+      // Skip system messages, take first N user/assistant pairs
+      const msgs = history.filter(m => m.role !== 'system');
+      return msgs.slice(0, Math.min(count, msgs.length)).map(m => ({
+        role: m.role,
+        content: typeof m.content === 'string' ? m.content.substring(0, 2000) : ''
+      }));
+    } catch { return []; }
+  }
+
+  /* ---- Save template ---- */
+  function save(template) {
+    const templates = _loadTemplates();
+    templates.unshift(template);
+    _saveTemplates(templates);
+  }
+
+  /* ---- Delete template ---- */
+  function remove(id) {
+    const templates = _loadTemplates().filter(t => t.id !== id);
+    _saveTemplates(templates);
+  }
+
+  /* ---- Apply template to new session ---- */
+  function apply(templateId) {
+    const templates = _loadTemplates();
+    const tpl = templates.find(t => t.id === templateId);
+    if (!tpl) return;
+
+    // Create new session
+    if (typeof SessionManager !== 'undefined' && SessionManager.newSession) {
+      SessionManager.newSession();
+    }
+
+    // Apply persona
+    if (tpl.persona && typeof SafeStorage !== 'undefined') {
+      SafeStorage.set('agenticchat_persona', tpl.persona);
+      // Try to refresh persona UI
+      if (typeof PersonaPresets !== 'undefined' && PersonaPresets.refresh) {
+        PersonaPresets.refresh();
+      }
+    }
+
+    // Apply model
+    if (tpl.model) {
+      ChatConfig.MODEL = tpl.model;
+      const label = document.getElementById('model-label');
+      const m = (ChatConfig.AVAILABLE_MODELS || []).find(x => x.id === tpl.model);
+      if (label && m) label.textContent = m.label;
+    }
+
+    // Apply tags
+    if (tpl.tags && tpl.tags.length > 0 && typeof ConversationTags !== 'undefined') {
+      const activeId = SessionManager.getActiveId ? SessionManager.getActiveId() : null;
+      if (activeId && ConversationTags.addTag) {
+        tpl.tags.forEach(tag => {
+          try { ConversationTags.addTag(activeId, tag); } catch {}
+        });
+      }
+    }
+
+    // Apply starter messages
+    if (tpl.starterMessages && tpl.starterMessages.length > 0) {
+      tpl.starterMessages.forEach(msg => {
+        if (typeof ConversationManager !== 'undefined' && ConversationManager.addMessage) {
+          ConversationManager.addMessage(msg.role, msg.content);
+        }
+      });
+      // Refresh UI
+      if (typeof UIController !== 'undefined' && UIController.renderHistory) {
+        UIController.renderHistory();
+      }
+    }
+
+    close();
+  }
+
+  /* ---- Export / Import ---- */
+  function exportAll() {
+    const templates = _loadTemplates();
+    const blob = new Blob([JSON.stringify(templates, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'session-templates.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  function importFromJSON(jsonString) {
+    try {
+      const imported = JSON.parse(jsonString);
+      if (!Array.isArray(imported)) return 0;
+      const existing = _loadTemplates();
+      const existingIds = new Set(existing.map(t => t.id));
+      let added = 0;
+      imported.forEach(tpl => {
+        if (tpl.id && tpl.name && !existingIds.has(tpl.id)) {
+          existing.unshift(tpl);
+          added++;
+        }
+      });
+      _saveTemplates(existing);
+      return added;
+    } catch { return 0; }
+  }
+
+  /* ---- UI ---- */
+  function _createOverlay() {
+    if (_overlay) return _overlay;
+
+    _overlay = document.createElement('div');
+    _overlay.id = 'session-templates-overlay';
+    _overlay.innerHTML = `
+      <div class="stpl-panel">
+        <div class="stpl-header">
+          <h3>📋 Session Templates</h3>
+          <div class="stpl-header-actions">
+            <button class="btn-sm stpl-save-btn" title="Save current session as template">💾 Save Current</button>
+            <button class="btn-sm stpl-import-btn" title="Import templates">📥 Import</button>
+            <button class="btn-sm stpl-export-btn" title="Export all templates">📤 Export</button>
+            <button class="btn-sm stpl-close-btn" title="Close">✕</button>
+          </div>
+        </div>
+        <div class="stpl-save-form" style="display:none">
+          <input class="stpl-name-input" type="text" placeholder="Template name" maxlength="80" />
+          <input class="stpl-desc-input" type="text" placeholder="Description (optional)" maxlength="200" />
+          <label class="stpl-starter-label">
+            <input type="checkbox" class="stpl-include-starters" />
+            Include first 4 messages as starters
+          </label>
+          <div class="stpl-save-actions">
+            <button class="btn-sm stpl-confirm-save">Save Template</button>
+            <button class="btn-sm stpl-cancel-save">Cancel</button>
+          </div>
+        </div>
+        <div class="stpl-list"></div>
+        <input type="file" class="stpl-file-input" accept=".json" style="display:none" />
+      </div>
+    `;
+
+    const style = document.createElement('style');
+    style.textContent = `
+      #session-templates-overlay {
+        display: none; position: fixed; inset: 0; z-index: 10000;
+        background: rgba(0,0,0,0.5); justify-content: center; align-items: center;
+      }
+      #session-templates-overlay.visible { display: flex; }
+      .stpl-panel {
+        background: var(--bg, #1e1e2e); color: var(--fg, #cdd6f4);
+        border: 1px solid var(--border, #45475a); border-radius: 12px;
+        width: 520px; max-width: 95vw; max-height: 80vh; overflow: hidden;
+        display: flex; flex-direction: column; box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+      }
+      .stpl-header {
+        display: flex; justify-content: space-between; align-items: center;
+        padding: 14px 18px; border-bottom: 1px solid var(--border, #45475a);
+      }
+      .stpl-header h3 { margin: 0; font-size: 16px; }
+      .stpl-header-actions { display: flex; gap: 6px; }
+      .stpl-header-actions .btn-sm {
+        background: var(--btn-bg, #313244); border: 1px solid var(--border, #45475a);
+        color: var(--fg, #cdd6f4); border-radius: 6px; padding: 4px 10px;
+        cursor: pointer; font-size: 12px;
+      }
+      .stpl-header-actions .btn-sm:hover { background: var(--btn-hover, #45475a); }
+      .stpl-save-form {
+        padding: 12px 18px; border-bottom: 1px solid var(--border, #45475a);
+        display: flex; flex-direction: column; gap: 8px;
+      }
+      .stpl-save-form input[type="text"] {
+        background: var(--input-bg, #313244); color: var(--fg, #cdd6f4);
+        border: 1px solid var(--border, #45475a); border-radius: 6px;
+        padding: 8px 10px; font-size: 13px; outline: none;
+      }
+      .stpl-save-form input[type="text"]:focus { border-color: var(--accent, #89b4fa); }
+      .stpl-starter-label {
+        font-size: 12px; display: flex; align-items: center; gap: 6px; opacity: 0.8;
+      }
+      .stpl-save-actions { display: flex; gap: 8px; }
+      .stpl-save-actions .btn-sm {
+        background: var(--accent, #89b4fa); color: #1e1e2e; border: none;
+        border-radius: 6px; padding: 6px 14px; cursor: pointer; font-size: 12px; font-weight: 600;
+      }
+      .stpl-save-actions .btn-sm:last-child { background: var(--btn-bg, #313244); color: var(--fg, #cdd6f4); }
+      .stpl-list {
+        overflow-y: auto; padding: 12px 18px; flex: 1;
+      }
+      .stpl-empty {
+        text-align: center; opacity: 0.5; padding: 40px 0; font-size: 14px;
+      }
+      .stpl-card {
+        background: var(--btn-bg, #313244); border: 1px solid var(--border, #45475a);
+        border-radius: 8px; padding: 12px 14px; margin-bottom: 8px;
+        display: flex; flex-direction: column; gap: 6px;
+      }
+      .stpl-card-top { display: flex; justify-content: space-between; align-items: center; }
+      .stpl-card-name { font-weight: 600; font-size: 14px; }
+      .stpl-card-desc { font-size: 12px; opacity: 0.7; }
+      .stpl-card-meta { display: flex; gap: 8px; font-size: 11px; opacity: 0.5; flex-wrap: wrap; }
+      .stpl-card-meta span { background: var(--bg, #1e1e2e); padding: 2px 6px; border-radius: 4px; }
+      .stpl-card-actions { display: flex; gap: 6px; }
+      .stpl-card-actions button {
+        background: var(--accent, #89b4fa); color: #1e1e2e; border: none;
+        border-radius: 5px; padding: 4px 12px; cursor: pointer; font-size: 11px; font-weight: 600;
+      }
+      .stpl-card-actions button.stpl-delete-btn {
+        background: transparent; color: var(--fg, #cdd6f4); opacity: 0.5;
+      }
+      .stpl-card-actions button.stpl-delete-btn:hover { opacity: 1; color: #f38ba8; }
+      .stpl-card-tags { display: flex; gap: 4px; flex-wrap: wrap; }
+      .stpl-card-tags span {
+        background: var(--accent, #89b4fa); color: #1e1e2e; font-size: 10px;
+        padding: 1px 6px; border-radius: 3px; font-weight: 600;
+      }
+    `;
+    document.head.appendChild(style);
+    document.body.appendChild(_overlay);
+
+    // Wire events
+    _overlay.querySelector('.stpl-close-btn').addEventListener('click', close);
+    _overlay.addEventListener('click', (e) => { if (e.target === _overlay) close(); });
+
+    const saveBtn = _overlay.querySelector('.stpl-save-btn');
+    const saveForm = _overlay.querySelector('.stpl-save-form');
+    const confirmBtn = _overlay.querySelector('.stpl-confirm-save');
+    const cancelBtn = _overlay.querySelector('.stpl-cancel-save');
+
+    saveBtn.addEventListener('click', () => {
+      saveForm.style.display = saveForm.style.display === 'none' ? 'flex' : 'none';
+      if (saveForm.style.display === 'flex') {
+        _overlay.querySelector('.stpl-name-input').focus();
+      }
+    });
+
+    cancelBtn.addEventListener('click', () => { saveForm.style.display = 'none'; });
+
+    confirmBtn.addEventListener('click', () => {
+      const name = _overlay.querySelector('.stpl-name-input').value.trim();
+      if (!name) { _overlay.querySelector('.stpl-name-input').focus(); return; }
+      const desc = _overlay.querySelector('.stpl-desc-input').value.trim();
+      const includeStarters = _overlay.querySelector('.stpl-include-starters').checked;
+      const tpl = captureFromCurrent({ name, description: desc, includeStarters });
+      save(tpl);
+      saveForm.style.display = 'none';
+      _overlay.querySelector('.stpl-name-input').value = '';
+      _overlay.querySelector('.stpl-desc-input').value = '';
+      _overlay.querySelector('.stpl-include-starters').checked = false;
+      _renderList();
+    });
+
+    _overlay.querySelector('.stpl-export-btn').addEventListener('click', exportAll);
+    _overlay.querySelector('.stpl-import-btn').addEventListener('click', () => {
+      _overlay.querySelector('.stpl-file-input').click();
+    });
+    _overlay.querySelector('.stpl-file-input').addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const count = importFromJSON(reader.result);
+        if (count > 0) _renderList();
+        alert(count > 0 ? `Imported ${count} template(s).` : 'No new templates found.');
+      };
+      reader.readAsText(file);
+      e.target.value = '';
+    });
+
+    // Keyboard: Esc to close
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && _isOpen) close();
+    });
+
+    return _overlay;
+  }
+
+  function _renderList() {
+    const list = _overlay.querySelector('.stpl-list');
+    const templates = _loadTemplates();
+
+    if (templates.length === 0) {
+      list.innerHTML = '<div class="stpl-empty">No templates yet.<br>Save your current session setup as a reusable template!</div>';
+      return;
+    }
+
+    list.innerHTML = '';
+    templates.forEach(tpl => {
+      const modelInfo = (ChatConfig.AVAILABLE_MODELS || []).find(m => m.id === tpl.model);
+      const modelLabel = modelInfo ? modelInfo.label : (tpl.model || 'default');
+      const date = new Date(tpl.createdAt).toLocaleDateString();
+
+      const card = document.createElement('div');
+      card.className = 'stpl-card';
+      card.innerHTML = `
+        <div class="stpl-card-top">
+          <span class="stpl-card-name">${_esc(tpl.name)}</span>
+        </div>
+        ${tpl.description ? `<div class="stpl-card-desc">${_esc(tpl.description)}</div>` : ''}
+        <div class="stpl-card-meta">
+          <span>🤖 ${_esc(modelLabel)}</span>
+          <span>🎭 ${_esc(tpl.persona || 'default')}</span>
+          ${tpl.starterMessages && tpl.starterMessages.length ? `<span>💬 ${tpl.starterMessages.length} starters</span>` : ''}
+          <span>📅 ${date}</span>
+        </div>
+        ${tpl.tags && tpl.tags.length ? `<div class="stpl-card-tags">${tpl.tags.map(t => `<span>${_esc(typeof t === 'string' ? t : t.name || '')}</span>`).join('')}</div>` : ''}
+        <div class="stpl-card-actions">
+          <button class="stpl-use-btn">▶ Use Template</button>
+          <button class="stpl-delete-btn">🗑</button>
+        </div>
+      `;
+
+      card.querySelector('.stpl-use-btn').addEventListener('click', () => {
+        if (confirm(`Start new session from "${tpl.name}"?`)) apply(tpl.id);
+      });
+      card.querySelector('.stpl-delete-btn').addEventListener('click', () => {
+        if (confirm(`Delete template "${tpl.name}"?`)) {
+          remove(tpl.id);
+          _renderList();
+        }
+      });
+
+      list.appendChild(card);
+    });
+  }
+
+  function open() {
+    const overlay = _createOverlay();
+    _renderList();
+    overlay.classList.add('visible');
+    _isOpen = true;
+  }
+
+  function close() {
+    if (_overlay) _overlay.classList.remove('visible');
+    _isOpen = false;
+  }
+
+  function toggle() { _isOpen ? close() : open(); }
+
+  function getAll() { return _loadTemplates(); }
+
+  /* ---- Init: register slash command + keyboard shortcut ---- */
+  function init() {
+    // Register slash command
+    if (typeof SlashCommands !== 'undefined' && SlashCommands.register) {
+      SlashCommands.register({
+        command: '/templates',
+        description: 'Open session templates manager',
+        action: open
+      });
+    }
+
+    // Register keyboard shortcut: Ctrl+Shift+N
+    document.addEventListener('keydown', (e) => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'N') {
+        e.preventDefault();
+        toggle();
+      }
+    });
+
+    // Register in command palette if available
+    if (typeof CommandPalette !== 'undefined' && CommandPalette.registerCommand) {
+      CommandPalette.registerCommand({
+        id: 'session-templates',
+        label: '📋 Session Templates',
+        action: open
+      });
+    }
+  }
+
+  return {
+    init, open, close, toggle,
+    captureFromCurrent, save, remove, apply,
+    getAll, exportAll, importFromJSON,
+    _loadTemplates, _saveTemplates
+  };
+})();
+
+document.addEventListener('DOMContentLoaded', SessionTemplates.init);
