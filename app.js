@@ -270,9 +270,17 @@ function sanitizeStorageObject(obj) {
  * Used by ChatStats, CostDashboard, PersonaPresets, HistoryPanel,
  * ConversationTimeline, and GlobalSessionSearch.
  */
+/**
+ * Escape HTML special characters using a single-pass replacement.
+ * Previous implementation chained 5 sequential .replace() calls, each
+ * creating a new string and scanning the entire input — O(5n) with 5
+ * intermediate string allocations.  This version uses a single regex
+ * with a lookup map: one scan, one allocation, O(n).
+ */
+const _HTML_ESCAPE_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+const _HTML_ESCAPE_RE = /[&<>"']/g;
 function _escapeHtml(str) {
-  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  return String(str).replace(_HTML_ESCAPE_RE, ch => _HTML_ESCAPE_MAP[ch]);
 }
 
 /* ---------- Conversation Manager ---------- */
@@ -306,6 +314,19 @@ const ConversationManager = (() => {
     getHistory()   { return history; },
     /** Return a shallow copy of the message history. */
     getMessages()  { return [...history]; },
+    /**
+     * Return non-system messages without the double allocation of
+     * getMessages().filter(). Called frequently by export, stats,
+     * session-save, and summarizer — avoids creating a full copy
+     * only to immediately filter it.
+     */
+    getUserMessages() {
+      const result = [];
+      for (let i = 0; i < history.length; i++) {
+        if (history[i].role !== 'system') result.push(history[i]);
+      }
+      return result;
+    },
     /** Return a copy of recorded response-time entries. */
     getResponseTimes() { return [...responseTimes]; },
     /** Whether timing badges are currently shown in the UI. */
@@ -1611,13 +1632,17 @@ const HistoryPanel = (() => {
    * @param {HTMLElement} container  The element to append content to.
    * @param {string}      content    Raw message text.
    */
+  // Pre-compiled regex for code block splitting — avoids re-creating the
+  // RegExp object on every _renderContent call (once per message rendered).
+  const _CODE_BLOCK_RE = /```(?:\w*)\n([\s\S]*?)```/g;
+
   function _renderContent(container, content) {
     // Split on fenced code blocks: ```[lang]\n...\n```
-    var codeBlockRegex = /```(?:\w*)\n([\s\S]*?)```/g;
+    _CODE_BLOCK_RE.lastIndex = 0;  // reset stateful regex
     var lastIndex = 0;
     var match;
 
-    while ((match = codeBlockRegex.exec(content)) !== null) {
+    while ((match = _CODE_BLOCK_RE.exec(content)) !== null) {
       // Text before this code block
       var before = content.substring(lastIndex, match.index).trim();
       if (before) {
@@ -1753,7 +1778,7 @@ const HistoryPanel = (() => {
   }
 
   function exportAsMarkdown() {
-    const messages = ConversationManager.getMessages().filter(m => m.role !== 'system');
+    const messages = ConversationManager.getUserMessages();
     if (messages.length === 0) {
       alert('No conversation to export.');
       return;
@@ -1773,7 +1798,7 @@ const HistoryPanel = (() => {
   }
 
   function exportAsJSON() {
-    const messages = ConversationManager.getMessages().filter(m => m.role !== 'system');
+    const messages = ConversationManager.getUserMessages();
     if (messages.length === 0) {
       alert('No conversation to export.');
       return;
@@ -1791,7 +1816,7 @@ const HistoryPanel = (() => {
   }
 
   function exportAsHTML() {
-    const messages = ConversationManager.getMessages().filter(m => m.role !== 'system');
+    const messages = ConversationManager.getUserMessages();
     if (messages.length === 0) {
       alert('No conversation to export.');
       return;
@@ -1874,7 +1899,7 @@ ${messagesHTML}
   }
 
   function exportAsCSV() {
-    const messages = ConversationManager.getMessages().filter(m => m.role !== 'system');
+    const messages = ConversationManager.getUserMessages();
     if (messages.length === 0) {
       alert('No conversation to export.');
       return;
@@ -4110,7 +4135,7 @@ const SessionManager = (() => {
    * If activeId matches an existing session, updates it. Otherwise creates new.
    */
   function save(name) {
-    const messages = ConversationManager.getMessages().filter(m => m.role !== 'system');
+    const messages = ConversationManager.getUserMessages();
     if (messages.length === 0 && !name) return null;
 
     const sessions = _loadAll();
@@ -4160,7 +4185,7 @@ const SessionManager = (() => {
   /** Auto-save the current session (called after each message). */
   function autoSaveIfEnabled() {
     if (!autoSave) return;
-    const messages = ConversationManager.getMessages().filter(m => m.role !== 'system');
+    const messages = ConversationManager.getUserMessages();
     if (messages.length === 0) return;
 
     save();
@@ -4189,7 +4214,7 @@ const SessionManager = (() => {
 
   /** Auto-save the current conversation if auto-save is enabled. */
   function _autoSaveCurrent() {
-    const currentMessages = ConversationManager.getMessages().filter(m => m.role !== 'system');
+    const currentMessages = ConversationManager.getUserMessages();
     if (autoSave && currentMessages.length > 0) {
       save();
     }
@@ -4653,7 +4678,7 @@ const SessionManager = (() => {
     if (active) {
       nameInput.value = active.name;
     } else {
-      const messages = ConversationManager.getMessages().filter(m => m.role !== 'system');
+      const messages = ConversationManager.getUserMessages();
       nameInput.value = _generateName(messages);
     }
 
@@ -5294,7 +5319,7 @@ const ChatStats = (() => {
    * Returns an object with computed stats.
    */
   function compute() {
-    const messages = ConversationManager.getMessages().filter(m => m.role !== 'system');
+    const messages = ConversationManager.getUserMessages();
     const userMsgs = messages.filter(m => m.role === 'user');
     const assistantMsgs = messages.filter(m => m.role === 'assistant');
 
@@ -9888,7 +9913,7 @@ const MessageAnnotations = (() => {
   function exportAnnotations() {
     const all = getAllAnnotations();
     const messages = typeof ConversationManager !== 'undefined'
-      ? ConversationManager.getMessages().filter(m => m.role !== 'system')
+      ? ConversationManager.getUserMessages()
       : [];
 
     return all.map(ann => {
@@ -10183,7 +10208,7 @@ const MessageAnnotations = (() => {
     }
 
     const messages = typeof ConversationManager !== 'undefined'
-      ? ConversationManager.getMessages().filter(m => m.role !== 'system')
+      ? ConversationManager.getUserMessages()
       : [];
 
     all.forEach(ann => {
@@ -23210,7 +23235,7 @@ const SmartTitle = (() => {
    * @returns {string} Generated title (3-8 words).
    */
   function generate(messages) {
-    const msgs = messages || ConversationManager.getMessages().filter(m => m.role !== 'system');
+    const msgs = messages || ConversationManager.getUserMessages();
     if (!msgs || msgs.length === 0) return 'Empty Conversation';
 
     // Combine all text
