@@ -284,6 +284,15 @@ function _escapeHtml(str) {
   return String(str).replace(_HTML_ESCAPE_RE, ch => _HTML_ESCAPE_MAP[ch]);
 }
 
+/* ---------- Shared Session Helper ---------- */
+function _getSessions() {
+  if (typeof SessionManager === 'undefined') return [];
+  try {
+    const all = SessionManager.getAll();
+    return Array.isArray(all) ? all : [];
+  } catch { return []; }
+}
+
 /* ---------- Conversation Manager ---------- */
 /**
  * Manages the conversation message history sent to the OpenAI API.
@@ -1482,7 +1491,7 @@ const PromptTemplates = (() => {
     if (!container) return;
 
     if (data.length === 0) {
-      container.innerHTML = '';
+      container.textContent = '';
       const empty = document.createElement('div');
       empty.className = 'templates-empty';
       empty.textContent = 'No templates match your search.';
@@ -1534,7 +1543,7 @@ const PromptTemplates = (() => {
     });
 
     // Single DOM mutation: clear and append all categories at once
-    container.innerHTML = '';
+    container.textContent = '';
     container.appendChild(fragment);
   }
 
@@ -2186,7 +2195,7 @@ const SnippetLibrary = (() => {
     }
 
     if (snippets.length === 0) {
-      container.innerHTML = '';
+      container.textContent = '';
       const empty = document.createElement('div');
       empty.className = 'snippets-empty';
       empty.textContent = total === 0
@@ -2297,7 +2306,7 @@ const SnippetLibrary = (() => {
       fragment.appendChild(card);
     });
 
-    container.innerHTML = '';
+    container.textContent = '';
     container.appendChild(fragment);
   }
 
@@ -2824,7 +2833,7 @@ const ChatBookmarks = (() => {
   function renderPanel() {
     const list = document.getElementById('bookmarks-list');
     if (!list) return;
-    list.innerHTML = '';
+    list.textContent = '';
 
     const sorted = getAll();
     if (sorted.length === 0) {
@@ -3090,7 +3099,7 @@ const SlashCommands = (() => {
 
     function renderCommands() {
         if (!dropdownEl) return;
-        dropdownEl.innerHTML = '';
+        dropdownEl.textContent = '';
         const visible = filteredCommands.slice(0, MAX_VISIBLE);
         visible.forEach((cmd, i) => {
             const item = document.createElement('div');
@@ -4484,7 +4493,7 @@ const SessionManager = (() => {
     }
 
     if (sessions.length === 0) {
-      container.innerHTML = '';
+      container.textContent = '';
       const empty = document.createElement('div');
       empty.className = 'sessions-empty';
       empty.textContent = 'No saved sessions.\nSend messages and save, or enable auto-save.';
@@ -4633,7 +4642,7 @@ const SessionManager = (() => {
       fragment.appendChild(card);
     });
 
-    container.innerHTML = '';
+    container.textContent = '';
     container.appendChild(fragment);
   }
 
@@ -4887,7 +4896,7 @@ const SessionNotes = (() => {
   function _startInlineEdit(sessionId, wrapper) {
     const currentNote = get(sessionId);
 
-    wrapper.innerHTML = '';
+    wrapper.textContent = '';
     const textarea = document.createElement('textarea');
     textarea.className = 'session-note-input';
     textarea.value = currentNote;
@@ -4906,7 +4915,7 @@ const SessionNotes = (() => {
     function finish() {
       const newNote = set(sessionId, textarea.value);
       // Re-render the card's note section
-      wrapper.innerHTML = '';
+      wrapper.textContent = '';
       const fresh = renderForCard(sessionId);
       wrapper.parentNode.replaceChild(fresh, wrapper);
     }
@@ -6066,7 +6075,7 @@ const ModelSelector = (() => {
   function _render() {
     const list = document.getElementById('model-list');
     if (!list) return;
-    list.innerHTML = '';
+    list.textContent = '';
     ChatConfig.AVAILABLE_MODELS.forEach(m => {
       const btn = document.createElement('button');
       btn.className = 'model-option' + (m.id === ChatConfig.MODEL ? ' model-active' : '');
@@ -6937,7 +6946,7 @@ const QuickReplies = (() => {
   function hide() {
     const container = document.getElementById('quick-replies');
     if (container) {
-      container.innerHTML = '';
+      container.textContent = '';
       container.style.display = 'none';
     }
   }
@@ -6965,7 +6974,7 @@ const QuickReplies = (() => {
    * @param {Array} suggestions     Array of { label, prompt } objects.
    */
   function _render(container, suggestions) {
-    container.innerHTML = '';
+    container.textContent = '';
     container.style.display = 'flex';
 
     suggestions.forEach(suggestion => {
@@ -9488,7 +9497,7 @@ const ConversationSummarizer = (() => {
   function renderPanel() {
     var body = document.getElementById('summary-body');
     if (!body) return;
-    body.innerHTML = '';
+    body.textContent = '';
 
     var sum = lastSummary || generateSummary();
     if (!sum) {
@@ -10200,7 +10209,7 @@ const MessageAnnotations = (() => {
     if (!panelEl) return;
     const body = panelEl.querySelector('#ann-panel-body');
     if (!body) return;
-    body.innerHTML = '';
+    body.textContent = '';
 
     const all = getAllAnnotations();
     if (all.length === 0) {
@@ -10694,7 +10703,7 @@ const ConversationChapters = (() => {
   function renderPanel() {
     var body = document.getElementById('chapters-body');
     if (!body) return;
-    body.innerHTML = '';
+    body.textContent = '';
 
     var sorted = getChapters();
     if (sorted.length === 0) return;
@@ -11680,7 +11689,7 @@ const GlobalSessionSearch = (() => {
 
   function _clearResults() {
     const el = document.getElementById('global-search-results');
-    if (el) el.innerHTML = '';
+    if (el) el.textContent = '';
   }
 
   const _esc = _escapeHtml;
@@ -14141,7 +14150,7 @@ const PromptLibrary = (() => {
     // Also update datalist in save modal
     var dl = document.getElementById('prompt-library-folder-suggestions');
     if (dl) {
-      dl.innerHTML = '';
+      dl.textContent = '';
       for (var j = 0; j < folders.length; j++) {
         var o = document.createElement('option');
         o.value = folders[j];
@@ -15461,7 +15470,7 @@ const ModelComparePanel = (() => {
 
     _setStatus('⏳ Running comparison across ' + modelIds.length + ' models...', 'info');
     panelEl.querySelector('.mcp-btn-run').disabled = true;
-    panelEl.querySelector('.mcp-result').innerHTML = '';
+    panelEl.querySelector('.mcp-result').textContent = '';
 
     try {
       const result = await ModelCompare.compare(prompt, modelIds);
@@ -17684,7 +17693,7 @@ const ClipboardHistory = (() => {
       frag.appendChild(el);
     });
 
-    listEl.innerHTML = '';
+    listEl.textContent = '';
     listEl.appendChild(frag);
   }
 
@@ -18538,11 +18547,7 @@ const QuickSwitcher = (() => {
     });
   }
 
-  function _escapeHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
-  }
+  // Uses shared _escapeHtml from top-level utilities
 
   function show() {
     const overlay = _createOverlay();
@@ -18627,7 +18632,7 @@ const WordCloud = (() => {
     if (!panelEl) return;
     const words = _extractWords();
     const cloud = panelEl.querySelector('.wc-cloud');
-    cloud.innerHTML = '';
+    cloud.textContent = '';
 
     if (words.length === 0) {
       cloud.innerHTML = '<p class="wc-empty">No words yet — start a conversation!</p>';
@@ -20254,7 +20259,7 @@ const FocusTimer = (() => {
     if (!el) return;
     const total = _settings.longAfter;
     const done = _todaySessions % total;
-    el.innerHTML = '';
+    el.textContent = '';
     for (let i = 0; i < total; i++) {
       const dot = document.createElement('div');
       dot.style.cssText = `width:14px;height:14px;border-radius:50%;border:2px solid ${i < done ? '#e74c3c' : 'rgba(128,128,128,0.4)'};background:${i < done ? '#e74c3c' : 'transparent'};`;
@@ -21073,7 +21078,7 @@ const CommandPalette = (() => {
   function _render() {
     if (!_list) return;
     const query = _input ? _input.value : '';
-    _list.innerHTML = '';
+    _list.textContent = '';
     if (_filtered.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'cp-empty';
@@ -21263,24 +21268,14 @@ const SplitView = (() => {
   let _rightSession = null;
   let _syncScroll = true;
 
-  function _escapeHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
-  }
+  // Uses shared _escapeHtml from top-level utilities
 
   function _truncate(text, max) {
     if (!text) return '';
     return text.length > max ? text.substring(0, max) + '…' : text;
   }
 
-  function _getSessions() {
-    if (typeof SessionManager === 'undefined') return [];
-    try {
-      const all = SessionManager.getAll();
-      return Array.isArray(all) ? all : [];
-    } catch { return []; }
-  }
+  // Uses shared _getSessions from top-level utilities
 
   function _createOverlay() {
     if (_overlay) { _overlay.remove(); }
@@ -21401,7 +21396,7 @@ const SplitView = (() => {
     const paneId = side === 'left' ? 'splitview-left-pane' : 'splitview-right-pane';
     const pane = document.getElementById(paneId);
     if (!pane) return;
-    pane.innerHTML = '';
+    pane.textContent = '';
 
     if (!session || !Array.isArray(session.messages) || session.messages.length === 0) {
       const empty = document.createElement('div');
@@ -21443,7 +21438,7 @@ const SplitView = (() => {
     const rightMsgs = _rightSession && Array.isArray(_rightSession.messages) ? _rightSession.messages : [];
 
     if (leftMsgs.length === 0 && rightMsgs.length === 0) {
-      el.innerHTML = '';
+      el.textContent = '';
       return;
     }
 
@@ -21578,13 +21573,7 @@ const StreakTracker = (() => {
     { days: 365, emoji: '🌟', label: 'Eternal', desc: 'Full year streak' },
   ];
 
-  function _getSessions() {
-    if (typeof SessionManager === 'undefined') return [];
-    try {
-      const all = SessionManager.getAll();
-      return Array.isArray(all) ? all : [];
-    } catch { return []; }
-  }
+  // Uses shared _getSessions from top-level utilities
 
   /** Get unique active dates (YYYY-MM-DD) from all sessions. */
   function _getActiveDates() {
@@ -21649,11 +21638,7 @@ const StreakTracker = (() => {
     };
   }
 
-  function _escapeHtml(str) {
-    const d = document.createElement('div');
-    d.textContent = str;
-    return d.innerHTML;
-  }
+  // Uses shared _escapeHtml from top-level utilities
 
   function _buildCalendar(dateSet) {
     const today = new Date();
@@ -23677,7 +23662,7 @@ const SessionTemplates = (() => {
       return;
     }
 
-    list.innerHTML = '';
+    list.textContent = '';
     templates.forEach(tpl => {
       const modelInfo = (ChatConfig.AVAILABLE_MODELS || []).find(m => m.id === tpl.model);
       const modelLabel = modelInfo ? modelInfo.label : (tpl.model || 'default');
