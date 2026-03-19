@@ -72,6 +72,7 @@
  *   ConversationFlashcards — extract Q&A pairs as study flashcards with flip animation
  *   SmartPaste           — intelligent paste formatting (JSON, code, CSV, SQL, URLs, stack traces)
  *   MessageContextMenu   — right-click context menu aggregating per-message actions
+ *   PomodoroTimer        — built-in focus timer with work/break cycles and stats
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -24870,3 +24871,238 @@ const MessageContextMenu = (() => {
 })();
 
 document.addEventListener('DOMContentLoaded', MessageContextMenu.init);
+
+/* ============================================================
+ *  PomodoroTimer — built-in focus timer with work/break cycles
+ * ============================================================ */
+var PomodoroTimer = (function() {
+  'use strict';
+  var STORAGE_KEY = 'ac_pomodoro';
+  var _overlay, _display, _phaseLabel, _progressFill, _startBtn, _statsEl;
+  var _workMin = 25, _shortBreakMin = 5, _longBreakMin = 15, _longBreakEvery = 4;
+  var _phase = 'work'; // 'work' | 'short-break' | 'long-break'
+  var _remaining = 0; // seconds
+  var _total = 0;
+  var _timer = null;
+  var _running = false;
+  var _completedPomodoros = 0;
+  var _totalFocusMin = 0;
+  var _visible = false;
+
+  function _load() {
+    try {
+      var d = JSON.parse(SafeStorage.get(STORAGE_KEY));
+      if (d) {
+        _completedPomodoros = d.completedPomodoros || 0;
+        _totalFocusMin = d.totalFocusMin || 0;
+        if (d.workMin) _workMin = d.workMin;
+        if (d.shortBreakMin) _shortBreakMin = d.shortBreakMin;
+        if (d.longBreakMin) _longBreakMin = d.longBreakMin;
+      }
+    } catch (_) {}
+  }
+
+  function _save() {
+    try {
+      SafeStorage.set(STORAGE_KEY, JSON.stringify({
+        completedPomodoros: _completedPomodoros,
+        totalFocusMin: _totalFocusMin,
+        workMin: _workMin,
+        shortBreakMin: _shortBreakMin,
+        longBreakMin: _longBreakMin
+      }));
+    } catch (_) {}
+  }
+
+  function _fmt(secs) {
+    var m = Math.floor(secs / 60);
+    var s = secs % 60;
+    return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+  }
+
+  function _updateUI() {
+    if (!_display) return;
+    _display.textContent = _fmt(_remaining);
+    _display.className = 'pomodoro-display ' + _phase;
+    var pct = _total > 0 ? (((_total - _remaining) / _total) * 100) : 0;
+    _progressFill.style.width = pct + '%';
+    _progressFill.className = 'pomodoro-progress-fill ' + _phase;
+    var labels = { work: '🍅 Focus', 'short-break': '☕ Short Break', 'long-break': '🌴 Long Break' };
+    _phaseLabel.textContent = labels[_phase] || _phase;
+    _startBtn.textContent = _running ? '⏸ Pause' : '▶ Start';
+    _startBtn.classList.toggle('primary', !_running);
+    _statsEl.textContent = '🍅 ' + _completedPomodoros + ' completed · ' + _totalFocusMin + ' min focused today';
+    // Update toolbar badge
+    var btn = document.getElementById('pomodoro-btn');
+    if (btn) {
+      var badge = btn.querySelector('.pomodoro-badge');
+      if (_running) {
+        if (!badge) { badge = document.createElement('span'); badge.className = 'pomodoro-badge'; btn.appendChild(badge); }
+        badge.textContent = _fmt(_remaining);
+      } else if (badge) { badge.remove(); }
+    }
+  }
+
+  function _tick() {
+    if (_remaining <= 0) {
+      _running = false;
+      clearInterval(_timer);
+      _timer = null;
+      _onPhaseComplete();
+      return;
+    }
+    _remaining--;
+    _updateUI();
+  }
+
+  function _onPhaseComplete() {
+    if (_phase === 'work') {
+      _completedPomodoros++;
+      _totalFocusMin += _workMin;
+      _save();
+      // Decide next break
+      if (_completedPomodoros % _longBreakEvery === 0) {
+        _setPhase('long-break');
+      } else {
+        _setPhase('short-break');
+      }
+      _notify('Focus session complete!', 'Time for a break.');
+    } else {
+      _setPhase('work');
+      _notify('Break over!', 'Ready to focus?');
+    }
+    _updateUI();
+  }
+
+  function _notify(title, body) {
+    try {
+      if (Notification && Notification.permission === 'granted') {
+        new Notification(title, { body: body, icon: '🍅' });
+      } else if (Notification && Notification.permission !== 'denied') {
+        Notification.requestPermission();
+      }
+    } catch (_) {}
+    // Also play a beep
+    try {
+      var ctx = new (window.AudioContext || window.webkitAudioContext)();
+      var osc = ctx.createOscillator();
+      var gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.frequency.value = 800; gain.gain.value = 0.3;
+      osc.start(); osc.stop(ctx.currentTime + 0.3);
+    } catch (_) {}
+  }
+
+  function _setPhase(phase) {
+    _phase = phase;
+    var mins = phase === 'work' ? _workMin : (phase === 'short-break' ? _shortBreakMin : _longBreakMin);
+    _remaining = mins * 60;
+    _total = _remaining;
+  }
+
+  function _toggleRun() {
+    if (_running) {
+      _running = false;
+      clearInterval(_timer);
+      _timer = null;
+    } else {
+      if (_remaining <= 0) _setPhase(_phase);
+      _running = true;
+      _timer = setInterval(_tick, 1000);
+    }
+    _updateUI();
+  }
+
+  function _reset() {
+    _running = false;
+    if (_timer) clearInterval(_timer);
+    _timer = null;
+    _setPhase('work');
+    _updateUI();
+  }
+
+  function _skip() {
+    _running = false;
+    if (_timer) clearInterval(_timer);
+    _timer = null;
+    _remaining = 0;
+    _onPhaseComplete();
+  }
+
+  function _build() {
+    _overlay = document.createElement('div');
+    _overlay.className = 'pomodoro-overlay';
+    _overlay.innerHTML =
+      '<div class="pomodoro-panel">' +
+        '<h3>🍅 Pomodoro Timer</h3>' +
+        '<div class="pomodoro-phase"></div>' +
+        '<div class="pomodoro-display work">25:00</div>' +
+        '<div class="pomodoro-progress"><div class="pomodoro-progress-fill work"></div></div>' +
+        '<div class="pomodoro-controls">' +
+          '<button class="pomo-start primary">▶ Start</button>' +
+          '<button class="pomo-skip">⏭ Skip</button>' +
+          '<button class="pomo-reset">↺ Reset</button>' +
+          '<button class="pomo-close">✕</button>' +
+        '</div>' +
+        '<div class="pomodoro-settings">' +
+          '<label>Focus<input type="number" class="pomo-work-input" min="1" max="90" value="' + _workMin + '"></label>' +
+          '<label>Short<input type="number" class="pomo-short-input" min="1" max="30" value="' + _shortBreakMin + '"></label>' +
+          '<label>Long<input type="number" class="pomo-long-input" min="1" max="60" value="' + _longBreakMin + '"></label>' +
+        '</div>' +
+        '<div class="pomodoro-stats"></div>' +
+      '</div>';
+    document.body.appendChild(_overlay);
+
+    _display = _overlay.querySelector('.pomodoro-display');
+    _phaseLabel = _overlay.querySelector('.pomodoro-phase');
+    _progressFill = _overlay.querySelector('.pomodoro-progress-fill');
+    _startBtn = _overlay.querySelector('.pomo-start');
+    _statsEl = _overlay.querySelector('.pomodoro-stats');
+
+    _startBtn.addEventListener('click', _toggleRun);
+    _overlay.querySelector('.pomo-skip').addEventListener('click', _skip);
+    _overlay.querySelector('.pomo-reset').addEventListener('click', _reset);
+    _overlay.querySelector('.pomo-close').addEventListener('click', function() { toggle(); });
+    _overlay.addEventListener('click', function(e) { if (e.target === _overlay) toggle(); });
+
+    // Settings inputs
+    _overlay.querySelector('.pomo-work-input').addEventListener('change', function() {
+      _workMin = Math.max(1, Math.min(90, parseInt(this.value) || 25));
+      this.value = _workMin;
+      if (_phase === 'work' && !_running) _setPhase('work');
+      _updateUI(); _save();
+    });
+    _overlay.querySelector('.pomo-short-input').addEventListener('change', function() {
+      _shortBreakMin = Math.max(1, Math.min(30, parseInt(this.value) || 5));
+      this.value = _shortBreakMin;
+      if (_phase === 'short-break' && !_running) _setPhase('short-break');
+      _updateUI(); _save();
+    });
+    _overlay.querySelector('.pomo-long-input').addEventListener('change', function() {
+      _longBreakMin = Math.max(1, Math.min(60, parseInt(this.value) || 15));
+      this.value = _longBreakMin;
+      if (_phase === 'long-break' && !_running) _setPhase('long-break');
+      _updateUI(); _save();
+    });
+  }
+
+  function toggle() {
+    if (!_overlay) { _build(); _setPhase('work'); _updateUI(); }
+    _visible = !_visible;
+    _overlay.classList.toggle('visible', _visible);
+  }
+
+  function init() {
+    _load();
+    // Keyboard shortcut
+    document.addEventListener('keydown', function(e) {
+      if (e.ctrlKey && e.shiftKey && e.key === 'T') { e.preventDefault(); toggle(); }
+    });
+    // Request notification permission
+    try { if (Notification && Notification.permission === 'default') Notification.requestPermission(); } catch (_) {}
+  }
+
+  return { init: init, toggle: toggle };
+})();
+
+document.addEventListener('DOMContentLoaded', PomodoroTimer.init);
