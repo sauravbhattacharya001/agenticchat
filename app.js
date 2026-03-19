@@ -71,6 +71,7 @@
  *   SessionTemplates     — save/load reusable session setups (persona, model, tags, starters)
  *   ConversationFlashcards — extract Q&A pairs as study flashcards with flip animation
  *   SmartPaste           — intelligent paste formatting (JSON, code, CSV, SQL, URLs, stack traces)
+ *   MessageContextMenu   — right-click context menu aggregating per-message actions
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -24471,3 +24472,401 @@ const SmartPaste = (() => {
 })();
 
 document.addEventListener('DOMContentLoaded', SmartPaste.init);
+
+/* ============================================================
+ * MessageContextMenu — right-click context menu for chat messages
+ *
+ * Provides a unified context menu when right-clicking on any chat
+ * message, surfacing common per-message actions: copy, bookmark,
+ * pin, annotate, translate, fork, read aloud, rate, edit, and more.
+ *
+ * @namespace MessageContextMenu
+ * ============================================================ */
+const MessageContextMenu = (() => {
+  const MENU_ID = 'msg-context-menu';
+  const STORAGE_KEY = 'ac-context-menu-enabled';
+  let _enabled = true;
+  let _menu = null;
+  let _targetMsg = null;
+  let _targetIndex = -1;
+
+  /* ---- helpers ---- */
+
+  function _getMessageIndex(el) {
+    const msgEl = el.closest('.msg-user, .msg-assistant, .msg-system, [data-msg-index]');
+    if (!msgEl) return -1;
+    if (msgEl.dataset.msgIndex !== undefined) return parseInt(msgEl.dataset.msgIndex, 10);
+    const output = document.getElementById('chat-output');
+    if (!output) return -1;
+    const children = Array.from(output.children);
+    return children.indexOf(msgEl);
+  }
+
+  function _getMessageText(el) {
+    const msgEl = el.closest('.msg-user, .msg-assistant, .msg-system, [data-msg-index]');
+    if (!msgEl) return '';
+    return msgEl.innerText || msgEl.textContent || '';
+  }
+
+  function _getMessageRole(el) {
+    const msgEl = el.closest('.msg-user, .msg-assistant, .msg-system, [data-msg-index]');
+    if (!msgEl) return 'unknown';
+    if (msgEl.classList.contains('msg-user')) return 'user';
+    if (msgEl.classList.contains('msg-assistant')) return 'assistant';
+    if (msgEl.classList.contains('msg-system')) return 'system';
+    return 'unknown';
+  }
+
+  /* ---- menu item definitions ---- */
+
+  function _buildMenuItems() {
+    const items = [];
+
+    // Always available
+    items.push({
+      icon: '📋', label: 'Copy Text', id: 'ctx-copy',
+      action: function() {
+        var text = _getMessageText(_targetMsg);
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(text).then(function() { _toast('Copied to clipboard'); });
+        }
+      }
+    });
+
+    items.push({
+      icon: '📋', label: 'Copy as Markdown', id: 'ctx-copy-md',
+      action: function() {
+        var role = _getMessageRole(_targetMsg);
+        var text = _getMessageText(_targetMsg);
+        var md = '**' + role.charAt(0).toUpperCase() + role.slice(1) + ':**\n' + text;
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(md).then(function() { _toast('Copied as Markdown'); });
+        }
+      }
+    });
+
+    items.push({ type: 'separator' });
+
+    // Bookmark
+    if (typeof ChatBookmarks !== 'undefined') {
+      items.push({
+        icon: '🔖', label: 'Bookmark', id: 'ctx-bookmark',
+        action: function() {
+          if (ChatBookmarks.toggle) ChatBookmarks.toggle(_targetIndex);
+          else _toast('Bookmark not available');
+        }
+      });
+    }
+
+    // Pin
+    if (typeof MessagePinning !== 'undefined') {
+      items.push({
+        icon: '📌', label: 'Pin Message', id: 'ctx-pin',
+        action: function() {
+          if (MessagePinning.togglePin) MessagePinning.togglePin(_targetIndex);
+          else _toast('Pinning not available');
+        }
+      });
+    }
+
+    // Annotate
+    if (typeof MessageAnnotations !== 'undefined') {
+      items.push({
+        icon: '🏷️', label: 'Annotate', id: 'ctx-annotate',
+        action: function() {
+          if (MessageAnnotations.openAnnotation) MessageAnnotations.openAnnotation(_targetIndex);
+          else if (MessageAnnotations.addAnnotation) MessageAnnotations.addAnnotation(_targetIndex);
+          else _toast('Annotations not available');
+        }
+      });
+    }
+
+    // React
+    if (typeof MessageReactions !== 'undefined') {
+      items.push({
+        icon: '😀', label: 'React', id: 'ctx-react',
+        action: function() {
+          if (MessageReactions.showPicker) MessageReactions.showPicker(_targetIndex);
+          else _toast('Reactions not available');
+        }
+      });
+    }
+
+    items.push({ type: 'separator' });
+
+    // Read aloud
+    if (typeof ReadAloud !== 'undefined') {
+      items.push({
+        icon: '🔊', label: 'Read Aloud', id: 'ctx-read',
+        action: function() {
+          if (ReadAloud.speak) ReadAloud.speak(_targetIndex);
+          else if (ReadAloud.readMessage) ReadAloud.readMessage(_targetIndex);
+          else _toast('Read aloud not available');
+        }
+      });
+    }
+
+    // Translate
+    if (typeof MessageTranslator !== 'undefined') {
+      items.push({
+        icon: '🌐', label: 'Translate', id: 'ctx-translate',
+        action: function() {
+          if (MessageTranslator.translateMessage) MessageTranslator.translateMessage(_targetIndex);
+          else _toast('Translation not available');
+        }
+      });
+    }
+
+    // Diff
+    if (typeof MessageDiff !== 'undefined') {
+      items.push({
+        icon: '🔀', label: 'Compare (Diff)', id: 'ctx-diff',
+        action: function() {
+          if (MessageDiff.selectForDiff) MessageDiff.selectForDiff(_targetIndex);
+          else _toast('Diff not available');
+        }
+      });
+    }
+
+    items.push({ type: 'separator' });
+
+    // Fork conversation
+    if (typeof ConversationFork !== 'undefined') {
+      items.push({
+        icon: '🔱', label: 'Fork from Here', id: 'ctx-fork',
+        action: function() {
+          if (ConversationFork.forkFrom) ConversationFork.forkFrom(_targetIndex);
+          else _toast('Fork not available');
+        }
+      });
+    }
+
+    // Edit & resend (user messages only)
+    if (typeof MessageEditor !== 'undefined') {
+      items.push({
+        icon: '✏️', label: 'Edit & Resend', id: 'ctx-edit',
+        condition: function() { return _getMessageRole(_targetMsg) === 'user'; },
+        action: function() {
+          if (MessageEditor.editMessage) MessageEditor.editMessage(_targetIndex);
+          else _toast('Edit not available');
+        }
+      });
+    }
+
+    // Rate (assistant messages only)
+    if (typeof ResponseRating !== 'undefined') {
+      items.push({
+        icon: '⭐', label: 'Rate Response', id: 'ctx-rate',
+        condition: function() { return _getMessageRole(_targetMsg) === 'assistant'; },
+        action: function() {
+          if (ResponseRating.rateMessage) ResponseRating.rateMessage(_targetIndex);
+          else _toast('Rating not available');
+        }
+      });
+    }
+
+    return items;
+  }
+
+  /* ---- DOM creation ---- */
+
+  function _createMenu() {
+    if (_menu) return _menu;
+    _menu = document.createElement('div');
+    _menu.id = MENU_ID;
+    _menu.className = 'msg-context-menu';
+    _menu.setAttribute('role', 'menu');
+    _menu.setAttribute('aria-label', 'Message actions');
+    _menu.style.display = 'none';
+    document.body.appendChild(_menu);
+    return _menu;
+  }
+
+  function _renderMenu() {
+    var items = _buildMenuItems();
+    _menu.innerHTML = '';
+    var count = 0;
+    items.forEach(function(item) {
+      if (item.type === 'separator') {
+        if (count > 0) {
+          var sep = document.createElement('div');
+          sep.className = 'msg-context-menu__sep';
+          sep.setAttribute('role', 'separator');
+          _menu.appendChild(sep);
+        }
+        return;
+      }
+      // Check condition
+      if (item.condition && !item.condition()) return;
+
+      var btn = document.createElement('button');
+      btn.className = 'msg-context-menu__item';
+      btn.setAttribute('role', 'menuitem');
+      btn.setAttribute('tabindex', '-1');
+      btn.innerHTML = '<span class="msg-context-menu__icon">' + item.icon + '</span>' +
+                      '<span class="msg-context-menu__label">' + item.label + '</span>';
+      btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        _hide();
+        item.action();
+      });
+      _menu.appendChild(btn);
+      count++;
+    });
+  }
+
+  /* ---- positioning ---- */
+
+  function _show(x, y) {
+    _createMenu();
+    _renderMenu();
+    _menu.style.display = 'block';
+    // Position, keeping within viewport
+    var rect = _menu.getBoundingClientRect();
+    var vw = window.innerWidth;
+    var vh = window.innerHeight;
+    // Temporarily make visible to measure
+    _menu.style.left = '0';
+    _menu.style.top = '0';
+    var menuW = _menu.offsetWidth;
+    var menuH = _menu.offsetHeight;
+    var posX = (x + menuW > vw) ? Math.max(0, x - menuW) : x;
+    var posY = (y + menuH > vh) ? Math.max(0, y - menuH) : y;
+    _menu.style.left = posX + 'px';
+    _menu.style.top = posY + 'px';
+    // Focus first item
+    var first = _menu.querySelector('.msg-context-menu__item');
+    if (first) first.focus();
+  }
+
+  function _hide() {
+    if (_menu) _menu.style.display = 'none';
+    _targetMsg = null;
+    _targetIndex = -1;
+  }
+
+  /* ---- toast ---- */
+
+  var _toastTimer = null;
+  function _toast(msg) {
+    var existing = document.getElementById('ctx-menu-toast');
+    if (existing) existing.remove();
+    var t = document.createElement('div');
+    t.id = 'ctx-menu-toast';
+    t.className = 'msg-context-toast';
+    t.textContent = msg;
+    document.body.appendChild(t);
+    clearTimeout(_toastTimer);
+    _toastTimer = setTimeout(function() { t.remove(); }, 2000);
+  }
+
+  /* ---- keyboard nav ---- */
+
+  function _handleKeydown(e) {
+    if (!_menu || _menu.style.display === 'none') return;
+    var items = Array.from(_menu.querySelectorAll('.msg-context-menu__item'));
+    var idx = items.indexOf(document.activeElement);
+    if (e.key === 'ArrowDown' || e.key === 'j') {
+      e.preventDefault();
+      var next = (idx + 1) % items.length;
+      items[next].focus();
+    } else if (e.key === 'ArrowUp' || e.key === 'k') {
+      e.preventDefault();
+      var prev = (idx - 1 + items.length) % items.length;
+      items[prev].focus();
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      _hide();
+    } else if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      if (idx >= 0) items[idx].click();
+    }
+  }
+
+  /* ---- event handlers ---- */
+
+  function _onContextMenu(e) {
+    if (!_enabled) return;
+    // Only activate on chat message elements
+    var msgEl = e.target.closest('.msg-user, .msg-assistant, .msg-system, [data-msg-index]');
+    if (!msgEl) return;
+    // Must be inside chat output
+    var output = document.getElementById('chat-output');
+    if (!output || !output.contains(msgEl)) return;
+
+    e.preventDefault();
+    _targetMsg = msgEl;
+    _targetIndex = _getMessageIndex(msgEl);
+    _show(e.clientX, e.clientY);
+  }
+
+  function _onDocClick(e) {
+    if (_menu && _menu.style.display !== 'none' && !_menu.contains(e.target)) {
+      _hide();
+    }
+  }
+
+  /* ---- public API ---- */
+
+  function init() {
+    var stored = SafeStorage.get(STORAGE_KEY);
+    if (stored !== null) _enabled = JSON.parse(stored);
+
+    _createMenu();
+    document.addEventListener('contextmenu', _onContextMenu);
+    document.addEventListener('click', _onDocClick);
+    document.addEventListener('keydown', _handleKeydown);
+
+    // Slash command
+    if (typeof SlashCommands !== 'undefined' && SlashCommands.register) {
+      SlashCommands.register({
+        command: '/contextmenu',
+        description: 'Toggle right-click context menu on messages',
+        action: function() {
+          _enabled = !_enabled;
+          try { SafeStorage.set(STORAGE_KEY, JSON.stringify(_enabled)); } catch (_) {}
+          _toast('Context menu ' + (_enabled ? 'enabled' : 'disabled'));
+        }
+      });
+    }
+
+    // Command palette
+    if (typeof CommandPalette !== 'undefined' && CommandPalette.registerCommand) {
+      CommandPalette.registerCommand({
+        id: 'context-menu-toggle',
+        label: '🖱️ Toggle Message Context Menu',
+        action: function() {
+          _enabled = !_enabled;
+          try { SafeStorage.set(STORAGE_KEY, JSON.stringify(_enabled)); } catch (_) {}
+          _toast('Context menu ' + (_enabled ? 'enabled' : 'disabled'));
+        }
+      });
+    }
+
+    // Preferences
+    if (typeof PreferencesPanel !== 'undefined' && PreferencesPanel.registerPreference) {
+      PreferencesPanel.registerPreference({
+        id: 'context-menu-enabled',
+        label: 'Message right-click context menu',
+        type: 'toggle',
+        default: true,
+        onChange: function(val) { _enabled = val; try { SafeStorage.set(STORAGE_KEY, JSON.stringify(val)); } catch (_) {} }
+      });
+    }
+  }
+
+  function enable()  { _enabled = true;  try { SafeStorage.set(STORAGE_KEY, 'true'); } catch (_) {} }
+  function disable() { _enabled = false; try { SafeStorage.set(STORAGE_KEY, 'false'); } catch (_) {} }
+  function isEnabled() { return _enabled; }
+
+  return {
+    init: init,
+    enable: enable,
+    disable: disable,
+    isEnabled: isEnabled,
+    show: _show,
+    hide: _hide
+  };
+})();
+
+document.addEventListener('DOMContentLoaded', MessageContextMenu.init);
