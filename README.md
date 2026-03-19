@@ -136,7 +136,7 @@ User Prompt  →  GPT-4o (system prompt: reply with JS only)
 
 ### Modules
 
-The codebase is organized into **48** IIFE modules in `app.js`, each using the revealing-module pattern:
+The codebase is organized into **49** IIFE modules in `app.js`, each using the revealing-module pattern:
 
 <details>
 <summary><strong>Core (7 modules)</strong></summary>
@@ -154,7 +154,7 @@ The codebase is organized into **48** IIFE modules in `app.js`, each using the r
 </details>
 
 <details>
-<summary><strong>Features (41 modules)</strong></summary>
+<summary><strong>Features (42 modules)</strong></summary>
 
 | Module | Purpose |
 |--------|---------|
@@ -201,6 +201,7 @@ The codebase is organized into **48** IIFE modules in `app.js`, each using the r
 | `MessageEditor` | Edit and resend user messages (truncate history + reload into input) |
 | `SmartRetry` | Automatic retry with exponential backoff for transient API failures |
 | `UsageHeatmap` | GitHub-style 7x24 activity heatmap across all sessions |
+| `SmartPaste` | Intelligent paste formatting — auto-detects JSON, code, CSV, SQL, URLs, stack traces |
 
 </details>
 
@@ -306,7 +307,7 @@ Contributions are welcome! Here's how:
 ### Guidelines
 
 - This is a **single-file app** — keep it that way unless there's a compelling reason to split
-- All 48 modules live in `app.js` as revealing-module IIFEs
+- All 49 modules live in `app.js` as revealing-module IIFEs
 - Security is paramount — any change that touches the sandbox must be reviewed carefully
 - Test with various prompt types before submitting (simple questions, API calls, error cases)
 

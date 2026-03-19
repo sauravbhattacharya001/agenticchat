@@ -70,6 +70,7 @@
  *   PreferencesPanel     — centralised settings panel with toggles, ranges, and reset
  *   SessionTemplates     — save/load reusable session setups (persona, model, tags, starters)
  *   ConversationFlashcards — extract Q&A pairs as study flashcards with flip animation
+ *   SmartPaste           — intelligent paste formatting (JSON, code, CSV, SQL, URLs, stack traces)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -24158,3 +24159,315 @@ const ConversationFlashcards = (() => {
 })();
 
 document.addEventListener('DOMContentLoaded', ConversationFlashcards.init);
+
+
+/* ============================================================
+ * SmartPaste — intelligent paste formatting for chat input
+ *
+ * Detects pasted content type (URL, JSON, code, CSV, SQL,
+ * stack trace, key-value config, markdown table) and auto-wraps
+ * it with appropriate markdown formatting. Shows a toast with
+ * the detected type. Users can undo with Ctrl+Z.
+ *
+ * Shortcut: none (activates on paste into chat input)
+ * ============================================================ */
+
+const SmartPaste = (() => {
+  const MAX_PASTE_LENGTH = 50000;
+  let _enabled = true;
+  let _toastTimeout = null;
+
+  /* ---- detection helpers ---- */
+
+  function _isURL(text) {
+    var t = text.trim();
+    return /^https?:\/\/[^\s]+$/i.test(t) && t.length < 2048;
+  }
+
+  function _isMultiURL(text) {
+    var lines = text.trim().split(/\n/);
+    if (lines.length < 2 || lines.length > 20) return false;
+    return lines.every(function(l) { return /^https?:\/\/[^\s]+$/i.test(l.trim()); });
+  }
+
+  function _isJSON(text) {
+    var t = text.trim();
+    if (!(t[0] === '{' || t[0] === '[')) return false;
+    try { JSON.parse(t); return t.length > 5; } catch(e) { return false; }
+  }
+
+  function _isCSV(text) {
+    var lines = text.trim().split(/\n/);
+    if (lines.length < 2) return false;
+    var commas = (lines[0].match(/,/g) || []).length;
+    if (commas < 1) return false;
+    var consistent = 0;
+    for (var i = 1; i < Math.min(lines.length, 6); i++) {
+      if ((lines[i].match(/,/g) || []).length === commas) consistent++;
+    }
+    return consistent >= Math.min(lines.length - 1, 3);
+  }
+
+  function _isSQL(text) {
+    var t = text.trim();
+    return /^(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|WITH)\s/i.test(t) && t.length > 15;
+  }
+
+  function _isStackTrace(text) {
+    var t = text.trim();
+    // Java/Python/JS/C# stack traces
+    return (
+      (t.match(/\bat\s+[\w.$<>]+\s*\(/gm) || []).length >= 2 ||
+      (t.match(/File\s+"[^"]+",\s+line\s+\d+/gm) || []).length >= 2 ||
+      (t.match(/Traceback\s+\(most\s+recent/i) !== null) ||
+      (t.match(/^\s+at\s+/gm) || []).length >= 3
+    );
+  }
+
+  function _isCodeBlock(text) {
+    var t = text.trim();
+    var lines = t.split(/\n/);
+    if (lines.length < 3) return false;
+    var codeSignals = 0;
+    var patterns = [
+      /^(import|from|require|include|using|package)\s/,
+      /^(def|function|fn|func|class|struct|enum|interface|trait)\s/,
+      /[{};]\s*$/,
+      /^\s*(if|else|for|while|switch|case|return|try|catch)\s*[\({]/,
+      /^\s*(const|let|var|int|str|bool|float|double|string|void)\s/,
+      /=>\s*[{(]/,
+      /^\s*#(include|define|ifdef|pragma)/,
+      /^\s*@(Override|Test|Component|Service)/
+    ];
+    for (var i = 0; i < lines.length; i++) {
+      for (var p = 0; p < patterns.length; p++) {
+        if (patterns[p].test(lines[i])) { codeSignals++; break; }
+      }
+    }
+    return codeSignals >= 2;
+  }
+
+  function _isKeyValue(text) {
+    var lines = text.trim().split(/\n/).filter(function(l) { return l.trim(); });
+    if (lines.length < 2) return false;
+    var kvCount = 0;
+    for (var i = 0; i < lines.length; i++) {
+      if (/^[\w./-]+\s*[=:]\s*.+/.test(lines[i].trim())) kvCount++;
+    }
+    return kvCount >= lines.length * 0.7;
+  }
+
+  function _guessLanguage(text) {
+    var t = text.trim();
+    if (/^(import\s+(React|useState|{)|export\s+(default|const|function)|=>\s*[{(]|const\s+\w+\s*=\s*require)/.test(t)) return 'javascript';
+    if (/^(from\s+\w+\s+import|import\s+\w+|def\s+\w+\s*\(|class\s+\w+[:(])/.test(t)) return 'python';
+    if (/^(package\s+\w+|import\s+"|\bfunc\s+\w+\s*\()/.test(t)) return 'go';
+    if (/^(use\s+\w+|fn\s+\w+|let\s+mut\s|impl\s)/.test(t)) return 'rust';
+    if (/^(using\s+System|namespace\s+\w+|public\s+(class|static|async))/.test(t)) return 'csharp';
+    if (/^(#include|#define|int\s+main\s*\()/.test(t)) return 'c';
+    if (/^\s*<[a-zA-Z][\s\S]*>/.test(t) && /<\/[a-zA-Z]+>\s*$/.test(t)) return 'html';
+    if (/^\s*[\w-]+\s*{[\s\S]*}/.test(t) && /:\s*[^;]+;/.test(t)) return 'css';
+    if (_isSQL(t)) return 'sql';
+    return '';
+  }
+
+  /* ---- formatting ---- */
+
+  function _formatPaste(text) {
+    if (!text || text.length > MAX_PASTE_LENGTH) return null;
+    var t = text.trim();
+    if (!t) return null;
+
+    // Single URL
+    if (_isURL(t)) {
+      return { formatted: t + '\n', type: 'URL' };
+    }
+
+    // Multiple URLs
+    if (_isMultiURL(t)) {
+      var urls = t.split(/\n/).map(function(l) { return '- ' + l.trim(); }).join('\n');
+      return { formatted: urls + '\n', type: 'URL list' };
+    }
+
+    // JSON
+    if (_isJSON(t)) {
+      try {
+        var pretty = JSON.stringify(JSON.parse(t), null, 2);
+        return { formatted: '```json\n' + pretty + '\n```', type: 'JSON' };
+      } catch(e) {
+        return { formatted: '```json\n' + t + '\n```', type: 'JSON' };
+      }
+    }
+
+    // Stack trace
+    if (_isStackTrace(t)) {
+      return { formatted: '```\n' + t + '\n```', type: 'Stack trace' };
+    }
+
+    // SQL
+    if (_isSQL(t)) {
+      return { formatted: '```sql\n' + t + '\n```', type: 'SQL' };
+    }
+
+    // CSV
+    if (_isCSV(t)) {
+      return { formatted: '```csv\n' + t + '\n```', type: 'CSV data' };
+    }
+
+    // Code block
+    if (_isCodeBlock(t)) {
+      var lang = _guessLanguage(t);
+      return { formatted: '```' + lang + '\n' + t + '\n```', type: lang ? lang.charAt(0).toUpperCase() + lang.slice(1) + ' code' : 'Code' };
+    }
+
+    // Key-value config
+    if (_isKeyValue(t)) {
+      return { formatted: '```\n' + t + '\n```', type: 'Config / key-value' };
+    }
+
+    return null;
+  }
+
+  /* ---- toast ---- */
+
+  function _showToast(typeLabel) {
+    var existing = document.getElementById('smartpaste-toast');
+    if (existing) existing.remove();
+    var toast = document.createElement('div');
+    toast.id = 'smartpaste-toast';
+    toast.textContent = '\u2728 Smart Paste: ' + typeLabel + ' detected';
+    toast.setAttribute('style',
+      'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);' +
+      'background:#333;color:#fff;padding:6px 16px;border-radius:20px;' +
+      'font-size:13px;z-index:100000;pointer-events:none;opacity:0;' +
+      'transition:opacity 0.3s ease;white-space:nowrap;');
+    document.body.appendChild(toast);
+    requestAnimationFrame(function() { toast.style.opacity = '1'; });
+    if (_toastTimeout) clearTimeout(_toastTimeout);
+    _toastTimeout = setTimeout(function() {
+      toast.style.opacity = '0';
+      setTimeout(function() { toast.remove(); }, 300);
+    }, 2500);
+  }
+
+  /* ---- paste handler ---- */
+
+  function _onPaste(e) {
+    if (!_enabled) return;
+    var clipboardData = e.clipboardData || (window.clipboardData);
+    if (!clipboardData) return;
+    var text = clipboardData.getData('text/plain');
+    if (!text || text.trim().length < 5) return;
+    // Don't format if it's just a short single-line string
+    var lines = text.trim().split(/\n/);
+    if (lines.length === 1 && !_isURL(text.trim()) && text.trim().length < 80) return;
+
+    var result = _formatPaste(text);
+    if (!result) return;
+
+    e.preventDefault();
+    var input = e.target;
+
+    if (input.tagName === 'INPUT') {
+      // For <input> elements, insert at cursor
+      var start = input.selectionStart || 0;
+      var end = input.selectionEnd || 0;
+      var val = input.value;
+      input.value = val.slice(0, start) + result.formatted + val.slice(end);
+      var newPos = start + result.formatted.length;
+      input.setSelectionRange(newPos, newPos);
+    } else if (input.tagName === 'TEXTAREA') {
+      var start2 = input.selectionStart || 0;
+      var end2 = input.selectionEnd || 0;
+      var val2 = input.value;
+      input.value = val2.slice(0, start2) + result.formatted + val2.slice(end2);
+      var newPos2 = start2 + result.formatted.length;
+      input.setSelectionRange(newPos2, newPos2);
+    } else if (input.isContentEditable) {
+      document.execCommand('insertText', false, result.formatted);
+    }
+
+    // Dispatch input event so other modules notice the change
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+
+    _showToast(result.type);
+  }
+
+  /* ---- public API ---- */
+
+  function enable() { _enabled = true; }
+  function disable() { _enabled = false; }
+  function isEnabled() { return _enabled; }
+  function setEnabled(val) { _enabled = !!val; }
+
+  function formatText(text) {
+    var result = _formatPaste(text);
+    return result ? result.formatted : text;
+  }
+
+  function detectType(text) {
+    var result = _formatPaste(text);
+    return result ? result.type : null;
+  }
+
+  function init() {
+    var chatInput = document.getElementById('chat-input');
+    if (chatInput) {
+      chatInput.addEventListener('paste', _onPaste);
+    }
+
+    if (typeof SlashCommands !== 'undefined' && SlashCommands.register) {
+      SlashCommands.register({
+        command: '/smartpaste',
+        description: 'Toggle Smart Paste auto-formatting on/off',
+        action: function() {
+          _enabled = !_enabled;
+          _showToast('Smart Paste ' + (_enabled ? 'enabled' : 'disabled'));
+        }
+      });
+    }
+
+    if (typeof CommandPalette !== 'undefined' && CommandPalette.registerCommand) {
+      CommandPalette.registerCommand({
+        id: 'smartpaste-toggle',
+        label: '\u2728 Toggle Smart Paste',
+        action: function() {
+          _enabled = !_enabled;
+          _showToast('Smart Paste ' + (_enabled ? 'enabled' : 'disabled'));
+        }
+      });
+    }
+
+    // Respect preferences if available
+    if (typeof PreferencesPanel !== 'undefined' && PreferencesPanel.registerPreference) {
+      PreferencesPanel.registerPreference({
+        id: 'smartpaste-enabled',
+        label: 'Smart Paste auto-formatting',
+        type: 'toggle',
+        default: true,
+        onChange: function(val) { _enabled = val; }
+      });
+    }
+  }
+
+  return {
+    init: init,
+    enable: enable,
+    disable: disable,
+    isEnabled: isEnabled,
+    setEnabled: setEnabled,
+    formatText: formatText,
+    detectType: detectType,
+    _isURL: _isURL,
+    _isJSON: _isJSON,
+    _isCSV: _isCSV,
+    _isSQL: _isSQL,
+    _isStackTrace: _isStackTrace,
+    _isCodeBlock: _isCodeBlock,
+    _isKeyValue: _isKeyValue,
+    _guessLanguage: _guessLanguage,
+    _formatPaste: _formatPaste
+  };
+})();
+
+document.addEventListener('DOMContentLoaded', SmartPaste.init);
