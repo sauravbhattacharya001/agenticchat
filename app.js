@@ -4812,7 +4812,7 @@ const SessionNotes = (() => {
   function _loadAll() {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
-      return raw ? JSON.parse(raw) : {};
+      return raw ? sanitizeStorageObject(JSON.parse(raw)) : {};
     } catch { return {}; }
   }
 
@@ -12747,7 +12747,7 @@ const DataBackup = (() => {
     }
 
     try {
-      var sessions = data.sessions ? JSON.parse(data.sessions) : null;
+      var sessions = data.sessions ? sanitizeStorageObject(JSON.parse(data.sessions)) : null;
       if (sessions) {
         if (Array.isArray(sessions)) {
           stats.sessionCount = sessions.length;
@@ -12758,17 +12758,17 @@ const DataBackup = (() => {
     } catch (_) { /* non-critical */ }
 
     try {
-      var snippets = data.snippets ? JSON.parse(data.snippets) : [];
+      var snippets = data.snippets ? sanitizeStorageObject(JSON.parse(data.snippets)) : [];
       stats.snippetCount = Array.isArray(snippets) ? snippets.length : 0;
     } catch (_) { /* non-critical */ }
 
     try {
-      var bookmarks = data.bookmarks ? JSON.parse(data.bookmarks) : [];
+      var bookmarks = data.bookmarks ? sanitizeStorageObject(JSON.parse(data.bookmarks)) : [];
       stats.bookmarkCount = Array.isArray(bookmarks) ? bookmarks.length : 0;
     } catch (_) { /* non-critical */ }
 
     try {
-      var pins = data.pins ? JSON.parse(data.pins) : {};
+      var pins = data.pins ? sanitizeStorageObject(JSON.parse(data.pins)) : {};
       stats.pinCount = typeof pins === 'object' ? Object.keys(pins).length : 0;
     } catch (_) { /* non-critical */ }
 
@@ -12933,7 +12933,7 @@ const DataBackup = (() => {
       var reader = new FileReader();
       reader.onload = function () {
         try {
-          var backup = JSON.parse(reader.result);
+          var backup = sanitizeStorageObject(JSON.parse(reader.result));
           resolve(restoreBackup(backup, options));
         } catch (e) {
           resolve({ success: false, restored: [], skipped: [], error: 'Invalid JSON: ' + (e.message || e), warnings: [] });
@@ -14389,7 +14389,7 @@ const PromptLibrary = (() => {
     var MAX_PROMPT_TEXT = 50000; // 50 KB per prompt text
     var MAX_PROMPT_NAME = 500;
     try {
-      var imported = JSON.parse(jsonStr);
+      var imported = sanitizeStorageObject(JSON.parse(jsonStr));
       if (!Array.isArray(imported)) return 0;
       if (imported.length > MAX_IMPORT_PROMPTS) return -1;
       _load();
@@ -17352,7 +17352,7 @@ const ClipboardHistory = (() => {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
       if (raw) {
-        const parsed = JSON.parse(raw);
+        const parsed = sanitizeStorageObject(JSON.parse(raw));
         entries = Array.isArray(parsed) ? sanitizeStorageObject(parsed) : [];
       }
     } catch (_) {
@@ -18920,11 +18920,11 @@ const PromptChainRunner = (() => {
   function _load() {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
-      _chains = raw ? JSON.parse(raw) : [];
+      _chains = raw ? sanitizeStorageObject(JSON.parse(raw)) : [];
     } catch (_) { _chains = []; }
     try {
       const raw = SafeStorage.get(HISTORY_KEY);
-      _runHistory = raw ? JSON.parse(raw) : [];
+      _runHistory = raw ? sanitizeStorageObject(JSON.parse(raw)) : [];
     } catch (_) { _runHistory = []; }
   }
 
@@ -19095,7 +19095,7 @@ const PromptChainRunner = (() => {
       const reader = new FileReader();
       reader.onload = () => {
         try {
-          const imported = JSON.parse(reader.result);
+          const imported = sanitizeStorageObject(JSON.parse(reader.result));
           if (!Array.isArray(imported)) throw new Error('Expected array');
           let count = 0;
           for (const c of imported) {
@@ -20017,7 +20017,7 @@ const TypingSpeedMonitor = (() => {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
       if (raw) {
-        const data = JSON.parse(raw);
+        const data = sanitizeStorageObject(JSON.parse(raw));
         _peakWpm = data.peakWpm || 0;
         _totalWords = data.totalWords || 0;
         _totalChars = data.totalChars || 0;
@@ -20092,7 +20092,7 @@ const FocusTimer = (() => {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
       if (raw) {
-        const d = JSON.parse(raw);
+        const d = sanitizeStorageObject(JSON.parse(raw));
         _sessionsCompleted = d.sessionsCompleted || 0;
         _totalFocusSeconds = d.totalFocusSeconds || 0;
         _todaySessions = d.todaySessions || 0;
@@ -21020,7 +21020,7 @@ const CommandPalette = (() => {
   function _loadRecent() {
     try {
       const raw = (typeof SafeStorage !== 'undefined' ? SafeStorage : localStorage).getItem('cp_recent');
-      if (raw) _recentIds = JSON.parse(raw);
+      if (raw) _recentIds = sanitizeStorageObject(JSON.parse(raw));
     } catch (e) { _recentIds = []; }
   }
 
@@ -21831,7 +21831,7 @@ const DraftRecovery = (() => {
   function _loadDrafts() {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
-      return raw ? JSON.parse(raw) : {};
+      return raw ? sanitizeStorageObject(JSON.parse(raw)) : {};
     } catch { return {}; }
   }
 
@@ -22130,7 +22130,7 @@ const CustomThemeCreator = (() => {
   function _loadCustomThemes() {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
-      return raw ? JSON.parse(raw) : {};
+      return raw ? sanitizeStorageObject(JSON.parse(raw)) : {};
     } catch (_) { return {}; }
   }
 
@@ -22452,7 +22452,7 @@ const CustomThemeCreator = (() => {
       const reader = new FileReader();
       reader.onload = (e) => {
         try {
-          const imported = JSON.parse(e.target.result);
+          const imported = sanitizeStorageObject(JSON.parse(e.target.result));
           if (typeof imported !== 'object' || Array.isArray(imported)) {
             alert('Invalid theme file format.');
             return;
@@ -22568,7 +22568,7 @@ const TextExpander = (() => {
   function _load() {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
-      return raw ? JSON.parse(raw) : {};
+      return raw ? sanitizeStorageObject(JSON.parse(raw)) : {};
     } catch { return {}; }
   }
 
@@ -22579,7 +22579,7 @@ const TextExpander = (() => {
   function _loadUsage() {
     try {
       const raw = SafeStorage.get(USAGE_KEY);
-      return raw ? JSON.parse(raw) : {};
+      return raw ? sanitizeStorageObject(JSON.parse(raw)) : {};
     } catch { return {}; }
   }
 
@@ -22646,7 +22646,7 @@ const TextExpander = (() => {
   /** Import snippets from JSON string. Returns count imported. */
   function importJSON(jsonStr) {
     try {
-      const data = JSON.parse(jsonStr);
+      const data = sanitizeStorageObject(JSON.parse(jsonStr));
       if (typeof data !== 'object' || Array.isArray(data)) return 0;
       const snippets = _load();
       let count = 0;
@@ -22927,7 +22927,7 @@ const PreferencesPanel = (() => {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
       if (raw) {
-        const parsed = JSON.parse(raw);
+        const parsed = sanitizeStorageObject(JSON.parse(raw));
         if (parsed && typeof parsed === 'object') {
           Object.assign(_prefs, parsed);
         }
@@ -23356,7 +23356,7 @@ const SessionTemplates = (() => {
   function _loadTemplates() {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
-      return raw ? JSON.parse(raw) : [];
+      return raw ? sanitizeStorageObject(JSON.parse(raw)) : [];
     } catch { return []; }
   }
 
@@ -23485,7 +23485,7 @@ const SessionTemplates = (() => {
 
   function importFromJSON(jsonString) {
     try {
-      const imported = JSON.parse(jsonString);
+      const imported = sanitizeStorageObject(JSON.parse(jsonString));
       if (!Array.isArray(imported)) return 0;
       const existing = _loadTemplates();
       const existingIds = new Set(existing.map(t => t.id));
@@ -23800,7 +23800,7 @@ const ConversationFlashcards = (() => {
   /* ---- persistence ---- */
   function _loadDecks() {
     try {
-      return JSON.parse(SafeStorage.get(STORAGE_KEY)) || [];
+      return sanitizeStorageObject(JSON.parse(SafeStorage.get(STORAGE_KEY))) || [];
     } catch (e) { return []; }
   }
   function _saveDecks(decks) {
