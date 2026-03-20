@@ -1608,15 +1608,8 @@ const PromptTemplates = (() => {
 const HistoryPanel = (() => {
   let isOpen = false;
 
-  const _cache = {};
-  function el(id) {
-    let node = _cache[id];
-    if (!node) {
-      node = document.getElementById(id);
-      if (node) _cache[id] = node;
-    }
-    return node;
-  }
+  // Use the shared DOMCache instead of a private per-module cache.
+  const el = DOMCache.get.bind(DOMCache);
 
   /** File-safe ISO timestamp (colons/dots → dashes, trimmed to seconds). */
   function _fileTimestamp() {
@@ -1980,15 +1973,8 @@ const SnippetLibrary = (() => {
   let isOpen = false;
   let currentCode = null;  // code displayed in chat-output for save
 
-  const _cache = {};
-  function el(id) {
-    let node = _cache[id];
-    if (!node) {
-      node = document.getElementById(id);
-      if (node) _cache[id] = node;
-    }
-    return node;
-  }
+  // Use the shared DOMCache instead of a private per-module cache.
+  const el = DOMCache.get.bind(DOMCache);
   let _searchTimer = null;
 
   /** Load snippets from localStorage. */
@@ -5327,15 +5313,8 @@ const ConversationSessions = (function () {
 const ChatStats = (() => {
   let isOpen = false;
 
-  const _cache = {};
-  function el(id) {
-    let node = _cache[id];
-    if (!node) {
-      node = document.getElementById(id);
-      if (node) _cache[id] = node;
-    }
-    return node;
-  }
+  // Use the shared DOMCache instead of a private per-module cache.
+  const el = DOMCache.get.bind(DOMCache);
 
   const _esc = _escapeHtml;
 
