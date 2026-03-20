@@ -25339,3 +25339,201 @@ const PromptABTester = (() => {
 })();
 
 document.addEventListener('DOMContentLoaded', PromptABTester.init);
+
+/* ---------- Smart Scroll ---------- */
+/**
+ * SmartScroll — floating "Jump to Latest" button, per-session scroll position
+ * memory, and "new messages below" indicator.
+ *
+ * When the user scrolls away from the bottom of the chat output, a floating
+ * button appears to quickly jump back.  An unread badge shows how many new
+ * messages arrived while scrolled up.  Scroll positions are saved per session
+ * so switching sessions restores where you left off.
+ *
+ * Shortcut: End key (when chat-input is not focused) jumps to bottom.
+ *
+ * @namespace SmartScroll
+ */
+const SmartScroll = (() => {
+  const STORAGE_KEY = 'agenticchat_scroll_positions';
+  const SCROLL_THRESHOLD = 200; // px from bottom to show button
+  let _fab = null;
+  let _badge = null;
+  let _chatOutput = null;
+  let _unreadCount = 0;
+  let _isAtBottom = true;
+  let _observer = null;
+
+  /** Get saved scroll positions map. */
+  function _getPositions() {
+    return SafeStorage.getJSON(STORAGE_KEY, {});
+  }
+
+  /** Save scroll positions map. */
+  function _savePositions(positions) {
+    // Keep only most recent 100 entries to avoid bloat
+    const keys = Object.keys(positions);
+    if (keys.length > 100) {
+      const sorted = keys.sort((a, b) => (positions[a].ts || 0) - (positions[b].ts || 0));
+      const toRemove = sorted.slice(0, keys.length - 100);
+      toRemove.forEach(k => delete positions[k]);
+    }
+    SafeStorage.setJSON(STORAGE_KEY, positions);
+  }
+
+  /** Save current scroll position for the active session. */
+  function savePosition() {
+    if (!_chatOutput) return;
+    const activeId = SafeStorage.get('agenticchat_active_session');
+    if (!activeId) return;
+    const positions = _getPositions();
+    positions[activeId] = {
+      top: _chatOutput.scrollTop,
+      ts: Date.now()
+    };
+    _savePositions(positions);
+  }
+
+  /** Restore scroll position for the active session. */
+  function restorePosition() {
+    if (!_chatOutput) return;
+    const activeId = SafeStorage.get('agenticchat_active_session');
+    if (!activeId) return;
+    const positions = _getPositions();
+    const saved = positions[activeId];
+    if (saved && typeof saved.top === 'number') {
+      _chatOutput.scrollTop = saved.top;
+    }
+  }
+
+  /** Check if scrolled near bottom. */
+  function _checkScrollPosition() {
+    if (!_chatOutput) return;
+    const distFromBottom = _chatOutput.scrollHeight - _chatOutput.scrollTop - _chatOutput.clientHeight;
+    const wasAtBottom = _isAtBottom;
+    _isAtBottom = distFromBottom < SCROLL_THRESHOLD;
+
+    if (_fab) {
+      _fab.classList.toggle('visible', !_isAtBottom);
+    }
+
+    // Clear unread when user scrolls to bottom
+    if (_isAtBottom && !wasAtBottom) {
+      _unreadCount = 0;
+      _updateBadge();
+    }
+  }
+
+  /** Update unread badge. */
+  function _updateBadge() {
+    if (!_badge) return;
+    if (_unreadCount > 0) {
+      _badge.textContent = _unreadCount > 99 ? '99+' : String(_unreadCount);
+      _badge.style.display = 'flex';
+    } else {
+      _badge.style.display = 'none';
+    }
+  }
+
+  /** Notify that a new message was added (called externally). */
+  function onNewMessage() {
+    if (!_isAtBottom) {
+      _unreadCount++;
+      _updateBadge();
+    }
+  }
+
+  /** Scroll to bottom smoothly. */
+  function scrollToBottom(smooth = true) {
+    if (!_chatOutput) return;
+    _chatOutput.scrollTo({
+      top: _chatOutput.scrollHeight,
+      behavior: smooth ? 'smooth' : 'instant'
+    });
+    _unreadCount = 0;
+    _updateBadge();
+  }
+
+  /** Build the floating action button. */
+  function _buildFAB() {
+    _fab = document.createElement('div');
+    _fab.id = 'smart-scroll-fab';
+    _fab.className = 'smart-scroll-fab';
+    _fab.setAttribute('role', 'button');
+    _fab.setAttribute('aria-label', 'Jump to latest message');
+    _fab.setAttribute('tabindex', '0');
+    _fab.title = 'Jump to latest (End)';
+    _fab.innerHTML = `<span class="smart-scroll-arrow">↓</span><span class="smart-scroll-badge" id="smart-scroll-badge"></span>`;
+
+    _fab.addEventListener('click', () => scrollToBottom());
+    _fab.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); scrollToBottom(); }
+    });
+
+    // Insert after chat output
+    _chatOutput = document.getElementById('chat-output');
+    if (_chatOutput) {
+      _chatOutput.parentElement.style.position = 'relative';
+      _chatOutput.parentElement.appendChild(_fab);
+      _badge = _fab.querySelector('#smart-scroll-badge');
+    }
+  }
+
+  /** Observe new child elements in chat output for unread tracking. */
+  function _observeNewMessages() {
+    if (!_chatOutput || typeof MutationObserver === 'undefined') return;
+    _observer = new MutationObserver(mutations => {
+      for (const m of mutations) {
+        if (m.type === 'childList' && m.addedNodes.length > 0) {
+          // Only count element nodes (not text nodes)
+          const added = [...m.addedNodes].filter(n => n.nodeType === Node.ELEMENT_NODE);
+          if (added.length > 0 && !_isAtBottom) {
+            _unreadCount += added.length;
+            _updateBadge();
+          }
+        }
+      }
+    });
+    _observer.observe(_chatOutput, { childList: true });
+  }
+
+  function init() {
+    _chatOutput = document.getElementById('chat-output');
+    if (!_chatOutput) return;
+
+    _buildFAB();
+    _observeNewMessages();
+
+    // Throttled scroll handler
+    let _scrollTick = false;
+    _chatOutput.addEventListener('scroll', () => {
+      if (!_scrollTick) {
+        _scrollTick = true;
+        requestAnimationFrame(() => {
+          _checkScrollPosition();
+          _scrollTick = false;
+        });
+      }
+    });
+
+    // Save position periodically and on unload
+    let _saveTick = null;
+    _chatOutput.addEventListener('scroll', () => {
+      clearTimeout(_saveTick);
+      _saveTick = setTimeout(savePosition, 1000);
+    });
+    window.addEventListener('beforeunload', savePosition);
+
+    // End key shortcut
+    document.addEventListener('keydown', e => {
+      if (e.key === 'End' && document.activeElement?.id !== 'chat-input') {
+        e.preventDefault();
+        scrollToBottom();
+      }
+    });
+  }
+
+  return { init, scrollToBottom, onNewMessage, savePosition, restorePosition };
+})();
+
+document.addEventListener('DOMContentLoaded', SmartScroll.init);
