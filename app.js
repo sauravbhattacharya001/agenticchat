@@ -73,6 +73,7 @@
  *   SmartPaste           — intelligent paste formatting (JSON, code, CSV, SQL, URLs, stack traces)
  *   MessageContextMenu   — right-click context menu aggregating per-message actions
  *   PomodoroTimer        — built-in focus timer with work/break cycles and stats
+ *   PromptABTester       — compare two model responses side-by-side with voting and history
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -25105,3 +25106,231 @@ var PomodoroTimer = (function() {
 })();
 
 document.addEventListener('DOMContentLoaded', PomodoroTimer.init);
+
+/* ============================================================
+ *  PromptABTester — compare two model responses side-by-side
+ *  Shortcut: Ctrl+Shift+B
+ * ============================================================ */
+const PromptABTester = (() => {
+  let _overlay = null;
+  let _visible = false;
+  const STORAGE_KEY = 'ac-ab-tester-history';
+  const MAX_HISTORY = 20;
+
+  function _getHistory() { return SafeStorage.getJSON(STORAGE_KEY, []); }
+  function _saveHistory(h) { SafeStorage.setJSON(STORAGE_KEY, h.slice(0, MAX_HISTORY)); }
+
+  function _build() {
+    _overlay = document.createElement('div');
+    _overlay.className = 'ab-tester-overlay';
+    _overlay.innerHTML = `
+      <div class="ab-tester-panel">
+        <div class="ab-tester-header">
+          <h3>⚖️ Prompt A/B Tester</h3>
+          <div class="ab-tester-header-actions">
+            <button class="ab-tester-history-btn" title="View comparison history">📋</button>
+            <button class="ab-tester-close" title="Close">&times;</button>
+          </div>
+        </div>
+        <div class="ab-tester-config">
+          <div class="ab-tester-model-row">
+            <label>Model A: <select class="ab-model-a"></select></label>
+            <label>Model B: <select class="ab-model-b"></select></label>
+          </div>
+          <textarea class="ab-tester-prompt" placeholder="Enter your prompt here…" rows="3"></textarea>
+          <div class="ab-tester-actions">
+            <button class="ab-tester-run btn-primary">▶ Compare</button>
+            <button class="ab-tester-swap btn-secondary" title="Swap models">🔄 Swap</button>
+            <button class="ab-tester-clear btn-secondary">Clear</button>
+          </div>
+        </div>
+        <div class="ab-tester-results" style="display:none">
+          <div class="ab-tester-result-col ab-tester-col-a">
+            <div class="ab-tester-col-header"><span class="ab-model-label-a"></span><span class="ab-tester-meta-a"></span></div>
+            <div class="ab-tester-response-a"></div>
+            <div class="ab-tester-vote">
+              <button class="ab-vote-btn" data-vote="a" title="Model A is better">👍 A wins</button>
+            </div>
+          </div>
+          <div class="ab-tester-result-col ab-tester-col-b">
+            <div class="ab-tester-col-header"><span class="ab-model-label-b"></span><span class="ab-tester-meta-b"></span></div>
+            <div class="ab-tester-response-b"></div>
+            <div class="ab-tester-vote">
+              <button class="ab-vote-btn" data-vote="b" title="Model B is better">👍 B wins</button>
+            </div>
+          </div>
+        </div>
+        <div class="ab-tester-history-panel" style="display:none">
+          <h4>Comparison History</h4>
+          <div class="ab-tester-history-list"></div>
+          <button class="ab-tester-clear-history btn-secondary">Clear History</button>
+        </div>
+      </div>`;
+    document.body.appendChild(_overlay);
+
+    // Populate model selects
+    const selA = _overlay.querySelector('.ab-model-a');
+    const selB = _overlay.querySelector('.ab-model-b');
+    ChatConfig.AVAILABLE_MODELS.forEach((m, i) => {
+      selA.add(new Option(m.label, m.id));
+      selB.add(new Option(m.label, m.id));
+    });
+    // Default: current model for A, next model for B
+    selA.value = ChatConfig.MODEL;
+    const models = ChatConfig.AVAILABLE_MODELS;
+    const curIdx = models.findIndex(m => m.id === ChatConfig.MODEL);
+    selB.value = models[(curIdx + 1) % models.length].id;
+
+    // Events
+    _overlay.querySelector('.ab-tester-close').onclick = toggle;
+    _overlay.querySelector('.ab-tester-run').onclick = _run;
+    _overlay.querySelector('.ab-tester-swap').onclick = () => {
+      const tmp = selA.value; selA.value = selB.value; selB.value = tmp;
+    };
+    _overlay.querySelector('.ab-tester-clear').onclick = () => {
+      _overlay.querySelector('.ab-tester-prompt').value = '';
+      _overlay.querySelector('.ab-tester-results').style.display = 'none';
+    };
+    _overlay.querySelectorAll('.ab-vote-btn').forEach(btn => {
+      btn.onclick = () => _vote(btn.dataset.vote);
+    });
+    _overlay.querySelector('.ab-tester-history-btn').onclick = _toggleHistory;
+    _overlay.querySelector('.ab-tester-clear-history').onclick = () => {
+      SafeStorage.remove(STORAGE_KEY);
+      _renderHistory();
+    };
+    _overlay.addEventListener('click', e => { if (e.target === _overlay) toggle(); });
+  }
+
+  async function _callModel(key, model, prompt) {
+    const messages = [
+      { role: 'system', content: 'You are a helpful assistant.' },
+      { role: 'user', content: prompt }
+    ];
+    const start = performance.now();
+    const rsp = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+      body: JSON.stringify({ model, messages, max_tokens: ChatConfig.MAX_TOKENS_RESPONSE })
+    });
+    const elapsed = Math.round(performance.now() - start);
+    if (!rsp.ok) {
+      const body = await rsp.json().catch(() => ({}));
+      return { ok: false, error: body?.error?.message || `HTTP ${rsp.status}`, elapsed };
+    }
+    const data = await rsp.json();
+    const text = data.choices?.[0]?.message?.content || '(empty response)';
+    const tokens = data.usage || {};
+    return { ok: true, text, tokens, elapsed };
+  }
+
+  async function _run() {
+    const key = ApiKeyManager?.getKey?.() || SafeStorage.get('ac-api-key');
+    if (!key) { alert('Please set your OpenAI API key first.'); return; }
+
+    const prompt = _overlay.querySelector('.ab-tester-prompt').value.trim();
+    if (!prompt) { alert('Enter a prompt to compare.'); return; }
+
+    const modelA = _overlay.querySelector('.ab-model-a').value;
+    const modelB = _overlay.querySelector('.ab-model-b').value;
+    if (modelA === modelB) { alert('Select two different models to compare.'); return; }
+
+    const results = _overlay.querySelector('.ab-tester-results');
+    const respA = _overlay.querySelector('.ab-tester-response-a');
+    const respB = _overlay.querySelector('.ab-tester-response-b');
+    const metaA = _overlay.querySelector('.ab-tester-meta-a');
+    const metaB = _overlay.querySelector('.ab-tester-meta-b');
+    const lblA = _overlay.querySelector('.ab-model-label-a');
+    const lblB = _overlay.querySelector('.ab-model-label-b');
+
+    results.style.display = 'grid';
+    respA.textContent = '⏳ Loading…';
+    respB.textContent = '⏳ Loading…';
+    lblA.textContent = modelA;
+    lblB.textContent = modelB;
+    metaA.textContent = '';
+    metaB.textContent = '';
+
+    _overlay.querySelector('.ab-tester-run').disabled = true;
+    _overlay.querySelectorAll('.ab-vote-btn').forEach(b => { b.disabled = false; b.classList.remove('voted'); });
+
+    const [rA, rB] = await Promise.all([
+      _callModel(key, modelA, prompt),
+      _callModel(key, modelB, prompt)
+    ]);
+
+    respA.textContent = rA.ok ? rA.text : `❌ ${rA.error}`;
+    respB.textContent = rB.ok ? rB.text : `❌ ${rB.error}`;
+    metaA.textContent = rA.ok ? ` — ${rA.elapsed}ms, ${rA.tokens.total_tokens || '?'} tok` : '';
+    metaB.textContent = rB.ok ? ` — ${rB.elapsed}ms, ${rB.tokens.total_tokens || '?'} tok` : '';
+
+    _overlay.querySelector('.ab-tester-run').disabled = false;
+
+    // Save to history
+    const entry = {
+      ts: new Date().toISOString(),
+      prompt: prompt.slice(0, 200),
+      modelA, modelB,
+      timeA: rA.elapsed, timeB: rB.elapsed,
+      tokensA: rA.tokens?.total_tokens, tokensB: rB.tokens?.total_tokens,
+      vote: null
+    };
+    _overlay._lastEntry = entry;
+    const hist = _getHistory();
+    hist.unshift(entry);
+    _saveHistory(hist);
+  }
+
+  function _vote(winner) {
+    if (!_overlay._lastEntry) return;
+    const hist = _getHistory();
+    if (hist.length && hist[0].ts === _overlay._lastEntry.ts) {
+      hist[0].vote = winner;
+      _saveHistory(hist);
+    }
+    _overlay.querySelectorAll('.ab-vote-btn').forEach(b => {
+      b.disabled = true;
+      if (b.dataset.vote === winner) b.classList.add('voted');
+    });
+  }
+
+  function _toggleHistory() {
+    const panel = _overlay.querySelector('.ab-tester-history-panel');
+    const shown = panel.style.display !== 'none';
+    panel.style.display = shown ? 'none' : 'block';
+    if (!shown) _renderHistory();
+  }
+
+  function _renderHistory() {
+    const list = _overlay.querySelector('.ab-tester-history-list');
+    const hist = _getHistory();
+    if (!hist.length) { list.innerHTML = '<p style="opacity:0.6">No comparisons yet.</p>'; return; }
+    list.innerHTML = hist.map(h => `
+      <div class="ab-history-item">
+        <div class="ab-history-prompt">${_esc(h.prompt)}</div>
+        <div class="ab-history-meta">
+          ${h.modelA} (${h.timeA || '?'}ms) vs ${h.modelB} (${h.timeB || '?'}ms)
+          ${h.vote ? `— <strong>${h.vote === 'a' ? h.modelA : h.modelB} won</strong>` : '— no vote'}
+        </div>
+      </div>
+    `).join('');
+  }
+
+  function _esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+  function toggle() {
+    if (!_overlay) _build();
+    _visible = !_visible;
+    _overlay.classList.toggle('visible', _visible);
+  }
+
+  function init() {
+    document.addEventListener('keydown', e => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'B') { e.preventDefault(); toggle(); }
+    });
+  }
+
+  return { init, toggle };
+})();
+
+document.addEventListener('DOMContentLoaded', PromptABTester.init);
