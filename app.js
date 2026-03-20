@@ -136,7 +136,12 @@ const SafeStorage = (() => {
     getJSON(key, fallback = null) {
       const raw = this.get(key);
       if (raw == null) return fallback;
-      try { return JSON.parse(raw); } catch (_) { return fallback; }
+      try {
+        const parsed = JSON.parse(raw);
+        return (parsed !== null && typeof parsed === 'object')
+          ? sanitizeStorageObject(parsed)
+          : parsed;
+      } catch (_) { return fallback; }
     },
     /**
      * JSON-stringify and persist a value.
