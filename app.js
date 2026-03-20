@@ -5478,7 +5478,7 @@ const ChatStats = (() => {
             <span class="stats-longest-role">${stats.longestMsg.role === 'user' ? 'You' : 'AI'}</span>
             <span class="stats-longest-len">${stats.longestMsg.length} chars</span>
           </div>
-          <div class="stats-longest-preview">${stats.longestMsg.preview}</div>
+          <div class="stats-longest-preview">${_escapeHtml(stats.longestMsg.preview)}</div>
         </div>` : ''}
         <div class="stats-section">
           <h4>🔤 Your Top Words</h4>
@@ -22252,7 +22252,7 @@ const CustomThemeCreator = (() => {
     // Add saved custom themes
     const customs = _loadCustomThemes();
     Object.keys(customs).forEach(name => {
-      presetSelect.innerHTML += `<option value="custom:${name}">★ ${name}</option>`;
+      presetSelect.innerHTML += `<option value="custom:${_escapeHtml(name)}">★ ${_escapeHtml(name)}</option>`;
     });
     presetSelect.onchange = () => {
       const val = presetSelect.value;
