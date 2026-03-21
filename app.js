@@ -493,7 +493,7 @@ const SandboxRunner = (() => {
 
       const iframeHTML = `<!DOCTYPE html><html><head>` +
         `<meta http-equiv="Content-Security-Policy" ` +
-        `content="default-src 'none'; script-src 'unsafe-inline'; connect-src https:;">` +
+        `content="default-src 'none'; script-src 'unsafe-inline'; connect-src https://api.openai.com;">` +
         `</head><body><script>
         window.addEventListener('message', async function handler(evt) {
           if (!evt.data || evt.data.type !== 'sandbox-exec') return;
