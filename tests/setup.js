@@ -245,6 +245,12 @@ function setupDOM() {
       <button id="heatmap-refresh-btn"></button>
     </div>
     <div id="file-drop-overlay"></div>
+    <div id="cross-tab-banner" style="display:none;">
+      <span id="cross-tab-message"></span>
+      <button id="cross-tab-reload">Reload</button>
+      <button id="cross-tab-keep">Keep Mine</button>
+      <button id="cross-tab-dismiss">Dismiss</button>
+    </div>
   `;
 }
 
@@ -327,7 +333,8 @@ function loadApp() {
     'QuickSwitcher',
     'ChatGPTImporter',
     'PromptChainRunner',
-    'CustomThemeCreator'
+    'CustomThemeCreator',
+    'CrossTabSync'
   ];
 
   for (const mod of modules) {

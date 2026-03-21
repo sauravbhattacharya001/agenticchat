@@ -19935,7 +19935,7 @@ const TypingSpeedMonitor = (() => {
     overlay.id = 'wpm-dashboard-overlay';
     overlay.className = 'wpm-dashboard-overlay';
     overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-    overlay.innerHTML = 
+    overlay.innerHTML = `
       <div class="wpm-dashboard">
         <button class="wpm-close" id="wpm-close">&times;</button>
         <h2>⌨️ Typing Speed</h2>
@@ -19960,7 +19960,7 @@ const TypingSpeedMonitor = (() => {
         <div class="wpm-history-label">Speed History (last 30s)</div>
         <div class="wpm-sparkline"><canvas id="wpm-canvas"></canvas></div>
         <button class="wpm-reset-btn" id="wpm-reset">Reset Stats</button>
-      </div>;
+      </div>`;
     document.body.appendChild(overlay);
     document.getElementById('wpm-close').addEventListener('click', close);
     document.getElementById('wpm-reset').addEventListener('click', reset);
@@ -25543,197 +25543,6 @@ const SmartScroll = (() => {
 })();
 
 document.addEventListener('DOMContentLoaded', SmartScroll.init);
-
-/* ---------- Text Expander ---------- */
-/**
- * TextExpander — define shorthand triggers that auto-expand inline as you type.
- *
- * Built-in dynamic snippets:
- *   /dt   → current date (YYYY-MM-DD)
- *   /ts   → current timestamp (ISO)
- *   /tm   → current time (HH:MM)
- *   /day  → day of week (e.g. Friday)
- *
- * Users can add custom snippets via the management panel (Ctrl+Shift+E).
- * All custom snippets are persisted in localStorage.
- */
-const TextExpander = (() => {
-  const STORAGE_KEY = 'agenticchat_text_expander';
-  let _snippets = {};
-  let _panelEl = null;
-
-  const BUILTINS = {
-    '/dt':  () => new Date().toISOString().slice(0, 10),
-    '/ts':  () => new Date().toISOString(),
-    '/tm':  () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    '/day': () => new Date().toLocaleDateString([], { weekday: 'long' }),
-  };
-
-  function _load() {
-    try { _snippets = JSON.parse(SafeStorage.get(STORAGE_KEY) || '{}'); } catch { _snippets = {}; }
-  }
-
-  function _save() {
-    SafeStorage.set(STORAGE_KEY, JSON.stringify(_snippets));
-  }
-
-  /** Expand triggers in the input field. Called on input events. */
-  function _tryExpand(inputEl) {
-    const val = inputEl.value;
-    const cursorPos = inputEl.selectionStart;
-    // Find the last word before cursor
-    const before = val.slice(0, cursorPos);
-    const match = before.match(/(\/[\w]+)$/);
-    if (!match) return;
-    const trigger = match[1].toLowerCase();
-    let replacement = null;
-    if (BUILTINS[trigger]) {
-      replacement = BUILTINS[trigger]();
-    } else if (_snippets[trigger]) {
-      replacement = _snippets[trigger];
-    }
-    if (replacement) {
-      const start = cursorPos - trigger.length;
-      const after = val.slice(cursorPos);
-      inputEl.value = before.slice(0, start) + replacement + after;
-      const newPos = start + replacement.length;
-      inputEl.setSelectionRange(newPos, newPos);
-      inputEl.dispatchEvent(new Event('input', { bubbles: true }));
-    }
-  }
-
-  function addSnippet(trigger, expansion) {
-    const t = trigger.startsWith('/') ? trigger.toLowerCase() : '/' + trigger.toLowerCase();
-    if (BUILTINS[t]) return false; // can't override builtins
-    _snippets[t] = expansion;
-    _save();
-    return true;
-  }
-
-  function removeSnippet(trigger) {
-    const t = trigger.startsWith('/') ? trigger.toLowerCase() : '/' + trigger.toLowerCase();
-    if (_snippets[t]) { delete _snippets[t]; _save(); return true; }
-    return false;
-  }
-
-  function getAll() {
-    const all = {};
-    Object.keys(BUILTINS).forEach(k => { all[k] = { value: '(dynamic)', builtin: true }; });
-    Object.keys(_snippets).forEach(k => { all[k] = { value: _snippets[k], builtin: false }; });
-    return all;
-  }
-
-  /* ---- Panel UI ---- */
-  function _buildPanel() {
-    if (_panelEl) return _panelEl;
-    _panelEl = document.createElement('div');
-    _panelEl.id = 'text-expander-panel';
-    _panelEl.className = 'modal-overlay';
-    _panelEl.style.display = 'none';
-    _panelEl.setAttribute('role', 'dialog');
-    _panelEl.setAttribute('aria-label', 'Text Expander');
-    _panelEl.innerHTML = 
-      <div class="modal-content" style="max-width:540px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-          <h3 style="margin:0">⚡ Text Expander</h3>
-          <button id="te-close" class="btn-sm" title="Close">✕</button>
-        </div>
-        <p style="font-size:0.85em;opacity:0.7;margin:0 0 10px">Type a trigger in chat input and press <kbd>Space</kbd> or <kbd>Tab</kbd> to expand. Triggers start with <code>/</code>.</p>
-        <div style="display:flex;gap:6px;margin-bottom:12px">
-          <input id="te-trigger" placeholder="Trigger (e.g. /sig)" style="width:120px;padding:6px;border:1px solid var(--border-color,#555);border-radius:4px;background:var(--input-bg,#333);color:var(--text-color,#eee)">
-          <input id="te-expansion" placeholder="Expansion text" style="flex:1;padding:6px;border:1px solid var(--border-color,#555);border-radius:4px;background:var(--input-bg,#333);color:var(--text-color,#eee)">
-          <button id="te-add" class="btn-sm" style="white-space:nowrap">+ Add</button>
-        </div>
-        <div id="te-list" style="max-height:300px;overflow-y:auto"></div>
-      </div>;
-    document.body.appendChild(_panelEl);
-
-    _panelEl.querySelector('#te-close').addEventListener('click', () => { _panelEl.style.display = 'none'; });
-    _panelEl.addEventListener('click', e => { if (e.target === _panelEl) _panelEl.style.display = 'none'; });
-    _panelEl.querySelector('#te-add').addEventListener('click', _onAdd);
-    _panelEl.querySelector('#te-trigger').addEventListener('keydown', e => { if (e.key === 'Enter') _onAdd(); });
-    _panelEl.querySelector('#te-expansion').addEventListener('keydown', e => { if (e.key === 'Enter') _onAdd(); });
-
-    return _panelEl;
-  }
-
-  function _onAdd() {
-    const triggerInput = document.getElementById('te-trigger');
-    const expansionInput = document.getElementById('te-expansion');
-    const t = triggerInput.value.trim();
-    const e = expansionInput.value.trim();
-    if (!t || !e) return;
-    if (addSnippet(t, e)) {
-      triggerInput.value = '';
-      expansionInput.value = '';
-      _renderList();
-    } else {
-      alert('Cannot override built-in snippets.');
-    }
-  }
-
-  function _renderList() {
-    const container = document.getElementById('te-list');
-    if (!container) return;
-    const all = getAll();
-    const keys = Object.keys(all).sort();
-    if (keys.length === 0) { container.innerHTML = '<p style="opacity:0.5;text-align:center">No snippets yet</p>'; return; }
-    container.innerHTML = keys.map(k => {
-      const s = all[k];
-      const val = s.builtin ? '<em style="opacity:0.6">(dynamic)</em>' : _escHtml(s.value.length > 60 ? s.value.slice(0, 57) + '...' : s.value);
-      const del = s.builtin ? '' :  <button class="btn-sm te-del" data-trigger="" title="Delete" style="color:#e74c3c">✕</button>;
-      return <div style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--border-color,#444)">
-        <code style="min-width:70px"></code>
-        <span style="flex:1;font-size:0.9em"></span>
-      </div>;
-    }).join('');
-    container.querySelectorAll('.te-del').forEach(btn => {
-      btn.addEventListener('click', () => { removeSnippet(btn.dataset.trigger); _renderList(); });
-    });
-  }
-
-  function _escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-  function _escAttr(s) { return s.replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
-
-  function togglePanel() {
-    const p = _buildPanel();
-    _renderList();
-    p.style.display = p.style.display === 'none' ? 'flex' : 'none';
-  }
-
-  function init() {
-    _load();
-    const input = document.getElementById('chat-input');
-    if (input) {
-      // Expand on space or tab after a trigger
-      input.addEventListener('keydown', e => {
-        if (e.key === ' ' || e.key === 'Tab') {
-          const before = input.value.slice(0, input.selectionStart);
-          if (before.match(/(\/[\w]+)$/)) {
-            e.preventDefault();
-            _tryExpand(input);
-            if (e.key === ' ') {
-              // Insert the space after expansion
-              const pos = input.selectionStart;
-              input.value = input.value.slice(0, pos) + ' ' + input.value.slice(pos);
-              input.setSelectionRange(pos + 1, pos + 1);
-            }
-          }
-        }
-      });
-    }
-
-    // Keyboard shortcut: Ctrl+Shift+E
-    document.addEventListener('keydown', e => {
-      if (e.ctrlKey && e.shiftKey && e.key === 'E') {
-        e.preventDefault();
-        togglePanel();
-      }
-    });
-  }
-
-  return { init, addSnippet, removeSnippet, getAll, togglePanel };
-})();
 
 // TextExpander.init already registered above (line ~22905) — skip duplicate
 
