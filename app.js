@@ -76,6 +76,7 @@
  *   PromptABTester       — compare two model responses side-by-side with voting and history
  *   TextExpander         — shorthand triggers that auto-expand inline (Ctrl+Shift+E)
  *   MessageReaderView    — full-width reader overlay for comfortable reading (Alt+R)
+ *   ReadabilityAnalyzer  — Flesch-Kincaid readability scoring with per-role stats (Ctrl+Shift+R)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -25852,4 +25853,291 @@ const MessageReaderView = (() => {
   }
 
   return { init, open, close, toggle, isOpen };
+})();
+
+
+/* ============================================================
+ *  ReadabilityAnalyzer — message readability scoring (Ctrl+Shift+R)
+ *
+ *  Computes Flesch-Kincaid grade level, reading ease, vocabulary
+ *  diversity, average sentence/word lengths for user and assistant
+ *  messages. Shows a slide-out panel with per-role stats and a
+ *  per-message sparkline.
+ * ============================================================ */
+const ReadabilityAnalyzer = (() => {
+
+  let panel = null;
+  let visible = false;
+  const STORAGE_KEY = 'ac-readability-visible';
+
+  /* ── Syllable counter (English heuristic) ─────────────────── */
+  function countSyllables(word) {
+    word = word.toLowerCase().replace(/[^a-z]/g, '');
+    if (word.length <= 2) return word.length ? 1 : 0;
+    word = word.replace(/(?:[^laeiouy]es|ed|[^laeiouy]e)$/, '');
+    word = word.replace(/^y/, '');
+    const matches = word.match(/[aeiouy]{1,2}/g);
+    return matches ? matches.length : 1;
+  }
+
+  /* ── Text metrics ─────────────────────────────────────────── */
+  function analyzeText(text) {
+    if (!text || !text.trim()) {
+      return { sentences: 0, words: 0, syllables: 0, chars: 0, uniqueWords: 0,
+               avgWordLen: 0, avgSentLen: 0, fleschEase: 0, fleschKincaid: 0, diversity: 0 };
+    }
+
+    // Strip code blocks to focus on prose
+    const prose = text.replace(/```[\s\S]*?```/g, '').replace(/`[^`]+`/g, '').trim();
+    if (!prose) {
+      return { sentences: 0, words: 0, syllables: 0, chars: 0, uniqueWords: 0,
+               avgWordLen: 0, avgSentLen: 0, fleschEase: 0, fleschKincaid: 0, diversity: 0 };
+    }
+
+    const sentences = prose.split(/[.!?]+/).filter(s => s.trim().length > 0);
+    const words = prose.split(/\s+/).filter(w => /[a-zA-Z]/.test(w));
+    const wordSet = new Set(words.map(w => w.toLowerCase().replace(/[^a-z]/g, '')));
+
+    const numSentences = Math.max(sentences.length, 1);
+    const numWords = Math.max(words.length, 1);
+    const totalSyllables = words.reduce((sum, w) => sum + countSyllables(w), 0);
+    const totalChars = words.reduce((sum, w) => sum + w.replace(/[^a-zA-Z]/g, '').length, 0);
+
+    const avgSentLen = numWords / numSentences;
+    const avgSyllPerWord = totalSyllables / numWords;
+    const avgWordLen = totalChars / numWords;
+
+    // Flesch Reading Ease: 206.835 - 1.015*(words/sentences) - 84.6*(syllables/words)
+    const fleschEase = Math.max(0, Math.min(100,
+      206.835 - 1.015 * avgSentLen - 84.6 * avgSyllPerWord));
+
+    // Flesch-Kincaid Grade Level: 0.39*(words/sentences) + 11.8*(syllables/words) - 15.59
+    const fleschKincaid = Math.max(0,
+      0.39 * avgSentLen + 11.8 * avgSyllPerWord - 15.59);
+
+    const diversity = wordSet.size / numWords;
+
+    return {
+      sentences: numSentences, words: numWords, syllables: totalSyllables,
+      chars: totalChars, uniqueWords: wordSet.size,
+      avgWordLen: Math.round(avgWordLen * 10) / 10,
+      avgSentLen: Math.round(avgSentLen * 10) / 10,
+      fleschEase: Math.round(fleschEase * 10) / 10,
+      fleschKincaid: Math.round(fleschKincaid * 10) / 10,
+      diversity: Math.round(diversity * 100)
+    };
+  }
+
+  function easeLabel(score) {
+    if (score >= 80) return '📗 Very Easy';
+    if (score >= 60) return '📘 Standard';
+    if (score >= 40) return '📙 Fairly Difficult';
+    if (score >= 20) return '📕 Difficult';
+    return '📓 Very Difficult';
+  }
+
+  function gradeLabel(grade) {
+    if (grade <= 5) return 'Elementary';
+    if (grade <= 8) return 'Middle School';
+    if (grade <= 12) return 'High School';
+    if (grade <= 16) return 'College';
+    return 'Post-Graduate';
+  }
+
+  /* ── Analysis across messages ─────────────────────────────── */
+  function analyzeConversation() {
+    const msgs = typeof ConversationManager !== 'undefined'
+      ? ConversationManager.getHistory().filter(m => m.role !== 'system')
+      : [];
+
+    const userMsgs = msgs.filter(m => m.role === 'user');
+    const assistantMsgs = msgs.filter(m => m.role === 'assistant');
+
+    function aggregate(list) {
+      if (list.length === 0) return analyzeText('');
+      const metrics = list.map(m => analyzeText(m.content || ''));
+      const total = key => metrics.reduce((s, m) => s + m[key], 0);
+      const avg = key => Math.round((metrics.reduce((s, m) => s + m[key], 0) / metrics.length) * 10) / 10;
+      return {
+        msgCount: list.length,
+        totalWords: total('words'),
+        avgFleschEase: avg('fleschEase'),
+        avgGrade: avg('fleschKincaid'),
+        avgSentLen: avg('avgSentLen'),
+        avgWordLen: avg('avgWordLen'),
+        avgDiversity: avg('diversity'),
+        perMessage: metrics
+      };
+    }
+
+    return { user: aggregate(userMsgs), assistant: aggregate(assistantMsgs), all: msgs };
+  }
+
+  /* ── Sparkline renderer ───────────────────────────────────── */
+  function sparkline(values, width, height, color) {
+    if (values.length < 2) return '';
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const range = max - min || 1;
+    const step = width / (values.length - 1);
+    const points = values.map((v, i) =>
+      `${(i * step).toFixed(1)},${(height - ((v - min) / range) * (height - 4) - 2).toFixed(1)}`
+    ).join(' ');
+    return `<svg width="${width}" height="${height}" style="display:block;margin:4px 0">
+      <polyline points="${points}" fill="none" stroke="${color}" stroke-width="1.5"/>
+    </svg>`;
+  }
+
+  /* ── Panel UI ─────────────────────────────────────────────── */
+  function buildPanel() {
+    if (panel) panel.remove();
+
+    panel = document.createElement('div');
+    panel.id = 'readability-panel';
+
+    const style = document.createElement('style');
+    style.textContent = `
+      #readability-panel {
+        position: fixed; top: 0; right: 0; width: 340px; height: 100vh;
+        background: var(--bg-secondary, #1e1e2e); color: var(--text-primary, #cdd6f4);
+        border-left: 1px solid var(--border-color, #45475a);
+        z-index: 10200; display: flex; flex-direction: column;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-size: 13px; box-shadow: -4px 0 20px rgba(0,0,0,.3);
+        transform: translateX(100%); transition: transform .25s ease;
+      }
+      #readability-panel.visible { transform: translateX(0); }
+      #readability-panel .rp-header {
+        display: flex; justify-content: space-between; align-items: center;
+        padding: 14px 16px; border-bottom: 1px solid var(--border-color, #45475a);
+        font-weight: 600; font-size: 15px;
+      }
+      #readability-panel .rp-close { cursor: pointer; background: none; border: none;
+        color: inherit; font-size: 18px; padding: 4px 8px; border-radius: 4px; }
+      #readability-panel .rp-close:hover { background: rgba(255,255,255,.1); }
+      #readability-panel .rp-body { flex: 1; overflow-y: auto; padding: 12px 16px; }
+      #readability-panel .rp-section { margin-bottom: 18px; }
+      #readability-panel .rp-section h3 { font-size: 13px; text-transform: uppercase;
+        letter-spacing: .5px; opacity: .7; margin: 0 0 8px; }
+      #readability-panel .rp-row { display: flex; justify-content: space-between;
+        padding: 3px 0; }
+      #readability-panel .rp-label { opacity: .7; }
+      #readability-panel .rp-value { font-weight: 600; }
+      #readability-panel .rp-meter { height: 6px; border-radius: 3px;
+        background: rgba(255,255,255,.1); margin: 4px 0 8px; }
+      #readability-panel .rp-meter-fill { height: 100%; border-radius: 3px;
+        transition: width .3s ease; }
+      #readability-panel .rp-empty { text-align: center; padding: 40px 16px;
+        opacity: .5; }
+    `;
+    panel.appendChild(style);
+
+    const header = document.createElement('div');
+    header.className = 'rp-header';
+    header.innerHTML = '<span>📊 Readability</span>';
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'rp-close';
+    closeBtn.textContent = '✕';
+    closeBtn.addEventListener('click', toggle);
+    header.appendChild(closeBtn);
+    panel.appendChild(header);
+
+    const body = document.createElement('div');
+    body.className = 'rp-body';
+    panel.appendChild(body);
+
+    document.body.appendChild(panel);
+    return panel;
+  }
+
+  function renderStats(data, container, label, color) {
+    const sec = document.createElement('div');
+    sec.className = 'rp-section';
+    sec.innerHTML = `<h3>${label}</h3>`;
+
+    if (data.msgCount === 0) {
+      sec.innerHTML += '<div class="rp-empty">No messages yet</div>';
+      container.appendChild(sec);
+      return;
+    }
+
+    const rows = [
+      ['Messages', data.msgCount],
+      ['Total Words', data.totalWords],
+      ['Reading Ease', `${data.avgFleschEase} ${easeLabel(data.avgFleschEase).split(' ')[0]}`],
+      ['Grade Level', `${data.avgGrade} (${gradeLabel(data.avgGrade)})`],
+      ['Avg Sentence Len', `${data.avgSentLen} words`],
+      ['Avg Word Len', `${data.avgWordLen} chars`],
+      ['Vocabulary Diversity', `${data.avgDiversity}%`]
+    ];
+
+    rows.forEach(([lbl, val]) => {
+      sec.innerHTML += `<div class="rp-row"><span class="rp-label">${lbl}</span><span class="rp-value">${val}</span></div>`;
+    });
+
+    // Reading ease meter
+    sec.innerHTML += `<div class="rp-meter"><div class="rp-meter-fill" style="width:${data.avgFleschEase}%;background:${color}"></div></div>`;
+
+    // Sparkline of per-message ease scores
+    if (data.perMessage && data.perMessage.length >= 2) {
+      const easeScores = data.perMessage.map(m => m.fleschEase);
+      sec.innerHTML += '<div class="rp-label" style="margin-top:8px">Ease over time:</div>';
+      sec.innerHTML += sparkline(easeScores, 300, 40, color);
+    }
+
+    container.appendChild(sec);
+  }
+
+  function refresh() {
+    if (!panel) buildPanel();
+    const body = panel.querySelector('.rp-body');
+    body.innerHTML = '';
+
+    const data = analyzeConversation();
+
+    if (data.all.length === 0) {
+      body.innerHTML = '<div class="rp-empty">Start a conversation to see readability stats</div>';
+      return;
+    }
+
+    renderStats(data.user, body, '👤 Your Messages', '#89b4fa');
+    renderStats(data.assistant, body, '🤖 AI Responses', '#a6e3a1');
+  }
+
+  function toggle() {
+    if (!panel) buildPanel();
+    visible = !visible;
+    panel.classList.toggle('visible', visible);
+    if (visible) refresh();
+    SafeStorage.setJSON(STORAGE_KEY, visible);
+  }
+
+  function init() {
+    // Keyboard shortcut: Ctrl+Shift+R
+    document.addEventListener('keydown', e => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'R') {
+        e.preventDefault();
+        toggle();
+      }
+    });
+
+    // Auto-refresh when messages change
+    const chatArea = document.getElementById('chat') || document.querySelector('.chat-area');
+    if (chatArea) {
+      const observer = new MutationObserver(() => { if (visible) refresh(); });
+      observer.observe(chatArea, { childList: true, subtree: true });
+    }
+
+    // Restore visibility
+    if (SafeStorage.getJSON(STORAGE_KEY, false)) {
+      visible = true;
+      buildPanel();
+      panel.classList.add('visible');
+      refresh();
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  return { init, toggle, analyzeText, analyzeConversation, refresh };
 })();
