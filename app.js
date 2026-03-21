@@ -512,7 +512,7 @@ const SandboxRunner = (() => {
         <\/script></body></html>`;
 
       // Remove previous sandbox
-      const prev = document.getElementById('sandbox-frame');
+      const prev = DOMCache.get('sandbox-frame');
       if (prev) prev.remove();
 
       const iframe = document.createElement('iframe');
@@ -529,7 +529,7 @@ const SandboxRunner = (() => {
       function cleanup() {
         clearTimeout(timer);
         window.removeEventListener('message', onMessage);
-        const f = document.getElementById('sandbox-frame');
+        const f = DOMCache.get('sandbox-frame');
         if (f) f.remove();
         cleanupFn = null;
       }
@@ -735,7 +735,7 @@ const UIController = (() => {
   function el(id) {
     let node = _cache[id];
     if (!node) {
-      node = document.getElementById(id);
+      node = DOMCache.get(id);
       if (node) _cache[id] = node;
     }
     return node;
@@ -1485,13 +1485,13 @@ const PromptTemplates = (() => {
 
   function toggle() {
     isOpen = !isOpen;
-    const panel = document.getElementById('templates-panel');
-    const overlay = document.getElementById('templates-overlay');
+    const panel = DOMCache.get('templates-panel');
+    const overlay = DOMCache.get('templates-overlay');
     if (isOpen) {
       panel.classList.add('open');
       overlay.classList.add('visible');
       render(templates);
-      const searchInput = document.getElementById('templates-search');
+      const searchInput = DOMCache.get('templates-search');
       if (searchInput) {
         searchInput.value = '';
         searchInput.focus();
@@ -1504,14 +1504,14 @@ const PromptTemplates = (() => {
 
   function close() {
     isOpen = false;
-    const panel = document.getElementById('templates-panel');
-    const overlay = document.getElementById('templates-overlay');
+    const panel = DOMCache.get('templates-panel');
+    const overlay = DOMCache.get('templates-overlay');
     if (panel) panel.classList.remove('open');
     if (overlay) overlay.classList.remove('visible');
   }
 
   function render(data) {
-    const container = document.getElementById('templates-list');
+    const container = DOMCache.get('templates-list');
     if (!container) return;
 
     if (data.length === 0) {
@@ -1582,7 +1582,7 @@ const PromptTemplates = (() => {
   }
 
   function handleSearch() {
-    const searchInput = document.getElementById('templates-search');
+    const searchInput = DOMCache.get('templates-search');
     if (!searchInput) return;
     const query = searchInput.value.trim();
     const results = search(query);
@@ -2420,11 +2420,11 @@ const MessageSearch = (() => {
    * Open the search bar and focus the input.
    */
   function open() {
-    const bar = document.getElementById('search-bar');
+    const bar = DOMCache.get('search-bar');
     if (!bar) return;
     bar.style.display = 'flex';
     isOpen = true;
-    const input = document.getElementById('search-input');
+    const input = DOMCache.get('search-input');
     if (input) {
       input.focus();
       // Re-search if there's existing text
@@ -2436,12 +2436,12 @@ const MessageSearch = (() => {
    * Close the search bar and clear highlights.
    */
   function close() {
-    const bar = document.getElementById('search-bar');
+    const bar = DOMCache.get('search-bar');
     if (!bar) return;
     bar.style.display = 'none';
     isOpen = false;
     clearHighlights();
-    const input = document.getElementById('search-input');
+    const input = DOMCache.get('search-input');
     if (input) input.value = '';
     updateCount();
   }
@@ -2619,7 +2619,7 @@ const MessageSearch = (() => {
    * Update the match count display.
    */
   function updateCount() {
-    const countEl = document.getElementById('search-count');
+    const countEl = DOMCache.get('search-count');
     if (!countEl) return;
 
     if (matches.length === 0) {
@@ -2633,8 +2633,8 @@ const MessageSearch = (() => {
    * Enable/disable nav buttons based on match count.
    */
   function updateNavButtons() {
-    const prevBtn = document.getElementById('search-prev');
-    const nextBtn = document.getElementById('search-next');
+    const prevBtn = DOMCache.get('search-prev');
+    const nextBtn = DOMCache.get('search-next');
     if (prevBtn) prevBtn.disabled = matches.length === 0;
     if (nextBtn) nextBtn.disabled = matches.length === 0;
   }
@@ -2645,7 +2645,7 @@ const MessageSearch = (() => {
   function handleInput() {
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
-      const input = document.getElementById('search-input');
+      const input = DOMCache.get('search-input');
       if (input) performSearch(input.value.trim());
     }, DEBOUNCE_MS);
   }
@@ -2829,19 +2829,19 @@ const ChatBookmarks = (() => {
 
   function openPanel() {
     panelOpen = true;
-    const panel = document.getElementById('bookmarks-panel');
+    const panel = DOMCache.get('bookmarks-panel');
     if (panel) panel.style.display = '';
     renderPanel();
   }
 
   function closePanel() {
     panelOpen = false;
-    const panel = document.getElementById('bookmarks-panel');
+    const panel = DOMCache.get('bookmarks-panel');
     if (panel) panel.style.display = 'none';
   }
 
   function renderPanel() {
-    const list = document.getElementById('bookmarks-list');
+    const list = DOMCache.get('bookmarks-list');
     if (!list) return;
     list.innerHTML = '';
 
@@ -3497,13 +3497,13 @@ const KeyboardShortcuts = (() => {
 
   function showHelp() {
     isHelpOpen = true;
-    const modal = document.getElementById('shortcuts-modal');
+    const modal = DOMCache.get('shortcuts-modal');
     if (modal) modal.classList.add('visible');
   }
 
   function hideHelp() {
     isHelpOpen = false;
-    const modal = document.getElementById('shortcuts-modal');
+    const modal = DOMCache.get('shortcuts-modal');
     if (modal) modal.classList.remove('visible');
   }
 
@@ -3584,7 +3584,7 @@ const KeyboardShortcuts = (() => {
     // ── Ctrl+M — toggle voice input (skip if button disabled) ──
     if (ctrl && e.key === 'm') {
       e.preventDefault();
-      const voiceBtn = document.getElementById('voice-btn');
+      const voiceBtn = DOMCache.get('voice-btn');
       if (voiceBtn && !voiceBtn.disabled) voiceBtn.click();
       return;
     }
@@ -3863,7 +3863,7 @@ const ThemeManager = (() => {
 
   function _updateButton() {
     if (typeof document === 'undefined') return;
-    const btn = document.getElementById('theme-btn');
+    const btn = DOMCache.get('theme-btn');
     if (!btn) return;
     if (currentTheme === 'dark') {
       btn.textContent = '☀️';
@@ -4081,7 +4081,7 @@ const SessionManager = (() => {
   }
 
   function _updateAutoSaveUI() {
-    const toggle = document.getElementById('sessions-autosave');
+    const toggle = DOMCache.get('sessions-autosave');
     if (toggle) {
       toggle.checked = autoSave;
       toggle.title = autoSave ? 'Auto-save is ON' : 'Auto-save is OFF';
@@ -4461,16 +4461,16 @@ const SessionManager = (() => {
   /** Toggle sessions panel. */
   function toggle() {
     isOpen = !isOpen;
-    const panel = document.getElementById('sessions-panel');
-    const overlay = document.getElementById('sessions-overlay');
+    const panel = DOMCache.get('sessions-panel');
+    const overlay = DOMCache.get('sessions-overlay');
     if (isOpen) {
       panel.classList.add('open');
       overlay.classList.add('visible');
       // Restore sort dropdown to saved preference
-      const sortSelect = document.getElementById('sessions-sort');
+      const sortSelect = DOMCache.get('sessions-sort');
       if (sortSelect) sortSelect.value = _getSortMode();
       // Clear search on open
-      const searchInput = document.getElementById('sessions-search');
+      const searchInput = DOMCache.get('sessions-search');
       if (searchInput) searchInput.value = '';
       _searchQuery = '';
       refresh();
@@ -4482,16 +4482,16 @@ const SessionManager = (() => {
 
   function close() {
     isOpen = false;
-    const panel = document.getElementById('sessions-panel');
-    const overlay = document.getElementById('sessions-overlay');
+    const panel = DOMCache.get('sessions-panel');
+    const overlay = DOMCache.get('sessions-overlay');
     if (panel) panel.classList.remove('open');
     if (overlay) overlay.classList.remove('visible');
   }
 
   /** Render the sessions list. */
   function refresh() {
-    const container = document.getElementById('sessions-list');
-    const countEl = document.getElementById('sessions-count');
+    const container = DOMCache.get('sessions-list');
+    const countEl = DOMCache.get('sessions-count');
     if (!container) return;
 
     const sessions = getAll();
@@ -4686,8 +4686,8 @@ const SessionManager = (() => {
 
   /** Open save dialog. */
   function openSaveDialog() {
-    const modal = document.getElementById('session-save-modal');
-    const nameInput = document.getElementById('session-name-input');
+    const modal = DOMCache.get('session-save-modal');
+    const nameInput = DOMCache.get('session-name-input');
     if (!modal || !nameInput) return;
 
     // Pre-fill with existing session name or auto-generated
@@ -4709,7 +4709,7 @@ const SessionManager = (() => {
 
   /** Confirm save from dialog. */
   function confirmSave() {
-    const nameInput = document.getElementById('session-name-input');
+    const nameInput = DOMCache.get('session-name-input');
     const name = nameInput ? nameInput.value.trim() : '';
     if (!name) { if (nameInput) nameInput.focus(); return; }
 
@@ -4724,7 +4724,7 @@ const SessionManager = (() => {
   }
 
   function closeSaveDialog() {
-    const modal = document.getElementById('session-save-modal');
+    const modal = DOMCache.get('session-save-modal');
     if (modal) modal.style.display = 'none';
   }
 
@@ -5007,9 +5007,9 @@ const CrossTabSync = (() => {
     }
 
     // Wire up banner buttons
-    const reloadBtn = document.getElementById('cross-tab-reload');
-    const keepBtn = document.getElementById('cross-tab-keep');
-    const dismissBtn = document.getElementById('cross-tab-dismiss');
+    const reloadBtn = DOMCache.get('cross-tab-reload');
+    const keepBtn = DOMCache.get('cross-tab-keep');
+    const dismissBtn = DOMCache.get('cross-tab-dismiss');
     if (reloadBtn) reloadBtn.addEventListener('click', _handleReload);
     if (keepBtn) keepBtn.addEventListener('click', _handleKeepMine);
     if (dismissBtn) dismissBtn.addEventListener('click', _hideBanner);
@@ -5105,8 +5105,8 @@ const CrossTabSync = (() => {
    * Show the conflict banner with a given message.
    */
   function _showBanner(message) {
-    const banner = document.getElementById('cross-tab-banner');
-    const msgEl = document.getElementById('cross-tab-message');
+    const banner = DOMCache.get('cross-tab-banner');
+    const msgEl = DOMCache.get('cross-tab-message');
     if (!banner || !msgEl) return;
 
     msgEl.textContent = message;
@@ -5118,7 +5118,7 @@ const CrossTabSync = (() => {
    * Hide the conflict banner.
    */
   function _hideBanner() {
-    const banner = document.getElementById('cross-tab-banner');
+    const banner = DOMCache.get('cross-tab-banner');
     if (banner) banner.style.display = 'none';
     bannerVisible = false;
   }
@@ -5420,7 +5420,7 @@ const ChatStats = (() => {
 
   /** Render the stats panel. */
   function render() {
-    const existing = document.getElementById('stats-panel');
+    const existing = DOMCache.get('stats-panel');
     if (existing) existing.remove();
 
     const stats = compute();
@@ -5519,8 +5519,8 @@ const ChatStats = (() => {
   }
 
   function close() {
-    const panel = document.getElementById('stats-panel');
-    const overlay = document.getElementById('stats-overlay');
+    const panel = DOMCache.get('stats-panel');
+    const overlay = DOMCache.get('stats-overlay');
     if (panel) panel.remove();
     if (overlay) overlay.remove();
     isOpen = false;
@@ -5635,7 +5635,7 @@ const CostDashboard = (() => {
     if (_showBudgetWarning._shown) return;
     _showBudgetWarning._shown = true;
     const pct = Math.round((spent / budget) * 100);
-    const bar = document.getElementById('token-usage');
+    const bar = DOMCache.get('token-usage');
     if (bar) {
       const warn = document.createElement('span');
       warn.className = 'cost-budget-warning';
@@ -5868,8 +5868,8 @@ const CostDashboard = (() => {
 
   function open()   { if (!isOpen) render(); }
   function close()  {
-    const panel = document.getElementById('cost-panel');
-    const overlay = document.getElementById('cost-overlay');
+    const panel = DOMCache.get('cost-panel');
+    const overlay = DOMCache.get('cost-overlay');
     if (panel) panel.remove();
     if (overlay) overlay.remove();
     isOpen = false;
@@ -5993,7 +5993,7 @@ const PersonaPresets = (() => {
   }
 
   function applyCustom() {
-    const textarea = document.getElementById('persona-custom-input');
+    const textarea = DOMCache.get('persona-custom-input');
     const prompt = (textarea.value || '').trim();
     if (!prompt) return;
     save('custom', prompt);
@@ -6003,8 +6003,8 @@ const PersonaPresets = (() => {
 
   function render() {
     const activeId = getActiveId();
-    const activeEl = document.getElementById('persona-active');
-    const listEl = document.getElementById('persona-list');
+    const activeEl = DOMCache.get('persona-active');
+    const listEl = DOMCache.get('persona-list');
 
     if (activeId === 'custom') {
       activeEl.textContent = 'Active: Custom Prompt';
@@ -6043,15 +6043,15 @@ const PersonaPresets = (() => {
 
   function open() {
     isOpen = true;
-    document.getElementById('persona-panel').classList.add('open');
-    document.getElementById('persona-overlay').classList.add('open');
+    DOMCache.get('persona-panel').classList.add('open');
+    DOMCache.get('persona-overlay').classList.add('open');
     render();
   }
 
   function close() {
     isOpen = false;
-    document.getElementById('persona-panel').classList.remove('open');
-    document.getElementById('persona-overlay').classList.remove('open');
+    DOMCache.get('persona-panel').classList.remove('open');
+    DOMCache.get('persona-overlay').classList.remove('open');
   }
 
   function toggle() {
@@ -6076,7 +6076,7 @@ const ModelSelector = (() => {
   let open = false;
 
   function _render() {
-    const list = document.getElementById('model-list');
+    const list = DOMCache.get('model-list');
     if (!list) return;
     list.innerHTML = '';
     ChatConfig.AVAILABLE_MODELS.forEach(m => {
@@ -6086,7 +6086,7 @@ const ModelSelector = (() => {
       btn.title = m.id;
       btn.addEventListener('click', () => {
         ChatConfig.MODEL = m.id;
-        const label = document.getElementById('model-label');
+        const label = DOMCache.get('model-label');
         if (label) label.textContent = m.label;
         _render();
         close();
@@ -6101,8 +6101,8 @@ const ModelSelector = (() => {
 
   function _open() {
     open = true;
-    const panel = document.getElementById('model-panel');
-    const overlay = document.getElementById('model-overlay');
+    const panel = DOMCache.get('model-panel');
+    const overlay = DOMCache.get('model-overlay');
     if (panel) { panel.style.display = 'block'; }
     if (overlay) { overlay.style.display = 'block'; }
     _render();
@@ -6110,8 +6110,8 @@ const ModelSelector = (() => {
 
   function close() {
     open = false;
-    const panel = document.getElementById('model-panel');
-    const overlay = document.getElementById('model-overlay');
+    const panel = DOMCache.get('model-panel');
+    const overlay = DOMCache.get('model-overlay');
     if (panel) { panel.style.display = 'none'; }
     if (overlay) { overlay.style.display = 'none'; }
   }
@@ -6120,7 +6120,7 @@ const ModelSelector = (() => {
     // Set initial label from saved model
     const saved = ChatConfig.MODEL;
     const match = ChatConfig.AVAILABLE_MODELS.find(m => m.id === saved);
-    const label = document.getElementById('model-label');
+    const label = DOMCache.get('model-label');
     if (label && match) label.textContent = match.label;
   }
 
@@ -6201,13 +6201,13 @@ const FileDropZone = (() => {
 
   /** Show the drop overlay. */
   function _showOverlay() {
-    const overlay = document.getElementById('file-drop-overlay');
+    const overlay = DOMCache.get('file-drop-overlay');
     if (overlay) overlay.classList.add('visible');
   }
 
   /** Hide the drop overlay. */
   function _hideOverlay() {
-    const overlay = document.getElementById('file-drop-overlay');
+    const overlay = DOMCache.get('file-drop-overlay');
     if (overlay) overlay.classList.remove('visible');
   }
 
@@ -6278,7 +6278,7 @@ const FileDropZone = (() => {
     // Brief confirmation
     const count = results.length;
     const msg = `📎 ${count} file${count > 1 ? 's' : ''} added to input`;
-    const consoleOut = document.getElementById('console-output');
+    const consoleOut = DOMCache.get('console-output');
     if (consoleOut && errors.length === 0) {
       consoleOut.textContent = msg;
       consoleOut.style.color = '#4ade80';
@@ -6287,7 +6287,7 @@ const FileDropZone = (() => {
 
   /** Initialize drag-and-drop event listeners. */
   function init() {
-    const blackbox = document.getElementById('blackbox');
+    const blackbox = DOMCache.get('blackbox');
     if (!blackbox) return;
 
     // Use dragCounter to handle nested element drag enter/leave correctly
@@ -6353,7 +6353,7 @@ const FocusMode = (() => {
 
   function apply() {
     document.body.classList.toggle('zen-mode', active);
-    const btn = document.getElementById('zen-btn');
+    const btn = DOMCache.get('zen-btn');
     if (btn) {
       btn.classList.toggle('active', active);
       btn.title = active
@@ -6561,7 +6561,7 @@ const Scratchpad = (() => {
   /** Update the word/char count display. */
   function _updateCount() {
     const textarea = DOMCache.get('scratchpad-textarea');
-    const countEl = document.getElementById('scratchpad-wordcount');
+    const countEl = DOMCache.get('scratchpad-wordcount');
     if (!textarea || !countEl) return;
     const text = textarea.value.trim();
     const words = text ? text.split(/\s+/).length : 0;
@@ -6571,7 +6571,7 @@ const Scratchpad = (() => {
 
   /** Show a brief status message. */
   function _showStatus(msg) {
-    const el = document.getElementById('scratchpad-status');
+    const el = DOMCache.get('scratchpad-status');
     if (!el) return;
     el.textContent = msg;
     setTimeout(() => { if (el.textContent === msg) el.textContent = ''; }, 2000);
@@ -6644,8 +6644,8 @@ const Scratchpad = (() => {
   /** Open the panel. */
   function open() {
     isOpen = true;
-    const panel = document.getElementById('scratchpad-panel');
-    const overlay = document.getElementById('scratchpad-overlay');
+    const panel = DOMCache.get('scratchpad-panel');
+    const overlay = DOMCache.get('scratchpad-overlay');
     const textarea = DOMCache.get('scratchpad-textarea');
     if (panel) panel.classList.add('open');
     if (overlay) overlay.classList.add('open');
@@ -6659,8 +6659,8 @@ const Scratchpad = (() => {
   /** Close the panel. */
   function close() {
     isOpen = false;
-    const panel = document.getElementById('scratchpad-panel');
-    const overlay = document.getElementById('scratchpad-overlay');
+    const panel = DOMCache.get('scratchpad-panel');
+    const overlay = DOMCache.get('scratchpad-overlay');
     if (panel) panel.classList.remove('open');
     if (overlay) overlay.classList.remove('open');
     // Save on close
@@ -6694,7 +6694,7 @@ const ResponseTimeBadge = (() => {
     if (!ConversationManager.isTimingVisible()) return;
 
     // Remove any existing badge
-    const existing = document.getElementById('response-time-badge');
+    const existing = DOMCache.get('response-time-badge');
     if (existing) existing.remove();
 
     const badge = document.createElement('div');
@@ -6710,11 +6710,11 @@ const ResponseTimeBadge = (() => {
     badge.innerHTML = `<span class="rt-icon">⏱️</span> <span class="rt-value ${colorClass}">${formatTime(responseTimeMs)}</span>`;
 
     // Insert after token-usage div
-    const tokenUsage = document.getElementById('token-usage');
+    const tokenUsage = DOMCache.get('token-usage');
     if (tokenUsage) {
       tokenUsage.parentNode.insertBefore(badge, tokenUsage.nextSibling);
     } else {
-      const blackbox = document.getElementById('blackbox');
+      const blackbox = DOMCache.get('blackbox');
       if (blackbox) blackbox.appendChild(badge);
     }
 
@@ -6723,7 +6723,7 @@ const ResponseTimeBadge = (() => {
   }
 
   function hide() {
-    const existing = document.getElementById('response-time-badge');
+    const existing = DOMCache.get('response-time-badge');
     if (existing) existing.remove();
   }
 
@@ -6929,7 +6929,7 @@ const QuickReplies = (() => {
    * @param {boolean} hadError  Whether the sandbox execution failed.
    */
   function show(reply, hasCode, hadError) {
-    const container = document.getElementById('quick-replies');
+    const container = DOMCache.get('quick-replies');
     if (!container) return;
 
     let suggestions;
@@ -6947,7 +6947,7 @@ const QuickReplies = (() => {
 
   /** Hide the suggestion chips. */
   function hide() {
-    const container = document.getElementById('quick-replies');
+    const container = DOMCache.get('quick-replies');
     if (container) {
       container.innerHTML = '';
       container.style.display = 'none';
@@ -7037,7 +7037,7 @@ const MessagePinning = (() => {
     if (!output || !output.parentNode) return;
 
     // Don't double-create
-    if (document.getElementById('pin-bar')) return;
+    if (DOMCache.get('pin-bar')) return;
 
     barEl = document.createElement('div');
     barEl.id = 'pin-bar';
@@ -7105,7 +7105,7 @@ const MessagePinning = (() => {
   /** Toggle collapsed state of the pin bar. */
   function toggleCollapse() {
     collapsed = !collapsed;
-    const btn = document.getElementById('pin-collapse-btn');
+    const btn = DOMCache.get('pin-collapse-btn');
     if (btn) btn.textContent = collapsed ? '\u25BC' : '\u25B2';
     if (listEl) listEl.style.display = collapsed ? 'none' : '';
     if (barEl) {
@@ -7218,7 +7218,7 @@ const MessagePinning = (() => {
     }
 
     barEl.style.display = '';
-    const title = document.getElementById('pin-bar-title');
+    const title = DOMCache.get('pin-bar-title');
     if (title) title.textContent = '\uD83D\uDCCC Pinned (' + pins.length + ')';
 
     // Clear and rebuild list
@@ -7632,7 +7632,7 @@ const ReadAloud = (() => {
   /** Render a floating controls panel when speech is active. */
   function updateControls() {
     if (!controlsEl) {
-      controlsEl = document.getElementById('readaloud-controls');
+      controlsEl = DOMCache.get('readaloud-controls');
     }
     if (!controlsEl) return;
 
@@ -7655,7 +7655,7 @@ const ReadAloud = (() => {
 
   /** Build the floating controls panel (once, on init). */
   function buildControls() {
-    if (document.getElementById('readaloud-controls')) return;
+    if (DOMCache.get('readaloud-controls')) return;
 
     let panel = document.createElement('div');
     panel.id = 'readaloud-controls';
@@ -7963,7 +7963,7 @@ const MessageDiff = (() => {
   // ── Modal ────────────────────────────────────────────────────
 
   function buildModal() {
-    if (document.getElementById('diff-modal')) return;
+    if (DOMCache.get('diff-modal')) return;
 
     let modal = document.createElement('div');
     modal.id = 'diff-modal';
@@ -8039,7 +8039,7 @@ const MessageDiff = (() => {
     let stats = diffStats(diff);
 
     // Update title
-    const titleEl = document.getElementById('diff-modal-title');
+    const titleEl = DOMCache.get('diff-modal-title');
     if (titleEl) {
       const roleA = msgA.role === 'user' ? '\uD83D\uDC64' : '\uD83E\uDD16';
       const roleB = msgB.role === 'user' ? '\uD83D\uDC64' : '\uD83E\uDD16';
@@ -8048,7 +8048,7 @@ const MessageDiff = (() => {
     }
 
     // Update stats
-    let statsEl = document.getElementById('diff-stats');
+    let statsEl = DOMCache.get('diff-stats');
     if (statsEl) {
       let parts = [];
       if (stats.added > 0) parts.push('+' + stats.added + ' added');
@@ -8058,7 +8058,7 @@ const MessageDiff = (() => {
     }
 
     // Render diff lines
-    let body = document.getElementById('diff-body');
+    let body = DOMCache.get('diff-body');
     if (!body) return;
     body.textContent = '';
 
@@ -8675,11 +8675,11 @@ const ConversationTimeline = (() => {
 
 document.addEventListener('DOMContentLoaded', () => {
   DOMCache.get('send-btn').addEventListener('click', ChatController.send);
-  document.getElementById('cancel-btn').addEventListener('click', () => {
+  DOMCache.get('cancel-btn').addEventListener('click', () => {
     ChatController.cancelRequest();
     SandboxRunner.cancel();
   });
-  document.getElementById('clear-btn').addEventListener('click', ChatController.clearHistory);
+  DOMCache.get('clear-btn').addEventListener('click', ChatController.clearHistory);
 
   DOMCache.get('chat-input').addEventListener('keydown', (e) => {
     // Input history navigation (Up/Down)
@@ -8693,27 +8693,27 @@ document.addEventListener('DOMContentLoaded', () => {
     UIController.updateCharCount(this.value.length);
   });
 
-  document.getElementById('user-api-key').addEventListener('keydown', (e) => {
+  DOMCache.get('user-api-key').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); ChatController.submitServiceKey(); }
   });
 
-  document.getElementById('apikey-submit-btn').addEventListener('click',
+  DOMCache.get('apikey-submit-btn').addEventListener('click',
     ChatController.submitServiceKey);
 
   // History panel
-  document.getElementById('history-btn').addEventListener('click', HistoryPanel.toggle);
-  document.getElementById('history-close-btn').addEventListener('click', HistoryPanel.close);
-  document.getElementById('history-overlay').addEventListener('click', HistoryPanel.close);
-  document.getElementById('export-md-btn').addEventListener('click', HistoryPanel.exportAsMarkdown);
-  document.getElementById('export-json-btn').addEventListener('click', HistoryPanel.exportAsJSON);
-  document.getElementById('export-html-btn').addEventListener('click', HistoryPanel.exportAsHTML);
-  document.getElementById('export-csv-btn').addEventListener('click', HistoryPanel.exportAsCSV);
+  DOMCache.get('history-btn').addEventListener('click', HistoryPanel.toggle);
+  DOMCache.get('history-close-btn').addEventListener('click', HistoryPanel.close);
+  DOMCache.get('history-overlay').addEventListener('click', HistoryPanel.close);
+  DOMCache.get('export-md-btn').addEventListener('click', HistoryPanel.exportAsMarkdown);
+  DOMCache.get('export-json-btn').addEventListener('click', HistoryPanel.exportAsJSON);
+  DOMCache.get('export-html-btn').addEventListener('click', HistoryPanel.exportAsHTML);
+  DOMCache.get('export-csv-btn').addEventListener('click', HistoryPanel.exportAsCSV);
 
   // Templates panel
-  document.getElementById('templates-btn').addEventListener('click', PromptTemplates.toggle);
-  document.getElementById('templates-close-btn').addEventListener('click', PromptTemplates.close);
-  document.getElementById('templates-overlay').addEventListener('click', PromptTemplates.close);
-  document.getElementById('templates-search').addEventListener('input', PromptTemplates.handleSearchDebounced);
+  DOMCache.get('templates-btn').addEventListener('click', PromptTemplates.toggle);
+  DOMCache.get('templates-close-btn').addEventListener('click', PromptTemplates.close);
+  DOMCache.get('templates-overlay').addEventListener('click', PromptTemplates.close);
+  DOMCache.get('templates-search').addEventListener('input', PromptTemplates.handleSearchDebounced);
 
   // Keyboard shortcut: Escape closes history panel
   document.addEventListener('keydown', (e) => {
@@ -8741,7 +8741,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('keydown', KeyboardShortcuts.handleKeydown);
 
   // Voice input
-  const voiceBtn = document.getElementById('voice-btn');
+  const voiceBtn = DOMCache.get('voice-btn');
   if (!VoiceInput.isSupported()) {
     voiceBtn.disabled = true;
     voiceBtn.title = 'Voice input not supported in this browser';
@@ -8781,61 +8781,61 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Shortcuts help button + modal close
-  document.getElementById('shortcuts-btn').addEventListener('click', KeyboardShortcuts.toggleHelp);
-  document.getElementById('shortcuts-modal-close').addEventListener('click', KeyboardShortcuts.hideHelp);
-  document.getElementById('shortcuts-modal').addEventListener('click', (e) => {
+  DOMCache.get('shortcuts-btn').addEventListener('click', KeyboardShortcuts.toggleHelp);
+  DOMCache.get('shortcuts-modal-close').addEventListener('click', KeyboardShortcuts.hideHelp);
+  DOMCache.get('shortcuts-modal').addEventListener('click', (e) => {
     // Close when clicking overlay (outside modal content)
     if (e.target.id === 'shortcuts-modal') KeyboardShortcuts.hideHelp();
   });
 
   // Theme toggle
-  document.getElementById('theme-btn').addEventListener('click', ThemeManager.toggle);
+  DOMCache.get('theme-btn').addEventListener('click', ThemeManager.toggle);
   ThemeManager.init();
 
   // Message search bar
-  document.getElementById('search-input').addEventListener('input', MessageSearch.handleInput);
-  document.getElementById('search-input').addEventListener('keydown', MessageSearch.handleKeydown);
-  document.getElementById('search-prev').addEventListener('click', MessageSearch.prev);
-  document.getElementById('search-next').addEventListener('click', MessageSearch.next);
-  document.getElementById('search-close').addEventListener('click', MessageSearch.close);
+  DOMCache.get('search-input').addEventListener('input', MessageSearch.handleInput);
+  DOMCache.get('search-input').addEventListener('keydown', MessageSearch.handleKeydown);
+  DOMCache.get('search-prev').addEventListener('click', MessageSearch.prev);
+  DOMCache.get('search-next').addEventListener('click', MessageSearch.next);
+  DOMCache.get('search-close').addEventListener('click', MessageSearch.close);
 
   // Code action buttons (save/copy/rerun)
-  document.getElementById('save-snippet-btn').addEventListener('click', SnippetLibrary.openSaveDialog);
-  document.getElementById('copy-code-btn').addEventListener('click', SnippetLibrary.copyCurrentCode);
-  document.getElementById('rerun-code-btn').addEventListener('click', SnippetLibrary.rerunCurrentCode);
+  DOMCache.get('save-snippet-btn').addEventListener('click', SnippetLibrary.openSaveDialog);
+  DOMCache.get('copy-code-btn').addEventListener('click', SnippetLibrary.copyCurrentCode);
+  DOMCache.get('rerun-code-btn').addEventListener('click', SnippetLibrary.rerunCurrentCode);
 
   // Snippet save dialog
-  document.getElementById('snippet-confirm-btn').addEventListener('click', SnippetLibrary.confirmSave);
-  document.getElementById('snippet-cancel-btn').addEventListener('click', SnippetLibrary.closeSaveDialog);
-  document.getElementById('snippet-name-input').addEventListener('keydown', (e) => {
+  DOMCache.get('snippet-confirm-btn').addEventListener('click', SnippetLibrary.confirmSave);
+  DOMCache.get('snippet-cancel-btn').addEventListener('click', SnippetLibrary.closeSaveDialog);
+  DOMCache.get('snippet-name-input').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); SnippetLibrary.confirmSave(); }
   });
 
   // Snippets panel
-  document.getElementById('snippets-btn').addEventListener('click', SnippetLibrary.toggle);
-  document.getElementById('snippets-close-btn').addEventListener('click', SnippetLibrary.close);
-  document.getElementById('snippets-overlay').addEventListener('click', SnippetLibrary.close);
-  document.getElementById('snippets-search').addEventListener('input', SnippetLibrary.handleSearchDebounced);
-  document.getElementById('snippets-clear-btn').addEventListener('click', SnippetLibrary.handleClearAll);
+  DOMCache.get('snippets-btn').addEventListener('click', SnippetLibrary.toggle);
+  DOMCache.get('snippets-close-btn').addEventListener('click', SnippetLibrary.close);
+  DOMCache.get('snippets-overlay').addEventListener('click', SnippetLibrary.close);
+  DOMCache.get('snippets-search').addEventListener('input', SnippetLibrary.handleSearchDebounced);
+  DOMCache.get('snippets-clear-btn').addEventListener('click', SnippetLibrary.handleClearAll);
 
   // Sessions panel
-  document.getElementById('sessions-btn').addEventListener('click', SessionManager.toggle);
-  document.getElementById('sessions-close-btn').addEventListener('click', SessionManager.close);
-  document.getElementById('sessions-overlay').addEventListener('click', SessionManager.close);
-  document.getElementById('sessions-new-btn').addEventListener('click', SessionManager.newSession);
-  document.getElementById('sessions-save-btn').addEventListener('click', SessionManager.openSaveDialog);
-  document.getElementById('sessions-import-btn').addEventListener('click', SessionManager.handleImport);
-  document.getElementById('sessions-clear-btn').addEventListener('click', SessionManager.handleClearAll);
-  const tagsBtn = document.getElementById('sessions-tags-btn');
+  DOMCache.get('sessions-btn').addEventListener('click', SessionManager.toggle);
+  DOMCache.get('sessions-close-btn').addEventListener('click', SessionManager.close);
+  DOMCache.get('sessions-overlay').addEventListener('click', SessionManager.close);
+  DOMCache.get('sessions-new-btn').addEventListener('click', SessionManager.newSession);
+  DOMCache.get('sessions-save-btn').addEventListener('click', SessionManager.openSaveDialog);
+  DOMCache.get('sessions-import-btn').addEventListener('click', SessionManager.handleImport);
+  DOMCache.get('sessions-clear-btn').addEventListener('click', SessionManager.handleClearAll);
+  const tagsBtn = DOMCache.get('sessions-tags-btn');
   if (tagsBtn) tagsBtn.addEventListener('click', ConversationTags.openManager);
-  document.getElementById('sessions-autosave').addEventListener('change', SessionManager.toggleAutoSave);
-  document.getElementById('sessions-sort').addEventListener('change', (e) => SessionManager.setSortMode(e.target.value));
-  document.getElementById('sessions-search').addEventListener('input', (e) => SessionManager.setSearchQuery(e.target.value));
+  DOMCache.get('sessions-autosave').addEventListener('change', SessionManager.toggleAutoSave);
+  DOMCache.get('sessions-sort').addEventListener('change', (e) => SessionManager.setSortMode(e.target.value));
+  DOMCache.get('sessions-search').addEventListener('input', (e) => SessionManager.setSearchQuery(e.target.value));
 
   // Session save dialog
-  document.getElementById('session-save-confirm').addEventListener('click', SessionManager.confirmSave);
-  document.getElementById('session-save-cancel').addEventListener('click', SessionManager.closeSaveDialog);
-  document.getElementById('session-name-input').addEventListener('keydown', (e) => {
+  DOMCache.get('session-save-confirm').addEventListener('click', SessionManager.confirmSave);
+  DOMCache.get('session-save-cancel').addEventListener('click', SessionManager.closeSaveDialog);
+  DOMCache.get('session-name-input').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); SessionManager.confirmSave(); }
   });
 
@@ -8852,52 +8852,52 @@ document.addEventListener('DOMContentLoaded', () => {
   MessageReactions.init();
 
   // Persona presets panel
-  document.getElementById('persona-btn').addEventListener('click', PersonaPresets.toggle);
-  document.getElementById('persona-close-btn').addEventListener('click', PersonaPresets.close);
-  document.getElementById('persona-overlay').addEventListener('click', PersonaPresets.close);
-  document.getElementById('persona-custom-apply').addEventListener('click', PersonaPresets.applyCustom);
+  DOMCache.get('persona-btn').addEventListener('click', PersonaPresets.toggle);
+  DOMCache.get('persona-close-btn').addEventListener('click', PersonaPresets.close);
+  DOMCache.get('persona-overlay').addEventListener('click', PersonaPresets.close);
+  DOMCache.get('persona-custom-apply').addEventListener('click', PersonaPresets.applyCustom);
   PersonaPresets.init();
 
   // Model selector
-  document.getElementById('model-btn').addEventListener('click', ModelSelector.toggle);
-  document.getElementById('model-close-btn').addEventListener('click', ModelSelector.close);
-  document.getElementById('model-overlay').addEventListener('click', ModelSelector.close);
+  DOMCache.get('model-btn').addEventListener('click', ModelSelector.toggle);
+  DOMCache.get('model-close-btn').addEventListener('click', ModelSelector.close);
+  DOMCache.get('model-overlay').addEventListener('click', ModelSelector.close);
   ModelSelector.init();
 
   // Stats button
-  document.getElementById('stats-btn').addEventListener('click', ChatStats.toggle);
+  DOMCache.get('stats-btn').addEventListener('click', ChatStats.toggle);
 
   // Cost dashboard
-  document.getElementById('cost-btn').addEventListener('click', CostDashboard.toggle);
+  DOMCache.get('cost-btn').addEventListener('click', CostDashboard.toggle);
 
   // Text Expander
-  document.getElementById('expander-btn').addEventListener('click', TextExpander.togglePanel);
+  DOMCache.get('expander-btn').addEventListener('click', TextExpander.togglePanel);
 
   // Usage heatmap
-  document.getElementById('heatmap-btn').addEventListener('click', UsageHeatmap.toggle);
+  DOMCache.get('heatmap-btn').addEventListener('click', UsageHeatmap.toggle);
 
   // Health check panel
-  document.getElementById('health-close-btn').addEventListener('click', ConversationHealthCheck.close);
-  document.getElementById('health-overlay').addEventListener('click', function(e) {
+  DOMCache.get('health-close-btn').addEventListener('click', ConversationHealthCheck.close);
+  DOMCache.get('health-overlay').addEventListener('click', function(e) {
     if (e.target === this) ConversationHealthCheck.close();
   });
 
   // Focus / Zen mode
-  document.getElementById('zen-btn').addEventListener('click', FocusMode.toggle);
+  DOMCache.get('zen-btn').addEventListener('click', FocusMode.toggle);
   FocusMode.init();
 
   // Formatting toolbar
-  document.getElementById('fmt-btn').addEventListener('click', FormattingToolbar.toggle);
+  DOMCache.get('fmt-btn').addEventListener('click', FormattingToolbar.toggle);
 
   // Scratchpad
-  document.getElementById('scratchpad-btn').addEventListener('click', Scratchpad.toggle);
-  document.getElementById('scratchpad-close-btn').addEventListener('click', Scratchpad.close);
-  document.getElementById('scratchpad-overlay').addEventListener('click', Scratchpad.close);
+  DOMCache.get('scratchpad-btn').addEventListener('click', Scratchpad.toggle);
+  DOMCache.get('scratchpad-close-btn').addEventListener('click', Scratchpad.close);
+  DOMCache.get('scratchpad-overlay').addEventListener('click', Scratchpad.close);
   DOMCache.get('scratchpad-textarea').addEventListener('input', Scratchpad._onInput);
-  document.getElementById('scratchpad-copy-btn').addEventListener('click', Scratchpad.copy);
-  document.getElementById('scratchpad-insert-btn').addEventListener('click', Scratchpad.insertToChat);
-  document.getElementById('scratchpad-download-btn').addEventListener('click', Scratchpad.download);
-  document.getElementById('scratchpad-clear-btn').addEventListener('click', Scratchpad.clear);
+  DOMCache.get('scratchpad-copy-btn').addEventListener('click', Scratchpad.copy);
+  DOMCache.get('scratchpad-insert-btn').addEventListener('click', Scratchpad.insertToChat);
+  DOMCache.get('scratchpad-download-btn').addEventListener('click', Scratchpad.download);
+  DOMCache.get('scratchpad-clear-btn').addEventListener('click', Scratchpad.clear);
 
   // Message pinning
   MessagePinning.init();
@@ -8912,19 +8912,19 @@ document.addEventListener('DOMContentLoaded', () => {
   ConversationTimeline.init();
 
   // Message annotations
-  document.getElementById('annotations-btn').addEventListener('click', MessageAnnotations.togglePanel);
+  DOMCache.get('annotations-btn').addEventListener('click', MessageAnnotations.togglePanel);
   MessageAnnotations.init();
 
   // Conversation chapters
-  document.getElementById('chapters-btn').addEventListener('click', ConversationChapters.togglePanel);
+  DOMCache.get('chapters-btn').addEventListener('click', ConversationChapters.togglePanel);
   ConversationChapters.init();
 
   // Conversation summarizer
-  document.getElementById('summary-btn').addEventListener('click', ConversationSummarizer.togglePanel);
+  DOMCache.get('summary-btn').addEventListener('click', ConversationSummarizer.togglePanel);
   ConversationSummarizer.init();
 
   // Response rating
-  document.getElementById('rating-btn').addEventListener('click', ResponseRating.toggleDashboard);
+  DOMCache.get('rating-btn').addEventListener('click', ResponseRating.toggleDashboard);
   ResponseRating.init();
 
   // Cross-tab sync (must come after SessionManager.initAutoSave)
@@ -9501,7 +9501,7 @@ const ConversationSummarizer = (() => {
   }
 
   function renderPanel() {
-    var body = document.getElementById('summary-body');
+    var body = DOMCache.get('summary-body');
     if (!body) return;
     body.innerHTML = '';
 
@@ -10707,7 +10707,7 @@ const ConversationChapters = (() => {
   }
 
   function renderPanel() {
-    var body = document.getElementById('chapters-body');
+    var body = DOMCache.get('chapters-body');
     if (!body) return;
     body.innerHTML = '';
 
@@ -11050,7 +11050,7 @@ const ConversationChapters = (() => {
     injectStyles();
 
     // Watch for history panel open to inject dividers + add-buttons
-    var historyPanel = document.getElementById('history-panel');
+    var historyPanel = DOMCache.get('history-panel');
     if (historyPanel) {
       var observer = new MutationObserver(function(mutations) {
         for (var m = 0; m < mutations.length; m++) {
@@ -11453,7 +11453,7 @@ const ConversationTags = (() => {
     filterBar.appendChild(clearBtn);
 
     // Insert into sessions panel
-    const panel = document.getElementById('sessions-panel');
+    const panel = DOMCache.get('sessions-panel');
     if (panel) {
       const container = panel.querySelector('.sessions-list') ||
                         panel.querySelector('[class*="session"]');
@@ -11470,7 +11470,7 @@ const ConversationTags = (() => {
   /** Open a modal showing all tags with counts and management options. */
   function openManager() {
     // Remove existing
-    const existing = document.getElementById('tag-manager-overlay');
+    const existing = DOMCache.get('tag-manager-overlay');
     if (existing) existing.remove();
 
     const overlay = document.createElement('div');
@@ -11663,9 +11663,9 @@ const GlobalSessionSearch = (() => {
   const MAX_CONTEXT_CHARS = 160;
 
   function open() {
-    const panel = document.getElementById('global-search-panel');
-    const overlay = document.getElementById('global-search-overlay');
-    const input = document.getElementById('global-search-input');
+    const panel = DOMCache.get('global-search-panel');
+    const overlay = DOMCache.get('global-search-overlay');
+    const input = DOMCache.get('global-search-input');
     if (!panel) return;
     isOpen = true;
     panel.style.display = 'flex';
@@ -11676,8 +11676,8 @@ const GlobalSessionSearch = (() => {
   }
 
   function close() {
-    const panel = document.getElementById('global-search-panel');
-    const overlay = document.getElementById('global-search-overlay');
+    const panel = DOMCache.get('global-search-panel');
+    const overlay = DOMCache.get('global-search-overlay');
     if (!panel) return;
     isOpen = false;
     panel.style.display = 'none';
@@ -11689,12 +11689,12 @@ const GlobalSessionSearch = (() => {
   }
 
   function _setStatus(text) {
-    const el = document.getElementById('global-search-status');
+    const el = DOMCache.get('global-search-status');
     if (el) el.textContent = text;
   }
 
   function _clearResults() {
-    const el = document.getElementById('global-search-results');
+    const el = DOMCache.get('global-search-results');
     if (el) el.innerHTML = '';
   }
 
@@ -11737,9 +11737,9 @@ const GlobalSessionSearch = (() => {
       return;
     }
 
-    const filterUser = document.getElementById('gs-filter-user')?.checked ?? true;
-    const filterAssistant = document.getElementById('gs-filter-assistant')?.checked ?? true;
-    const caseSensitive = document.getElementById('gs-filter-case')?.checked ?? false;
+    const filterUser = DOMCache.get('gs-filter-user')?.checked ?? true;
+    const filterAssistant = DOMCache.get('gs-filter-assistant')?.checked ?? true;
+    const caseSensitive = DOMCache.get('gs-filter-case')?.checked ?? false;
 
     const sessions = SessionManager.getAll();
     if (sessions.length === 0) {
@@ -11777,7 +11777,7 @@ const GlobalSessionSearch = (() => {
 
     if (totalMatches === 0) {
       _setStatus(`No matches for "${query}"`);
-      const container = document.getElementById('global-search-results');
+      const container = DOMCache.get('global-search-results');
       if (container) {
         const empty = document.createElement('div');
         empty.className = 'gs-no-results';
@@ -11793,7 +11793,7 @@ const GlobalSessionSearch = (() => {
 
   /** Render grouped search results. */
   function _renderResults(results, query, caseSensitive) {
-    const container = document.getElementById('global-search-results');
+    const container = DOMCache.get('global-search-results');
     if (!container) return;
     const frag = document.createDocumentFragment();
 
@@ -11848,7 +11848,7 @@ const GlobalSessionSearch = (() => {
 
   /** Initialize event listeners. */
   function init() {
-    const input = document.getElementById('global-search-input');
+    const input = DOMCache.get('global-search-input');
     if (input) {
       input.addEventListener('input', () => {
         clearTimeout(debounceTimer);
@@ -11859,20 +11859,20 @@ const GlobalSessionSearch = (() => {
       });
     }
 
-    const closeBtn = document.getElementById('global-search-close-btn');
+    const closeBtn = DOMCache.get('global-search-close-btn');
     if (closeBtn) closeBtn.addEventListener('click', close);
 
-    const overlay = document.getElementById('global-search-overlay');
+    const overlay = DOMCache.get('global-search-overlay');
     if (overlay) overlay.addEventListener('click', close);
 
-    const btn = document.getElementById('global-search-btn');
+    const btn = DOMCache.get('global-search-btn');
     if (btn) btn.addEventListener('click', toggle);
 
     // Filter checkboxes trigger re-search
     ['gs-filter-user', 'gs-filter-assistant', 'gs-filter-case'].forEach(id => {
-      const el = document.getElementById(id);
+      const el = DOMCache.get(id);
       if (el) el.addEventListener('change', () => {
-        const q = document.getElementById('global-search-input')?.value?.trim();
+        const q = DOMCache.get('global-search-input')?.value?.trim();
         if (q) _search(q);
       });
     });
@@ -13010,7 +13010,7 @@ const DataBackup = (() => {
    * Show the backup/restore modal UI.
    */
   function showModal() {
-    var existing = document.getElementById('backup-modal-overlay');
+    var existing = DOMCache.get('backup-modal-overlay');
     if (existing) existing.remove();
 
     var overlay = document.createElement('div');
@@ -14112,9 +14112,9 @@ const PromptLibrary = (() => {
   }
 
   function _getFilteredPrompts() {
-    var searchEl = document.getElementById('prompt-library-search');
-    var folderEl = document.getElementById('prompt-library-folder-filter');
-    var sortEl = document.getElementById('prompt-library-sort');
+    var searchEl = DOMCache.get('prompt-library-search');
+    var folderEl = DOMCache.get('prompt-library-folder-filter');
+    var sortEl = DOMCache.get('prompt-library-sort');
     var query = searchEl ? searchEl.value.toLowerCase().trim() : '';
     var folder = folderEl ? folderEl.value : '';
     var sortBy = sortEl ? sortEl.value : 'recent';
@@ -14140,7 +14140,7 @@ const PromptLibrary = (() => {
   }
 
   function _renderFolderFilter() {
-    var el = document.getElementById('prompt-library-folder-filter');
+    var el = DOMCache.get('prompt-library-folder-filter');
     if (!el) return;
     var current = el.value;
     var folders = _getFolders();
@@ -14154,7 +14154,7 @@ const PromptLibrary = (() => {
     el.value = current;
 
     // Also update datalist in save modal
-    var dl = document.getElementById('prompt-library-folder-suggestions');
+    var dl = DOMCache.get('prompt-library-folder-suggestions');
     if (dl) {
       dl.innerHTML = '';
       for (var j = 0; j < folders.length; j++) {
@@ -14166,8 +14166,8 @@ const PromptLibrary = (() => {
   }
 
   function _renderList() {
-    var listEl = document.getElementById('prompt-library-list');
-    var countEl = document.getElementById('prompt-library-count');
+    var listEl = DOMCache.get('prompt-library-list');
+    var countEl = DOMCache.get('prompt-library-count');
     if (!listEl) return;
 
     var filtered = _getFilteredPrompts();
@@ -14229,20 +14229,20 @@ const PromptLibrary = (() => {
 
   function open() {
     _load();
-    var panel = document.getElementById('prompt-library-panel');
-    var overlay = document.getElementById('prompt-library-overlay');
+    var panel = DOMCache.get('prompt-library-panel');
+    var overlay = DOMCache.get('prompt-library-overlay');
     if (panel) panel.style.display = '';
     if (overlay) overlay.style.display = '';
     visible = true;
     _renderFolderFilter();
     _renderList();
-    var searchEl = document.getElementById('prompt-library-search');
+    var searchEl = DOMCache.get('prompt-library-search');
     if (searchEl) { searchEl.value = ''; searchEl.focus(); }
   }
 
   function close() {
-    var panel = document.getElementById('prompt-library-panel');
-    var overlay = document.getElementById('prompt-library-overlay');
+    var panel = DOMCache.get('prompt-library-panel');
+    var overlay = DOMCache.get('prompt-library-overlay');
     if (panel) panel.style.display = 'none';
     if (overlay) overlay.style.display = 'none';
     visible = false;
@@ -14329,11 +14329,11 @@ const PromptLibrary = (() => {
 
   function openSaveModal(prefillText) {
     editingId = null;
-    var modal = document.getElementById('prompt-library-save-modal');
-    var titleEl = document.getElementById('prompt-library-modal-title');
-    var nameInput = document.getElementById('prompt-library-name-input');
-    var folderInput = document.getElementById('prompt-library-folder-input');
-    var textInput = document.getElementById('prompt-library-text-input');
+    var modal = DOMCache.get('prompt-library-save-modal');
+    var titleEl = DOMCache.get('prompt-library-modal-title');
+    var nameInput = DOMCache.get('prompt-library-name-input');
+    var folderInput = DOMCache.get('prompt-library-folder-input');
+    var textInput = DOMCache.get('prompt-library-text-input');
     if (titleEl) titleEl.textContent = 'Save Prompt';
     if (nameInput) nameInput.value = '';
     if (folderInput) folderInput.value = '';
@@ -14347,11 +14347,11 @@ const PromptLibrary = (() => {
     var p = getById(id);
     if (!p) return;
     editingId = id;
-    var modal = document.getElementById('prompt-library-save-modal');
-    var titleEl = document.getElementById('prompt-library-modal-title');
-    var nameInput = document.getElementById('prompt-library-name-input');
-    var folderInput = document.getElementById('prompt-library-folder-input');
-    var textInput = document.getElementById('prompt-library-text-input');
+    var modal = DOMCache.get('prompt-library-save-modal');
+    var titleEl = DOMCache.get('prompt-library-modal-title');
+    var nameInput = DOMCache.get('prompt-library-name-input');
+    var folderInput = DOMCache.get('prompt-library-folder-input');
+    var textInput = DOMCache.get('prompt-library-text-input');
     if (titleEl) titleEl.textContent = 'Edit Prompt';
     if (nameInput) nameInput.value = p.name || '';
     if (folderInput) folderInput.value = p.folder || '';
@@ -14362,15 +14362,15 @@ const PromptLibrary = (() => {
   }
 
   function closeSaveModal() {
-    var modal = document.getElementById('prompt-library-save-modal');
+    var modal = DOMCache.get('prompt-library-save-modal');
     if (modal) modal.style.display = 'none';
     editingId = null;
   }
 
   function confirmSave() {
-    var nameInput = document.getElementById('prompt-library-name-input');
-    var folderInput = document.getElementById('prompt-library-folder-input');
-    var textInput = document.getElementById('prompt-library-text-input');
+    var nameInput = DOMCache.get('prompt-library-name-input');
+    var folderInput = DOMCache.get('prompt-library-folder-input');
+    var textInput = DOMCache.get('prompt-library-text-input');
     var name = nameInput ? nameInput.value.trim() : '';
     var folder = folderInput ? folderInput.value.trim() : '';
     var text = textInput ? textInput.value.trim() : '';
@@ -14450,22 +14450,22 @@ const PromptLibrary = (() => {
   function init() {
     _load();
 
-    var btn = document.getElementById('prompt-library-btn');
+    var btn = DOMCache.get('prompt-library-btn');
     if (btn) btn.addEventListener('click', toggle);
 
-    var closeBtn = document.getElementById('prompt-library-close-btn');
+    var closeBtn = DOMCache.get('prompt-library-close-btn');
     if (closeBtn) closeBtn.addEventListener('click', close);
 
-    var overlay = document.getElementById('prompt-library-overlay');
+    var overlay = DOMCache.get('prompt-library-overlay');
     if (overlay) overlay.addEventListener('click', close);
 
-    var addBtn = document.getElementById('prompt-library-add-btn');
+    var addBtn = DOMCache.get('prompt-library-add-btn');
     if (addBtn) addBtn.addEventListener('click', function() { openSaveModal(); });
 
-    var exportBtn = document.getElementById('prompt-library-export-btn');
+    var exportBtn = DOMCache.get('prompt-library-export-btn');
     if (exportBtn) exportBtn.addEventListener('click', exportPrompts);
 
-    var importBtn = document.getElementById('prompt-library-import-btn');
+    var importBtn = DOMCache.get('prompt-library-import-btn');
     if (importBtn) importBtn.addEventListener('click', function() {
       var input = document.createElement('input');
       input.type = 'file';
@@ -14479,19 +14479,19 @@ const PromptLibrary = (() => {
       input.click();
     });
 
-    var confirmBtn = document.getElementById('prompt-library-confirm-btn');
+    var confirmBtn = DOMCache.get('prompt-library-confirm-btn');
     if (confirmBtn) confirmBtn.addEventListener('click', confirmSave);
 
-    var cancelBtn = document.getElementById('prompt-library-cancel-btn');
+    var cancelBtn = DOMCache.get('prompt-library-cancel-btn');
     if (cancelBtn) cancelBtn.addEventListener('click', closeSaveModal);
 
-    var searchEl = document.getElementById('prompt-library-search');
+    var searchEl = DOMCache.get('prompt-library-search');
     if (searchEl) searchEl.addEventListener('input', _renderList);
 
-    var folderFilter = document.getElementById('prompt-library-folder-filter');
+    var folderFilter = DOMCache.get('prompt-library-folder-filter');
     if (folderFilter) folderFilter.addEventListener('change', _renderList);
 
-    var sortEl = document.getElementById('prompt-library-sort');
+    var sortEl = DOMCache.get('prompt-library-sort');
     if (sortEl) sortEl.addEventListener('change', _renderList);
 
     // Ctrl+L shortcut
@@ -15392,7 +15392,7 @@ const ModelComparePanel = (() => {
 
     // Fill from input
     panelEl.querySelector('.mcp-btn-fill').addEventListener('click', function () {
-      const chatInput = document.getElementById('user-input');
+      const chatInput = DOMCache.get('user-input');
       if (chatInput && chatInput.value.trim()) {
         panelEl.querySelector('.mcp-prompt-input').value = chatInput.value.trim();
       }
@@ -16082,9 +16082,9 @@ const MessageScheduler = (() => {
   }
 
   function _handleSubmit() {
-    const msgInput = document.getElementById('schedMsgInput');
-    const dtInput = document.getElementById('schedDatetime');
-    const labelInput = document.getElementById('schedLabel');
+    const msgInput = DOMCache.get('schedMsgInput');
+    const dtInput = DOMCache.get('schedDatetime');
+    const labelInput = DOMCache.get('schedLabel');
     if (!msgInput || !dtInput) return;
 
     const text = msgInput.value.trim();
@@ -16112,7 +16112,7 @@ const MessageScheduler = (() => {
   }
 
   function _renderPanel() {
-    const listEl = document.getElementById('schedulerList');
+    const listEl = DOMCache.get('schedulerList');
     if (!listEl) return;
 
     const pending = getPending().sort((a, b) => a.scheduledAt - b.scheduledAt);
@@ -16139,7 +16139,7 @@ const MessageScheduler = (() => {
   }
 
   function _renderHistory() {
-    const histEl = document.getElementById('schedulerHistory');
+    const histEl = DOMCache.get('schedulerHistory');
     if (!histEl) return;
 
     const hist = getHistory().sort((a, b) => (b.sentAt || b.scheduledAt) - (a.sentAt || a.scheduledAt));
@@ -16355,12 +16355,12 @@ const SmartRetry = (() => {
       '<div class="retry-countdown">Retrying in <span id="retry-seconds">' + remaining + '</span>s\u2026</div>' +
       '<button class="retry-cancel-btn" id="retry-cancel-btn">Cancel</button>';
 
-    const existing = document.getElementById('smart-retry-indicator');
+    const existing = DOMCache.get('smart-retry-indicator');
     if (existing) existing.remove();
 
     container.appendChild(retryDiv);
 
-    const cancelBtn = document.getElementById('retry-cancel-btn');
+    const cancelBtn = DOMCache.get('retry-cancel-btn');
     if (cancelBtn) {
       cancelBtn.addEventListener('click', () => {
         _cancelled = true;
@@ -16371,7 +16371,7 @@ const SmartRetry = (() => {
     if (_countdownInterval) clearInterval(_countdownInterval);
     _countdownInterval = setInterval(() => {
       remaining--;
-      const el = document.getElementById('retry-seconds');
+      const el = DOMCache.get('retry-seconds');
       if (el) el.textContent = String(remaining);
       if (remaining <= 0) {
         clearInterval(_countdownInterval);
@@ -16386,7 +16386,7 @@ const SmartRetry = (() => {
       clearInterval(_countdownInterval);
       _countdownInterval = null;
     }
-    const el = document.getElementById('smart-retry-indicator');
+    const el = DOMCache.get('smart-retry-indicator');
     if (el) el.remove();
   }
 
@@ -16685,8 +16685,8 @@ const UsageHeatmap = (() => {
   /* -- Rendering ------------------------------------------------------- */
 
   function _render() {
-    const container = document.getElementById('heatmap-grid');
-    const statsEl = document.getElementById('heatmap-stats');
+    const container = DOMCache.get('heatmap-grid');
+    const statsEl = DOMCache.get('heatmap-stats');
     if (!container) return;
 
     const { grid, total, sessionCount } = _collectData();
@@ -16755,8 +16755,8 @@ const UsageHeatmap = (() => {
   /* -- Panel management ------------------------------------------------ */
 
   function open() {
-    const panel = document.getElementById('heatmap-panel');
-    const overlay = document.getElementById('heatmap-overlay');
+    const panel = DOMCache.get('heatmap-panel');
+    const overlay = DOMCache.get('heatmap-overlay');
     if (panel) panel.style.display = '';
     if (overlay) overlay.style.display = '';
     isOpen = true;
@@ -16764,8 +16764,8 @@ const UsageHeatmap = (() => {
   }
 
   function close() {
-    const panel = document.getElementById('heatmap-panel');
-    const overlay = document.getElementById('heatmap-overlay');
+    const panel = DOMCache.get('heatmap-panel');
+    const overlay = DOMCache.get('heatmap-overlay');
     if (panel) panel.style.display = 'none';
     if (overlay) overlay.style.display = 'none';
     isOpen = false;
@@ -16799,16 +16799,16 @@ const UsageHeatmap = (() => {
   /* -- Init ------------------------------------------------------------ */
 
   function init() {
-    const closeBtn = document.getElementById('heatmap-close-btn');
+    const closeBtn = DOMCache.get('heatmap-close-btn');
     if (closeBtn) closeBtn.addEventListener('click', close);
 
-    const overlay = document.getElementById('heatmap-overlay');
+    const overlay = DOMCache.get('heatmap-overlay');
     if (overlay) overlay.addEventListener('click', close);
 
-    const exportBtn = document.getElementById('heatmap-export-btn');
+    const exportBtn = DOMCache.get('heatmap-export-btn');
     if (exportBtn) exportBtn.addEventListener('click', exportCSV);
 
-    const refreshBtn = document.getElementById('heatmap-refresh-btn');
+    const refreshBtn = DOMCache.get('heatmap-refresh-btn');
     if (refreshBtn) refreshBtn.addEventListener('click', _render);
   }
 
@@ -16866,7 +16866,7 @@ const ContextWindowMeter = (() => {
   let _observer  = null;
   let _visible   = true;
 
-  function _el(id) { return document.getElementById(id); }
+  function _el(id) { return DOMCache.get(id); }
 
   function _ensureEls() {
     if (!_container) _container = _el('context-meter');
@@ -17303,7 +17303,7 @@ const ConversationAgenda = (() => {
   function init() {
     _load();
 
-    const btn = document.getElementById('agenda-btn');
+    const btn = DOMCache.get('agenda-btn');
     if (btn) btn.addEventListener('click', toggle);
 
     // Alt+G shortcut
@@ -17779,9 +17779,9 @@ const OfflineManager = (function () {
   var _wasOffline = false;
 
   function init() {
-    banner = document.getElementById('offline-banner');
+    banner = DOMCache.get('offline-banner');
     sendBtn = DOMCache.get('send-btn');
-    var dismissBtn = document.getElementById('offline-dismiss');
+    var dismissBtn = DOMCache.get('offline-dismiss');
 
     if (dismissBtn) {
       dismissBtn.addEventListener('click', function () {
@@ -17989,7 +17989,7 @@ const MessageFilter = (() => {
   /* ── UI ─────────────────────────────────────────────────────── */
 
   function _injectStyles() {
-    if (document.getElementById('msg-filter-styles')) return;
+    if (DOMCache.get('msg-filter-styles')) return;
     const style = document.createElement('style');
     style.id = 'msg-filter-styles';
     style.textContent = `
@@ -18446,7 +18446,7 @@ const QuickSwitcher = (() => {
   }
 
   function _createOverlay() {
-    let overlay = document.getElementById('quick-switcher-overlay');
+    let overlay = DOMCache.get('quick-switcher-overlay');
     if (overlay) return overlay;
 
     overlay = document.createElement('div');
@@ -18466,7 +18466,7 @@ const QuickSwitcher = (() => {
       if (e.target === overlay) hide();
     });
 
-    const input = document.getElementById('quick-switcher-input');
+    const input = DOMCache.get('quick-switcher-input');
     input.addEventListener('input', () => { _updateResults(input.value); });
     input.addEventListener('keydown', _handleKeydown);
 
@@ -18498,7 +18498,7 @@ const QuickSwitcher = (() => {
   }
 
   function _updateResults(query) {
-    const results = document.getElementById('quick-switcher-results');
+    const results = DOMCache.get('quick-switcher-results');
     if (!results) return;
 
     let sessions;
@@ -18545,7 +18545,7 @@ const QuickSwitcher = (() => {
   }
 
   function _highlightSelected() {
-    const results = document.getElementById('quick-switcher-results');
+    const results = DOMCache.get('quick-switcher-results');
     if (!results) return;
     results.querySelectorAll('.quick-switcher-item').forEach((el, i) => {
       el.classList.toggle('selected', i === selectedIndex);
@@ -18564,13 +18564,13 @@ const QuickSwitcher = (() => {
     overlay.classList.add('visible');
     isVisible = true;
     selectedIndex = 0;
-    const input = document.getElementById('quick-switcher-input');
+    const input = DOMCache.get('quick-switcher-input');
     if (input) { input.value = ''; input.focus(); }
     _updateResults('');
   }
 
   function hide() {
-    const overlay = document.getElementById('quick-switcher-overlay');
+    const overlay = DOMCache.get('quick-switcher-overlay');
     if (overlay) overlay.classList.remove('visible');
     isVisible = false;
   }
@@ -18719,7 +18719,7 @@ const WordCloud = (() => {
   function toggle() { isVisible ? close() : open(); }
 
   function init() {
-    const btn = document.getElementById('wordcloud-btn');
+    const btn = DOMCache.get('wordcloud-btn');
     if (btn) btn.addEventListener('click', toggle);
 
     document.addEventListener('keydown', (e) => {
@@ -19266,7 +19266,7 @@ const PromptChainRunner = (() => {
 
   function _addStepInput(value) {
     _stepCounter++;
-    const container = document.getElementById('chain-steps-container');
+    const container = DOMCache.get('chain-steps-container');
     if (!container) return;
 
     const stepDiv = document.createElement('div');
@@ -19280,7 +19280,7 @@ const PromptChainRunner = (() => {
   }
 
   function _renumberSteps() {
-    const container = document.getElementById('chain-steps-container');
+    const container = DOMCache.get('chain-steps-container');
     if (!container) return;
     Array.from(container.children).forEach((div, i) => {
       const num = div.querySelector('span');
@@ -19289,7 +19289,7 @@ const PromptChainRunner = (() => {
   }
 
   function _saveNewChain() {
-    const nameInput = document.getElementById('chain-name-input');
+    const nameInput = DOMCache.get('chain-name-input');
     const name = nameInput ? nameInput.value.trim() : '';
     const steps = Array.from(document.querySelectorAll('.chain-step-input'))
       .map(ta => ta.value.trim())
@@ -19329,7 +19329,7 @@ const PromptChainRunner = (() => {
   }
 
   function _saveEditedChain(id) {
-    const nameInput = document.getElementById('chain-name-input');
+    const nameInput = DOMCache.get('chain-name-input');
     const name = nameInput ? nameInput.value.trim() : '';
     const steps = Array.from(document.querySelectorAll('.chain-step-input'))
       .map(ta => ta.value.trim())
@@ -19729,7 +19729,7 @@ const ConversationHealthCheck = (() => {
    * Render the health check results into the panel.
    */
   function render() {
-    const contentEl = document.getElementById('health-content');
+    const contentEl = DOMCache.get('health-content');
     if (!contentEl) return;
 
     const result = analyze();
@@ -19787,7 +19787,7 @@ const ConversationHealthCheck = (() => {
 
   /** Open the health check panel. */
   function open() {
-    const overlay = document.getElementById('health-overlay');
+    const overlay = DOMCache.get('health-overlay');
     if (overlay) {
       overlay.style.display = 'flex';
       isOpen = true;
@@ -19797,7 +19797,7 @@ const ConversationHealthCheck = (() => {
 
   /** Close the health check panel. */
   function close() {
-    const overlay = document.getElementById('health-overlay');
+    const overlay = DOMCache.get('health-overlay');
     if (overlay) {
       overlay.style.display = 'none';
       isOpen = false;
@@ -19840,7 +19840,7 @@ const TypingSpeedMonitor = (() => {
       input.addEventListener('input', _onInput);
     }
 
-    const indicator = document.getElementById('wpm-indicator');
+    const indicator = DOMCache.get('wpm-indicator');
     if (indicator) indicator.addEventListener('click', toggle);
 
     // Periodic WPM update
@@ -19918,8 +19918,8 @@ const TypingSpeedMonitor = (() => {
   }
 
   function _updateIndicator() {
-    const valEl = document.getElementById('wpm-value');
-    const indicator = document.getElementById('wpm-indicator');
+    const valEl = DOMCache.get('wpm-value');
+    const indicator = DOMCache.get('wpm-indicator');
     if (!valEl || !indicator) return;
 
     valEl.textContent = _currentWpm;
@@ -19931,7 +19931,7 @@ const TypingSpeedMonitor = (() => {
   }
 
   function _createDashboardHTML() {
-    if (document.getElementById('wpm-dashboard-overlay')) return;
+    if (DOMCache.get('wpm-dashboard-overlay')) return;
     const overlay = document.createElement('div');
     overlay.id = 'wpm-dashboard-overlay';
     overlay.className = 'wpm-dashboard-overlay';
@@ -19963,15 +19963,15 @@ const TypingSpeedMonitor = (() => {
         <button class="wpm-reset-btn" id="wpm-reset">Reset Stats</button>
       </div>`;
     document.body.appendChild(overlay);
-    document.getElementById('wpm-close').addEventListener('click', close);
-    document.getElementById('wpm-reset').addEventListener('click', reset);
+    DOMCache.get('wpm-close').addEventListener('click', close);
+    DOMCache.get('wpm-reset').addEventListener('click', reset);
   }
 
   function _renderDashboard() {
-    const liveEl = document.getElementById('wpm-live');
-    const peakEl = document.getElementById('wpm-peak');
-    const wordsEl = document.getElementById('wpm-words');
-    const charsEl = document.getElementById('wpm-chars');
+    const liveEl = DOMCache.get('wpm-live');
+    const peakEl = DOMCache.get('wpm-peak');
+    const wordsEl = DOMCache.get('wpm-words');
+    const charsEl = DOMCache.get('wpm-chars');
     if (liveEl) liveEl.textContent = _currentWpm;
     if (peakEl) peakEl.textContent = _peakWpm;
     if (wordsEl) wordsEl.textContent = _totalWords;
@@ -19980,7 +19980,7 @@ const TypingSpeedMonitor = (() => {
   }
 
   function _drawSparkline() {
-    const canvas = document.getElementById('wpm-canvas');
+    const canvas = DOMCache.get('wpm-canvas');
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     const rect = canvas.parentElement.getBoundingClientRect();
@@ -20049,12 +20049,12 @@ const TypingSpeedMonitor = (() => {
   }
 
   function open() {
-    const overlay = document.getElementById('wpm-dashboard-overlay');
+    const overlay = DOMCache.get('wpm-dashboard-overlay');
     if (overlay) { overlay.style.display = 'flex'; _isOpen = true; _renderDashboard(); }
   }
 
   function close() {
-    const overlay = document.getElementById('wpm-dashboard-overlay');
+    const overlay = DOMCache.get('wpm-dashboard-overlay');
     if (overlay) { overlay.style.display = 'none'; _isOpen = false; }
   }
 
@@ -20150,7 +20150,7 @@ const FocusTimer = (() => {
   }
 
   function _createUI() {
-    if (document.getElementById('focus-timer-overlay')) return;
+    if (DOMCache.get('focus-timer-overlay')) return;
 
     const overlay = document.createElement('div');
     overlay.id = 'focus-timer-overlay';
@@ -20198,12 +20198,12 @@ const FocusTimer = (() => {
     document.body.appendChild(overlay);
 
     overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
-    document.getElementById('focus-timer-close').addEventListener('click', close);
-    document.getElementById('ft-start').addEventListener('click', start);
-    document.getElementById('ft-pause').addEventListener('click', pause);
-    document.getElementById('ft-skip').addEventListener('click', skip);
-    document.getElementById('ft-reset').addEventListener('click', reset);
-    document.getElementById('ft-save-settings').addEventListener('click', _saveSettings);
+    DOMCache.get('focus-timer-close').addEventListener('click', close);
+    DOMCache.get('ft-start').addEventListener('click', start);
+    DOMCache.get('ft-pause').addEventListener('click', pause);
+    DOMCache.get('ft-skip').addEventListener('click', skip);
+    DOMCache.get('ft-reset').addEventListener('click', reset);
+    DOMCache.get('ft-save-settings').addEventListener('click', _saveSettings);
 
     // Keyboard shortcut: Alt+P
     document.addEventListener('keydown', e => {
@@ -20217,7 +20217,7 @@ const FocusTimer = (() => {
   }
 
   function _createIndicator() {
-    if (document.getElementById('ft-indicator')) return;
+    if (DOMCache.get('ft-indicator')) return;
     const ind = document.createElement('div');
     ind.id = 'ft-indicator';
     ind.style.cssText = 'display:none;position:fixed;bottom:12px;left:12px;background:var(--bg-color,#1e1e1e);color:var(--text-color,#d4d4d4);border:1px solid rgba(128,128,128,0.3);border-radius:10px;padding:6px 14px;font-size:13px;font-family:system-ui,sans-serif;cursor:pointer;z-index:10050;box-shadow:0 2px 8px rgba(0,0,0,0.3);font-variant-numeric:tabular-nums;';
@@ -20227,15 +20227,15 @@ const FocusTimer = (() => {
   }
 
   function _updateUI() {
-    const timeEl = document.getElementById('ft-time');
-    const labelEl = document.getElementById('ft-state-label');
-    const startBtn = document.getElementById('ft-start');
-    const pauseBtn = document.getElementById('ft-pause');
-    const skipBtn = document.getElementById('ft-skip');
-    const todayEl = document.getElementById('ft-today-count');
-    const totalEl = document.getElementById('ft-total-count');
-    const hoursEl = document.getElementById('ft-total-hours');
-    const streakEl = document.getElementById('ft-streak');
+    const timeEl = DOMCache.get('ft-time');
+    const labelEl = DOMCache.get('ft-state-label');
+    const startBtn = DOMCache.get('ft-start');
+    const pauseBtn = DOMCache.get('ft-pause');
+    const skipBtn = DOMCache.get('ft-skip');
+    const todayEl = DOMCache.get('ft-today-count');
+    const totalEl = DOMCache.get('ft-total-count');
+    const hoursEl = DOMCache.get('ft-total-hours');
+    const streakEl = DOMCache.get('ft-streak');
 
     if (timeEl) timeEl.textContent = _formatTime(_state === 'idle' ? _settings.work * 60 : _remaining);
     if (labelEl) labelEl.textContent = _stateLabel();
@@ -20265,7 +20265,7 @@ const FocusTimer = (() => {
   }
 
   function _renderProgress() {
-    const el = document.getElementById('ft-progress');
+    const el = DOMCache.get('ft-progress');
     if (!el) return;
     const total = _settings.longAfter;
     const done = _todaySessions % total;
@@ -20278,7 +20278,7 @@ const FocusTimer = (() => {
   }
 
   function _renderHistory() {
-    const el = document.getElementById('ft-history');
+    const el = DOMCache.get('ft-history');
     if (!el) return;
     const recent = [..._history].slice(-6);
     const today = { date: _todayDate, sessions: _todaySessions, focusMinutes: Math.round(_todaySessions * _settings.work) };
@@ -20290,7 +20290,7 @@ const FocusTimer = (() => {
   }
 
   function _updateIndicator() {
-    const ind = document.getElementById('ft-indicator');
+    const ind = DOMCache.get('ft-indicator');
     if (!ind) return;
     if (_state === 'idle') { ind.style.display = 'none'; return; }
     ind.style.display = '';
@@ -20299,10 +20299,10 @@ const FocusTimer = (() => {
   }
 
   function _updateSettingsInputs() {
-    const w = document.getElementById('ft-set-work');
-    const s = document.getElementById('ft-set-short');
-    const l = document.getElementById('ft-set-long');
-    const a = document.getElementById('ft-set-after');
+    const w = DOMCache.get('ft-set-work');
+    const s = DOMCache.get('ft-set-short');
+    const l = DOMCache.get('ft-set-long');
+    const a = DOMCache.get('ft-set-after');
     if (w && !w.matches(':focus')) w.value = _settings.work;
     if (s && !s.matches(':focus')) s.value = _settings.short;
     if (l && !l.matches(':focus')) l.value = _settings.long;
@@ -20310,10 +20310,10 @@ const FocusTimer = (() => {
   }
 
   function _saveSettings() {
-    const w = parseInt(document.getElementById('ft-set-work')?.value) || DEFAULTS.work;
-    const s = parseInt(document.getElementById('ft-set-short')?.value) || DEFAULTS.short;
-    const l = parseInt(document.getElementById('ft-set-long')?.value) || DEFAULTS.long;
-    const a = parseInt(document.getElementById('ft-set-after')?.value) || DEFAULTS.longAfter;
+    const w = parseInt(DOMCache.get('ft-set-work')?.value) || DEFAULTS.work;
+    const s = parseInt(DOMCache.get('ft-set-short')?.value) || DEFAULTS.short;
+    const l = parseInt(DOMCache.get('ft-set-long')?.value) || DEFAULTS.long;
+    const a = parseInt(DOMCache.get('ft-set-after')?.value) || DEFAULTS.longAfter;
     _settings = { work: Math.max(1, Math.min(120, w)), short: Math.max(1, Math.min(30, s)), long: Math.max(1, Math.min(60, l)), longAfter: Math.max(2, Math.min(10, a)) };
     _save();
     if (_state === 'idle') _updateUI();
@@ -20429,12 +20429,12 @@ const FocusTimer = (() => {
   }
 
   function open() {
-    const overlay = document.getElementById('focus-timer-overlay');
+    const overlay = DOMCache.get('focus-timer-overlay');
     if (overlay) { overlay.style.display = 'flex'; _isOpen = true; _updateUI(); }
   }
 
   function close() {
-    const overlay = document.getElementById('focus-timer-overlay');
+    const overlay = DOMCache.get('focus-timer-overlay');
     if (overlay) { overlay.style.display = 'none'; _isOpen = false; }
   }
 
@@ -20950,7 +20950,7 @@ const ConversationMindMap = (() => {
   function toggle() { _isOpen ? close() : open(); }
 
   function init() {
-    const btn = document.getElementById('mindmap-btn');
+    const btn = DOMCache.get('mindmap-btn');
     if (btn) btn.addEventListener('click', toggle);
     document.addEventListener('keydown', (e) => {
       if (e.ctrlKey && e.shiftKey && e.key === 'G') {
@@ -21415,7 +21415,7 @@ const SplitView = (() => {
 
   function _renderPane(side, session) {
     const paneId = side === 'left' ? 'splitview-left-pane' : 'splitview-right-pane';
-    const pane = document.getElementById(paneId);
+    const pane = DOMCache.get(paneId);
     if (!pane) return;
     pane.innerHTML = '';
 
@@ -21452,7 +21452,7 @@ const SplitView = (() => {
   }
 
   function _renderStats() {
-    const el = document.getElementById('splitview-stats');
+    const el = DOMCache.get('splitview-stats');
     if (!el) return;
 
     const leftMsgs = _leftSession && Array.isArray(_leftSession.messages) ? _leftSession.messages : [];
@@ -21483,8 +21483,8 @@ const SplitView = (() => {
   }
 
   function _setupSyncScroll() {
-    const left = document.getElementById('splitview-left-pane');
-    const right = document.getElementById('splitview-right-pane');
+    const left = DOMCache.get('splitview-left-pane');
+    const right = DOMCache.get('splitview-right-pane');
     if (!left || !right) return;
 
     // Remove old listeners
@@ -21511,8 +21511,8 @@ const SplitView = (() => {
   }
 
   function _swap() {
-    const leftSelect = document.getElementById('splitview-left-select');
-    const rightSelect = document.getElementById('splitview-right-select');
+    const leftSelect = DOMCache.get('splitview-left-select');
+    const rightSelect = DOMCache.get('splitview-right-select');
     if (!leftSelect || !rightSelect) return;
 
     const temp = leftSelect.value;
@@ -23124,7 +23124,7 @@ const PreferencesPanel = (() => {
     });
 
     // Button
-    const btn = document.getElementById('preferences-btn');
+    const btn = DOMCache.get('preferences-btn');
     if (btn) btn.addEventListener('click', toggle);
   }
 
@@ -23320,11 +23320,11 @@ const SmartTitle = (() => {
    * Initialize: wire up the suggest button.
    */
   function init() {
-    const btn = document.getElementById('session-suggest-title');
+    const btn = DOMCache.get('session-suggest-title');
     if (!btn) return;
     btn.addEventListener('click', (e) => {
       e.preventDefault();
-      const input = document.getElementById('session-name-input');
+      const input = DOMCache.get('session-name-input');
       if (input) {
         const title = generate();
         input.value = title;
@@ -23455,7 +23455,7 @@ const SessionTemplates = (() => {
     // Apply model
     if (tpl.model) {
       ChatConfig.MODEL = tpl.model;
-      const label = document.getElementById('model-label');
+      const label = DOMCache.get('model-label');
       const m = (ChatConfig.AVAILABLE_MODELS || []).find(x => x.id === tpl.model);
       if (label && m) label.textContent = m.label;
     }
@@ -24345,7 +24345,7 @@ const SmartPaste = (() => {
   /* ---- toast ---- */
 
   function _showToast(typeLabel) {
-    var existing = document.getElementById('smartpaste-toast');
+    var existing = DOMCache.get('smartpaste-toast');
     if (existing) existing.remove();
     var toast = document.createElement('div');
     toast.id = 'smartpaste-toast';
@@ -24425,7 +24425,7 @@ const SmartPaste = (() => {
   }
 
   function init() {
-    var chatInput = document.getElementById('chat-input');
+    var chatInput = DOMCache.get('chat-input');
     if (chatInput) {
       chatInput.addEventListener('paste', _onPaste);
     }
@@ -24509,7 +24509,7 @@ const MessageContextMenu = (() => {
     const msgEl = el.closest('.msg-user, .msg-assistant, .msg-system, [data-msg-index]');
     if (!msgEl) return -1;
     if (msgEl.dataset.msgIndex !== undefined) return parseInt(msgEl.dataset.msgIndex, 10);
-    const output = document.getElementById('chat-output');
+    const output = DOMCache.get('chat-output');
     if (!output) return -1;
     const children = Array.from(output.children);
     return children.indexOf(msgEl);
@@ -24762,7 +24762,7 @@ const MessageContextMenu = (() => {
 
   var _toastTimer = null;
   function _toast(msg) {
-    var existing = document.getElementById('ctx-menu-toast');
+    var existing = DOMCache.get('ctx-menu-toast');
     if (existing) existing.remove();
     var t = document.createElement('div');
     t.id = 'ctx-menu-toast';
@@ -24804,7 +24804,7 @@ const MessageContextMenu = (() => {
     var msgEl = e.target.closest('.msg-user, .msg-assistant, .msg-system, [data-msg-index]');
     if (!msgEl) return;
     // Must be inside chat output
-    var output = document.getElementById('chat-output');
+    var output = DOMCache.get('chat-output');
     if (!output || !output.contains(msgEl)) return;
 
     e.preventDefault();
@@ -24945,7 +24945,7 @@ var PomodoroTimer = (function() {
     _startBtn.classList.toggle('primary', !_running);
     _statsEl.textContent = '🍅 ' + _completedPomodoros + ' completed · ' + _totalFocusMin + ' min focused today';
     // Update toolbar badge
-    var btn = document.getElementById('pomodoro-btn');
+    var btn = DOMCache.get('pomodoro-btn');
     if (btn) {
       var badge = btn.querySelector('.pomodoro-badge');
       if (_running) {
@@ -25478,7 +25478,7 @@ const SmartScroll = (() => {
     });
 
     // Insert after chat output
-    _chatOutput = document.getElementById('chat-output');
+    _chatOutput = DOMCache.get('chat-output');
     if (_chatOutput) {
       _chatOutput.parentElement.style.position = 'relative';
       _chatOutput.parentElement.appendChild(_fab);
@@ -25505,7 +25505,7 @@ const SmartScroll = (() => {
   }
 
   function init() {
-    _chatOutput = document.getElementById('chat-output');
+    _chatOutput = DOMCache.get('chat-output');
     if (!_chatOutput) return;
 
     _buildFAB();
@@ -25787,7 +25787,7 @@ const MessageReaderView = (() => {
     _injectStyles();
 
     // Double-click any message to open reader
-    const chatArea = document.getElementById('chat') || document.getElementById('chat-output');
+    const chatArea = DOMCache.get('chat') || DOMCache.get('chat-output');
     if (chatArea) {
       chatArea.addEventListener('dblclick', e => {
         const msgEl = e.target.closest('.msg');
@@ -26122,7 +26122,7 @@ const ReadabilityAnalyzer = (() => {
     });
 
     // Auto-refresh when messages change
-    const chatArea = document.getElementById('chat') || document.querySelector('.chat-area');
+    const chatArea = DOMCache.get('chat') || document.querySelector('.chat-area');
     if (chatArea) {
       const observer = new MutationObserver(() => { if (visible) refresh(); });
       observer.observe(chatArea, { childList: true, subtree: true });
