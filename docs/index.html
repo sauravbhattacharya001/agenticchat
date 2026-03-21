@@ -107,6 +107,40 @@
     @media (max-width: 1199px) {
       .toc { display: none; }
     }
+
+    /* Search box */
+    .search-box { margin-left: auto; }
+    .search-box input {
+      background: var(--bg-code);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 0.35rem 0.75rem;
+      font-size: 0.85rem;
+      width: 200px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .search-box input:focus { border-color: var(--accent); }
+    .search-box input::placeholder { color: var(--text-muted); }
+    .search-highlight { background: rgba(88,166,255,0.25); border-radius: 2px; padding: 0 1px; }
+    section.search-hidden { display: none; }
+    .search-no-results {
+      text-align: center; color: var(--text-muted); padding: 3rem 0; font-size: 1.1rem; display: none;
+    }
+
+    /* Back to top */
+    #back-to-top {
+      position: fixed; bottom: 2rem; right: 2rem;
+      width: 40px; height: 40px;
+      border-radius: 50%; border: 1px solid var(--border);
+      background: var(--bg-card); color: var(--accent);
+      font-size: 1.2rem; cursor: pointer;
+      opacity: 0; transition: opacity 0.3s;
+      pointer-events: none; z-index: 100;
+    }
+    #back-to-top.visible { opacity: 1; pointer-events: auto; }
+    #back-to-top:hover { background: var(--accent); color: var(--bg); }
   </style>
 </head>
 <body>
@@ -119,7 +153,13 @@
       <a href="#security">Security</a>
       <a href="https://github.com/sauravbhattacharya001/agenticchat">GitHub</a>
     </div>
+    <div class="search-box">
+      <input type="search" id="docs-search" placeholder="Search docs…" autocomplete="off" aria-label="Search documentation">
+    </div>
   </nav>
+
+  <!-- Back to top button -->
+  <button id="back-to-top" aria-label="Back to top" title="Back to top">↑</button>
 
   <div class="toc">
     <strong>On this page</strong>
@@ -940,5 +980,66 @@ npx jest --coverage</code></pre>
   <footer>
     <p>Agentic Chat — Built by <a href="https://github.com/sauravbhattacharya001">Saurav Bhattacharya</a> · <a href="https://github.com/sauravbhattacharya001/agenticchat">GitHub</a> · MIT License</p>
   </footer>
+  <div id="search-no-results" class="search-no-results">No sections match your search.</div>
+
+  <script>
+  (function() {
+    'use strict';
+    // --- Docs search ---
+    const input = document.getElementById('docs-search');
+    const container = document.querySelector('.container');
+    const sections = container.querySelectorAll('section');
+    const noResults = document.getElementById('search-no-results');
+    let debounce;
+
+    input.addEventListener('input', function() {
+      clearTimeout(debounce);
+      debounce = setTimeout(doSearch, 200);
+    });
+
+    // Ctrl+K / Cmd+K to focus search
+    document.addEventListener('keydown', function(e) {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        input.focus();
+        input.select();
+      }
+    });
+
+    function doSearch() {
+      const q = input.value.trim().toLowerCase();
+      // Clear previous highlights
+      container.querySelectorAll('.search-highlight').forEach(function(el) {
+        el.replaceWith(el.textContent);
+      });
+      if (!q) {
+        sections.forEach(function(s) { s.classList.remove('search-hidden'); });
+        noResults.style.display = 'none';
+        return;
+      }
+      let visible = 0;
+      sections.forEach(function(s) {
+        const text = s.textContent.toLowerCase();
+        if (text.includes(q)) {
+          s.classList.remove('search-hidden');
+          visible++;
+        } else {
+          s.classList.add('search-hidden');
+        }
+      });
+      noResults.style.display = visible === 0 ? 'block' : 'none';
+    }
+
+    // --- Back to top ---
+    const btn = document.getElementById('back-to-top');
+    window.addEventListener('scroll', function() {
+      btn.classList.toggle('visible', window.scrollY > 400);
+    }, { passive: true });
+    btn.addEventListener('click', function() {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  })();
+  </script>
+
 </body>
 </html>
