@@ -75,6 +75,7 @@
  *   PomodoroTimer        — built-in focus timer with work/break cycles and stats
  *   PromptABTester       — compare two model responses side-by-side with voting and history
  *   TextExpander         — shorthand triggers that auto-expand inline (Ctrl+Shift+E)
+ *   MessageReaderView    — full-width reader overlay for comfortable reading (Alt+R)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -21223,6 +21224,7 @@ const CommandPalette = (() => {
       { id: 'cp:annotations', label: 'Message Annotations', icon: '\uD83C\uDFF7\uFE0F', category: 'Tools', action: () => { if (typeof MessageAnnotations !== 'undefined') MessageAnnotations.toggle(); } },
       { id: 'cp:tags', label: 'Manage Tags', icon: '\uD83C\uDFF7\uFE0F', category: 'Sessions', action: () => { if (typeof ConversationTags !== 'undefined') ConversationTags.toggle(); } },
       { id: 'cp:wordcloud', label: 'Word Cloud', icon: '\u2601\uFE0F', shortcut: 'Ctrl+Shift+W', category: 'Visualization', action: () => { if (typeof WordCloudPanel !== 'undefined') WordCloudPanel.toggle(); } },
+      { id: 'cp:reader', label: 'Reader View', icon: '\uD83D\uDCD6', shortcut: 'Alt+R', category: 'Tools', action: () => { if (typeof MessageReaderView !== 'undefined') MessageReaderView.toggle(); } },
       { id: 'cp:mindmap', label: 'Mind Map', icon: '\uD83E\uDDE0', shortcut: 'Ctrl+Shift+G', category: 'Visualization', action: () => { if (typeof ConversationMindMap !== 'undefined') ConversationMindMap.toggle(); } },
       { id: 'cp:timeline', label: 'Conversation Timeline', icon: '\uD83D\uDCC8', category: 'Visualization', action: () => { if (typeof ConversationTimeline !== 'undefined') ConversationTimeline.toggle(); } },
       { id: 'cp:sentiment', label: 'Sentiment Analysis', icon: '\uD83D\uDE0A', shortcut: 'Ctrl+Shift+M', category: 'Analytics', action: () => { if (typeof ConversationSentiment !== 'undefined') ConversationSentiment.toggle(); } },
@@ -25734,3 +25736,311 @@ const TextExpander = (() => {
 })();
 
 // TextExpander.init already registered above (line ~22905) — skip duplicate
+
+/* ---------- Message Reader View (module 65) ---------- */
+/**
+ * Opens any message in a clean, full-width reader overlay with larger text,
+ * proper typography, and utility actions (copy, close). Especially useful
+ * for long AI responses that are hard to read in the narrow chat column.
+ *
+ * Usage: double-click any message bubble, or click the 📖 expand icon that
+ * appears on hover. Press Escape or click the backdrop to close.
+ *
+ * Public API:
+ *   init()          — inject styles, wire event delegation
+ *   open(el)        — open reader for a specific message element
+ *   close()         — close the reader overlay
+ *   toggle()        — open reader for the last assistant message, or close
+ *   isOpen()        — whether the reader overlay is currently visible
+ *
+ * @namespace MessageReaderView
+ */
+const MessageReaderView = (() => {
+  'use strict';
+
+  let overlayEl = null;
+  let styleInjected = false;
+  let currentSourceEl = null;
+
+  // ── Styles ──
+
+  function _injectStyles() {
+    if (styleInjected) return;
+    styleInjected = true;
+    const css = document.createElement('style');
+    css.textContent = `
+      /* Reader overlay */
+      .reader-overlay {
+        position: fixed; inset: 0; z-index: 99999;
+        background: rgba(0,0,0,0.7);
+        display: flex; align-items: center; justify-content: center;
+        opacity: 0; transition: opacity .2s ease;
+        pointer-events: none;
+      }
+      .reader-overlay.active {
+        opacity: 1; pointer-events: auto;
+      }
+      .reader-panel {
+        background: var(--bg-primary, #1e1e2e);
+        color: var(--text-primary, #cdd6f4);
+        border-radius: 12px;
+        width: min(90vw, 800px);
+        max-height: 85vh;
+        overflow-y: auto;
+        padding: 2rem 2.5rem;
+        box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+        font-size: 1.1rem;
+        line-height: 1.8;
+        position: relative;
+      }
+      .reader-panel pre {
+        background: var(--bg-secondary, #181825);
+        border-radius: 8px;
+        padding: 1rem;
+        overflow-x: auto;
+        font-size: 0.95rem;
+        line-height: 1.5;
+      }
+      .reader-panel code {
+        font-family: 'Fira Code', 'Consolas', monospace;
+      }
+      .reader-panel p { margin: 0.8em 0; }
+      .reader-panel h1, .reader-panel h2, .reader-panel h3 {
+        margin-top: 1.2em; margin-bottom: 0.4em;
+        color: var(--accent, #89b4fa);
+      }
+      .reader-panel ul, .reader-panel ol {
+        padding-left: 1.5em; margin: 0.5em 0;
+      }
+      .reader-toolbar {
+        display: flex; align-items: center; gap: 8px;
+        margin-bottom: 1rem; padding-bottom: 0.8rem;
+        border-bottom: 1px solid var(--border, #313244);
+        position: sticky; top: 0;
+        background: var(--bg-primary, #1e1e2e);
+        z-index: 1;
+      }
+      .reader-toolbar .reader-label {
+        flex: 1; font-size: 0.85rem; opacity: 0.6;
+        text-transform: uppercase; letter-spacing: 0.05em;
+      }
+      .reader-toolbar button {
+        background: var(--bg-secondary, #313244);
+        color: var(--text-primary, #cdd6f4);
+        border: none; border-radius: 6px;
+        padding: 6px 14px; cursor: pointer;
+        font-size: 0.85rem; transition: background .15s;
+      }
+      .reader-toolbar button:hover {
+        background: var(--accent, #89b4fa);
+        color: var(--bg-primary, #1e1e2e);
+      }
+      /* Hover expand icon on messages */
+      .msg .reader-expand-icon {
+        position: absolute; top: 4px; right: 4px;
+        background: var(--bg-secondary, #313244);
+        border: none; border-radius: 4px;
+        color: var(--text-primary, #cdd6f4);
+        font-size: 14px; padding: 2px 6px;
+        cursor: pointer; opacity: 0;
+        transition: opacity .15s;
+        z-index: 10;
+      }
+      .msg:hover .reader-expand-icon { opacity: 0.7; }
+      .msg .reader-expand-icon:hover { opacity: 1; }
+
+      /* Font size controls */
+      .reader-font-controls {
+        display: flex; gap: 4px;
+      }
+      .reader-font-controls button {
+        padding: 4px 10px; font-size: 0.8rem;
+      }
+
+      /* Light theme overrides */
+      [data-theme="light"] .reader-panel {
+        background: #fff; color: #1e1e2e;
+        box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+      }
+      [data-theme="light"] .reader-panel pre {
+        background: #f5f5f5;
+      }
+      [data-theme="light"] .reader-toolbar {
+        background: #fff;
+        border-bottom-color: #e0e0e0;
+      }
+      [data-theme="light"] .reader-toolbar button {
+        background: #e8e8e8; color: #333;
+      }
+    `;
+    document.head.appendChild(css);
+  }
+
+  // ── Overlay creation ──
+
+  function _ensureOverlay() {
+    if (overlayEl) return;
+    overlayEl = document.createElement('div');
+    overlayEl.className = 'reader-overlay';
+    overlayEl.innerHTML = `
+      <div class="reader-panel">
+        <div class="reader-toolbar">
+          <span class="reader-label">📖 Reader View</span>
+          <div class="reader-font-controls">
+            <button class="reader-font-down" title="Decrease font size">A−</button>
+            <button class="reader-font-up" title="Increase font size">A+</button>
+          </div>
+          <button class="reader-copy-btn" title="Copy to clipboard">📋 Copy</button>
+          <button class="reader-close-btn" title="Close (Escape)">✕</button>
+        </div>
+        <div class="reader-content"></div>
+      </div>
+    `;
+    // Close on backdrop click
+    overlayEl.addEventListener('click', e => {
+      if (e.target === overlayEl) close();
+    });
+    // Close button
+    overlayEl.querySelector('.reader-close-btn').addEventListener('click', close);
+    // Copy button
+    overlayEl.querySelector('.reader-copy-btn').addEventListener('click', () => {
+      const content = overlayEl.querySelector('.reader-content');
+      const text = content.innerText || content.textContent;
+      navigator.clipboard.writeText(text).then(() => {
+        const btn = overlayEl.querySelector('.reader-copy-btn');
+        const orig = btn.textContent;
+        btn.textContent = '✅ Copied!';
+        setTimeout(() => { btn.textContent = orig; }, 1500);
+      }).catch(() => {});
+    });
+    // Font size controls
+    let fontSize = 1.1;
+    overlayEl.querySelector('.reader-font-up').addEventListener('click', () => {
+      fontSize = Math.min(fontSize + 0.1, 2.0);
+      overlayEl.querySelector('.reader-content').style.fontSize = fontSize + 'rem';
+    });
+    overlayEl.querySelector('.reader-font-down').addEventListener('click', () => {
+      fontSize = Math.max(fontSize - 0.1, 0.7);
+      overlayEl.querySelector('.reader-content').style.fontSize = fontSize + 'rem';
+    });
+
+    document.body.appendChild(overlayEl);
+  }
+
+  // ── Public API ──
+
+  function open(msgEl) {
+    _injectStyles();
+    _ensureOverlay();
+    if (!msgEl) return;
+    currentSourceEl = msgEl;
+    const content = overlayEl.querySelector('.reader-content');
+    // Clone the message content (innerHTML) for display
+    content.innerHTML = msgEl.innerHTML;
+    // Remove any existing expand icons from the cloned content
+    content.querySelectorAll('.reader-expand-icon').forEach(el => el.remove());
+    overlayEl.classList.add('active');
+    // Trap focus
+    overlayEl.querySelector('.reader-close-btn').focus();
+  }
+
+  function close() {
+    if (overlayEl) {
+      overlayEl.classList.remove('active');
+    }
+    currentSourceEl = null;
+  }
+
+  function toggle() {
+    if (overlayEl && overlayEl.classList.contains('active')) {
+      close();
+      return;
+    }
+    // Open the last assistant message
+    const msgs = document.querySelectorAll('.msg.assistant .content, .msg.assistant .msg-body');
+    if (msgs.length > 0) {
+      open(msgs[msgs.length - 1]);
+    } else {
+      // Fallback: try any message
+      const all = document.querySelectorAll('.msg .content, .msg .msg-body');
+      if (all.length > 0) open(all[all.length - 1]);
+    }
+  }
+
+  function isOpen() {
+    return !!(overlayEl && overlayEl.classList.contains('active'));
+  }
+
+  // ── Init: delegation + keyboard ──
+
+  function init() {
+    _injectStyles();
+
+    // Double-click any message to open reader
+    const chatArea = document.getElementById('chat') || document.getElementById('chat-output');
+    if (chatArea) {
+      chatArea.addEventListener('dblclick', e => {
+        const msgEl = e.target.closest('.msg');
+        if (!msgEl) return;
+        const body = msgEl.querySelector('.content') || msgEl.querySelector('.msg-body') || msgEl;
+        open(body);
+      });
+    }
+
+    // Add expand icons to messages via MutationObserver
+    function _addExpandIcon(msgEl) {
+      if (msgEl.querySelector('.reader-expand-icon')) return;
+      const btn = document.createElement('button');
+      btn.className = 'reader-expand-icon';
+      btn.textContent = '📖';
+      btn.title = 'Open in Reader View';
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const body = msgEl.querySelector('.content') || msgEl.querySelector('.msg-body') || msgEl;
+        open(body);
+      });
+      msgEl.style.position = 'relative';
+      msgEl.appendChild(btn);
+    }
+
+    if (chatArea) {
+      // Add to existing messages
+      chatArea.querySelectorAll('.msg').forEach(_addExpandIcon);
+      // Watch for new messages
+      const observer = new MutationObserver(mutations => {
+        for (const m of mutations) {
+          for (const node of m.addedNodes) {
+            if (node.nodeType === 1) {
+              if (node.classList && node.classList.contains('msg')) _addExpandIcon(node);
+              else if (node.querySelectorAll) {
+                node.querySelectorAll('.msg').forEach(_addExpandIcon);
+              }
+            }
+          }
+        }
+      });
+      observer.observe(chatArea, { childList: true, subtree: true });
+    }
+
+    // Keyboard: Alt+R to toggle, Escape to close
+    document.addEventListener('keydown', e => {
+      if (e.altKey && e.key === 'r') {
+        e.preventDefault();
+        toggle();
+      }
+      if (e.key === 'Escape' && isOpen()) {
+        e.preventDefault();
+        close();
+      }
+    });
+  }
+
+  // Auto-init on DOM ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+
+  return { init, open, close, toggle, isOpen };
+})();
