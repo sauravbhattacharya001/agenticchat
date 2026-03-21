@@ -14961,7 +14961,7 @@ const ModelCompare = (() => {
   /** Load history from localStorage. */
   function _load() {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = SafeStorage.get(STORAGE_KEY);
       _history = raw ? sanitizeStorageObject(JSON.parse(raw)) : [];
     } catch (_) { _history = []; }
   }
@@ -14969,7 +14969,7 @@ const ModelCompare = (() => {
   /** Save history to localStorage. */
   function _save() {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(_history));
+      SafeStorage.set(STORAGE_KEY, JSON.stringify(_history));
     } catch (_) { /* quota */ }
   }
 
@@ -25568,7 +25568,7 @@ const TextExpander = (() => {
   };
 
   function _load() {
-    try { _snippets = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}'); } catch { _snippets = {}; }
+    try { _snippets = JSON.parse(SafeStorage.get(STORAGE_KEY) || '{}'); } catch { _snippets = {}; }
   }
 
   function _save() {
