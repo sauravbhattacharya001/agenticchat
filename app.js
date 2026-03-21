@@ -18137,7 +18137,7 @@ const MessageFilter = (() => {
   };
 })();
 
-document.addEventListener('DOMContentLoaded', OfflineManager.init);
+// OfflineManager.init already registered above (line ~17852) — skip duplicate
 document.addEventListener('DOMContentLoaded', MessageFilter.init);
 
 /* ============================================================
@@ -25733,4 +25733,4 @@ const TextExpander = (() => {
   return { init, addSnippet, removeSnippet, getAll, togglePanel };
 })();
 
-document.addEventListener('DOMContentLoaded', TextExpander.init);
+// TextExpander.init already registered above (line ~22905) — skip duplicate
