@@ -22295,12 +22295,18 @@ const CustomThemeCreator = (() => {
     presetSelect.style.cssText = 'flex:1;min-width:100px;padding:4px 8px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border);border-radius:4px;font-size:12px;';
     presetSelect.innerHTML = '<option value="">- Apply Preset -</option>';
     Object.keys(PRESETS).forEach(name => {
-      presetSelect.innerHTML += `<option value="${name}">${name}</option>`;
+      const opt = document.createElement('option');
+      opt.value = name;
+      opt.textContent = name;
+      presetSelect.appendChild(opt);
     });
     // Add saved custom themes
     const customs = _loadCustomThemes();
     Object.keys(customs).forEach(name => {
-      presetSelect.innerHTML += `<option value="custom:${name}">★ ${name}</option>`;
+      const opt = document.createElement('option');
+      opt.value = 'custom:' + name;
+      opt.textContent = '★ ' + name;
+      presetSelect.appendChild(opt);
     });
     presetSelect.onchange = () => {
       const val = presetSelect.value;
