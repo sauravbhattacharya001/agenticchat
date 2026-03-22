@@ -79,6 +79,7 @@
  *   ReadabilityAnalyzer  - Flesch-Kincaid readability scoring with per-role stats (Ctrl+Shift+R)
  *   ToneAdjuster         - rewrite assistant messages in different tones (formal, casual, concise, ELI5, etc.)
  *   ResponseLengthPresets - pre-send verbosity control with 4 length modes (Alt+L)
+ *   SessionArchive       - archive/unarchive sessions to declutter the sessions panel
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -4504,11 +4505,6 @@ const SessionManager = (() => {
     const sessions = getAll();
     const activeId = _getActiveId();
 
-    if (countEl) {
-      countEl.textContent = sessions.length === 0 ? '' :
-        `${sessions.length} session${sessions.length !== 1 ? 's' : ''}`;
-    }
-
     if (sessions.length === 0) {
       container.innerHTML = '';
       const empty = document.createElement('div');
@@ -4528,7 +4524,22 @@ const SessionManager = (() => {
       }
     }
 
-    sessions.forEach(session => {
+    // Apply archive filter
+    const displaySessions = typeof SessionArchive !== 'undefined'
+      ? SessionArchive.filterSessions(sessions)
+      : sessions;
+
+    // Update count to reflect visible sessions
+    if (countEl) {
+      const archiveCount = typeof SessionArchive !== 'undefined' ? SessionArchive.getArchivedCount() : 0;
+      const showingArchived = typeof SessionArchive !== 'undefined' && SessionArchive.isShowingArchived();
+      const label = showingArchived ? 'archived' : 'session';
+      countEl.textContent = displaySessions.length === 0 ? '' :
+        `${displaySessions.length} ${label}${displaySessions.length !== 1 ? 's' : ''}` +
+        (!showingArchived && archiveCount > 0 ? ` (${archiveCount} archived)` : '');
+    }
+
+    displaySessions.forEach(session => {
       // Skip sessions that don't match the active tag filter
       if (typeof ConversationTags !== 'undefined' &&
           !ConversationTags.matchesFilter(session.id)) {
@@ -4563,6 +4574,14 @@ const SessionManager = (() => {
         pinBadge.className = 'session-badge session-badge-pin';
         pinBadge.textContent = '📌 pinned';
         header.appendChild(pinBadge);
+      }
+
+      if (typeof SessionArchive !== 'undefined' && SessionArchive.isArchived(session.id)) {
+        const archBadge = document.createElement('span');
+        archBadge.className = 'session-badge';
+        archBadge.textContent = '📥 archived';
+        archBadge.style.opacity = '0.7';
+        header.appendChild(archBadge);
       }
 
       card.appendChild(header);
@@ -4642,6 +4661,20 @@ const SessionManager = (() => {
         refresh();
       });
       actions.appendChild(deleteBtn);
+
+      // Archive button
+      if (typeof SessionArchive !== 'undefined') {
+        const archBtn = document.createElement('button');
+        archBtn.className = 'btn-sm';
+        const isArch = SessionArchive.isArchived(session.id);
+        archBtn.textContent = isArch ? '📤 Unarchive' : '📥 Archive';
+        archBtn.title = isArch ? 'Restore session to main list' : 'Archive session (hide from main list)';
+        archBtn.addEventListener('click', () => {
+          SessionArchive.toggle(session.id);
+          refresh();
+        });
+        actions.appendChild(archBtn);
+      }
 
       // Auto-tag button
       if (typeof AutoTagger !== 'undefined') {
@@ -26913,4 +26946,115 @@ const ResponseLengthPresets = (() => {
   document.addEventListener('DOMContentLoaded', init);
 
   return { toggle, getCurrentPreset, PRESETS, init };
+})();
+
+/* ---------- Session Archive ---------- */
+/**
+ * Archive sessions to hide them from the main sessions list without
+ * deleting them. Archived sessions can be revealed via a toggle in the
+ * sessions toolbar. Each session card gets an archive/unarchive button.
+ *
+ * Storage: a JSON array of archived session IDs in localStorage.
+ *
+ * Keyboard shortcut: none (accessed via sessions panel UI).
+ *
+ * @namespace SessionArchive
+ */
+const SessionArchive = (() => {
+  const STORAGE_KEY = 'agenticchat_archived_sessions';
+  let _showArchived = false;
+
+  /** Load archived IDs set. */
+  function _load() {
+    try {
+      const raw = SafeStorage.get(STORAGE_KEY);
+      return raw ? new Set(JSON.parse(raw)) : new Set();
+    } catch { return new Set(); }
+  }
+
+  /** Save archived IDs set. */
+  function _save(ids) {
+    try { SafeStorage.set(STORAGE_KEY, JSON.stringify([...ids])); } catch {}
+  }
+
+  /** Check if a session is archived. */
+  function isArchived(id) {
+    return _load().has(id);
+  }
+
+  /** Archive a session. */
+  function archive(id) {
+    const ids = _load();
+    ids.add(id);
+    _save(ids);
+  }
+
+  /** Unarchive a session. */
+  function unarchive(id) {
+    const ids = _load();
+    ids.delete(id);
+    _save(ids);
+  }
+
+  /** Toggle archive state for a session. Returns new archived state. */
+  function toggle(id) {
+    const ids = _load();
+    if (ids.has(id)) {
+      ids.delete(id);
+      _save(ids);
+      return false;
+    } else {
+      ids.add(id);
+      _save(ids);
+      return true;
+    }
+  }
+
+  /** Whether the panel is showing archived sessions. */
+  function isShowingArchived() { return _showArchived; }
+
+  /** Toggle visibility of archived sessions. */
+  function toggleShowArchived() {
+    _showArchived = !_showArchived;
+    return _showArchived;
+  }
+
+  /** Set showing state explicitly. */
+  function setShowArchived(val) { _showArchived = !!val; }
+
+  /** Filter sessions based on archive state. */
+  function filterSessions(sessions) {
+    const archivedIds = _load();
+    if (_showArchived) {
+      // Show only archived
+      return sessions.filter(s => archivedIds.has(s.id));
+    }
+    // Default: hide archived
+    return sessions.filter(s => !archivedIds.has(s.id));
+  }
+
+  /** Get count of archived sessions. */
+  function getArchivedCount() {
+    return _load().size;
+  }
+
+  /** Clean up archived IDs for sessions that no longer exist. */
+  function cleanup(existingIds) {
+    const archived = _load();
+    const existing = new Set(existingIds);
+    let changed = false;
+    for (const id of archived) {
+      if (!existing.has(id)) {
+        archived.delete(id);
+        changed = true;
+      }
+    }
+    if (changed) _save(archived);
+  }
+
+  return {
+    isArchived, archive, unarchive, toggle,
+    isShowingArchived, toggleShowArchived, setShowArchived,
+    filterSessions, getArchivedCount, cleanup
+  };
 })();

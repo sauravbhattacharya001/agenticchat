@@ -183,6 +183,7 @@
       <button id="sessions-import-chatgpt-btn" class="btn-sm" title="Import ChatGPT conversations.json" onclick="ChatGPTImporter.openFilePicker()">🤖 ChatGPT</button>
       <button id="sessions-tags-btn" class="btn-sm" title="Manage conversation tags">🏷️ Tags</button>
       <button id="sessions-merge-btn" class="btn-sm" title="Merge multiple sessions into one" onclick="ConversationMerge.open()">🔀 Merge</button>
+      <button id="sessions-archive-toggle" class="btn-sm" title="Show/hide archived sessions" onclick="SessionArchive.toggleShowArchived(); SessionManager.refresh(); this.textContent = SessionArchive.isShowingArchived() ? '📂 Active' : '📥 Archived';">📥 Archived</button>
       <button id="sessions-clear-btn" class="btn-sm btn-danger-sm" title="Delete all sessions">Clear All</button>
       <label class="sessions-autosave-label" title="Auto-save after each message">
         <input type="checkbox" id="sessions-autosave">
