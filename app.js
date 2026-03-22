@@ -1,83 +1,84 @@
 /* ============================================================
- * Agentic Chat — Application Logic
+ * Agentic Chat - Application Logic
  *
  * Architecture (47 modules, all revealing-module-pattern IIFEs):
  *
  *   Core:
- *   SafeStorage          — safe localStorage wrapper for restricted-storage environments
- *   ChatConfig           — constants, model list, pricing, and runtime configuration
- *   ConversationManager  — history management (add, trim, clear, token estimation)
- *   SandboxRunner        — iframe sandbox for executing LLM-generated code
- *   ApiKeyManager        — OpenAI key + per-service key storage, modal handling
- *   UIController         — DOM updates, button state, character count
- *   ChatController       — orchestrates sending messages, processing responses
+ *   SafeStorage          - safe localStorage wrapper for restricted-storage environments
+ *   ChatConfig           - constants, model list, pricing, and runtime configuration
+ *   ConversationManager  - history management (add, trim, clear, token estimation)
+ *   SandboxRunner        - iframe sandbox for executing LLM-generated code
+ *   ApiKeyManager        - OpenAI key + per-service key storage, modal handling
+ *   UIController         - DOM updates, button state, character count
+ *   ChatController       - orchestrates sending messages, processing responses
  *
  *   Features:
- *   PromptTemplates      — categorized prompt library with search and one-click insert
- *   HistoryPanel         — slide-out conversation history with export/import
- *   SnippetLibrary       — persistent code snippet storage with tagging and search
- *   MessageSearch        — full-text search across conversation messages
- *   ChatBookmarks        — bookmark individual messages for quick reference
- *   SlashCommands        — slash-command dropdown (autocomplete, keyboard nav)
- *   MessageReactions     — per-message emoji reactions with persistent counts
- *   KeyboardShortcuts    — global keyboard shortcuts with help modal
- *   VoiceInput           — browser speech recognition with language selection
- *   ThemeManager         — dark/light theme with OS preference detection
- *   SessionManager       — multi-session persistence with auto-save, pinning, and quota mgmt
- *   SessionNotes         — per-session notes/memos with inline editing
- *   CrossTabSync         — multi-tab conflict detection via storage events + BroadcastChannel
- *   ChatStats            — conversation analytics (word counts, code blocks, timing)
- *   CostDashboard        — persistent API spend tracker with budget alerts
- *   PersonaPresets       — switchable system prompt presets with custom persona support
- *   ModelSelector        — model picker with localStorage persistence
- *   FileDropZone         — drag-and-drop file inclusion (text-based files, 100 KB limit)
- *   FocusMode            — distraction-free zen mode (Ctrl+Shift+F)
- *   InputHistory         — navigate previous prompts with ↑/↓ arrow keys
- *   Scratchpad           — persistent notepad panel with copy/insert/download actions
- *   ResponseTimeBadge    — response time indicator below token usage area
- *   ConversationFork     — branch conversations from any message into new sessions
- *   QuickReplies         — contextual follow-up suggestion chips after AI responses
- *   MessagePinning       — pin important messages to a floating quick-jump bar
- *   ReadAloud            — text-to-speech for messages with voice/speed controls
- *   MessageDiff          — compare any two messages with visual line-level diff
- *   ConversationTimeline — visual minimap sidebar for conversation navigation
- *   ConversationSummarizer — heuristic conversation summary with topics, decisions, action items
- *   MessageAnnotations   — private notes/annotations on messages with labels
- *   ConversationChapters — named section dividers with TOC navigation
- *   ConversationTags     — colored tag labels on sessions with filtering and management
- *   FormattingToolbar    — markdown formatting buttons above chat input
- *   GlobalSessionSearch  — full-text search across all saved sessions
- *   AutoTagger           — heuristic topic detection and automatic tag suggestions
- *   ResponseRating       — thumbs up/down ratings on AI responses with model satisfaction dashboard
- *   ConversationMerge    — combine 2+ sessions into one merged conversation (chronological interleave)
- *   ConversationReplay   — message-by-message playback with transport controls
- *   PromptLibrary        — user-created prompt snippets with folders, search, usage tracking, import/export
- *   MessageTranslator    — inline message translation to 20+ languages via OpenAI API
- *   MessageEditor        — edit & resend user messages (truncate + reload into input)
- *   SmartRetry           — automatic retry with exponential backoff for transient API failures
- *   UsageHeatmap         — GitHub-style 7×24 activity heatmap across all sessions
- *   ConversationAgenda   — per-session goal checklist with progress tracking
- *   ClipboardHistory     — tracks copied text from chat with searchable panel (Ctrl+Shift+V)
- *   MessageFilter       — visual content-type filters (code/questions/links/errors/lists/role)
- *   ConversationSentiment — heuristic sentiment analysis with mood timeline (Ctrl+Shift+M)
- *   QuickSwitcher        — VS Code-style fuzzy session switcher (Ctrl+K)
- *   ChatGPTImporter      — import ChatGPT exported conversations (conversations.json)
- *   ConversationHealthCheck — heuristic conversation diagnostic (prompt quality, balance, context usage, repetition)
- *   TypingSpeedMonitor   — live WPM indicator with sparkline dashboard (Ctrl+Shift+T)
- *   FocusTimer           — Pomodoro-style focus timer with work/break cycles (Alt+P)
- *   CommandPalette       — VS Code-style universal command launcher (Ctrl+Shift+P)
- *   DraftRecovery        — auto-save/restore unsent message drafts per session
- *   PreferencesPanel     — centralised settings panel with toggles, ranges, and reset
- *   SessionTemplates     — save/load reusable session setups (persona, model, tags, starters)
- *   ConversationFlashcards — extract Q&A pairs as study flashcards with flip animation
- *   SmartPaste           — intelligent paste formatting (JSON, code, CSV, SQL, URLs, stack traces)
- *   MessageContextMenu   — right-click context menu aggregating per-message actions
- *   PomodoroTimer        — built-in focus timer with work/break cycles and stats
- *   PromptABTester       — compare two model responses side-by-side with voting and history
- *   TextExpander         — shorthand triggers that auto-expand inline (Ctrl+Shift+E)
- *   MessageReaderView    — full-width reader overlay for comfortable reading (Alt+R)
- *   ReadabilityAnalyzer  — Flesch-Kincaid readability scoring with per-role stats (Ctrl+Shift+R)
- *   ToneAdjuster         — rewrite assistant messages in different tones (formal, casual, concise, ELI5, etc.)
+ *   PromptTemplates      - categorized prompt library with search and one-click insert
+ *   HistoryPanel         - slide-out conversation history with export/import
+ *   SnippetLibrary       - persistent code snippet storage with tagging and search
+ *   MessageSearch        - full-text search across conversation messages
+ *   ChatBookmarks        - bookmark individual messages for quick reference
+ *   SlashCommands        - slash-command dropdown (autocomplete, keyboard nav)
+ *   MessageReactions     - per-message emoji reactions with persistent counts
+ *   KeyboardShortcuts    - global keyboard shortcuts with help modal
+ *   VoiceInput           - browser speech recognition with language selection
+ *   ThemeManager         - dark/light theme with OS preference detection
+ *   SessionManager       - multi-session persistence with auto-save, pinning, and quota mgmt
+ *   SessionNotes         - per-session notes/memos with inline editing
+ *   CrossTabSync         - multi-tab conflict detection via storage events + BroadcastChannel
+ *   ChatStats            - conversation analytics (word counts, code blocks, timing)
+ *   CostDashboard        - persistent API spend tracker with budget alerts
+ *   PersonaPresets       - switchable system prompt presets with custom persona support
+ *   ModelSelector        - model picker with localStorage persistence
+ *   FileDropZone         - drag-and-drop file inclusion (text-based files, 100 KB limit)
+ *   FocusMode            - distraction-free zen mode (Ctrl+Shift+F)
+ *   InputHistory         - navigate previous prompts with ↑/↓ arrow keys
+ *   Scratchpad           - persistent notepad panel with copy/insert/download actions
+ *   ResponseTimeBadge    - response time indicator below token usage area
+ *   ConversationFork     - branch conversations from any message into new sessions
+ *   QuickReplies         - contextual follow-up suggestion chips after AI responses
+ *   MessagePinning       - pin important messages to a floating quick-jump bar
+ *   ReadAloud            - text-to-speech for messages with voice/speed controls
+ *   MessageDiff          - compare any two messages with visual line-level diff
+ *   ConversationTimeline - visual minimap sidebar for conversation navigation
+ *   ConversationSummarizer - heuristic conversation summary with topics, decisions, action items
+ *   MessageAnnotations   - private notes/annotations on messages with labels
+ *   ConversationChapters - named section dividers with TOC navigation
+ *   ConversationTags     - colored tag labels on sessions with filtering and management
+ *   FormattingToolbar    - markdown formatting buttons above chat input
+ *   GlobalSessionSearch  - full-text search across all saved sessions
+ *   AutoTagger           - heuristic topic detection and automatic tag suggestions
+ *   ResponseRating       - thumbs up/down ratings on AI responses with model satisfaction dashboard
+ *   ConversationMerge    - combine 2+ sessions into one merged conversation (chronological interleave)
+ *   ConversationReplay   - message-by-message playback with transport controls
+ *   PromptLibrary        - user-created prompt snippets with folders, search, usage tracking, import/export
+ *   MessageTranslator    - inline message translation to 20+ languages via OpenAI API
+ *   MessageEditor        - edit & resend user messages (truncate + reload into input)
+ *   SmartRetry           - automatic retry with exponential backoff for transient API failures
+ *   UsageHeatmap         - GitHub-style 7×24 activity heatmap across all sessions
+ *   ConversationAgenda   - per-session goal checklist with progress tracking
+ *   ClipboardHistory     - tracks copied text from chat with searchable panel (Ctrl+Shift+V)
+ *   MessageFilter       - visual content-type filters (code/questions/links/errors/lists/role)
+ *   ConversationSentiment - heuristic sentiment analysis with mood timeline (Ctrl+Shift+M)
+ *   QuickSwitcher        - VS Code-style fuzzy session switcher (Ctrl+K)
+ *   ChatGPTImporter      - import ChatGPT exported conversations (conversations.json)
+ *   ConversationHealthCheck - heuristic conversation diagnostic (prompt quality, balance, context usage, repetition)
+ *   TypingSpeedMonitor   - live WPM indicator with sparkline dashboard (Ctrl+Shift+T)
+ *   FocusTimer           - Pomodoro-style focus timer with work/break cycles (Alt+P)
+ *   CommandPalette       - VS Code-style universal command launcher (Ctrl+Shift+P)
+ *   DraftRecovery        - auto-save/restore unsent message drafts per session
+ *   PreferencesPanel     - centralised settings panel with toggles, ranges, and reset
+ *   SessionTemplates     - save/load reusable session setups (persona, model, tags, starters)
+ *   ConversationFlashcards - extract Q&A pairs as study flashcards with flip animation
+ *   SmartPaste           - intelligent paste formatting (JSON, code, CSV, SQL, URLs, stack traces)
+ *   MessageContextMenu   - right-click context menu aggregating per-message actions
+ *   PomodoroTimer        - built-in focus timer with work/break cycles and stats
+ *   PromptABTester       - compare two model responses side-by-side with voting and history
+ *   TextExpander         - shorthand triggers that auto-expand inline (Ctrl+Shift+E)
+ *   MessageReaderView    - full-width reader overlay for comfortable reading (Alt+R)
+ *   ReadabilityAnalyzer  - Flesch-Kincaid readability scoring with per-role stats (Ctrl+Shift+R)
+ *   ToneAdjuster         - rewrite assistant messages in different tones (formal, casual, concise, ELI5, etc.)
+ *   ResponseLengthPresets - pre-send verbosity control with 4 length modes (Alt+L)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -150,7 +151,7 @@ const SafeStorage = (() => {
     /**
      * JSON-stringify and persist a value.
      * @param {string} key
-     * @param {*} value  — must be JSON-serializable
+     * @param {*} value  - must be JSON-serializable
      */
     setJSON(key, value) {
       this.set(key, JSON.stringify(value));
@@ -163,7 +164,7 @@ const SafeStorage = (() => {
  * Lazy-caching wrapper around document.getElementById.
  * Frequently accessed elements (chat-input, chat-output, etc.) are looked up
  * dozens of times during a session.  Caching the reference avoids redundant
- * DOM tree traversals — the two most common IDs alone accounted for 54 lookups.
+ * DOM tree traversals - the two most common IDs alone accounted for 54 lookups.
  *
  * Usage:  DOMCache.get('chat-input')   // cached getElementById
  *         DOMCache.clear()             // flush after dynamic DOM rebuild
@@ -192,7 +193,7 @@ const DOMCache = (() => {
 })();
 
 /* ============================================================
- * ChatConfig — application constants and runtime configuration.
+ * ChatConfig - application constants and runtime configuration.
  *
  * Centralizes all tunables: model selection, token limits, input
  * constraints, sandbox timeout, streaming toggle, system prompt,
@@ -308,7 +309,7 @@ function sanitizeStorageObject(obj) {
 /**
  * Escape HTML special characters using a single-pass replacement.
  * Previous implementation chained 5 sequential .replace() calls, each
- * creating a new string and scanning the entire input — O(5n) with 5
+ * creating a new string and scanning the entire input - O(5n) with 5
  * intermediate string allocations.  This version uses a single regex
  * with a lookup map: one scan, one allocation, O(n).
  */
@@ -352,7 +353,7 @@ const ConversationManager = (() => {
     /**
      * Return non-system messages without the double allocation of
      * getMessages().filter(). Called frequently by export, stats,
-     * session-save, and summarizer — avoids creating a full copy
+     * session-save, and summarizer - avoids creating a full copy
      * only to immediately filter it.
      */
     getUserMessages() {
@@ -447,7 +448,7 @@ const ConversationManager = (() => {
      * the given index.  Preserves the system message at index 0.
      * Used by MessageEditor to rewind the conversation for re-sending.
      *
-     * @param {number} historyIndex — index into getHistory(); messages
+     * @param {number} historyIndex - index into getHistory(); messages
      *   from this index onward are removed.
      */
     truncateAt(historyIndex) {
@@ -642,7 +643,7 @@ const ApiKeyManager = (() => {
       return code.replace(/YOUR_API_KEY/g, sanitizeKeyForCodeInjection(serviceKeys[domain]));
     }
 
-    // Show modal — store pending state
+    // Show modal - store pending state
     pendingCode = code;
     pendingDomain = domain;
     return null; // caller should not run yet
@@ -664,8 +665,8 @@ const ApiKeyManager = (() => {
       .replace(/\n/g, '\\n')
       .replace(/\r/g, '\\r')
       .replace(/\0/g, '')                       // Strip null bytes
-      .replace(/\u2028/g, '\\u2028')            // Line Separator — JS line terminator
-      .replace(/\u2029/g, '\\u2029');           // Paragraph Separator — JS line terminator
+      .replace(/\u2028/g, '\\u2028')            // Line Separator - JS line terminator
+      .replace(/\u2029/g, '\\u2029');           // Paragraph Separator - JS line terminator
   }
 
   /** Called when the user submits a key in the modal. */
@@ -693,7 +694,7 @@ const ApiKeyManager = (() => {
   }
 
   /**
-   * Purge all sensitive key material — OpenAI key, per-service keys,
+   * Purge all sensitive key material - OpenAI key, per-service keys,
    * and any pending code/domain state. Call on conversation clear or
    * session switch to prevent credential leakage across contexts.
    */
@@ -743,7 +744,7 @@ const UIController = (() => {
   }
 
   /** Set the chat output area to the given text (replaces content). */
-  // Streaming text node — kept as module-level state so appendChatOutput
+  // Streaming text node - kept as module-level state so appendChatOutput
   // can append in O(1) instead of the old textContent += which was O(n²)
   // (read full string → concat → write back on every single token).
   let _streamNode = null;
@@ -969,9 +970,9 @@ const ChatController = (() => {
       if (body?.error?.message) errMsg += `: ${body.error.message}`;
     } catch (_) {}
 
-    if (rsp.status === 401) errMsg += ' — check your API key';
-    else if (rsp.status === 429) errMsg += ' — rate limited, try again shortly';
-    else if (rsp.status === 503) errMsg += ' — service temporarily unavailable';
+    if (rsp.status === 401) errMsg += ' - check your API key';
+    else if (rsp.status === 429) errMsg += ' - rate limited, try again shortly';
+    else if (rsp.status === 503) errMsg += ' - service temporarily unavailable';
 
     return { ok: false, status: rsp.status, error: errMsg };
   }
@@ -1040,7 +1041,7 @@ const ChatController = (() => {
     const decoder = new TextDecoder();
     // Collect chunks in an array and join once at the end.
     // The old `fullText += delta` was O(n²) because JS strings are
-    // immutable — every += allocates a new string and copies the
+    // immutable - every += allocates a new string and copies the
     // entire previous content.  Array.push + join is O(n) amortised.
     const chunks = [];
     let buffer = '';
@@ -1145,7 +1146,7 @@ const ChatController = (() => {
   async function executeCode(code) {
     const substituted = ApiKeyManager.substituteServiceKey(code);
     if (substituted === null) {
-      // Need a service key from user — modal is shown via UI
+      // Need a service key from user - modal is shown via UI
       UIController.showServiceKeyModal(ApiKeyManager.getPendingDomain());
       return false;
     }
@@ -1240,7 +1241,7 @@ const ChatController = (() => {
       const sendStartTime = performance.now();
 
       if (ChatConfig.STREAMING_ENABLED) {
-        // Streaming path — show tokens as they arrive, with automatic retry
+        // Streaming path - show tokens as they arrive, with automatic retry
         UIController.setChatOutput('');
         const result = await SmartRetry.withRetry(() => {
           UIController.setChatOutput(''); // Reset output on each retry attempt
@@ -1256,7 +1257,7 @@ const ChatController = (() => {
         reply = result.text || 'No response';
         usage = result.usage;
       } else {
-        // Non-streaming path — original behavior, with automatic retry
+        // Non-streaming path - original behavior, with automatic retry
         UIController.setChatOutput('Thinking…');
         const result = await SmartRetry.withRetry(() => {
           UIController.setChatOutput('Thinking…'); // Reset on retry
@@ -1280,7 +1281,7 @@ const ChatController = (() => {
 
       // Warn if history is getting large
       if (ConversationManager.estimateTokens() > ChatConfig.TOKEN_WARNING_THRESHOLD) {
-        console.warn('[agenticchat] History tokens high — consider clicking Clear');
+        console.warn('[agenticchat] History tokens high - consider clicking Clear');
       }
 
       // Extract and run code, or display text
@@ -1312,7 +1313,7 @@ const ChatController = (() => {
         UIController.setChatOutput('(request cancelled)');
         UIController.setConsoleOutput('(cancelled)');
       } else if (err.name === 'TimeoutError') {
-        UIController.setChatOutput('Request timed out — try again.');
+        UIController.setChatOutput('Request timed out - try again.');
         UIController.setConsoleOutput('(timed out)');
       } else {
         UIController.setChatOutput('Network error: ' + err.message);
@@ -1660,7 +1661,7 @@ const HistoryPanel = (() => {
    * @param {HTMLElement} container  The element to append content to.
    * @param {string}      content    Raw message text.
    */
-  // Pre-compiled regex for code block splitting — avoids re-creating the
+  // Pre-compiled regex for code block splitting - avoids re-creating the
   // RegExp object on every _renderContent call (once per message rendered).
   const _CODE_BLOCK_RE = /```(?:\w*)\n([\s\S]*?)```/g;
 
@@ -1702,7 +1703,7 @@ const HistoryPanel = (() => {
     const container = el('history-messages');
     const history = ConversationManager.getHistory();
 
-    // Filter out system messages — iterate directly instead of
+    // Filter out system messages - iterate directly instead of
     // creating a filtered copy via getMessages() + filter().
     const messages = [];
     for (let i = 0; i < history.length; i++) {
@@ -1733,7 +1734,7 @@ const HistoryPanel = (() => {
       }
       div.appendChild(roleLabel);
 
-      // Render message content — handles multiple code blocks
+      // Render message content - handles multiple code blocks
       _renderContent(div, msg.content);
 
       fragment.appendChild(div);
@@ -1746,7 +1747,7 @@ const HistoryPanel = (() => {
     // Auto-scroll to bottom
     container.scrollTop = container.scrollHeight;
 
-    // Decorate messages — single DOM traversal instead of 5 separate passes.
+    // Decorate messages - single DOM traversal instead of 5 separate passes.
     // See issue #40: each decorateMessages() was doing its own querySelectorAll,
     // causing 5×N DOM traversals. Now we query once and dispatch per-message.
     _decorateAllMessages(container);
@@ -1818,7 +1819,7 @@ const HistoryPanel = (() => {
     }
 
     const timestamp = _fileTimestamp();
-    // Build via array.join — repeated string += is O(n²) in total
+    // Build via array.join - repeated string += is O(n²) in total
     // content length because JS strings are immutable (each += copies).
     const parts = [`# Agentic Chat Export\n\n**Exported:** ${new Date().toLocaleString()}\n\n---\n\n`];
 
@@ -1899,7 +1900,7 @@ const HistoryPanel = (() => {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Agentic Chat Export — ${escapeHTML(dateStr)}</title>
+<title>Agentic Chat Export - ${escapeHTML(dateStr)}</title>
 <style>
 *{box-sizing:border-box}
 body{font-family:system-ui,-apple-system,sans-serif;background:#111;color:#eee;margin:0;padding:0}
@@ -2312,7 +2313,7 @@ const SnippetLibrary = (() => {
       deleteBtn.addEventListener('click', () => {
         const result = remove(snippet.id);
         if (!result.saved) {
-          alert('Failed to delete snippet — storage may be unavailable.');
+          alert('Failed to delete snippet - storage may be unavailable.');
         }
         refresh();
       });
@@ -2386,7 +2387,7 @@ const SnippetLibrary = (() => {
     if (!confirm(`Delete all ${count} saved snippet${count !== 1 ? 's' : ''}?`)) return;
     const result = clearAll();
     if (!result.saved) {
-      alert('Failed to clear snippets — storage may be unavailable.');
+      alert('Failed to clear snippets - storage may be unavailable.');
     }
     refresh();
   }
@@ -2988,7 +2989,7 @@ const SlashCommands = (() => {
             });
             input.click();
           } },
-        { name: 'focus', description: 'Toggle focus/zen mode — hide distractions', icon: '🧘',
+        { name: 'focus', description: 'Toggle focus/zen mode - hide distractions', icon: '🧘',
           action: () => {
             const isActive = FocusMode.toggle();
             UIController.setChatOutput(`Focus mode ${isActive ? 'enabled 🧘' : 'disabled'}`);
@@ -3001,7 +3002,7 @@ const SlashCommands = (() => {
             if (!visible) ResponseTimeBadge.hide();
             UIController.setChatOutput(`Response timing badges ${visible ? 'enabled ⏱️' : 'hidden'}`);
           } },
-        { name: 'tags', description: 'Manage conversation tags — add, view, filter', icon: '🏷️',
+        { name: 'tags', description: 'Manage conversation tags - add, view, filter', icon: '🏷️',
           action: () => {
             ConversationTags.openManager();
           } },
@@ -3028,7 +3029,7 @@ const SlashCommands = (() => {
           action: () => ConversationReplay.start() },
         { name: 'compare', description: 'Compare AI model responses side-by-side', icon: '⚔️',
           action: () => ModelComparePanel.toggle() },
-        { name: 'clips', description: 'Open clipboard history — browse copied text', icon: '📋',
+        { name: 'clips', description: 'Open clipboard history - browse copied text', icon: '📋',
           action: () => ClipboardHistory.toggle() },
         { name: 'sort', description: 'Cycle session sort order (newest/oldest/name/messages)', icon: '🔃',
           action: () => {
@@ -3042,11 +3043,11 @@ const SlashCommands = (() => {
           } },
             { name: 'import-chatgpt', description: 'Import conversations from ChatGPT export (conversations.json)', icon: '🤖',
           action: () => ChatGPTImporter.openFilePicker() },
-        { name: 'health', description: 'Run conversation health check — diagnostic analysis', icon: '🩺',
+        { name: 'health', description: 'Run conversation health check - diagnostic analysis', icon: '🩺',
           action: () => ConversationHealthCheck.toggle() },
-        { name: 'pomodoro', description: 'Focus timer — Pomodoro work/break cycles with tracking', icon: '🍅',
+        { name: 'pomodoro', description: 'Focus timer - Pomodoro work/break cycles with tracking', icon: '🍅',
           action: () => FocusTimer.toggle() },
-        { name: 'theme-creator', description: 'Custom theme creator — color pickers, presets, save/load themes', icon: '🎨',
+        { name: 'theme-creator', description: 'Custom theme creator - color pickers, presets, save/load themes', icon: '🎨',
           action: () => CustomThemeCreator.toggle() },
     ]);
 
@@ -3198,28 +3199,28 @@ const MessageReactions = (() => {
     const STORAGE_KEY = 'agenticchat_reactions';
     const AVAILABLE_EMOJIS = ['👍', '👎', '❤️', '😂', '🤔', '💡', '🎉', '⚠️'];
     const MAX_REACTIONS_PER_MESSAGE = 50;
-    
+
     // reactions: { [messageIndex]: { [emoji]: count } }
     let reactions = {};
-    
+
     function init() {
         load();
     }
-    
+
     // Add a reaction to a message (by its index in conversation history)
     function addReaction(messageIndex, emoji) {
         if (!AVAILABLE_EMOJIS.includes(emoji)) return false;
         if (typeof messageIndex !== 'number' || messageIndex < 0) return false;
-        
+
         if (!reactions[messageIndex]) reactions[messageIndex] = {};
         const current = reactions[messageIndex][emoji] || 0;
         if (current >= MAX_REACTIONS_PER_MESSAGE) return false;
-        
+
         reactions[messageIndex][emoji] = current + 1;
         save();
         return true;
     }
-    
+
     // Remove a reaction (decrement count, remove if 0)
     function removeReaction(messageIndex, emoji) {
         if (!reactions[messageIndex] || !reactions[messageIndex][emoji]) return false;
@@ -3233,12 +3234,12 @@ const MessageReactions = (() => {
         save();
         return true;
     }
-    
+
     // Toggle a reaction (add if not present, remove if already 1)
     function toggleReaction(messageIndex, emoji) {
         if (!AVAILABLE_EMOJIS.includes(emoji)) return false;
         if (typeof messageIndex !== 'number' || messageIndex < 0) return false;
-        
+
         const current = (reactions[messageIndex] && reactions[messageIndex][emoji]) || 0;
         if (current > 0) {
             return removeReaction(messageIndex, emoji);
@@ -3246,7 +3247,7 @@ const MessageReactions = (() => {
             return addReaction(messageIndex, emoji);
         }
     }
-    
+
     // Get reactions for a message
     function getReactions(messageIndex) {
         if (!reactions[messageIndex]) return {};
@@ -3257,7 +3258,7 @@ const MessageReactions = (() => {
         }
         return copy;
     }
-    
+
     // Get total reaction count for a message
     function getReactionCount(messageIndex) {
         if (!reactions[messageIndex]) return 0;
@@ -3267,12 +3268,12 @@ const MessageReactions = (() => {
         }
         return count;
     }
-    
+
     // Get all message indices that have reactions
     function getReactedMessages() {
         return Object.keys(reactions).map(Number).sort((a, b) => a - b);
     }
-    
+
     // Clear all reactions for a message
     function clearReactions(messageIndex) {
         if (!reactions[messageIndex]) return 0;
@@ -3281,7 +3282,7 @@ const MessageReactions = (() => {
         save();
         return count;
     }
-    
+
     // Clear all reactions
     function clearAll() {
         const count = Object.keys(reactions).length;
@@ -3289,7 +3290,7 @@ const MessageReactions = (() => {
         save();
         return count;
     }
-    
+
     // Get most reacted emoji across all messages
     function getMostUsedEmoji() {
         const totals = {};
@@ -3308,17 +3309,17 @@ const MessageReactions = (() => {
         }
         return best;
     }
-    
+
     // Render reaction bar for a message element in the history panel
     function renderReactionBar(messageElement, messageIndex) {
         // Remove existing reaction bar if any
         const existing = messageElement.querySelector('.reaction-bar');
         if (existing) existing.remove();
-        
+
         const bar = document.createElement('div');
         bar.className = 'reaction-bar';
         bar.setAttribute('data-msg-index', messageIndex);
-        
+
         // Show existing reactions as badges
         const msgReactions = getReactions(messageIndex);
         for (const emoji of AVAILABLE_EMOJIS) {
@@ -3336,7 +3337,7 @@ const MessageReactions = (() => {
                 bar.appendChild(badge);
             }
         }
-        
+
         // Add reaction button (picker)
         const addBtn = document.createElement('button');
         addBtn.className = 'reaction-add-btn';
@@ -3348,20 +3349,20 @@ const MessageReactions = (() => {
             showEmojiPicker(messageElement, messageIndex, addBtn);
         });
         bar.appendChild(addBtn);
-        
+
         messageElement.appendChild(bar);
     }
-    
+
     // Show emoji picker near the add button
     function showEmojiPicker(messageElement, messageIndex, anchorBtn) {
         // Remove any existing picker
         hideEmojiPicker();
-        
+
         const picker = document.createElement('div');
         picker.className = 'emoji-picker';
         picker.setAttribute('role', 'listbox');
         picker.setAttribute('aria-label', 'Choose reaction emoji');
-        
+
         for (const emoji of AVAILABLE_EMOJIS) {
             const btn = document.createElement('button');
             btn.className = 'emoji-option';
@@ -3376,28 +3377,28 @@ const MessageReactions = (() => {
             });
             picker.appendChild(btn);
         }
-        
+
         anchorBtn.parentElement.appendChild(picker);
-        
+
         // Close on outside click
         setTimeout(function() {
             document.addEventListener('click', _onOutsideClick);
         }, 0);
     }
-    
+
     function _onOutsideClick(e) {
         const picker = document.querySelector('.emoji-picker');
         if (picker && !picker.contains(e.target)) {
             hideEmojiPicker();
         }
     }
-    
+
     function hideEmojiPicker() {
         const picker = document.querySelector('.emoji-picker');
         if (picker) picker.remove();
         document.removeEventListener('click', _onOutsideClick);
     }
-    
+
     // Decorate all history messages with reaction bars
     function decorateMessages() {
         const container = DOMCache.get('history-messages');
@@ -3414,15 +3415,15 @@ const MessageReactions = (() => {
             nonSystemIdx++;
         }
     }
-    
+
     function save() {
         try {
             SafeStorage.setJSON(STORAGE_KEY, reactions);
         } catch (e) {
-            // Storage full — silent fail
+            // Storage full - silent fail
         }
     }
-    
+
     function load() {
         try {
             const data = SafeStorage.get(STORAGE_KEY);
@@ -3438,23 +3439,23 @@ const MessageReactions = (() => {
             reactions = {};
         }
     }
-    
+
     function getAvailableEmojis() {
         return AVAILABLE_EMOJIS.slice();
     }
-    
+
     function _getState() {
         return {
             reactions: JSON.parse(JSON.stringify(reactions)),
             availableEmojis: AVAILABLE_EMOJIS.slice()
         };
     }
-    
+
     function reset() {
         reactions = {};
         SafeStorage.remove(STORAGE_KEY);
     }
-    
+
     return {
         init,
         addReaction,
@@ -3523,7 +3524,7 @@ const KeyboardShortcuts = (() => {
   }
 
   /**
-   * Ctrl+key dispatch table — maps a key to its handler.
+   * Ctrl+key dispatch table - maps a key to its handler.
    * Simple shortcuts that just call a single function go here;
    * multi-step or conditional shortcuts stay in handleKeydown.
    *
@@ -3569,7 +3570,7 @@ const KeyboardShortcuts = (() => {
       }
     }
 
-    // ── Ctrl+S / Ctrl+Shift+S — snippets vs global session search ──
+    // ── Ctrl+S / Ctrl+Shift+S - snippets vs global session search ──
     if (ctrl && e.key === 's') {
       e.preventDefault();
       if (e.shiftKey) {
@@ -3580,14 +3581,14 @@ const KeyboardShortcuts = (() => {
       return;
     }
 
-    // ── Ctrl+K — quick session switcher ──
+    // ── Ctrl+K - quick session switcher ──
     if (ctrl && e.key === 'k') {
       e.preventDefault();
       QuickSwitcher.toggle();
       return;
     }
 
-    // ── Ctrl+M — toggle voice input (skip if button disabled) ──
+    // ── Ctrl+M - toggle voice input (skip if button disabled) ──
     if (ctrl && e.key === 'm') {
       e.preventDefault();
       const voiceBtn = document.getElementById('voice-btn');
@@ -3595,27 +3596,27 @@ const KeyboardShortcuts = (() => {
       return;
     }
 
-    // ── Ctrl+Shift+H — conversation health check ──
+    // ── Ctrl+Shift+H - conversation health check ──
     if (ctrl && e.shiftKey && (e.key === 'H' || e.key === 'h')) {
       e.preventDefault();
       ConversationHealthCheck.toggle();
       return;
     }
 
-    // ── ? — show shortcuts help (only when not typing in an input) ──
+    // ── ? - show shortcuts help (only when not typing in an input) ──
     if (e.key === '?' && !ctrl && !e.altKey && !isInputFocused()) {
       e.preventDefault();
       toggleHelp();
       return;
     }
 
-    // ── Escape — close shortcuts help (other panels handled by existing handler) ──
+    // ── Escape - close shortcuts help (other panels handled by existing handler) ──
     if (e.key === 'Escape' && isHelpOpen) {
       hideHelp();
-      // Don't return — let existing Escape handler also close other panels
+      // Don't return - let existing Escape handler also close other panels
     }
 
-    // ── Escape — close search bar ──
+    // ── Escape - close search bar ──
     if (e.key === 'Escape' && MessageSearch.isSearchOpen()) {
       MessageSearch.close();
     }
@@ -3698,7 +3699,7 @@ const VoiceInput = (() => {
     });
 
     recognition.addEventListener('error', (event) => {
-      // 'no-speech' and 'aborted' are soft errors — don't stop listening
+      // 'no-speech' and 'aborted' are soft errors - don't stop listening
       if (event.error === 'no-speech' || event.error === 'aborted') return;
       stop();
     });
@@ -3729,7 +3730,7 @@ const VoiceInput = (() => {
     try {
       rec.start();
     } catch (_) {
-      // Already started — ignore
+      // Already started - ignore
     }
 
     if (_onStateChange) _onStateChange(true);
@@ -4256,7 +4257,7 @@ const SessionManager = (() => {
     HistoryPanel.refresh();
   }
 
-  /** Load a session by ID — replaces current conversation. */
+  /** Load a session by ID - replaces current conversation. */
   function load(id) {
     const sessions = _loadAll();
     const session = sessions.find(s => s.id === id);
@@ -4411,7 +4412,7 @@ const SessionManager = (() => {
         if (!msg || typeof msg !== 'object') continue;
         if (typeof msg.role !== 'string' || typeof msg.content !== 'string') continue;
 
-        // Only allow user/assistant — block system/function/tool roles
+        // Only allow user/assistant - block system/function/tool roles
         // to prevent prompt injection via imported sessions
         if (!ALLOWED_ROLES[msg.role]) continue;
 
@@ -5069,7 +5070,7 @@ const CrossTabSync = (() => {
     }
 
     if (e.key === SESSION_STORAGE_KEY) {
-      // Another tab modified sessions — invalidate the in-memory cache
+      // Another tab modified sessions - invalidate the in-memory cache
       // so the next SessionManager read will re-parse from localStorage.
       SessionManager.invalidateCache();
       // Check if it's actually different from what we know
@@ -5143,7 +5144,7 @@ const CrossTabSync = (() => {
     if (activeId) {
       SessionManager.load(activeId);
     } else {
-      // No active session — just refresh the sessions panel if open
+      // No active session - just refresh the sessions panel if open
       SessionManager.refresh();
     }
     // Refresh panels
@@ -5600,8 +5601,8 @@ const CostDashboard = (() => {
    * Record a single API response's token usage.
    * Called from ChatController after each successful API call.
    *
-   * @param {Object} usage  – OpenAI usage object
-   * @param {string} [model] – model name (defaults to ChatConfig.MODEL)
+   * @param {Object} usage  - OpenAI usage object
+   * @param {string} [model] - model name (defaults to ChatConfig.MODEL)
    */
   function recordUsage(usage, model) {
     if (!usage) return;
@@ -5915,7 +5916,7 @@ const PersonaPresets = (() => {
     {
       id: 'default',
       name: '🤖 Code Generator',
-      desc: 'Default — replies with executable JavaScript code blocks.',
+      desc: 'Default - replies with executable JavaScript code blocks.',
       prompt: ChatConfig.SYSTEM_PROMPT
     },
     {
@@ -5945,13 +5946,13 @@ const PersonaPresets = (() => {
     {
       id: 'scraper',
       name: '🕷️ Web Utility',
-      desc: 'Builds web utilities — converters, generators, calculators.',
+      desc: 'Builds web utilities - converters, generators, calculators.',
       prompt: 'You are a utility-building agent in a browser. Reply only with JavaScript code in a single code block that creates useful web utilities: converters, generators, calculators, formatters, validators, etc. Build a complete interactive UI with inputs and outputs. Always `return` the final value.'
     },
     {
       id: 'minimal',
       name: '⚡ Minimal',
-      desc: 'Concise code with no comments — just clean, working JS.',
+      desc: 'Concise code with no comments - just clean, working JS.',
       prompt: 'You are a minimalist coding agent in a browser. Reply only with JavaScript in a single code block. Write the shortest, cleanest code possible. No comments. No explanations. Just working code. Always `return` the final value.'
     }
   ];
@@ -6189,7 +6190,7 @@ const FileDropZone = (() => {
     if (!filename) return false;
     const dotIdx = filename.lastIndexOf('.');
     if (dotIdx < 0) {
-      // Files without extensions — check common names
+      // Files without extensions - check common names
       const lower = filename.toLowerCase();
       return ['makefile', 'dockerfile', 'rakefile', 'gemfile', 'procfile',
               'vagrantfile', 'readme', 'license', 'changelog', 'authors',
@@ -6344,7 +6345,7 @@ const FileDropZone = (() => {
 
 /* ---------- Focus / Zen Mode ---------- */
 /**
- * FocusMode — distraction-free chat mode.
+ * FocusMode - distraction-free chat mode.
  *
  * Hides non-essential toolbar buttons, the API key bar, title, char count,
  * and token usage to let the user focus purely on the conversation.
@@ -6364,7 +6365,7 @@ const FocusMode = (() => {
       btn.classList.toggle('active', active);
       btn.title = active
         ? 'Exit focus mode (Ctrl+Shift+F)'
-        : 'Focus mode — hide distractions (Ctrl+Shift+F)';
+        : 'Focus mode - hide distractions (Ctrl+Shift+F)';
     }
     try { SafeStorage.setJSON(STORAGE_KEY, active); } catch (_) {}
   }
@@ -6402,7 +6403,7 @@ const FocusMode = (() => {
 })();
 
 /* ============================================================
- * InputHistory — navigate previous prompts with ↑/↓ arrows.
+ * InputHistory - navigate previous prompts with ↑/↓ arrows.
  *
  * Records every user prompt sent via ChatController.send().
  * Persists in localStorage so history survives page reloads.
@@ -6437,7 +6438,7 @@ const InputHistory = (() => {
   function save() {
     try {
       SafeStorage.setJSON(STORAGE_KEY, entries.slice(-MAX_ENTRIES));
-    } catch { /* quota exceeded — silently drop */ }
+    } catch { /* quota exceeded - silently drop */ }
   }
 
   /**
@@ -6478,13 +6479,13 @@ const InputHistory = (() => {
       if (input.selectionStart !== 0 && input.value.length > 0) return false;
 
       if (cursor === -1) {
-        // Starting navigation — save current draft
+        // Starting navigation - save current draft
         draft = input.value;
         cursor = entries.length - 1;
       } else if (cursor > 0) {
         cursor--;
       } else {
-        // Already at oldest — do nothing
+        // Already at oldest - do nothing
         return true;
       }
       input.value = entries[cursor];
@@ -6501,7 +6502,7 @@ const InputHistory = (() => {
         cursor++;
         input.value = entries[cursor];
       } else {
-        // Past newest — restore draft
+        // Past newest - restore draft
         cursor = -1;
         input.value = draft;
         draft = '';
@@ -6738,7 +6739,7 @@ const ResponseTimeBadge = (() => {
 
 /* ---------- Conversation Fork ---------- */
 /**
- * Conversation forking — branch a chat from any message point.
+ * Conversation forking - branch a chat from any message point.
  *
  * Adds a "Fork" button to each message in the history panel. Clicking it
  * creates a new session containing all messages up to (and including) the
@@ -6756,7 +6757,7 @@ const ConversationFork = (() => {
   /**
    * Fork the conversation at a given message index.
    *
-   * @param {number} historyIndex — index into ConversationManager.getHistory()
+   * @param {number} historyIndex - index into ConversationManager.getHistory()
    *   (includes the system message at index 0)
    * @returns {object|null} the newly created session, or null on failure
    */
@@ -6908,7 +6909,7 @@ const QuickReplies = (() => {
     { label: '🔍 Explain this code', prompt: 'Explain the code you just wrote step by step. What does each part do?' },
     { label: '⚡ Make it faster', prompt: 'Optimize the code you just wrote for better performance. Keep the same functionality.' },
     { label: '🛡️ Add error handling', prompt: 'Add proper error handling and edge-case checks to the code you just wrote.' },
-    { label: '🎨 Improve the UI', prompt: 'Improve the visual design of the output — better colors, spacing, typography, and polish.' },
+    { label: '🎨 Improve the UI', prompt: 'Improve the visual design of the output - better colors, spacing, typography, and polish.' },
     { label: '➕ Add more features', prompt: 'Extend the code with additional useful features. Keep it clean and well-structured.' },
     { label: '📱 Make responsive', prompt: 'Make the output responsive so it looks good on mobile, tablet, and desktop.' },
     { label: '♿ Add accessibility', prompt: 'Add ARIA labels, keyboard navigation, and screen reader support to the code.' },
@@ -6997,7 +6998,7 @@ const QuickReplies = (() => {
   }
 
   /**
-   * Handle chip click — insert prompt into chat input and focus.
+   * Handle chip click - insert prompt into chat input and focus.
    * @param {Object} suggestion  The selected { label, prompt } object.
    */
   function _selectSuggestion(suggestion) {
@@ -7195,7 +7196,7 @@ const MessagePinning = (() => {
     const output = DOMCache.get('chat-output');
     if (!output) return;
 
-    // Find the message element — messages are child divs of chat-output
+    // Find the message element - messages are child divs of chat-output
     const allMsgs = output.querySelectorAll('.chat-msg');
     // Message index in conversation includes system prompt at [0],
     // but system msgs aren't rendered, so DOM index = messageIndex - 1
@@ -7282,7 +7283,7 @@ const MessagePinning = (() => {
     try {
       SafeStorage.setJSON(STORAGE_KEY, pins);
     } catch (_) {
-      // Storage full — degrade silently
+      // Storage full - degrade silently
     }
   }
 
@@ -7395,7 +7396,7 @@ const ReadAloud = (() => {
     save();
   }
 
-  /** Set speech rate (0.5–3.0). */
+  /** Set speech rate (0.5-3.0). */
   function setRate(r) {
     r = parseFloat(r);
     if (isNaN(r)) return;
@@ -7403,7 +7404,7 @@ const ReadAloud = (() => {
     save();
   }
 
-  /** Set pitch (0.5–2.0). */
+  /** Set pitch (0.5-2.0). */
   function setPitch(p) {
     p = parseFloat(p);
     if (isNaN(p)) return;
@@ -7808,7 +7809,7 @@ const ReadAloud = (() => {
 
 /* ---------- MessageDiff ---------- */
 /**
- * Message Diff Viewer — compare any two conversation messages with a
+ * Message Diff Viewer - compare any two conversation messages with a
  * visual line-by-line diff.  Useful for seeing how an AI response
  * changes when a prompt is rephrased, or comparing two code snippets.
  *
@@ -7920,7 +7921,7 @@ const MessageDiff = (() => {
         clearSelection();
         return;
       }
-      // Second selection — show diff
+      // Second selection - show diff
       const second = { index: index, role: msg.role, content: msg.content };
       showDiff(firstSelection, second);
       highlightSelected(firstSelection.index, false);
@@ -8205,7 +8206,7 @@ const MessageDiff = (() => {
         clearSelection();
       });
     } else if (firstSelection !== null) {
-      // Another message is selected — this is a potential second target
+      // Another message is selected - this is a potential second target
       btn.textContent = '\uD83D\uDD0D Diff with #' + (firstSelection.index + 1);
       btn.style.borderColor = '#3fb950';
       btn.style.color = '#3fb950';
@@ -8259,7 +8260,7 @@ const MessageDiff = (() => {
 
 /* ---------- ConversationTimeline ---------- */
 /**
- * Conversation Timeline — a visual minimap/navigator showing the
+ * Conversation Timeline - a visual minimap/navigator showing the
  * conversation structure as a vertical strip. Each message is rendered
  * as a colored segment whose height is proportional to its length.
  * Users can:
@@ -8773,7 +8774,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
       voiceBtn.classList.remove('voice-recording');
       voiceBtn.textContent = '🎤';
-      voiceBtn.title = 'Voice input — speak your prompt (Ctrl+M)';
+      voiceBtn.title = 'Voice input - speak your prompt (Ctrl+M)';
     }
   });
 
@@ -9706,7 +9707,7 @@ const ConversationSummarizer = (() => {
 
 
 /* ============================================================
- * MessageAnnotations — private notes and annotations on messages.
+ * MessageAnnotations - private notes and annotations on messages.
  *
  * Lets users attach personal notes to any message in the conversation.
  * Each annotation has a text body (up to 500 chars) and one of six
@@ -11116,7 +11117,7 @@ const ConversationChapters = (() => {
 
 /* ---------- Conversation Tags ---------- */
 /**
- * ConversationTags — colored label tags for organizing conversations.
+ * ConversationTags - colored label tags for organizing conversations.
  *
  * Lets users attach colored tags (e.g. "work", "research", "code review")
  * to any conversation session. Tags are stored alongside sessions in
@@ -11170,7 +11171,7 @@ const ConversationTags = (() => {
   function save() {
     try {
       SafeStorage.setJSON(STORAGE_KEY, tagMap);
-    } catch { /* quota exceeded — tags are non-critical */ }
+    } catch { /* quota exceeded - tags are non-critical */ }
   }
 
   // ── Color assignment ────────────────────────────────────────
@@ -11883,7 +11884,7 @@ const GlobalSessionSearch = (() => {
       });
     });
 
-    // Keyboard shortcut: Ctrl+Shift+G — handled by central KeyboardShortcuts dispatcher
+    // Keyboard shortcut: Ctrl+Shift+G - handled by central KeyboardShortcuts dispatcher
   }
 
   document.addEventListener('DOMContentLoaded', init);
@@ -12119,12 +12120,12 @@ const FormattingToolbar = (() => {
 })();
 
 /* ============================================================
- * AutoTagger — heuristic topic detection and automatic tag suggestions
+ * AutoTagger - heuristic topic detection and automatic tag suggestions
  *
  * Analyzes conversation messages to detect dominant topics and suggests
  * relevant tags.  Uses a two-layer approach:
- *   1. Category dictionaries — curated keyword lists for common topics
- *   2. TF-IDF-inspired scoring — surface important terms not in the
+ *   1. Category dictionaries - curated keyword lists for common topics
+ *   2. TF-IDF-inspired scoring - surface important terms not in the
  *      stop-word list, weighted by frequency relative to message count
  *
  * Integrates with ConversationTags: suggested tags can be applied in
@@ -13448,7 +13449,7 @@ const ResponseRating = (() => {
         const icon = r.rating === 'up' ? '👍' : '👎';
         const time = new Date(r.timestamp).toLocaleString();
         const snippet = _esc((r.snippet || '').slice(0, 60));
-        html += `<div style="font-size:12px;padding:4px 0;border-bottom:1px solid #222">${icon} <strong>${_esc(r.model)}</strong> — "${snippet}…" <span style="color:#666;float:right">${time}</span></div>`;
+        html += `<div style="font-size:12px;padding:4px 0;border-bottom:1px solid #222">${icon} <strong>${_esc(r.model)}</strong> - "${snippet}…" <span style="color:#666;float:right">${time}</span></div>`;
       }
       html += '</div></details>';
     }
@@ -13520,7 +13521,7 @@ const ResponseRating = (() => {
 
 /* ---------- Conversation Merge ---------- */
 /**
- * ConversationMerge — combine 2+ saved sessions into one merged conversation.
+ * ConversationMerge - combine 2+ saved sessions into one merged conversation.
  *
  * Features:
  *  • Multi-select sessions to merge via checkbox UI
@@ -13650,7 +13651,7 @@ const ConversationMerge = (() => {
       if (session.messages && session.messages.length > 0) {
         for (let i = 0; i < session.messages.length; i++) {
           const msg = { ...session.messages[i] };
-          // Add metadata for sorting — use timestamp if present, otherwise use order
+          // Add metadata for sorting - use timestamp if present, otherwise use order
           msg._sourceSession = session.name;
           msg._sourceOrder = i;
           // Use message timestamp for true chronological interleaving;
@@ -14055,7 +14056,7 @@ const ConversationReplay = (() => {
     };
   }
 
-  // Keyboard handler — Escape stops replay
+  // Keyboard handler - Escape stops replay
   document.addEventListener('keydown', function(e) {
     if (e.key === 'Escape' && state !== STATE_STOPPED) {
       e.preventDefault();
@@ -14080,7 +14081,7 @@ const ConversationReplay = (() => {
 
 /* ---------- Prompt Library ---------- */
 /**
- * PromptLibrary — user-created prompt snippets with folders, search,
+ * PromptLibrary - user-created prompt snippets with folders, search,
  * usage tracking, import/export, and one-click insert into the chat input.
  *
  * Storage key: ac_prompt_library (JSON array of prompt objects).
@@ -14138,7 +14139,7 @@ const PromptLibrary = (() => {
       if (sortBy === 'alpha') return (a.name || '').localeCompare(b.name || '');
       if (sortBy === 'created') return (b.createdAt || 0) - (a.createdAt || 0);
       if (sortBy === 'used') return (b.useCount || 0) - (a.useCount || 0);
-      // recent — by lastUsedAt desc, then createdAt desc
+      // recent - by lastUsedAt desc, then createdAt desc
       return (b.lastUsedAt || b.createdAt || 0) - (a.lastUsedAt || a.createdAt || 0);
     });
 
@@ -14538,7 +14539,7 @@ const PromptLibrary = (() => {
 })();
 
 /* ============================================================
- * MessageTranslator — inline message translation via OpenAI API
+ * MessageTranslator - inline message translation via OpenAI API
  *
  * Adds a 🌐 button to every message. Click to pick a target language,
  * then the message content is translated using the configured model
@@ -14958,7 +14959,7 @@ const MessageTranslator = (() => {
 })();
 
 /* ═══════════════════════════════════════════════════════════════════
- *  ModelCompare – Send the same prompt to multiple models, compare
+ *  ModelCompare - Send the same prompt to multiple models, compare
  *  results side-by-side with timing and token metrics.
  * ═══════════════════════════════════════════════════════════════════ */
 const ModelCompare = (() => {
@@ -15635,7 +15636,7 @@ const ModelComparePanel = (() => {
  *      modify it and re-send.
  *   3. The history panel refreshes to reflect the shorter conversation.
  *
- * This mirrors the "Edit message" UX in ChatGPT / Claude — a frequently
+ * This mirrors the "Edit message" UX in ChatGPT / Claude - a frequently
  * requested pattern for iterating on prompts without starting over.
  *
  * Hooks into HistoryPanel's single-pass _decorateAllMessages via
@@ -15688,7 +15689,7 @@ const MessageEditor = (() => {
    * subsequent messages are removed, then places the original text
    * in the chat input for modification.
    *
-   * @param {number} historyIndex — index in ConversationManager.getHistory()
+   * @param {number} historyIndex - index in ConversationManager.getHistory()
    *   (includes system message at index 0)
    */
   function editAt(historyIndex) {
@@ -15721,7 +15722,7 @@ const MessageEditor = (() => {
 
     // Update the main chat display
     UIController.setChatOutput('');
-    UIController.setConsoleOutput('(editing message — modify and re-send)');
+    UIController.setConsoleOutput('(editing message - modify and re-send)');
     UIController.setLastPrompt('✏️ Editing previous message');
 
     // Refresh history panel
@@ -15740,8 +15741,8 @@ const MessageEditor = (() => {
    * Add an edit button to a single user-message element.
    * Called by HistoryPanel._decorateAllMessages for each message.
    *
-   * @param {HTMLElement} msgEl — the .history-msg element
-   * @param {number} historyIndex — index in ConversationManager.getHistory()
+   * @param {HTMLElement} msgEl - the .history-msg element
+   * @param {number} historyIndex - index in ConversationManager.getHistory()
    */
   function decorateOne(msgEl, historyIndex) {
     // Only decorate user messages
@@ -15755,7 +15756,7 @@ const MessageEditor = (() => {
     const btn = document.createElement('button');
     btn.className = 'msg-edit-btn';
     btn.textContent = '✏️ Edit';
-    btn.title = 'Edit this message — truncates conversation and loads text into input for re-sending';
+    btn.title = 'Edit this message - truncates conversation and loads text into input for re-sending';
     btn.setAttribute('aria-label', 'Edit and resend this message');
 
     btn.addEventListener('click', (e) => {
@@ -15799,7 +15800,7 @@ const MessageEditor = (() => {
     note.setAttribute('aria-live', 'polite');
     note.innerHTML =
       '<span class="msg-edit-notification-icon">✏️</span> ' +
-      '<span>Message loaded for editing — modify and press Send</span>';
+      '<span>Message loaded for editing - modify and press Send</span>';
     document.body.appendChild(note);
 
     requestAnimationFrame(() => note.classList.add('visible'));
@@ -15831,7 +15832,7 @@ const MessageEditor = (() => {
 
 
 // ═══════════════════════════════════════════════════════════════════════
-//  MessageScheduler — schedule prompts to send at a specific time
+//  MessageScheduler - schedule prompts to send at a specific time
 // ═══════════════════════════════════════════════════════════════════════
 
 const MessageScheduler = (() => {
@@ -16250,7 +16251,7 @@ const MessageScheduler = (() => {
           if (unit.startsWith('d')) ms = amount * 86400000;
           const dt = new Date(Date.now() + ms);
           const item = schedule(match[3], dt);
-          if (!item) return 'Could not schedule — check the time.';
+          if (!item) return 'Could not schedule - check the time.';
           return 'Scheduled for ' + _fmtTime(item.scheduledAt) + ': ' + match[3].slice(0, 50);
         }
       });
@@ -16281,7 +16282,7 @@ const MessageScheduler = (() => {
 
 /* ---------- Smart Retry ---------- */
 /**
- * SmartRetry — Automatic retry with exponential backoff for transient API failures.
+ * SmartRetry - Automatic retry with exponential backoff for transient API failures.
  *
  * Intercepts 429 (rate limit), 500, 502, 503, and network errors. Shows a
  * visual countdown indicator in the chat output area with a cancel button.
@@ -16401,10 +16402,10 @@ const SmartRetry = (() => {
   /**
    * Wrap an async API call with automatic retry logic.
    *
-   * @param {Function} fn — Async function returning {ok, status?, error?, networkError?}
-   * @param {Object} [opts] — Options
-   * @param {number} [opts.maxRetries] — Override max retries (default 3)
-   * @param {boolean} [opts.showIndicator] — Show visual retry indicator (default true)
+   * @param {Function} fn - Async function returning {ok, status?, error?, networkError?}
+   * @param {Object} [opts] - Options
+   * @param {number} [opts.maxRetries] - Override max retries (default 3)
+   * @param {boolean} [opts.showIndicator] - Show visual retry indicator (default true)
    * @returns {Promise<Object>} The API result (success or final failure)
    */
   async function withRetry(fn, opts) {
@@ -16842,14 +16843,14 @@ document.addEventListener('DOMContentLoaded', UsageHeatmap.init);
 //  Context Window Meter
 // ═══════════════════════════════════════════════════════════════════
 /**
- * ContextWindowMeter — real-time visual indicator of context window usage.
+ * ContextWindowMeter - real-time visual indicator of context window usage.
  *
  * Shows a persistent progress bar between the char-count and chat output
  * areas, displaying how much of the model's MAX_TOTAL_TOKENS budget the
  * current conversation consumes.  Color-coded:
- *   green  (<60%)  — plenty of room
- *   yellow (60-80%) — getting full
- *   red    (>80%)  — near limit, messages will be trimmed soon
+ *   green  (<60%)  - plenty of room
+ *   yellow (60-80%) - getting full
+ *   red    (>80%)  - near limit, messages will be trimmed soon
  *
  * The meter hooks into ConversationManager.estimateTokens() and updates
  * automatically on every UI refresh cycle via a MutationObserver on the
@@ -17001,7 +17002,7 @@ const ContextWindowMeter = (() => {
 document.addEventListener('DOMContentLoaded', ContextWindowMeter.init);
 
 /* ============================================================
- * ConversationAgenda — per-session goal checklist.
+ * ConversationAgenda - per-session goal checklist.
  *
  * Users can define objectives for a chat session (e.g., "Understand
  * React hooks", "Fix the login bug") and check them off as they go.
@@ -17337,7 +17338,7 @@ document.addEventListener('DOMContentLoaded', ConversationAgenda.init);
 
 // ── Clipboard History ──────────────────────────────────────────────────
 /**
- * ClipboardHistory — tracks text copied from the chat area and provides
+ * ClipboardHistory - tracks text copied from the chat area and provides
  * a searchable panel to browse, re-copy, or insert past clips.
  *
  * Features:
@@ -17382,7 +17383,7 @@ const ClipboardHistory = (() => {
   function _save() {
     try {
       SafeStorage.setJSON(STORAGE_KEY, entries);
-    } catch (_) { /* quota exceeded — silently skip */ }
+    } catch (_) { /* quota exceeded - silently skip */ }
   }
 
   // ── Core API ─────────────────────────────────────────────────────
@@ -17812,7 +17813,7 @@ const OfflineManager = (function () {
     if (banner) banner.style.display = '';
     if (sendBtn) {
       sendBtn.disabled = true;
-      sendBtn.title = 'Cannot send — you are offline';
+      sendBtn.title = 'Cannot send - you are offline';
     }
   }
 
@@ -17860,7 +17861,7 @@ const OfflineManager = (function () {
 document.addEventListener('DOMContentLoaded', OfflineManager.init);
 
 /* ============================================================
- * MessageFilter — visual content-type filters for conversation view
+ * MessageFilter - visual content-type filters for conversation view
  *
  * Shows/hides messages based on content type: code blocks, questions,
  * links, errors, lists, images, or by role (user-only / assistant-only).
@@ -18145,11 +18146,11 @@ const MessageFilter = (() => {
   };
 })();
 
-// OfflineManager.init already registered above (line ~17852) — skip duplicate
+// OfflineManager.init already registered above (line ~17852) - skip duplicate
 document.addEventListener('DOMContentLoaded', MessageFilter.init);
 
 /* ============================================================
- * ConversationSentiment — heuristic sentiment analysis with mood timeline
+ * ConversationSentiment - heuristic sentiment analysis with mood timeline
  *
  * Analyses each message using keyword-based sentiment scoring and
  * displays a live mood indicator + sparkline timeline showing how
@@ -18651,7 +18652,7 @@ const WordCloud = (() => {
     cloud.innerHTML = '';
 
     if (words.length === 0) {
-      cloud.innerHTML = '<p class="wc-empty">No words yet — start a conversation!</p>';
+      cloud.innerHTML = '<p class="wc-empty">No words yet - start a conversation!</p>';
       return;
     }
 
@@ -18673,7 +18674,7 @@ const WordCloud = (() => {
       span.textContent = word;
       span.style.fontSize = size + 'px';
       span.style.color = `rgba(${r},${g},${b},${opacity})`;
-      span.title = `"${word}" — ${info.count}× (user: ${info.userCount}, AI: ${info.assistantCount})`;
+      span.title = `"${word}" - ${info.count}× (user: ${info.userCount}, AI: ${info.assistantCount})`;
       span.addEventListener('click', () => {
         // Trigger message search if available
         if (typeof MessageSearch !== 'undefined' && MessageSearch.open) {
@@ -18903,7 +18904,7 @@ const ChatGPTImporter = (() => {
 
 /* ---------- Prompt Chain Runner (module 57) ---------- */
 /**
- * Multi-step prompt chains — define a sequence of prompts that execute
+ * Multi-step prompt chains - define a sequence of prompts that execute
  * one after another, with each step able to reference the previous
  * step's response via {{prev}}.  Great for multi-stage code generation
  * workflows like "design data model" → "add API endpoints" → "write tests".
@@ -19225,8 +19226,8 @@ const PromptChainRunner = (() => {
       : `<details style="margin-top:16px;"><summary style="cursor:pointer;font-weight:600;opacity:0.8;">📜 Run History (${_runHistory.length})</summary>
          ${_runHistory.slice(0, 10).map(r => `
            <div style="background:var(--input-bg,#313244);border-radius:6px;padding:8px;margin:4px 0;font-size:12px;">
-             <strong>${_esc(r.chainName)}</strong> — ${new Date(r.startedAt).toLocaleString()}
-             — ${r.completed ? '✅ completed' : '⏹ stopped'} (${r.steps.length} steps)
+             <strong>${_esc(r.chainName)}</strong> - ${new Date(r.startedAt).toLocaleString()}
+             - ${r.completed ? '✅ completed' : '⏹ stopped'} (${r.steps.length} steps)
            </div>
          `).join('')}
          </details>`;
@@ -19403,7 +19404,7 @@ const PromptChainRunner = (() => {
     if (typeof SlashCommands !== 'undefined' && SlashCommands.register) {
       SlashCommands.register({
         name: 'chains',
-        description: 'Open prompt chain builder — multi-step workflows',
+        description: 'Open prompt chain builder - multi-step workflows',
         icon: '⛓️',
         action: () => toggle()
       });
@@ -19457,23 +19458,23 @@ const PromptChainRunner = (() => {
 
 /* ---------- Conversation Health Check ---------- */
 /**
- * ConversationHealthCheck — heuristic diagnostic analysis of the current
+ * ConversationHealthCheck - heuristic diagnostic analysis of the current
  * conversation, providing actionable feedback on prompt quality, balance,
  * context usage, repetition, and conversation patterns.
  *
  * Opens as a modal (Ctrl+Shift+H or /health slash command).
  *
  * Checks performed:
- *  1. Prompt clarity — flags very short or very long user messages
- *  2. Conversation balance — user vs assistant message ratio
- *  3. Context window usage — estimated token count vs model limit
- *  4. Repetition detection — duplicate/near-duplicate user messages
- *  5. Code block ratio — flags code-heavy conversations
- *  6. Question density — checks if user is asking enough questions
- *  7. System prompt — checks if a persona is set
- *  8. Conversation length — flags very long conversations
- *  9. Idle time warning — if conversation was abandoned mid-thread
- * 10. Response length variance — flags wildly inconsistent responses
+ *  1. Prompt clarity - flags very short or very long user messages
+ *  2. Conversation balance - user vs assistant message ratio
+ *  3. Context window usage - estimated token count vs model limit
+ *  4. Repetition detection - duplicate/near-duplicate user messages
+ *  5. Code block ratio - flags code-heavy conversations
+ *  6. Question density - checks if user is asking enough questions
+ *  7. System prompt - checks if a persona is set
+ *  8. Conversation length - flags very long conversations
+ *  9. Idle time warning - if conversation was abandoned mid-thread
+ * 10. Response length variance - flags wildly inconsistent responses
  *
  * @namespace ConversationHealthCheck
  */
@@ -19516,7 +19517,7 @@ const ConversationHealthCheck = (() => {
       checks.push({
         id: 'clarity', status: 'warn', points: 5,
         title: 'Prompts are very short',
-        detail: `${veryShort.length} of ${userMsgs.length} prompts have fewer than 3 words. Short prompts often produce vague responses — try adding context or specifics.`,
+        detail: `${veryShort.length} of ${userMsgs.length} prompts have fewer than 3 words. Short prompts often produce vague responses - try adding context or specifics.`,
       });
       totalPoints += 5;
     } else if (veryLong.length > userMsgs.length * 0.3 && userMsgs.length >= 2) {
@@ -19530,7 +19531,7 @@ const ConversationHealthCheck = (() => {
       checks.push({
         id: 'clarity', status: 'pass', points: 15,
         title: 'Prompt length is good',
-        detail: `Average prompt is ${avgUserWords} words — clear and specific.`,
+        detail: `Average prompt is ${avgUserWords} words - clear and specific.`,
       });
       totalPoints += 15;
     }
@@ -19613,7 +19614,7 @@ const ConversationHealthCheck = (() => {
       checks.push({
         id: 'repetition', status: 'fail', points: 0,
         title: `${dupes} duplicate prompt${dupes > 1 ? 's' : ''} detected`,
-        detail: 'Exact same messages sent multiple times. This wastes tokens and suggests the AI response wasn\'t satisfactory — try rephrasing instead of repeating.',
+        detail: 'Exact same messages sent multiple times. This wastes tokens and suggests the AI response wasn\'t satisfactory - try rephrasing instead of repeating.',
       });
     } else if (nearDupes > 0) {
       checks.push({
@@ -19626,7 +19627,7 @@ const ConversationHealthCheck = (() => {
       checks.push({
         id: 'repetition', status: 'pass', points: 15,
         title: 'No repetition detected',
-        detail: 'All prompts are unique — good conversation flow.',
+        detail: 'All prompts are unique - good conversation flow.',
       });
       totalPoints += 15;
     }
@@ -19715,7 +19716,7 @@ const ConversationHealthCheck = (() => {
       checks.push({
         id: 'length', status: 'pass', points: 10,
         title: 'Conversation length is manageable',
-        detail: `${msgs.length} messages — well within comfortable limits.`,
+        detail: `${msgs.length} messages - well within comfortable limits.`,
       });
       totalPoints += 10;
     }
@@ -20084,7 +20085,7 @@ const TypingSpeedMonitor = (() => {
 })();
 
 /* ============================================================
- * FocusTimer — Pomodoro-style focus timer with work/break cycles,
+ * FocusTimer - Pomodoro-style focus timer with work/break cycles,
  * session tracking, and persistent statistics.
  *
  * Toggle via Alt+P, the 🍅 toolbar button, or /pomodoro slash command.
@@ -20724,7 +20725,7 @@ const ConversationMindMap = (() => {
     // Tooltip for hovered node
     if (_hover) {
       const n = _hover;
-      const tip = `"${n.id}" — ${n.count}× (you: ${n.user}, AI: ${n.ai})`;
+      const tip = `"${n.id}" - ${n.count}× (you: ${n.user}, AI: ${n.ai})`;
       _ctx.font = '13px -apple-system, BlinkMacSystemFont, sans-serif';
       const tw = _ctx.measureText(tip).width;
       const tx = Math.min(n.x - tw / 2, (w / _zoom) - tw - 16);
@@ -20914,7 +20915,7 @@ const ConversationMindMap = (() => {
       _canvas.style.display = 'none';
       const empty = document.createElement('div');
       empty.className = 'mm-empty';
-      empty.textContent = 'No topics yet — start a conversation!';
+      empty.textContent = 'No topics yet - start a conversation!';
       container.appendChild(empty);
       return;
     }
@@ -20972,7 +20973,7 @@ const ConversationMindMap = (() => {
 })();
 
 /* ============================================================
- * Command Palette — VS Code-style universal command launcher
+ * Command Palette - VS Code-style universal command launcher
  *
  * Ctrl+Shift+P opens a fuzzy-searchable palette of all app commands.
  * Modules register commands via CommandPalette.register(). Each command
@@ -21311,7 +21312,7 @@ const SplitView = (() => {
     _overlay.className = 'modal-overlay splitview-overlay';
     _overlay.setAttribute('role', 'dialog');
     _overlay.setAttribute('aria-modal', 'true');
-    _overlay.setAttribute('aria-label', 'Split View — Compare Sessions');
+    _overlay.setAttribute('aria-label', 'Split View - Compare Sessions');
 
     const panel = document.createElement('div');
     panel.className = 'splitview-panel';
@@ -21320,7 +21321,7 @@ const SplitView = (() => {
     const header = document.createElement('div');
     header.className = 'splitview-header';
     header.innerHTML = `
-      <h3>📖 Split View — Compare Sessions</h3>
+      <h3>📖 Split View - Compare Sessions</h3>
       <div class="splitview-controls">
         <label class="splitview-sync-label" title="Synchronize scrolling between panes">
           <input type="checkbox" id="splitview-sync" ${_syncScroll ? 'checked' : ''}> Sync scroll
@@ -21345,14 +21346,14 @@ const SplitView = (() => {
       <div class="splitview-selector">
         <label for="splitview-left-select">Left:</label>
         <select id="splitview-left-select">
-          <option value="">— select session —</option>
+          <option value="">- select session -</option>
           ${optionsHtml}
         </select>
       </div>
       <div class="splitview-selector">
         <label for="splitview-right-select">Right:</label>
         <select id="splitview-right-select">
-          <option value="">— select session —</option>
+          <option value="">- select session -</option>
           ${optionsHtml}
         </select>
       </div>
@@ -21579,7 +21580,7 @@ const SplitView = (() => {
 
 /* ---------- Session Streak Tracker ---------- */
 /**
- * StreakTracker — tracks consecutive-day chat activity streaks,
+ * StreakTracker - tracks consecutive-day chat activity streaks,
  * shows current/longest streak, 90-day activity calendar, and
  * milestone achievements. Gamifies consistent usage.
  *
@@ -21691,7 +21692,7 @@ const StreakTracker = (() => {
       const dayName = d.toLocaleDateString('en-US', { weekday: 'short' });
       const fullDate = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
       cells.push(
-        `<div class="streak-cal-cell ${active ? 'streak-cal-active' : ''}" title="${fullDate} (${dayName})${active ? ' — active' : ''}"></div>`
+        `<div class="streak-cal-cell ${active ? 'streak-cal-active' : ''}" title="${fullDate} (${dayName})${active ? ' - active' : ''}"></div>`
       );
     }
 
@@ -21720,7 +21721,7 @@ const StreakTracker = (() => {
       return `<div class="streak-milestone ${achieved ? 'streak-milestone-achieved' : ''}">
         <span class="streak-milestone-emoji">${m.emoji}</span>
         <div class="streak-milestone-info">
-          <strong>${m.label}</strong> — ${m.desc}
+          <strong>${m.label}</strong> - ${m.desc}
           ${achieved ? '<span class="streak-milestone-check">✅</span>' : `<span class="streak-milestone-remaining">${m.days - longestStreak} days to go</span>`}
         </div>
       </div>`;
@@ -21832,13 +21833,13 @@ const StreakTracker = (() => {
 })();
 
 /* ============================================================
- * DraftRecovery — auto-save unsent message drafts per session
+ * DraftRecovery - auto-save unsent message drafts per session
  *
  * Saves the chat input text as you type (debounced 500ms) and
  * restores it when switching sessions or reloading the page.
  * Shows a subtle toast when a draft is recovered.
  *
- * Keyboard shortcut: Ctrl+Shift+D — discard current draft
+ * Keyboard shortcut: Ctrl+Shift+D - discard current draft
  * ============================================================ */
 const DraftRecovery = (() => {
   const STORAGE_KEY = 'agenticchat_drafts';
@@ -22000,7 +22001,7 @@ const DraftRecovery = (() => {
     }, DEBOUNCE_MS);
   }
 
-  /** Initialize — attach listeners and restore draft. */
+  /** Initialize - attach listeners and restore draft. */
   function load() {
     const input = DOMCache.get('chat-input');
     if (input) {
@@ -22258,7 +22259,7 @@ const CustomThemeCreator = (() => {
     // Preset dropdown
     const presetSelect = document.createElement('select');
     presetSelect.style.cssText = 'flex:1;min-width:100px;padding:4px 8px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border);border-radius:4px;font-size:12px;';
-    presetSelect.innerHTML = '<option value="">— Apply Preset —</option>';
+    presetSelect.innerHTML = '<option value="">- Apply Preset -</option>';
     Object.keys(PRESETS).forEach(name => {
       presetSelect.innerHTML += `<option value="${name}">${name}</option>`;
     });
@@ -22557,7 +22558,7 @@ const CustomThemeCreator = (() => {
 document.addEventListener('DOMContentLoaded', CustomThemeCreator.init);
 
 /* ============================================================
- * TextExpander — auto-expanding text shortcuts in chat input.
+ * TextExpander - auto-expanding text shortcuts in chat input.
  *
  * Users define trigger → expansion pairs (e.g. "/sig" → full signature).
  * Triggers expand automatically when followed by Space or Tab.
@@ -23922,7 +23923,7 @@ const ConversationFlashcards = (() => {
     select.style.cssText = 'flex:1;background:var(--bg-secondary,#313244);color:var(--text-primary,#cdd6f4);border:1px solid var(--border-color,#45475a);border-radius:4px;padding:4px 8px;font-size:13px';
     var defOpt = document.createElement('option');
     defOpt.value = '';
-    defOpt.textContent = '— current extraction —';
+    defOpt.textContent = '- current extraction -';
     select.appendChild(defOpt);
     var delBtn = document.createElement('button');
     delBtn.id = 'fc-delete-deck-btn';
@@ -24182,7 +24183,7 @@ document.addEventListener('DOMContentLoaded', ConversationFlashcards.init);
 
 
 /* ============================================================
- * SmartPaste — intelligent paste formatting for chat input
+ * SmartPaste - intelligent paste formatting for chat input
  *
  * Detects pasted content type (URL, JSON, code, CSV, SQL,
  * stack trace, key-value config, markdown table) and auto-wraps
@@ -24493,7 +24494,7 @@ const SmartPaste = (() => {
 document.addEventListener('DOMContentLoaded', SmartPaste.init);
 
 /* ============================================================
- * MessageContextMenu — right-click context menu for chat messages
+ * MessageContextMenu - right-click context menu for chat messages
  *
  * Provides a unified context menu when right-clicking on any chat
  * message, surfacing common per-message actions: copy, bookmark,
@@ -24891,7 +24892,7 @@ const MessageContextMenu = (() => {
 document.addEventListener('DOMContentLoaded', MessageContextMenu.init);
 
 /* ============================================================
- *  PomodoroTimer — built-in focus timer with work/break cycles
+ *  PomodoroTimer - built-in focus timer with work/break cycles
  * ============================================================ */
 var PomodoroTimer = (function() {
   'use strict';
@@ -25126,7 +25127,7 @@ var PomodoroTimer = (function() {
 document.addEventListener('DOMContentLoaded', PomodoroTimer.init);
 
 /* ============================================================
- *  PromptABTester — compare two model responses side-by-side
+ *  PromptABTester - compare two model responses side-by-side
  *  Shortcut: Ctrl+Shift+B
  * ============================================================ */
 const PromptABTester = (() => {
@@ -25279,8 +25280,8 @@ const PromptABTester = (() => {
 
     respA.textContent = rA.ok ? rA.text : `❌ ${rA.error}`;
     respB.textContent = rB.ok ? rB.text : `❌ ${rB.error}`;
-    metaA.textContent = rA.ok ? ` — ${rA.elapsed}ms, ${rA.tokens.total_tokens || '?'} tok` : '';
-    metaB.textContent = rB.ok ? ` — ${rB.elapsed}ms, ${rB.tokens.total_tokens || '?'} tok` : '';
+    metaA.textContent = rA.ok ? ` - ${rA.elapsed}ms, ${rA.tokens.total_tokens || '?'} tok` : '';
+    metaB.textContent = rB.ok ? ` - ${rB.elapsed}ms, ${rB.tokens.total_tokens || '?'} tok` : '';
 
     _overlay.querySelector('.ab-tester-run').disabled = false;
 
@@ -25328,7 +25329,7 @@ const PromptABTester = (() => {
         <div class="ab-history-prompt">${_esc(h.prompt)}</div>
         <div class="ab-history-meta">
           ${h.modelA} (${h.timeA || '?'}ms) vs ${h.modelB} (${h.timeB || '?'}ms)
-          ${h.vote ? `— <strong>${h.vote === 'a' ? h.modelA : h.modelB} won</strong>` : '— no vote'}
+          ${h.vote ? `- <strong>${h.vote === 'a' ? h.modelA : h.modelB} won</strong>` : '- no vote'}
         </div>
       </div>
     `).join('');
@@ -25355,7 +25356,7 @@ document.addEventListener('DOMContentLoaded', PromptABTester.init);
 
 /* ---------- Smart Scroll ---------- */
 /**
- * SmartScroll — floating "Jump to Latest" button, per-session scroll position
+ * SmartScroll - floating "Jump to Latest" button, per-session scroll position
  * memory, and "new messages below" indicator.
  *
  * When the user scrolls away from the bottom of the chat output, a floating
@@ -25551,7 +25552,7 @@ const SmartScroll = (() => {
 
 document.addEventListener('DOMContentLoaded', SmartScroll.init);
 
-// TextExpander.init already registered above (line ~22905) — skip duplicate
+// TextExpander.init already registered above (line ~22905) - skip duplicate
 
 /* ---------- Message Reader View (module 65) ---------- */
 /**
@@ -25563,11 +25564,11 @@ document.addEventListener('DOMContentLoaded', SmartScroll.init);
  * appears on hover. Press Escape or click the backdrop to close.
  *
  * Public API:
- *   init()          — inject styles, wire event delegation
- *   open(el)        — open reader for a specific message element
- *   close()         — close the reader overlay
- *   toggle()        — open reader for the last assistant message, or close
- *   isOpen()        — whether the reader overlay is currently visible
+ *   init()          - inject styles, wire event delegation
+ *   open(el)        - open reader for a specific message element
+ *   close()         - close the reader overlay
+ *   toggle()        - open reader for the last assistant message, or close
+ *   isOpen()        - whether the reader overlay is currently visible
  *
  * @namespace MessageReaderView
  */
@@ -25703,7 +25704,7 @@ const MessageReaderView = (() => {
         <div class="reader-toolbar">
           <span class="reader-label">📖 Reader View</span>
           <div class="reader-font-controls">
-            <button class="reader-font-down" title="Decrease font size">A−</button>
+            <button class="reader-font-down" title="Decrease font size">A-</button>
             <button class="reader-font-up" title="Increase font size">A+</button>
           </div>
           <button class="reader-copy-btn" title="Copy to clipboard">📋 Copy</button>
@@ -25863,7 +25864,7 @@ const MessageReaderView = (() => {
 
 
 /* ============================================================
- *  ReadabilityAnalyzer — message readability scoring (Ctrl+Shift+R)
+ *  ReadabilityAnalyzer - message readability scoring (Ctrl+Shift+R)
  *
  *  Computes Flesch-Kincaid grade level, reading ease, vocabulary
  *  diversity, average sentence/word lengths for user and assistant
@@ -26252,7 +26253,7 @@ const MessageDiffViewer = (() => {
     } catch (_) { /* ignore */ }
   }
 
-  /** Start selection mode — user clicks two messages to compare. */
+  /** Start selection mode - user clicks two messages to compare. */
   function startSelection() {
     const output = DOMCache ? DOMCache.get('chat-output') : document.getElementById('chat-output');
     if (!output) return;
@@ -26283,7 +26284,7 @@ const MessageDiffViewer = (() => {
     msg.style.outline = '2px solid #38bdf8';
 
     if (selectedIndices.length === 1) {
-      _showBanner('Click the second message to compare (2/2) — or Esc to cancel');
+      _showBanner('Click the second message to compare (2/2) - or Esc to cancel');
     } else if (selectedIndices.length >= 2) {
       _endSelection();
       showDiff(selectedIndices[0], selectedIndices[1]);
@@ -26361,7 +26362,7 @@ const MessageDiffViewer = (() => {
     statsBar.style.cssText = 'display:flex;gap:16px;padding:10px 20px;background:#111;font-size:13px;color:#aaa;border-bottom:1px solid #333';
     statsBar.innerHTML = `
       <span style="color:#68d391">+${stats.added} added</span>
-      <span style="color:#fc8181">−${stats.removed} removed</span>
+      <span style="color:#fc8181">-${stats.removed} removed</span>
       <span>${stats.unchanged} unchanged</span>
       <span style="color:#63b3ed">${stats.similarity}% similar</span>
     `;
@@ -26456,7 +26457,7 @@ const MessageDiffViewer = (() => {
 
 /* ---------- Tone Adjuster ---------- */
 /**
- * ToneAdjuster — rewrite assistant messages in different tones via the OpenAI API.
+ * ToneAdjuster - rewrite assistant messages in different tones via the OpenAI API.
  *
  * Adds a 🎭 button to each assistant message in the history panel.
  * Clicking opens a tone picker (Formal, Casual, Concise, Detailed, ELI5, Poetic).
@@ -26709,4 +26710,207 @@ const ToneAdjuster = (() => {
   document.addEventListener('DOMContentLoaded', init);
 
   return { init, decorateOne, TONES };
+})();
+
+/* ---------- Response Length Presets ---------- */
+/**
+ * Pre-send response length control. Lets users choose how verbose
+ * the AI's responses should be (Concise / Normal / Detailed / Exhaustive).
+ *
+ * Adjusts ChatConfig.MAX_TOKENS_RESPONSE and prepends a length instruction
+ * to the system prompt so the model follows the desired verbosity.
+ * Persists preference to localStorage. Toggle with Alt+L.
+ *
+ * @namespace ResponseLengthPresets
+ */
+const ResponseLengthPresets = (() => {
+  const STORAGE_KEY = 'ac-response-length';
+  const PRESETS = [
+    {
+      id: 'concise',
+      label: 'Concise',
+      icon: '⚡',
+      maxTokens: 1024,
+      instruction: 'Keep your response very concise and to the point. Use short sentences, minimal explanation. Aim for the shortest useful answer.',
+      description: 'Short & direct - bullet points, minimal prose'
+    },
+    {
+      id: 'normal',
+      label: 'Normal',
+      icon: '💬',
+      maxTokens: 4096,
+      instruction: '',
+      description: 'Default response length - balanced detail'
+    },
+    {
+      id: 'detailed',
+      label: 'Detailed',
+      icon: '📖',
+      maxTokens: 8192,
+      instruction: 'Provide a thorough, detailed response. Include explanations, examples, and context. Cover edge cases when relevant.',
+      description: 'Thorough - examples, explanations, context'
+    },
+    {
+      id: 'exhaustive',
+      label: 'Exhaustive',
+      icon: '📚',
+      maxTokens: 16384,
+      instruction: 'Provide the most comprehensive, exhaustive response possible. Cover all aspects in depth with extensive examples, step-by-step breakdowns, alternative approaches, trade-offs, and edge cases. Leave nothing out.',
+      description: 'Maximum depth - comprehensive coverage'
+    }
+  ];
+
+  let currentPreset = 'normal';
+  let panelEl = null;
+  let isOpen = false;
+
+  // Original system prompt (without length instruction)
+  let _baseSystemPrompt = null;
+
+  function _load() {
+    try {
+      const saved = SafeStorage.get(STORAGE_KEY);
+      if (saved && PRESETS.some(p => p.id === saved)) {
+        currentPreset = saved;
+      }
+    } catch (_) {}
+  }
+
+  function _save() {
+    try { SafeStorage.set(STORAGE_KEY, currentPreset); } catch (_) {}
+  }
+
+  function _getPreset(id) {
+    return PRESETS.find(p => p.id === id) || PRESETS[1];
+  }
+
+  function _apply() {
+    const preset = _getPreset(currentPreset);
+
+    // Update max tokens
+    ChatConfig.MAX_TOKENS_RESPONSE = preset.maxTokens;
+
+    // Update system prompt: strip any previous length instruction, then prepend new one
+    if (_baseSystemPrompt === null) {
+      _baseSystemPrompt = ChatConfig.SYSTEM_PROMPT;
+    }
+
+    if (preset.instruction) {
+      ChatConfig.SYSTEM_PROMPT = `[Response length: ${preset.label}] ${preset.instruction}\n\n${_baseSystemPrompt}`;
+    } else {
+      ChatConfig.SYSTEM_PROMPT = _baseSystemPrompt;
+    }
+
+    // Update the system message in conversation history
+    const msgs = ConversationManager.getMessages();
+    if (msgs.length > 0 && msgs[0].role === 'system') {
+      ConversationManager.setSystemPrompt(ChatConfig.SYSTEM_PROMPT);
+    }
+
+    // Update button label
+    const label = document.getElementById('length-label');
+    if (label) label.textContent = preset.label;
+
+    _save();
+  }
+
+  function _createPanel() {
+    if (panelEl) return panelEl;
+
+    panelEl = document.createElement('div');
+    panelEl.className = 'length-preset-panel';
+    panelEl.setAttribute('role', 'dialog');
+    panelEl.setAttribute('aria-label', 'Response Length Presets');
+
+    let html = '<div class="length-preset-header">📏 Response Length</div>';
+    html += '<div class="length-preset-list">';
+
+    for (const preset of PRESETS) {
+      html += `<button class="length-preset-option" data-preset="${preset.id}" title="${preset.description}">
+        <span class="length-preset-icon">${preset.icon}</span>
+        <div class="length-preset-info">
+          <span class="length-preset-name">${preset.label}</span>
+          <span class="length-preset-desc">${preset.description}</span>
+        </div>
+        <span class="length-preset-check" style="visibility:hidden">✓</span>
+      </button>`;
+    }
+
+    html += '</div>';
+    html += '<div class="length-preset-footer">Adjusts response verbosity and max tokens</div>';
+    panelEl.innerHTML = html;
+
+    panelEl.addEventListener('click', (e) => {
+      const btn = e.target.closest('.length-preset-option');
+      if (!btn) return;
+      const id = btn.dataset.preset;
+      if (id) {
+        currentPreset = id;
+        _apply();
+        _updateChecks();
+        // Brief visual feedback before closing
+        setTimeout(() => toggle(), 150);
+      }
+    });
+
+    document.body.appendChild(panelEl);
+    return panelEl;
+  }
+
+  function _updateChecks() {
+    if (!panelEl) return;
+    panelEl.querySelectorAll('.length-preset-check').forEach(el => {
+      el.style.visibility = 'hidden';
+    });
+    const active = panelEl.querySelector(`[data-preset="${currentPreset}"] .length-preset-check`);
+    if (active) active.style.visibility = 'visible';
+  }
+
+  function _positionPanel() {
+    const btn = document.getElementById('length-preset-btn');
+    if (!btn || !panelEl) return;
+    const rect = btn.getBoundingClientRect();
+    panelEl.style.top = (rect.bottom + 6) + 'px';
+    panelEl.style.left = Math.max(8, rect.left - 100) + 'px';
+  }
+
+  function toggle() {
+    _createPanel();
+    isOpen = !isOpen;
+    panelEl.style.display = isOpen ? 'block' : 'none';
+    if (isOpen) {
+      _updateChecks();
+      _positionPanel();
+    }
+  }
+
+  function getCurrentPreset() {
+    return currentPreset;
+  }
+
+  function init() {
+    _load();
+    _apply();
+
+    // Close on outside click
+    document.addEventListener('click', (e) => {
+      if (isOpen && panelEl && !panelEl.contains(e.target) &&
+          !e.target.closest('#length-preset-btn')) {
+        isOpen = false;
+        panelEl.style.display = 'none';
+      }
+    });
+
+    // Alt+L shortcut
+    document.addEventListener('keydown', (e) => {
+      if (e.altKey && e.key.toLowerCase() === 'l' && !e.ctrlKey && !e.shiftKey && !e.metaKey) {
+        e.preventDefault();
+        toggle();
+      }
+    });
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  return { toggle, getCurrentPreset, PRESETS, init };
 })();
