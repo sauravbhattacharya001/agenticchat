@@ -10662,7 +10662,7 @@ const ConversationChapters = (() => {
 
   function importChapters(json) {
     try {
-      var arr = typeof json === 'string' ? JSON.parse(json) : json;
+      var arr = typeof json === 'string' ? sanitizeStorageObject(JSON.parse(json)) : json;
       if (!Array.isArray(arr)) return 0;
       var imported = 0;
       for (var j = 0; j < arr.length; j++) {
@@ -18802,7 +18802,7 @@ const ChatGPTImporter = (() => {
   function importFromJSON(jsonString) {
     let data;
     try {
-      data = JSON.parse(jsonString);
+      data = sanitizeStorageObject(JSON.parse(jsonString));
     } catch (_) {
       throw new Error('Invalid JSON file');
     }
