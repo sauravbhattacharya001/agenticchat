@@ -18593,11 +18593,9 @@ const QuickSwitcher = (() => {
     });
   }
 
-  function _escapeHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
-  }
+  // Use the shared _escapeHtml defined at file scope (line ~319).
+  // Removed duplicate DOM-based implementation; the global regex version
+  // is both faster (no DOM allocation) and works identically.
 
   function show() {
     const overlay = _createOverlay();
@@ -21319,11 +21317,8 @@ const SplitView = (() => {
   let _rightSession = null;
   let _syncScroll = true;
 
-  function _escapeHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
-  }
+  // Use the shared _escapeHtml defined at file scope (line ~319).
+  // Removed duplicate DOM-based implementation.
 
   function _truncate(text, max) {
     if (!text) return '';
@@ -21705,11 +21700,8 @@ const StreakTracker = (() => {
     };
   }
 
-  function _escapeHtml(str) {
-    const d = document.createElement('div');
-    d.textContent = str;
-    return d.innerHTML;
-  }
+  // Use the shared _escapeHtml defined at file scope (line ~319).
+  // Removed duplicate DOM-based implementation.
 
   function _buildCalendar(dateSet) {
     const today = new Date();
