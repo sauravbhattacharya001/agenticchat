@@ -77,6 +77,7 @@
  *   TextExpander         — shorthand triggers that auto-expand inline (Ctrl+Shift+E)
  *   MessageReaderView    — full-width reader overlay for comfortable reading (Alt+R)
  *   ReadabilityAnalyzer  — Flesch-Kincaid readability scoring with per-role stats (Ctrl+Shift+R)
+ *   ToneAdjuster         — rewrite assistant messages in different tones (formal, casual, concise, ELI5, etc.)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -1799,6 +1800,11 @@ const HistoryPanel = (() => {
 
       // MessageEditor: user messages only (decorateOne checks role internally)
       MessageEditor.decorateOne(msgEl, i);
+
+      // ToneAdjuster: assistant messages only
+      if (role === 'assistant') {
+        ToneAdjuster.decorateOne(msgEl, nonSystemIdx);
+      }
 
       nonSystemIdx++;
     }
@@ -26446,4 +26452,261 @@ const MessageDiffViewer = (() => {
   document.addEventListener('DOMContentLoaded', init);
 
   return { init, toggle, showDiff, close, startSelection };
+})();
+
+/* ---------- Tone Adjuster ---------- */
+/**
+ * ToneAdjuster — rewrite assistant messages in different tones via the OpenAI API.
+ *
+ * Adds a 🎭 button to each assistant message in the history panel.
+ * Clicking opens a tone picker (Formal, Casual, Concise, Detailed, ELI5, Poetic).
+ * The selected tone rewrites the message content using the configured model.
+ *
+ * Keyboard shortcut: Alt+T (when hovering a message)
+ *
+ * @namespace ToneAdjuster
+ */
+const ToneAdjuster = (() => {
+  const TONES = [
+    { id: 'formal',   label: '🎩 Formal',   prompt: 'Rewrite the following text in a formal, professional tone. Preserve all information and meaning.' },
+    { id: 'casual',   label: '😎 Casual',   prompt: 'Rewrite the following text in a casual, friendly, conversational tone. Preserve all information.' },
+    { id: 'concise',  label: '✂️ Concise',   prompt: 'Rewrite the following text to be as concise as possible. Remove filler, keep all key information.' },
+    { id: 'detailed', label: '📝 Detailed',  prompt: 'Rewrite the following text with more detail and explanation. Expand on key points.' },
+    { id: 'eli5',     label: '🧒 ELI5',      prompt: 'Rewrite the following text as if explaining to a 5-year-old. Use simple words and analogies.' },
+    { id: 'poetic',   label: '🎭 Poetic',    prompt: 'Rewrite the following text in a poetic, literary style with vivid language and metaphors.' },
+  ];
+
+  const CACHE_KEY = 'ac-tone-cache';
+  let _cache = {};
+  let _activePicker = null;
+
+  function _loadCache() {
+    try { _cache = JSON.parse(localStorage.getItem(CACHE_KEY)) || {}; } catch (_) { _cache = {}; }
+  }
+  function _saveCache() {
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify(_cache)); } catch (_) {}
+  }
+
+  /**
+   * Generate a cache key for a message + tone combination.
+   * @param {string} content - Original message content.
+   * @param {string} toneId - Tone identifier.
+   * @returns {string}
+   */
+  function _cacheKey(content, toneId) {
+    // Simple hash: first 100 chars + length + tone
+    return `${toneId}:${content.length}:${content.substring(0, 100)}`;
+  }
+
+  /**
+   * Call the OpenAI API to rewrite text in the given tone.
+   * @param {string} text - Original text to rewrite.
+   * @param {Object} tone - Tone object with prompt.
+   * @returns {Promise<string>} Rewritten text.
+   */
+  async function _rewrite(text, tone) {
+    const key = _cacheKey(text, tone.id);
+    if (_cache[key]) return _cache[key];
+
+    const apiKey = typeof ApiKeyManager !== 'undefined' ? ApiKeyManager.getKey() : null;
+    if (!apiKey) {
+      throw new Error('No API key configured. Set your OpenAI key first.');
+    }
+
+    const model = typeof ChatConfig !== 'undefined' ? ChatConfig.MODEL : 'gpt-4o-mini';
+    const rsp = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: tone.prompt },
+          { role: 'user', content: text }
+        ],
+        max_tokens: 2048
+      })
+    });
+
+    if (!rsp.ok) {
+      const err = await rsp.json().catch(() => ({}));
+      throw new Error(err?.error?.message || `API error ${rsp.status}`);
+    }
+
+    const data = await rsp.json();
+    const result = data.choices?.[0]?.message?.content || text;
+
+    // Cache the result
+    _cache[key] = result;
+    _saveCache();
+
+    // Track cost if CostDashboard is available
+    if (typeof CostDashboard !== 'undefined' && data.usage) {
+      CostDashboard.trackUsage(data.usage);
+    }
+
+    return result;
+  }
+
+  /**
+   * Close the active tone picker dropdown.
+   */
+  function _closePicker() {
+    if (_activePicker) {
+      _activePicker.remove();
+      _activePicker = null;
+    }
+  }
+
+  /**
+   * Show the tone picker dropdown near the button.
+   * @param {HTMLElement} btn - The 🎭 button element.
+   * @param {number} msgIndex - Index into displayed (non-system) messages.
+   */
+  function _showPicker(btn, msgIndex) {
+    _closePicker();
+
+    const history = typeof ConversationManager !== 'undefined' ? ConversationManager.getHistory() : [];
+    // Map non-system index to actual history index
+    let actualIdx = -1;
+    let nonSysCount = 0;
+    for (let i = 0; i < history.length; i++) {
+      if (history[i].role === 'system') continue;
+      if (nonSysCount === msgIndex) { actualIdx = i; break; }
+      nonSysCount++;
+    }
+    if (actualIdx < 0 || history[actualIdx].role !== 'assistant') return;
+
+    const originalContent = history[actualIdx].content;
+
+    const picker = document.createElement('div');
+    picker.className = 'tone-picker';
+    picker.style.cssText = 'position:absolute;z-index:10000;background:#1a1a2e;border:1px solid #333;border-radius:8px;padding:6px 0;box-shadow:0 4px 16px rgba(0,0,0,0.4);min-width:160px;';
+
+    // Title
+    const title = document.createElement('div');
+    title.textContent = '🎭 Adjust Tone';
+    title.style.cssText = 'padding:6px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:#888;border-bottom:1px solid #333;margin-bottom:4px;';
+    picker.appendChild(title);
+
+    for (const tone of TONES) {
+      const item = document.createElement('div');
+      item.textContent = tone.label;
+      item.style.cssText = 'padding:8px 14px;cursor:pointer;font-size:13px;color:#e0e0e0;transition:background 0.15s;';
+      item.addEventListener('mouseenter', () => { item.style.background = '#2a2a4a'; });
+      item.addEventListener('mouseleave', () => { item.style.background = 'transparent'; });
+      item.addEventListener('click', async () => {
+        _closePicker();
+        // Show loading state on the button
+        const origBtnText = btn.textContent;
+        btn.textContent = '⏳';
+        btn.style.pointerEvents = 'none';
+        try {
+          const rewritten = await _rewrite(originalContent, tone);
+          // Update the message in history
+          history[actualIdx].content = rewritten;
+          history[actualIdx]._originalContent = history[actualIdx]._originalContent || originalContent;
+          history[actualIdx]._appliedTone = tone.id;
+          // Re-render the history panel
+          if (typeof HistoryPanel !== 'undefined' && HistoryPanel.refresh) {
+            HistoryPanel.refresh();
+          }
+        } catch (err) {
+          alert('Tone adjustment failed: ' + err.message);
+        } finally {
+          btn.textContent = origBtnText;
+          btn.style.pointerEvents = '';
+        }
+      });
+      picker.appendChild(item);
+    }
+
+    // "Restore Original" option if tone was already applied
+    if (history[actualIdx]._originalContent) {
+      const sep = document.createElement('div');
+      sep.style.cssText = 'border-top:1px solid #333;margin:4px 0;';
+      picker.appendChild(sep);
+
+      const restore = document.createElement('div');
+      restore.textContent = '↩️ Restore Original';
+      restore.style.cssText = 'padding:8px 14px;cursor:pointer;font-size:13px;color:#f59e0b;transition:background 0.15s;';
+      restore.addEventListener('mouseenter', () => { restore.style.background = '#2a2a4a'; });
+      restore.addEventListener('mouseleave', () => { restore.style.background = 'transparent'; });
+      restore.addEventListener('click', () => {
+        _closePicker();
+        history[actualIdx].content = history[actualIdx]._originalContent;
+        delete history[actualIdx]._originalContent;
+        delete history[actualIdx]._appliedTone;
+        if (typeof HistoryPanel !== 'undefined' && HistoryPanel.refresh) {
+          HistoryPanel.refresh();
+        }
+      });
+      picker.appendChild(restore);
+    }
+
+    // Position the picker
+    const rect = btn.getBoundingClientRect();
+    picker.style.top = (rect.bottom + window.scrollY + 4) + 'px';
+    picker.style.left = (rect.left + window.scrollX) + 'px';
+    document.body.appendChild(picker);
+    _activePicker = picker;
+
+    // Close on outside click
+    setTimeout(() => {
+      const handler = (e) => {
+        if (!picker.contains(e.target) && e.target !== btn) {
+          _closePicker();
+          document.removeEventListener('click', handler);
+        }
+      };
+      document.addEventListener('click', handler);
+    }, 0);
+  }
+
+  /**
+   * Decorate a single assistant message element with the 🎭 tone button.
+   * Called from _decorateAllMessages.
+   * @param {HTMLElement} msgEl - The .history-msg element.
+   * @param {number} displayIndex - Non-system message index.
+   */
+  function decorateOne(msgEl, displayIndex) {
+    if (msgEl.querySelector('.tone-btn')) return; // already decorated
+
+    const btn = document.createElement('button');
+    btn.className = 'tone-btn';
+    btn.textContent = '🎭';
+    btn.title = 'Adjust message tone (Alt+T)';
+    btn.style.cssText = 'background:none;border:none;cursor:pointer;font-size:14px;padding:2px 4px;opacity:0.5;transition:opacity 0.2s;margin-left:6px;';
+    btn.addEventListener('mouseenter', () => { btn.style.opacity = '1'; });
+    btn.addEventListener('mouseleave', () => { btn.style.opacity = '0.5'; });
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      _showPicker(btn, displayIndex);
+    });
+
+    // Insert after the role label
+    const roleLabel = msgEl.querySelector('.msg-role');
+    if (roleLabel) {
+      roleLabel.appendChild(btn);
+    } else {
+      msgEl.insertBefore(btn, msgEl.firstChild);
+    }
+  }
+
+  function init() {
+    _loadCache();
+
+    // Close picker on Escape
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && _activePicker) {
+        _closePicker();
+      }
+    });
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  return { init, decorateOne, TONES };
 })();
