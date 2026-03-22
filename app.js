@@ -78,6 +78,7 @@
  *   MessageReaderView    - full-width reader overlay for comfortable reading (Alt+R)
  *   ReadabilityAnalyzer  - Flesch-Kincaid readability scoring with per-role stats (Ctrl+Shift+R)
  *   ToneAdjuster         - rewrite assistant messages in different tones (formal, casual, concise, ELI5, etc.)
+ *   SessionCalendar      - visual month calendar to browse sessions by date (Alt+C)
  *   ResponseLengthPresets - pre-send verbosity control with 4 length modes (Alt+L)
  *   SessionArchive       - archive/unarchive sessions to declutter the sessions panel
  *
@@ -27057,4 +27058,188 @@ const SessionArchive = (() => {
     isShowingArchived, toggleShowArchived, setShowArchived,
     filterSessions, getArchivedCount, cleanup
   };
+})();
+
+/* ---------- Session Calendar ---------- */
+/**
+ * Visual month-calendar showing sessions by date. Click a day to see
+ * its sessions; click a session to load it. Navigate months with arrows.
+ *
+ * Keyboard shortcut: Alt+C
+ *
+ * @namespace SessionCalendar
+ */
+const SessionCalendar = (() => {
+  let isOpen = false;
+  let viewYear, viewMonth; // 0-indexed month
+  let selectedDate = null; // 'YYYY-MM-DD'
+
+  function _allSessions() {
+    try {
+      const raw = SafeStorage.get('agenticchat_sessions');
+      return raw ? JSON.parse(raw) : [];
+    } catch { return []; }
+  }
+
+  /** Build a map of 'YYYY-MM-DD' → [sessions]. */
+  function _sessionsByDate(sessions) {
+    const map = {};
+    for (const s of sessions) {
+      const ts = s.updatedAt || s.createdAt || s.savedAt;
+      if (!ts) continue;
+      const d = new Date(ts);
+      if (isNaN(d)) continue;
+      const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+      (map[key] = map[key] || []).push(s);
+    }
+    return map;
+  }
+
+  function _render() {
+    const grid = document.getElementById('calendar-grid');
+    const titleEl = document.getElementById('calendar-title');
+    const dayPanel = document.getElementById('calendar-day-sessions');
+    if (!grid || !titleEl) return;
+
+    const sessions = _allSessions();
+    const dateMap = _sessionsByDate(sessions);
+
+    const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    titleEl.textContent = months[viewMonth] + ' ' + viewYear;
+
+    const today = new Date();
+    const todayKey = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
+
+    const firstDay = new Date(viewYear, viewMonth, 1).getDay();
+    const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+    const daysInPrev = new Date(viewYear, viewMonth, 0).getDate();
+
+    let html = '';
+    const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    for (const dn of dayNames) html += `<div class="cal-head">${dn}</div>`;
+
+    for (let i = firstDay - 1; i >= 0; i--) {
+      html += `<div class="cal-day empty other-month">${daysInPrev - i}</div>`;
+    }
+
+    for (let d = 1; d <= daysInMonth; d++) {
+      const key = viewYear + '-' + String(viewMonth + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+      const cls = [];
+      if (key === todayKey) cls.push('today');
+      if (dateMap[key]) cls.push('has-sessions');
+      if (key === selectedDate) cls.push('selected');
+      html += `<div class="cal-day ${cls.join(' ')}" data-date="${key}">${d}</div>`;
+    }
+
+    const totalCells = firstDay + daysInMonth;
+    const remaining = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
+    for (let d = 1; d <= remaining; d++) {
+      html += `<div class="cal-day empty other-month">${d}</div>`;
+    }
+
+    grid.innerHTML = html;
+
+    grid.querySelectorAll('.cal-day:not(.empty)').forEach(el => {
+      el.addEventListener('click', () => {
+        const date = el.dataset.date;
+        if (!date) return;
+        selectedDate = date;
+        _render();
+        _renderDaySessions(dateMap[date] || []);
+      });
+    });
+
+    if (selectedDate && dateMap[selectedDate]) {
+      _renderDaySessions(dateMap[selectedDate]);
+    } else if (dayPanel) {
+      dayPanel.innerHTML = '<div class="cal-no-sessions">Click a day to see sessions</div>';
+    }
+  }
+
+  function _renderDaySessions(sessions) {
+    const dayPanel = document.getElementById('calendar-day-sessions');
+    if (!dayPanel) return;
+    if (!sessions.length) {
+      dayPanel.innerHTML = '<div class="cal-no-sessions">No sessions on this day</div>';
+      return;
+    }
+    sessions.sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0));
+    let html = '';
+    for (const s of sessions) {
+      const name = s.name || 'Untitled';
+      const msgCount = (s.messages || s.history || []).length;
+      const time = new Date(s.updatedAt || s.createdAt || 0);
+      const timeStr = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      html += `<div class="cal-session-item" data-sid="${s.id}">
+        <span class="cal-session-name">${name}</span>
+        <span class="cal-session-msgs">${timeStr} · ${msgCount} msgs</span>
+      </div>`;
+    }
+    dayPanel.innerHTML = html;
+
+    dayPanel.querySelectorAll('.cal-session-item').forEach(el => {
+      el.addEventListener('click', () => {
+        const sid = el.dataset.sid;
+        if (sid && typeof SessionManager !== 'undefined' && SessionManager.load) {
+          SessionManager.load(sid);
+          close();
+        }
+      });
+    });
+  }
+
+  function open() {
+    const now = new Date();
+    if (viewYear == null) { viewYear = now.getFullYear(); viewMonth = now.getMonth(); }
+    isOpen = true;
+    const panel = document.getElementById('calendar-panel');
+    const overlay = document.getElementById('calendar-overlay');
+    if (panel) panel.style.display = 'block';
+    if (overlay) overlay.style.display = 'block';
+    _render();
+  }
+
+  function close() {
+    isOpen = false;
+    const panel = document.getElementById('calendar-panel');
+    const overlay = document.getElementById('calendar-overlay');
+    if (panel) panel.style.display = 'none';
+    if (overlay) overlay.style.display = 'none';
+  }
+
+  function toggle() { isOpen ? close() : open(); }
+
+  function init() {
+    document.getElementById('calendar-prev')?.addEventListener('click', () => {
+      viewMonth--;
+      if (viewMonth < 0) { viewMonth = 11; viewYear--; }
+      selectedDate = null;
+      _render();
+    });
+    document.getElementById('calendar-next')?.addEventListener('click', () => {
+      viewMonth++;
+      if (viewMonth > 11) { viewMonth = 0; viewYear++; }
+      selectedDate = null;
+      _render();
+    });
+    document.getElementById('calendar-today-btn')?.addEventListener('click', () => {
+      const now = new Date();
+      viewYear = now.getFullYear(); viewMonth = now.getMonth();
+      selectedDate = null;
+      _render();
+    });
+    document.getElementById('calendar-close-btn')?.addEventListener('click', close);
+    document.getElementById('calendar-overlay')?.addEventListener('click', close);
+
+    document.addEventListener('keydown', (e) => {
+      if (e.altKey && e.key.toLowerCase() === 'c' && !e.ctrlKey && !e.shiftKey && !e.metaKey) {
+        e.preventDefault();
+        toggle();
+      }
+    });
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  return { open, close, toggle, init };
 })();
