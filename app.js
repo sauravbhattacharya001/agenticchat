@@ -26141,3 +26141,309 @@ const ReadabilityAnalyzer = (() => {
 
   return { init, toggle, analyzeText, analyzeConversation, refresh };
 })();
+
+/* ---------- Message Diff Viewer ---------- */
+/**
+ * Compare any two messages side-by-side with word-level diff highlighting.
+ * Useful for iterating on prompts or comparing assistant responses.
+ *
+ * Usage: Click the diff button (🔀) in the toolbar, then click two messages
+ * to compare. Additions are highlighted green, deletions red.
+ *
+ * Keyboard shortcut: Ctrl+Shift+D
+ *
+ * @namespace MessageDiffViewer
+ */
+const MessageDiffViewer = (() => {
+  let overlay = null;
+  let selecting = false;
+  let selectedIndices = [];
+  const STORAGE_KEY = 'messageDiffHistory';
+  const MAX_HISTORY = 20;
+
+  /** Simple word-level diff using LCS (longest common subsequence). */
+  function diffWords(textA, textB) {
+    const wordsA = textA.split(/(\s+)/);
+    const wordsB = textB.split(/(\s+)/);
+    const m = wordsA.length, n = wordsB.length;
+
+    // Build LCS table
+    const dp = Array.from({ length: m + 1 }, () => new Uint16Array(n + 1));
+    for (let i = 1; i <= m; i++) {
+      for (let j = 1; j <= n; j++) {
+        dp[i][j] = wordsA[i - 1] === wordsB[j - 1]
+          ? dp[i - 1][j - 1] + 1
+          : Math.max(dp[i - 1][j], dp[i][j - 1]);
+      }
+    }
+
+    // Backtrack to produce diff
+    const result = [];
+    let i = m, j = n;
+    while (i > 0 || j > 0) {
+      if (i > 0 && j > 0 && wordsA[i - 1] === wordsB[j - 1]) {
+        result.unshift({ type: 'equal', text: wordsA[i - 1] });
+        i--; j--;
+      } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+        result.unshift({ type: 'add', text: wordsB[j - 1] });
+        j--;
+      } else {
+        result.unshift({ type: 'del', text: wordsA[i - 1] });
+        i--;
+      }
+    }
+    return result;
+  }
+
+  /** Render diff tokens to HTML. */
+  function renderDiff(tokens) {
+    return tokens.map(t => {
+      if (t.type === 'add') return `<span style="background:#22543d;color:#68d391;text-decoration:none">${_escapeHtml(t.text)}</span>`;
+      if (t.type === 'del') return `<span style="background:#553333;color:#fc8181;text-decoration:line-through">${_escapeHtml(t.text)}</span>`;
+      return _escapeHtml(t.text);
+    }).join('');
+  }
+
+  /** Compute diff stats. */
+  function diffStats(tokens) {
+    let added = 0, removed = 0, unchanged = 0;
+    for (const t of tokens) {
+      // Only count non-whitespace tokens
+      if (t.text.trim() === '') continue;
+      if (t.type === 'add') added++;
+      else if (t.type === 'del') removed++;
+      else unchanged++;
+    }
+    return { added, removed, unchanged, similarity: unchanged ? Math.round(unchanged / (unchanged + added + removed) * 100) : 0 };
+  }
+
+  /** Get message text content from DOM by index. */
+  function getMessageText(index) {
+    const output = DOMCache ? DOMCache.get('chat-output') : document.getElementById('chat-output');
+    if (!output) return null;
+    const msgs = output.querySelectorAll('.chat-msg');
+    if (index < 0 || index >= msgs.length) return null;
+    return msgs[index].textContent.trim();
+  }
+
+  /** Get message role from DOM. */
+  function getMessageRole(index) {
+    const output = DOMCache ? DOMCache.get('chat-output') : document.getElementById('chat-output');
+    if (!output) return 'unknown';
+    const msgs = output.querySelectorAll('.chat-msg');
+    if (index < 0 || index >= msgs.length) return 'unknown';
+    const text = msgs[index].textContent || '';
+    return text.includes('You') ? 'user' : 'assistant';
+  }
+
+  /** Save diff to history. */
+  function saveDiffHistory(indexA, indexB, stats) {
+    try {
+      const hist = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+      hist.unshift({ indexA, indexB, stats, timestamp: Date.now() });
+      if (hist.length > MAX_HISTORY) hist.length = MAX_HISTORY;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(hist));
+    } catch (_) { /* ignore */ }
+  }
+
+  /** Start selection mode — user clicks two messages to compare. */
+  function startSelection() {
+    const output = DOMCache ? DOMCache.get('chat-output') : document.getElementById('chat-output');
+    if (!output) return;
+    const msgs = output.querySelectorAll('.chat-msg');
+    if (msgs.length < 2) { alert('Need at least 2 messages to compare.'); return; }
+
+    selecting = true;
+    selectedIndices = [];
+
+    // Add selection highlight styles
+    msgs.forEach((msg, idx) => {
+      msg.style.cursor = 'pointer';
+      msg.style.transition = 'outline 0.15s';
+      msg.dataset.diffIdx = idx;
+      msg.addEventListener('click', _onMsgClick);
+    });
+
+    // Show instruction banner
+    _showBanner('Click the first message to compare (1/2)');
+  }
+
+  function _onMsgClick(e) {
+    const msg = e.currentTarget;
+    const idx = parseInt(msg.dataset.diffIdx, 10);
+    if (isNaN(idx)) return;
+
+    selectedIndices.push(idx);
+    msg.style.outline = '2px solid #38bdf8';
+
+    if (selectedIndices.length === 1) {
+      _showBanner('Click the second message to compare (2/2) — or Esc to cancel');
+    } else if (selectedIndices.length >= 2) {
+      _endSelection();
+      showDiff(selectedIndices[0], selectedIndices[1]);
+    }
+  }
+
+  function _endSelection() {
+    selecting = false;
+    const output = DOMCache ? DOMCache.get('chat-output') : document.getElementById('chat-output');
+    if (output) {
+      output.querySelectorAll('.chat-msg').forEach(msg => {
+        msg.style.cursor = '';
+        msg.style.outline = '';
+        msg.removeEventListener('click', _onMsgClick);
+        delete msg.dataset.diffIdx;
+      });
+    }
+    _hideBanner();
+  }
+
+  function _showBanner(text) {
+    let banner = document.getElementById('diff-banner');
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.id = 'diff-banner';
+      banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:10001;background:#1e3a5f;color:#fff;text-align:center;padding:10px 16px;font-size:14px;box-shadow:0 2px 8px rgba(0,0,0,0.3)';
+      document.body.appendChild(banner);
+    }
+    banner.textContent = text;
+    banner.style.display = 'block';
+  }
+
+  function _hideBanner() {
+    const banner = document.getElementById('diff-banner');
+    if (banner) banner.style.display = 'none';
+  }
+
+  /** Show the diff overlay for two message indices. */
+  function showDiff(indexA, indexB) {
+    const textA = getMessageText(indexA);
+    const textB = getMessageText(indexB);
+    if (textA == null || textB == null) { alert('Could not read messages.'); return; }
+
+    const roleA = getMessageRole(indexA);
+    const roleB = getMessageRole(indexB);
+    const tokens = diffWords(textA, textB);
+    const stats = diffStats(tokens);
+    saveDiffHistory(indexA, indexB, stats);
+
+    // Build overlay
+    if (overlay) overlay.remove();
+    overlay = document.createElement('div');
+    overlay.id = 'diff-viewer-overlay';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;padding:20px';
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+
+    const panel = document.createElement('div');
+    panel.style.cssText = 'background:#1a1a2e;border:1px solid #333;border-radius:12px;width:90vw;max-width:900px;max-height:85vh;display:flex;flex-direction:column;overflow:hidden';
+
+    // Header
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid #333';
+    header.innerHTML = `
+      <div>
+        <span style="font-size:18px;font-weight:600">🔀 Message Diff</span>
+        <span style="font-size:13px;color:#888;margin-left:12px">
+          Message #${indexA + 1} (${roleA}) → #${indexB + 1} (${roleB})
+        </span>
+      </div>
+      <button id="diff-close-btn" style="background:none;border:none;color:#aaa;font-size:20px;cursor:pointer" title="Close (Esc)">✕</button>
+    `;
+
+    // Stats bar
+    const statsBar = document.createElement('div');
+    statsBar.style.cssText = 'display:flex;gap:16px;padding:10px 20px;background:#111;font-size:13px;color:#aaa;border-bottom:1px solid #333';
+    statsBar.innerHTML = `
+      <span style="color:#68d391">+${stats.added} added</span>
+      <span style="color:#fc8181">−${stats.removed} removed</span>
+      <span>${stats.unchanged} unchanged</span>
+      <span style="color:#63b3ed">${stats.similarity}% similar</span>
+    `;
+
+    // Tabs: unified / side-by-side
+    const tabs = document.createElement('div');
+    tabs.style.cssText = 'display:flex;gap:0;border-bottom:1px solid #333';
+    tabs.innerHTML = `
+      <button class="diff-tab active" data-view="unified" style="flex:1;padding:8px;background:#1a1a2e;border:none;border-bottom:2px solid #38bdf8;color:#fff;cursor:pointer;font-size:13px">Unified</button>
+      <button class="diff-tab" data-view="sidebyside" style="flex:1;padding:8px;background:#1a1a2e;border:none;border-bottom:2px solid transparent;color:#888;cursor:pointer;font-size:13px">Side by Side</button>
+    `;
+
+    // Content area
+    const content = document.createElement('div');
+    content.style.cssText = 'flex:1;overflow-y:auto;padding:20px';
+
+    function renderUnified() {
+      content.innerHTML = `<div style="white-space:pre-wrap;line-height:1.8;font-size:14px;font-family:ui-monospace,'Cascadia Code',monospace">${renderDiff(tokens)}</div>`;
+    }
+
+    function renderSideBySide() {
+      content.innerHTML = `
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+          <div>
+            <div style="font-size:12px;color:#888;margin-bottom:8px;text-transform:uppercase">Message #${indexA + 1} (${roleA})</div>
+            <div style="white-space:pre-wrap;line-height:1.6;font-size:13px;background:#111;padding:12px;border-radius:8px;border:1px solid #333;max-height:50vh;overflow-y:auto">${_escapeHtml(textA)}</div>
+          </div>
+          <div>
+            <div style="font-size:12px;color:#888;margin-bottom:8px;text-transform:uppercase">Message #${indexB + 1} (${roleB})</div>
+            <div style="white-space:pre-wrap;line-height:1.6;font-size:13px;background:#111;padding:12px;border-radius:8px;border:1px solid #333;max-height:50vh;overflow-y:auto">${_escapeHtml(textB)}</div>
+          </div>
+        </div>
+      `;
+    }
+
+    renderUnified();
+
+    tabs.addEventListener('click', e => {
+      const btn = e.target.closest('.diff-tab');
+      if (!btn) return;
+      tabs.querySelectorAll('.diff-tab').forEach(t => {
+        t.style.borderBottomColor = 'transparent';
+        t.style.color = '#888';
+        t.classList.remove('active');
+      });
+      btn.style.borderBottomColor = '#38bdf8';
+      btn.style.color = '#fff';
+      btn.classList.add('active');
+      if (btn.dataset.view === 'unified') renderUnified();
+      else renderSideBySide();
+    });
+
+    panel.appendChild(header);
+    panel.appendChild(statsBar);
+    panel.appendChild(tabs);
+    panel.appendChild(content);
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+
+    // Close button
+    header.querySelector('#diff-close-btn').addEventListener('click', close);
+  }
+
+  function close() {
+    if (overlay) { overlay.remove(); overlay = null; }
+  }
+
+  function toggle() {
+    if (overlay) { close(); return; }
+    startSelection();
+  }
+
+  function init() {
+    // Keyboard shortcut: Ctrl+Shift+D
+    document.addEventListener('keydown', e => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'D') {
+        e.preventDefault();
+        toggle();
+      }
+      // Esc to cancel selection or close overlay
+      if (e.key === 'Escape') {
+        if (selecting) _endSelection();
+        else if (overlay) close();
+      }
+    });
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  return { init, toggle, showDiff, close, startSelection };
+})();
