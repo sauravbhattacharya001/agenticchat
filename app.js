@@ -27243,3 +27243,144 @@ const SessionCalendar = (() => {
 
   return { open, close, toggle, init };
 })();
+
+/* ============================================================
+ *  WordCloudGenerator  (Alt+W)
+ *  Generates a visual word cloud from conversation messages
+ *  using HTML5 Canvas. No external dependencies.
+ * ============================================================ */
+const WordCloudGenerator = (() => {
+  let isOpen = false;
+  const STOP_WORDS = new Set([
+    'the','be','to','of','and','a','in','that','have','i','it','for','not','on','with',
+    'he','as','you','do','at','this','but','his','by','from','they','we','her','she',
+    'or','an','will','my','one','all','would','there','their','what','so','up','out',
+    'if','about','who','get','which','go','me','when','make','can','like','time','no',
+    'just','him','know','take','people','into','year','your','good','some','could',
+    'them','see','other','than','then','now','look','only','come','its','over','think',
+    'also','back','after','use','two','how','our','work','first','well','way','even',
+    'new','want','because','any','these','give','day','most','us','is','are','was',
+    'were','been','has','had','did','does','am','been','being','here','very','much',
+    'more','may','should','each','said','such','still','own','may','might','shall',
+    'else','let','say','too','where','why','how','same','got','did','had','sure',
+    'yes','no','ok','okay','yeah','oh','ah','um','uh','well','right','dont','im',
+    'youre','hes','shes','its','were','theyre','wont','cant','isnt','arent','wasnt',
+    'werent','hasnt','havent','hadnt','doesnt','didnt','thats','whats','whos',
+    'wheres','whens','hows','been','would','could','should','must'
+  ]);
+
+  function _extractWords(source) {
+    const messages = (typeof ConversationManager !== 'undefined' && ConversationManager.getHistory)
+      ? ConversationManager.getHistory() : [];
+    const filtered = messages.filter(m => {
+      if (source === 'user') return m.role === 'user';
+      if (source === 'assistant') return m.role === 'assistant';
+      return m.role === 'user' || m.role === 'assistant';
+    });
+    const text = filtered.map(m => m.content || '').join(' ');
+    const words = text.toLowerCase().replace(/[^a-z0-9\s'-]/g, ' ').split(/\s+/).filter(w => w.length > 2 && !STOP_WORDS.has(w));
+    const freq = {};
+    words.forEach(w => { freq[w] = (freq[w] || 0) + 1; });
+    return Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 80);
+  }
+
+  function _render() {
+    const canvas = document.getElementById('wordcloud-canvas');
+    const emptyEl = document.getElementById('wordcloud-empty');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const source = document.getElementById('wordcloud-source')?.value || 'all';
+    const words = _extractWords(source);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (words.length === 0) {
+      canvas.style.display = 'none';
+      if (emptyEl) emptyEl.style.display = '';
+      return;
+    }
+    canvas.style.display = '';
+    if (emptyEl) emptyEl.style.display = 'none';
+
+    const maxFreq = words[0][1];
+    const minSize = 12, maxSize = 56;
+    const colors = ['#FF6B6B','#4ECDC4','#45B7D1','#96CEB4','#FFEAA7','#DDA0DD','#98D8C8','#F7DC6F','#BB8FCE','#85C1E9','#F0B27A','#82E0AA'];
+    const isDark = !document.body.classList.contains('light');
+    const placed = [];
+
+    words.forEach(([word, freq], idx) => {
+      const size = Math.max(minSize, Math.round((freq / maxFreq) * maxSize));
+      const color = isDark ? colors[idx % colors.length] : colors[(idx + 3) % colors.length];
+      ctx.font = `bold ${size}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+      const metrics = ctx.measureText(word);
+      const w = metrics.width + 4;
+      const h = size + 4;
+
+      let bestX = canvas.width / 2, bestY = canvas.height / 2;
+      let foundSpot = false;
+      // Spiral placement
+      for (let r = 0; r < 300 && !foundSpot; r += 2) {
+        for (let a = 0; a < 360 && !foundSpot; a += 15) {
+          const rad = (a * Math.PI) / 180;
+          const x = canvas.width / 2 + r * Math.cos(rad) - w / 2;
+          const y = canvas.height / 2 + r * Math.sin(rad) + h / 4;
+          if (x < 5 || y < 5 || x + w > canvas.width - 5 || y > canvas.height - 5 || y - h < 0) continue;
+          const overlap = placed.some(p => !(x + w < p.x || x > p.x + p.w || y - h > p.y || y < p.y - p.h));
+          if (!overlap) {
+            bestX = x; bestY = y; foundSpot = true;
+          }
+        }
+      }
+      if (foundSpot) {
+        ctx.fillStyle = color;
+        ctx.font = `bold ${size}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+        ctx.fillText(word, bestX, bestY);
+        placed.push({ x: bestX, y: bestY, w, h });
+      }
+    });
+  }
+
+  function open() {
+    isOpen = true;
+    const panel = document.getElementById('wordcloud-panel');
+    const overlay = document.getElementById('wordcloud-overlay');
+    if (panel) panel.style.display = '';
+    if (overlay) overlay.style.display = '';
+    _render();
+  }
+
+  function close() {
+    isOpen = false;
+    const panel = document.getElementById('wordcloud-panel');
+    const overlay = document.getElementById('wordcloud-overlay');
+    if (panel) panel.style.display = 'none';
+    if (overlay) overlay.style.display = 'none';
+  }
+
+  function toggle() { isOpen ? close() : open(); }
+
+  function download() {
+    const canvas = document.getElementById('wordcloud-canvas');
+    if (!canvas) return;
+    const a = document.createElement('a');
+    a.download = 'word-cloud.png';
+    a.href = canvas.toDataURL('image/png');
+    a.click();
+  }
+
+  function init() {
+    document.getElementById('wordcloud-close')?.addEventListener('click', close);
+    document.getElementById('wordcloud-overlay')?.addEventListener('click', close);
+    document.getElementById('wordcloud-refresh')?.addEventListener('click', _render);
+    document.getElementById('wordcloud-download')?.addEventListener('click', download);
+    document.getElementById('wordcloud-source')?.addEventListener('change', _render);
+    document.addEventListener('keydown', (e) => {
+      if (e.altKey && e.key.toLowerCase() === 'w' && !e.ctrlKey && !e.shiftKey && !e.metaKey) {
+        e.preventDefault();
+        toggle();
+      }
+    });
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  return { open, close, toggle, init };
+})();

@@ -77,6 +77,7 @@
     <button id="diff-btn" class="btn-secondary" title="Message Diff — compare two messages side by side (Ctrl+Shift+D)" onclick="MessageDiffViewer.toggle()">🔀</button>
     <button id="length-preset-btn" class="btn-secondary" title="Response Length — control AI response verbosity (Alt+L)" onclick="ResponseLengthPresets.toggle()">📏 <span id="length-label">Normal</span></button>
     <button id="calendar-btn" class="btn-secondary" title="Session Calendar — browse sessions by date (Alt+C)" onclick="SessionCalendar.toggle()">📅</button>
+    <button id="wordcloud-btn" class="btn-secondary" title="Word Cloud — visualize conversation keywords (Alt+W)" onclick="WordCloudGenerator.toggle()">☁️</button>
     <button id="preferences-btn" class="btn-secondary" title="Preferences — configure app settings (Ctrl+,)">⚙️</button>
   </div>
 
@@ -469,5 +470,24 @@
   </div>
 
   <script src="app.js"></script>
+  <!-- Word Cloud Generator Panel -->
+  <div id="wordcloud-overlay" class="modal-overlay" style="display:none"></div>
+  <div id="wordcloud-panel" class="wordcloud-panel" style="display:none;" aria-label="Word cloud generator">
+    <div class="wordcloud-header">
+      <span class="wordcloud-title">☁️ Word Cloud</span>
+      <div class="wordcloud-controls">
+        <select id="wordcloud-source" title="Source">
+          <option value="all">All messages</option>
+          <option value="user">My messages</option>
+          <option value="assistant">AI messages</option>
+        </select>
+        <button id="wordcloud-refresh" class="btn-sm" title="Regenerate">🔄</button>
+        <button id="wordcloud-download" class="btn-sm" title="Download as PNG">💾</button>
+        <button id="wordcloud-close" class="btn-sm" title="Close">✕</button>
+      </div>
+    </div>
+    <canvas id="wordcloud-canvas" width="700" height="420"></canvas>
+    <div id="wordcloud-empty" style="display:none;padding:2rem;text-align:center;color:var(--text-secondary);">No conversation data yet. Start chatting to generate a word cloud!</div>
+  </div>
 </body>
 </html>
