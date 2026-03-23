@@ -4035,7 +4035,7 @@ const SessionManager = (() => {
   function _getPinnedIds() {
     try {
       const raw = SafeStorage.get(PINNED_KEY);
-      return raw ? new Set(JSON.parse(raw)) : new Set();
+      return raw ? new Set(sanitizeStorageObject(JSON.parse(raw))) : new Set();
     } catch { return new Set(); }
   }
 
@@ -10663,7 +10663,7 @@ const ConversationChapters = (() => {
 
   function importChapters(json) {
     try {
-      var arr = typeof json === 'string' ? JSON.parse(json) : json;
+      var arr = typeof json === 'string' ? sanitizeStorageObject(JSON.parse(json)) : json;
       if (!Array.isArray(arr)) return 0;
       var imported = 0;
       for (var j = 0; j < arr.length; j++) {
@@ -18803,7 +18803,7 @@ const ChatGPTImporter = (() => {
   function importFromJSON(jsonString) {
     let data;
     try {
-      data = JSON.parse(jsonString);
+      data = sanitizeStorageObject(JSON.parse(jsonString));
     } catch (_) {
       throw new Error('Invalid JSON file');
     }
@@ -26280,7 +26280,7 @@ const MessageDiffViewer = (() => {
   /** Save diff to history. */
   function saveDiffHistory(indexA, indexB, stats) {
     try {
-      const hist = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+      const hist = sanitizeStorageObject(JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'));
       hist.unshift({ indexA, indexB, stats, timestamp: Date.now() });
       if (hist.length > MAX_HISTORY) hist.length = MAX_HISTORY;
       localStorage.setItem(STORAGE_KEY, JSON.stringify(hist));
@@ -26516,7 +26516,7 @@ const ToneAdjuster = (() => {
   let _activePicker = null;
 
   function _loadCache() {
-    try { _cache = JSON.parse(localStorage.getItem(CACHE_KEY)) || {}; } catch (_) { _cache = {}; }
+    try { _cache = sanitizeStorageObject(JSON.parse(localStorage.getItem(CACHE_KEY)) || {}); } catch (_) { _cache = {}; }
   }
   function _saveCache() {
     try { localStorage.setItem(CACHE_KEY, JSON.stringify(_cache)); } catch (_) {}
@@ -26969,7 +26969,7 @@ const SessionArchive = (() => {
   function _load() {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
-      return raw ? new Set(JSON.parse(raw)) : new Set();
+      return raw ? new Set(sanitizeStorageObject(JSON.parse(raw))) : new Set();
     } catch { return new Set(); }
   }
 
@@ -27077,7 +27077,7 @@ const SessionCalendar = (() => {
   function _allSessions() {
     try {
       const raw = SafeStorage.get('agenticchat_sessions');
-      return raw ? JSON.parse(raw) : [];
+      return raw ? sanitizeStorageObject(JSON.parse(raw)) : [];
     } catch { return []; }
   }
 
