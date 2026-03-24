@@ -249,6 +249,85 @@ Always \`return\` the final value.
   return _cfg;
 })();
 
+/* ============================================================
+ * OpenAIClient - shared OpenAI API fetch helper.
+ *
+ * Centralizes the repeated pattern of calling the OpenAI chat
+ * completions endpoint. Every module that needs a one-shot
+ * (non-streaming) completion can use this instead of inlining
+ * its own fetch + error handling + response parsing.
+ *
+ * @namespace OpenAIClient
+ * ============================================================ */
+const OpenAIClient = (() => {
+  const ENDPOINT = 'https://api.openai.com/v1/chat/completions';
+
+  /**
+   * Resolve an API key from the available sources.
+   * @returns {string|null}
+   */
+  function _resolveKey() {
+    if (typeof ApiKeyManager !== 'undefined' && ApiKeyManager.getKey) {
+      return ApiKeyManager.getKey();
+    }
+    return SafeStorage.get('ac-api-key');
+  }
+
+  /**
+   * Send a non-streaming chat completion request to OpenAI.
+   *
+   * @param {Object} opts
+   * @param {Array<{role: string, content: string}>} opts.messages - Conversation messages.
+   * @param {string}  [opts.model]       - Model id (defaults to ChatConfig.MODEL).
+   * @param {number}  [opts.maxTokens]   - Max tokens (defaults to ChatConfig.MAX_TOKENS_RESPONSE).
+   * @param {number}  [opts.temperature] - Sampling temperature (omitted if undefined).
+   * @param {string}  [opts.apiKey]      - Explicit key (auto-resolved if omitted).
+   * @param {AbortSignal} [opts.signal]  - Optional abort signal.
+   * @returns {Promise<{ok: boolean, content?: string, usage?: Object, data?: Object, error?: string, status?: number}>}
+   */
+  async function complete(opts) {
+    const key = opts.apiKey || _resolveKey();
+    if (!key) {
+      return { ok: false, error: 'No API key configured. Set your OpenAI key first.' };
+    }
+
+    const model = opts.model || (typeof ChatConfig !== 'undefined' ? ChatConfig.MODEL : 'gpt-4o-mini');
+    const body = {
+      model,
+      messages: opts.messages,
+      max_tokens: opts.maxTokens || (typeof ChatConfig !== 'undefined' ? ChatConfig.MAX_TOKENS_RESPONSE : 4096)
+    };
+    if (typeof opts.temperature === 'number') {
+      body.temperature = opts.temperature;
+    }
+
+    const fetchOpts = {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${key}`
+      },
+      body: JSON.stringify(body)
+    };
+    if (opts.signal) fetchOpts.signal = opts.signal;
+
+    const rsp = await fetch(ENDPOINT, fetchOpts);
+    if (!rsp.ok) {
+      const errBody = await rsp.json().catch(() => ({}));
+      const errMsg = errBody?.error?.message || `HTTP ${rsp.status}`;
+      return { ok: false, error: errMsg, status: rsp.status };
+    }
+
+    const data = await rsp.json();
+    const choice = data.choices && data.choices[0];
+    const content = choice ? (choice.message ? choice.message.content : '') : '';
+
+    return { ok: true, content, usage: data.usage || null, data };
+  }
+
+  return { complete, _resolveKey, ENDPOINT };
+})();
+
 /* ---------- Shared Utilities ---------- */
 
 /** Format an ISO timestamp as relative time (e.g. "2h ago", "3d ago"). */
@@ -14802,34 +14881,24 @@ const MessageTranslator = (() => {
     }
 
     try {
-      var rsp = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + key
-        },
-        body: JSON.stringify({
-          model: ChatConfig.MODEL,
-          messages: [
-            { role: 'system', content: 'You are a translator. Translate the following text to ' + langName + '. Return ONLY the translation, nothing else. Preserve formatting, code blocks, and markdown.' },
-            { role: 'user', content: content }
-          ],
-          max_tokens: 4096,
-          temperature: 0.3
-        })
+      var result = await OpenAIClient.complete({
+        apiKey: key,
+        messages: [
+          { role: 'system', content: 'You are a translator. Translate the following text to ' + langName + '. Return ONLY the translation, nothing else. Preserve formatting, code blocks, and markdown.' },
+          { role: 'user', content: content }
+        ],
+        maxTokens: 4096,
+        temperature: 0.3
       });
 
       removeLoading(msgIndex);
 
-      if (!rsp.ok) {
-        var errData = await rsp.json().catch(function () { return {}; });
-        alert('Translation failed: ' + (errData.error ? errData.error.message : rsp.statusText));
+      if (!result.ok) {
+        alert('Translation failed: ' + result.error);
         return;
       }
 
-      var data = await rsp.json();
-      var translation = data.choices && data.choices[0] && data.choices[0].message
-        ? data.choices[0].message.content : '';
+      var translation = result.content || '';
 
       if (!translation) {
         alert('No translation returned.');
@@ -15106,33 +15175,20 @@ const ModelCompare = (() => {
       throw new Error('API key not configured');
     }
 
-    const body = {
+    const result = await OpenAIClient.complete({
+      apiKey,
       model: modelId,
-      messages: messages
-    };
-    if (typeof temperature === 'number') {
-      body.temperature = temperature;
-    }
-
-    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + apiKey
-      },
-      body: JSON.stringify(body)
+      messages,
+      temperature
     });
 
-    if (!resp.ok) {
-      const errText = await resp.text().catch(function () { return ''; });
-      throw new Error('HTTP ' + resp.status + ': ' + errText.slice(0, 200));
+    if (!result.ok) {
+      throw new Error(result.error);
     }
 
-    const data = await resp.json();
-    const choice = data.choices && data.choices[0];
     return {
-      content: choice ? (choice.message ? choice.message.content : '') : '',
-      tokens: data.usage || null
+      content: result.content,
+      tokens: result.usage
     };
   }
 
@@ -25261,20 +25317,12 @@ const PromptABTester = (() => {
       { role: 'user', content: prompt }
     ];
     const start = performance.now();
-    const rsp = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
-      body: JSON.stringify({ model, messages, max_tokens: ChatConfig.MAX_TOKENS_RESPONSE })
-    });
+    const result = await OpenAIClient.complete({ apiKey: key, model, messages });
     const elapsed = Math.round(performance.now() - start);
-    if (!rsp.ok) {
-      const body = await rsp.json().catch(() => ({}));
-      return { ok: false, error: body?.error?.message || `HTTP ${rsp.status}`, elapsed };
+    if (!result.ok) {
+      return { ok: false, error: result.error, elapsed };
     }
-    const data = await rsp.json();
-    const text = data.choices?.[0]?.message?.content || '(empty response)';
-    const tokens = data.usage || {};
-    return { ok: true, text, tokens, elapsed };
+    return { ok: true, text: result.content || '(empty response)', tokens: result.usage || {}, elapsed };
   }
 
   async function _run() {
@@ -26543,46 +26591,30 @@ const ToneAdjuster = (() => {
     const key = _cacheKey(text, tone.id);
     if (_cache[key]) return _cache[key];
 
-    const apiKey = typeof ApiKeyManager !== 'undefined' ? ApiKeyManager.getKey() : null;
-    if (!apiKey) {
-      throw new Error('No API key configured. Set your OpenAI key first.');
-    }
-
-    const model = typeof ChatConfig !== 'undefined' ? ChatConfig.MODEL : 'gpt-4o-mini';
-    const rsp = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: 'system', content: tone.prompt },
-          { role: 'user', content: text }
-        ],
-        max_tokens: 2048
-      })
+    const result = await OpenAIClient.complete({
+      messages: [
+        { role: 'system', content: tone.prompt },
+        { role: 'user', content: text }
+      ],
+      maxTokens: 2048
     });
 
-    if (!rsp.ok) {
-      const err = await rsp.json().catch(() => ({}));
-      throw new Error(err?.error?.message || `API error ${rsp.status}`);
+    if (!result.ok) {
+      throw new Error(result.error);
     }
 
-    const data = await rsp.json();
-    const result = data.choices?.[0]?.message?.content || text;
+    const adjusted = result.content || text;
 
     // Cache the result
-    _cache[key] = result;
+    _cache[key] = adjusted;
     _saveCache();
 
     // Track cost if CostDashboard is available
-    if (typeof CostDashboard !== 'undefined' && data.usage) {
-      CostDashboard.trackUsage(data.usage);
+    if (typeof CostDashboard !== 'undefined' && result.usage) {
+      CostDashboard.trackUsage(result.usage);
     }
 
-    return result;
+    return adjusted;
   }
 
   /**
