@@ -302,6 +302,60 @@ function sanitizeStorageObject(obj) {
   return clean;
 }
 
+/* ---------- Shared Modal Overlay Helper ---------- */
+/**
+ * Create a modal overlay + panel pair used throughout the app.
+ * Returns { overlay, panel, close } where close() removes both from the DOM.
+ *
+ * @param {Object}  opts
+ * @param {string}  [opts.overlayId]        - id attribute for the overlay element
+ * @param {string}  [opts.overlayClass]     - CSS class(es) for the overlay
+ * @param {string}  [opts.panelId]          - id attribute for the panel element
+ * @param {string}  [opts.panelClass]       - CSS class(es) for the panel
+ * @param {string}  [opts.overlayStyle]     - inline style override for overlay
+ * @param {string}  [opts.panelStyle]       - inline style override for panel
+ * @param {Function} [opts.onClose]         - callback invoked after removal
+ * @param {boolean} [opts.closeOnOverlayClick=true] - click overlay to close
+ * @param {boolean} [opts.appendToBody=true] - auto-append to document.body
+ */
+function createModalOverlay(opts = {}) {
+  const overlay = document.createElement('div');
+  if (opts.overlayId) overlay.id = opts.overlayId;
+  if (opts.overlayClass) overlay.className = opts.overlayClass;
+  if (opts.overlayStyle) {
+    overlay.style.cssText = opts.overlayStyle;
+  } else {
+    overlay.style.cssText =
+      'position:fixed;top:0;left:0;width:100%;height:100%;' +
+      'background:rgba(0,0,0,0.5);z-index:10000;display:flex;' +
+      'align-items:center;justify-content:center;';
+  }
+
+  const panel = document.createElement('div');
+  if (opts.panelId) panel.id = opts.panelId;
+  if (opts.panelClass) panel.className = opts.panelClass;
+  if (opts.panelStyle) panel.style.cssText = opts.panelStyle;
+
+  overlay.appendChild(panel);
+
+  function close() {
+    overlay.remove();
+    if (typeof opts.onClose === 'function') opts.onClose();
+  }
+
+  if (opts.closeOnOverlayClick !== false) {
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) close();
+    });
+  }
+
+  if (opts.appendToBody !== false) {
+    document.body.appendChild(overlay);
+  }
+
+  return { overlay, panel, close };
+}
+
 /* ---------- Shared HTML Escape ---------- */
 /**
  * Escape HTML special characters to prevent XSS in rendered content.
@@ -11514,18 +11568,13 @@ const ConversationTags = (() => {
     const existing = DOMCache.get('tag-manager-overlay');
     if (existing) existing.remove();
 
-    const overlay = document.createElement('div');
-    overlay.id = 'tag-manager-overlay';
-    overlay.style.cssText =
-      'position:fixed;top:0;left:0;width:100%;height:100%;' +
-      'background:rgba(0,0,0,0.5);z-index:10000;display:flex;' +
-      'align-items:center;justify-content:center;';
-
-    const modal = document.createElement('div');
-    modal.style.cssText =
-      'background:var(--bg, #1a1a2e);color:var(--fg, #e0e0e0);' +
-      'border-radius:12px;padding:24px;max-width:400px;width:90%;' +
-      'max-height:70vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.3);';
+    const { overlay, panel: modal, close: closeTagMgr } = createModalOverlay({
+      overlayId: 'tag-manager-overlay',
+      panelStyle:
+        'background:var(--bg, #1a1a2e);color:var(--fg, #e0e0e0);' +
+        'border-radius:12px;padding:24px;max-width:400px;width:90%;' +
+        'max-height:70vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.3);',
+    });
 
     const title = document.createElement('h3');
     title.textContent = '🏷️ Manage Tags';
@@ -11639,15 +11688,8 @@ const ConversationTags = (() => {
       'display:block;margin:16px auto 0;padding:8px 24px;border-radius:8px;' +
       'border:1px solid #555;background:transparent;color:inherit;' +
       'cursor:pointer;font-size:14px;';
-    closeBtn.addEventListener('click', () => overlay.remove());
+    closeBtn.addEventListener('click', closeTagMgr);
     modal.appendChild(closeBtn);
-
-    overlay.appendChild(modal);
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) overlay.remove();
-    });
-
-    document.body.appendChild(overlay);
 
     // Escape to close
     const onKey = (e) => {
@@ -12577,21 +12619,15 @@ const AutoTagger = (() => {
   function showSuggestionModal(sessionId) {
     const suggestions = suggestForSession(sessionId);
 
-    // Create overlay
-    const overlay = document.createElement('div');
-    overlay.style.cssText =
-      'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:10100;' +
-      'display:flex;align-items:center;justify-content:center;';
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) overlay.remove();
+    const { overlay, panel: modal, close: closeSuggestion } = createModalOverlay({
+      overlayStyle:
+        'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:10100;' +
+        'display:flex;align-items:center;justify-content:center;',
+      panelStyle:
+        'background:#1e1e2e;border:1px solid #444;border-radius:12px;' +
+        'padding:24px;max-width:420px;width:90%;color:#e0e0e0;' +
+        'box-shadow:0 8px 32px rgba(0,0,0,0.5);',
     });
-
-    // Modal container
-    const modal = document.createElement('div');
-    modal.style.cssText =
-      'background:#1e1e2e;border:1px solid #444;border-radius:12px;' +
-      'padding:24px;max-width:420px;width:90%;color:#e0e0e0;' +
-      'box-shadow:0 8px 32px rgba(0,0,0,0.5);';
 
     // Title
     const title = document.createElement('h3');
@@ -12704,9 +12740,6 @@ const AutoTagger = (() => {
       closeBtn.addEventListener('click', () => overlay.remove());
       modal.appendChild(closeBtn);
     }
-
-    overlay.appendChild(modal);
-    document.body.appendChild(overlay);
   }
 
   /* ── Public API ──────────────────────────────────────────── */
@@ -13054,21 +13087,17 @@ const DataBackup = (() => {
     var existing = DOMCache.get('backup-modal-overlay');
     if (existing) existing.remove();
 
-    var overlay = document.createElement('div');
-    overlay.id = 'backup-modal-overlay';
-    overlay.style.cssText =
-      'position:fixed;top:0;left:0;width:100%;height:100%;' +
-      'background:rgba(0,0,0,0.6);z-index:10000;display:flex;' +
-      'align-items:center;justify-content:center;';
-    overlay.addEventListener('click', function (e) {
-      if (e.target === overlay) overlay.remove();
+    var { overlay, panel: modal, close: closeBackup } = createModalOverlay({
+      overlayId: 'backup-modal-overlay',
+      overlayStyle:
+        'position:fixed;top:0;left:0;width:100%;height:100%;' +
+        'background:rgba(0,0,0,0.6);z-index:10000;display:flex;' +
+        'align-items:center;justify-content:center;',
+      panelStyle:
+        'background:#1e1e2e;color:#cdd6f4;border-radius:12px;padding:24px;' +
+        'max-width:440px;width:90%;max-height:80vh;overflow-y:auto;' +
+        'box-shadow:0 8px 32px rgba(0,0,0,0.5);',
     });
-
-    var modal = document.createElement('div');
-    modal.style.cssText =
-      'background:#1e1e2e;color:#cdd6f4;border-radius:12px;padding:24px;' +
-      'max-width:440px;width:90%;max-height:80vh;overflow-y:auto;' +
-      'box-shadow:0 8px 32px rgba(0,0,0,0.5);';
 
     var title = document.createElement('h3');
     title.textContent = '\uD83D\uDCBE Backup & Restore';
@@ -13193,9 +13222,6 @@ const DataBackup = (() => {
       'border:1px solid #555;background:transparent;color:inherit;cursor:pointer;font-size:13px;';
     closeBtn.addEventListener('click', function () { overlay.remove(); });
     modal.appendChild(closeBtn);
-
-    overlay.appendChild(modal);
-    document.body.appendChild(overlay);
   }
 
   return {
