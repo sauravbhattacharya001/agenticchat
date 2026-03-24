@@ -4115,6 +4115,15 @@ const SessionManager = (() => {
     if (isOpen) refresh();
   }
 
+  /**
+   * Return the raw cached sessions array without sorting or filtering.
+   * Used by search paths that don't need presentation order, avoiding
+   * the overhead of sort + localeCompare + pinned-set lookups.
+   */
+  function getAllUnsorted() {
+    return _loadAll().slice();
+  }
+
   function getAll() {
     const pinned = _getPinnedIds();
     const sortMode = _getSortMode();
@@ -4832,7 +4841,7 @@ const SessionManager = (() => {
   }
 
   return {
-    getAll, getCount, save, load, remove, rename, duplicate,
+    getAll, getAllUnsorted, getCount, save, load, remove, rename, duplicate,
     newSession, exportSession, importSession, clearAll,
     isAutoSaveEnabled, toggleAutoSave, autoSaveIfEnabled, initAutoSave,
     isPinned, togglePin, setSortMode, setSearchQuery,
@@ -11782,18 +11791,17 @@ const GlobalSessionSearch = (() => {
     const filterAssistant = DOMCache.get('gs-filter-assistant')?.checked ?? true;
     const caseSensitive = DOMCache.get('gs-filter-case')?.checked ?? false;
 
-    const sessions = SessionManager.getAll();
+    const sessions = SessionManager.getAllUnsorted();
     if (sessions.length === 0) {
-      _setStatus('No saved sessions to search');
-      return;
-    }
 
     const results = []; // { session, matches: [{ role, content, index }] }
     let totalMatches = 0;
+    const MAX_TOTAL_RESULTS = 100;
 
     const lowerQuery = caseSensitive ? query : query.toLowerCase();
 
     for (const session of sessions) {
+      if (totalMatches >= MAX_TOTAL_RESULTS) break;
       if (!session.messages || !Array.isArray(session.messages)) continue;
       const matches = [];
 
@@ -11816,6 +11824,7 @@ const GlobalSessionSearch = (() => {
       }
     }
 
+    const capped = totalMatches >= MAX_TOTAL_RESULTS;
     if (totalMatches === 0) {
       _setStatus(`No matches for "${query}"`);
       const container = DOMCache.get('global-search-results');
@@ -11828,7 +11837,7 @@ const GlobalSessionSearch = (() => {
       return;
     }
 
-    _setStatus(`${totalMatches} match${totalMatches !== 1 ? 'es' : ''} in ${results.length} session${results.length !== 1 ? 's' : ''}`);
+    _setStatus(`${totalMatches}${capped ? '+' : ''} match${totalMatches !== 1 ? 'es' : ''} in ${results.length} session${results.length !== 1 ? 's' : ''}${capped ? ' (showing first ' + MAX_TOTAL_RESULTS + ')' : ''}`);
     _renderResults(results, query, caseSensitive);
   }
 
