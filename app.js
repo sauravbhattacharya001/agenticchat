@@ -27384,3 +27384,205 @@ const WordCloudGenerator = (() => {
 
   return { open, close, toggle, init };
 })();
+
+// ── Pin Board ──────────────────────────────────────────────────
+const PinBoard = (() => {
+  const STORAGE_KEY = 'agenticchat_pinboard';
+  let isOpen = false;
+
+  function _load() {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); } catch { return []; }
+  }
+
+  function _save(pins) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(pins));
+  }
+
+  function pinMessage(role, content, opts = {}) {
+    const pins = _load();
+    const pin = {
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      role: role || 'user',
+      content: (content || '').slice(0, 5000),
+      note: opts.note || '',
+      tags: opts.tags || [],
+      session: opts.session || (typeof SessionManager !== 'undefined' && SessionManager.current ? SessionManager.current.name : ''),
+      pinnedAt: new Date().toISOString()
+    };
+    pins.unshift(pin);
+    _save(pins);
+    if (isOpen) _render();
+    return pin;
+  }
+
+  function unpinMessage(id) {
+    const pins = _load().filter(p => p.id !== id);
+    _save(pins);
+    _render();
+  }
+
+  function updateNote(id, note) {
+    const pins = _load();
+    const pin = pins.find(p => p.id === id);
+    if (pin) { pin.note = note; _save(pins); _render(); }
+  }
+
+  function addTag(id, tag) {
+    const pins = _load();
+    const pin = pins.find(p => p.id === id);
+    if (pin && tag && !pin.tags.includes(tag)) { pin.tags.push(tag); _save(pins); _render(); }
+  }
+
+  function removeTag(id, tag) {
+    const pins = _load();
+    const pin = pins.find(p => p.id === id);
+    if (pin) { pin.tags = pin.tags.filter(t => t !== tag); _save(pins); _render(); }
+  }
+
+  function _render() {
+    const list = document.getElementById('pinboard-list');
+    const empty = document.getElementById('pinboard-empty');
+    const filter = document.getElementById('pinboard-filter')?.value || 'all';
+    const search = (document.getElementById('pinboard-search')?.value || '').toLowerCase();
+    if (!list) return;
+
+    let pins = _load();
+    if (filter !== 'all') pins = pins.filter(p => p.role === filter);
+    if (search) pins = pins.filter(p => p.content.toLowerCase().includes(search) || p.note.toLowerCase().includes(search) || p.tags.some(t => t.toLowerCase().includes(search)));
+
+    if (pins.length === 0) {
+      list.innerHTML = '';
+      if (empty) empty.style.display = '';
+      return;
+    }
+    if (empty) empty.style.display = 'none';
+
+    list.innerHTML = pins.map(pin => {
+      const date = new Date(pin.pinnedAt);
+      const dateStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+      const tagsHtml = pin.tags.map(t => `<span class="pinboard-tag">${_esc(t)} <span style="cursor:pointer" onclick="PinBoard.removeTag('${pin.id}','${_esc(t)}')">&times;</span></span>`).join('');
+      const preview = pin.content.length > 300 ? pin.content.slice(0, 300) + '…' : pin.content;
+      return `<div class="pinboard-item" data-id="${pin.id}">
+        <div class="pinboard-item-header">
+          <span class="pinboard-item-role ${pin.role}">${pin.role}</span>
+          <span>${pin.session ? _esc(pin.session) + ' · ' : ''}${dateStr}</span>
+          <div class="pinboard-item-actions">
+            <button onclick="PinBoard.promptNote('${pin.id}')" title="Add/edit note">📝</button>
+            <button onclick="PinBoard.promptTag('${pin.id}')" title="Add tag">🏷️</button>
+            <button onclick="PinBoard.copyPin('${pin.id}')" title="Copy content">📋</button>
+            <button onclick="PinBoard.unpinMessage('${pin.id}')" title="Unpin">❌</button>
+          </div>
+        </div>
+        <div class="pinboard-item-content">${_esc(preview)}</div>
+        ${tagsHtml ? '<div style="margin-top:6px">' + tagsHtml + '</div>' : ''}
+        ${pin.note ? '<div class="pinboard-item-note">📝 ' + _esc(pin.note) + '</div>' : ''}
+      </div>`;
+    }).join('');
+  }
+
+  function _esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+  function promptNote(id) {
+    const pins = _load();
+    const pin = pins.find(p => p.id === id);
+    const note = prompt('Add a note to this pin:', pin?.note || '');
+    if (note !== null) updateNote(id, note);
+  }
+
+  function promptTag(id) {
+    const tag = prompt('Add a tag:');
+    if (tag && tag.trim()) addTag(id, tag.trim());
+  }
+
+  function copyPin(id) {
+    const pin = _load().find(p => p.id === id);
+    if (pin) navigator.clipboard.writeText(pin.content).catch(() => {});
+  }
+
+  function exportPins() {
+    const pins = _load();
+    const blob = new Blob([JSON.stringify(pins, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.download = 'pinboard-export.json';
+    a.href = URL.createObjectURL(blob);
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  function clearAll() {
+    if (confirm('Remove all pinned messages?')) { _save([]); _render(); }
+  }
+
+  function open() {
+    isOpen = true;
+    const panel = document.getElementById('pinboard-panel');
+    const overlay = document.getElementById('pinboard-overlay');
+    if (panel) panel.style.display = '';
+    if (overlay) overlay.style.display = '';
+    _render();
+  }
+
+  function close() {
+    isOpen = false;
+    const panel = document.getElementById('pinboard-panel');
+    const overlay = document.getElementById('pinboard-overlay');
+    if (panel) panel.style.display = 'none';
+    if (overlay) overlay.style.display = 'none';
+  }
+
+  function toggle() { isOpen ? close() : open(); }
+
+  function init() {
+    document.getElementById('pinboard-close')?.addEventListener('click', close);
+    document.getElementById('pinboard-overlay')?.addEventListener('click', close);
+    document.getElementById('pinboard-export')?.addEventListener('click', exportPins);
+    document.getElementById('pinboard-clear')?.addEventListener('click', clearAll);
+    document.getElementById('pinboard-filter')?.addEventListener('change', _render);
+    document.getElementById('pinboard-search')?.addEventListener('input', _render);
+    document.addEventListener('keydown', (e) => {
+      if (e.altKey && e.key.toLowerCase() === 'p' && !e.ctrlKey && !e.shiftKey && !e.metaKey) {
+        e.preventDefault();
+        toggle();
+      }
+    });
+
+    // Add "Pin" option to message context menus if they exist
+    document.addEventListener('contextmenu', (e) => {
+      const msgEl = e.target.closest('.message, .chat-message, [data-role]');
+      if (!msgEl) return;
+      // We don't override the context menu, but we inject pin buttons into messages below
+    });
+  }
+
+  // Inject pin buttons into chat output messages
+  const _observer = new MutationObserver(() => {
+    document.querySelectorAll('#chat-output .message, #chat-output .chat-message, #chat-output [data-role]').forEach(el => {
+      if (el.dataset.pinReady) return;
+      el.dataset.pinReady = '1';
+      const pinBtn = document.createElement('button');
+      pinBtn.textContent = '📌';
+      pinBtn.title = 'Pin this message';
+      pinBtn.style.cssText = 'position:absolute;top:4px;right:4px;background:none;border:none;cursor:pointer;opacity:0;transition:opacity .2s;font-size:.85rem;z-index:1;';
+      el.style.position = 'relative';
+      el.appendChild(pinBtn);
+      el.addEventListener('mouseenter', () => pinBtn.style.opacity = '0.7');
+      el.addEventListener('mouseleave', () => pinBtn.style.opacity = '0');
+      pinBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const role = el.dataset.role || el.classList.contains('user') ? 'user' : 'assistant';
+        const content = el.textContent.replace('📌', '').trim();
+        pinMessage(role, content);
+        pinBtn.textContent = '✅';
+        setTimeout(() => pinBtn.textContent = '📌', 1200);
+      });
+    });
+  });
+
+  document.addEventListener('DOMContentLoaded', () => {
+    init();
+    const chatOutput = document.getElementById('chat-output');
+    if (chatOutput) _observer.observe(chatOutput, { childList: true, subtree: true });
+  });
+
+  return { open, close, toggle, init, pinMessage, unpinMessage, updateNote, addTag, removeTag, promptNote, promptTag, copyPin, exportPins, clearAll };
+})();
