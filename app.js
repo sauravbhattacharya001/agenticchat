@@ -21110,17 +21110,18 @@ const CommandPalette = (() => {
   }
 
   function _highlightMatch(text, query) {
-    if (!query) return text;
+    if (!query) return _escapeHtml(text);
     const q = query.toLowerCase();
     const t = text.toLowerCase();
     let result = '';
     let qi = 0;
     for (let i = 0; i < text.length; i++) {
+      const escaped = _escapeHtml(text[i]);
       if (qi < q.length && t[i] === q[qi]) {
-        result += '<b>' + text[i] + '</b>';
+        result += '<b>' + escaped + '</b>';
         qi++;
       } else {
-        result += text[i];
+        result += escaped;
       }
     }
     return result;

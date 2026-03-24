@@ -100,18 +100,23 @@ function createCommandPalette() {
     _selectedIndex = 0;
   }
 
+  function _escapeHtml(str) {
+    return String(str).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
+  }
+
   function _highlightMatch(text, query) {
-    if (!query) return text;
+    if (!query) return _escapeHtml(text);
     const q = query.toLowerCase();
     const t = text.toLowerCase();
     let result = '';
     let qi = 0;
     for (let i = 0; i < text.length; i++) {
+      const escaped = _escapeHtml(text[i]);
       if (qi < q.length && t[i] === q[qi]) {
-        result += '<b>' + text[i] + '</b>';
+        result += '<b>' + escaped + '</b>';
         qi++;
       } else {
-        result += text[i];
+        result += escaped;
       }
     }
     return result;
@@ -506,5 +511,19 @@ describe('CommandPalette', () => {
     const empty = document.querySelector('.cp-empty');
     expect(empty).not.toBeNull();
     expect(empty.textContent).toBe('No matching commands');
+  });
+
+  test('_highlightMatch escapes HTML entities to prevent XSS', () => {
+    CP.register({ id: 'test:xss', label: '<img onerror=alert(1)>', action: () => {} });
+    CP.open();
+    const input = document.querySelector('.cp-input');
+    input.value = '<img';
+    input.dispatchEvent(new Event('input'));
+    const items = document.querySelectorAll('.cp-item');
+    // The label should contain escaped HTML, not a real <img> element
+    const labelEl = items[0] && items[0].querySelector('.cp-label');
+    expect(labelEl).not.toBeNull();
+    expect(labelEl.querySelector('img')).toBeNull();
+    expect(labelEl.textContent).toContain('<img');
   });
 });
