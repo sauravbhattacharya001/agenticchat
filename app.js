@@ -1,7 +1,7 @@
 /* ============================================================
  * Agentic Chat - Application Logic
  *
- * Architecture (47 modules, all revealing-module-pattern IIFEs):
+ * Architecture (48 modules, all revealing-module-pattern IIFEs):
  *
  *   Core:
  *   SafeStorage          - safe localStorage wrapper for restricted-storage environments
@@ -1245,30 +1245,40 @@ const ChatController = (() => {
       if (ChatConfig.STREAMING_ENABLED) {
         // Streaming path - show tokens as they arrive, with automatic retry
         UIController.setChatOutput('');
+        TypingIndicatorBubble.show();
+        let _firstToken = true;
         const result = await SmartRetry.withRetry(() => {
           UIController.setChatOutput(''); // Reset output on each retry attempt
+          TypingIndicatorBubble.show();
+          _firstToken = true;
           return callOpenAIStreaming(
             ApiKeyManager.getOpenAIKey(),
             ConversationManager.getMessages(),
-            (token) => UIController.appendChatOutput(token)
+            (token) => {
+              if (_firstToken) { TypingIndicatorBubble.hide(); _firstToken = false; }
+              UIController.appendChatOutput(token);
+            }
           );
         });
 
-        if (!result.ok) { _handleApiError(result); return; }
+        if (!result.ok) { TypingIndicatorBubble.hide(); _handleApiError(result); return; }
 
         reply = result.text || 'No response';
         usage = result.usage;
       } else {
         // Non-streaming path - original behavior, with automatic retry
-        UIController.setChatOutput('Thinking…');
+        UIController.setChatOutput('');
+        TypingIndicatorBubble.show();
         const result = await SmartRetry.withRetry(() => {
-          UIController.setChatOutput('Thinking…'); // Reset on retry
+          UIController.setChatOutput('');
+          TypingIndicatorBubble.show();
           return callOpenAI(
             ApiKeyManager.getOpenAIKey(),
             ConversationManager.getMessages()
           );
         });
 
+        TypingIndicatorBubble.hide();
         if (!result.ok) { _handleApiError(result); return; }
 
         reply = result.data.choices?.[0]?.message?.content || 'No response';
@@ -1309,6 +1319,7 @@ const ChatController = (() => {
       // Auto-save session if enabled
       SessionManager.autoSaveIfEnabled();
     } catch (err) {
+      TypingIndicatorBubble.hide();
       _rollbackLastUserMessage();
 
       if (err.name === 'AbortError') {
@@ -27386,6 +27397,55 @@ const WordCloudGenerator = (() => {
 })();
 
 // ── Pin Board ──────────────────────────────────────────────────
+const TypingIndicatorBubble = (() => {
+  let _el = null;
+  const LABELS = [
+    'AI is thinking…',
+    'Generating response…',
+    'Processing your request…',
+    'Crafting a reply…',
+    'Working on it…',
+  ];
+
+  function _randomLabel() {
+    return LABELS[Math.floor(Math.random() * LABELS.length)];
+  }
+
+  /** Show the typing indicator bubble inside #chat-output. */
+  function show() {
+    hide(); // remove any existing
+    _el = document.createElement('div');
+    _el.className = 'typing-indicator';
+    _el.setAttribute('role', 'status');
+    _el.setAttribute('aria-label', 'AI is typing');
+    _el.innerHTML =
+      '<div class="typing-indicator__dots">' +
+        '<span class="typing-indicator__dot"></span>' +
+        '<span class="typing-indicator__dot"></span>' +
+        '<span class="typing-indicator__dot"></span>' +
+      '</div>' +
+      '<span class="typing-indicator__label">' + _randomLabel() + '</span>';
+    const chatOutput = document.getElementById('chat-output');
+    if (chatOutput) {
+      chatOutput.appendChild(_el);
+      _el.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    }
+  }
+
+  /** Remove the typing indicator bubble. */
+  function hide() {
+    if (_el && _el.parentNode) {
+      _el.parentNode.removeChild(_el);
+    }
+    _el = null;
+  }
+
+  /** Check if currently visible. */
+  function isVisible() { return !!_el && !!_el.parentNode; }
+
+  return { show, hide, isVisible };
+})();
+
 const PinBoard = (() => {
   const STORAGE_KEY = 'agenticchat_pinboard';
   let isOpen = false;

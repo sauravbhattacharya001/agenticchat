@@ -4229,3 +4229,42 @@ body.light .pinboard-panel { background: #fff; border-color: #ddd; box-shadow: 0
 body.light .pinboard-item { background: #f5f5f5; border-color: #ddd; }
 body.light .pinboard-search-input { background: #fff; border-color: #ccc; }
 body.light .pinboard-item-note { background: #eee; color: #555; }
+
+/* ---- Typing Indicator Bubble ---- */
+.typing-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: var(--msg-assistant-bg, #1a2e1a);
+  border-radius: 16px 16px 16px 4px;
+  margin: 8px 0;
+  animation: typing-fade-in 0.3s ease-out;
+}
+.typing-indicator__dots {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.typing-indicator__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted, #aaa);
+  animation: typing-bounce 1.4s ease-in-out infinite;
+}
+.typing-indicator__dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-indicator__dot:nth-child(3) { animation-delay: 0.4s; }
+.typing-indicator__label {
+  font-size: 0.8rem;
+  color: var(--text-muted, #aaa);
+  font-style: italic;
+}
+@keyframes typing-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-6px); opacity: 1; }
+}
+@keyframes typing-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
