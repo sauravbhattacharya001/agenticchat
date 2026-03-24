@@ -1180,12 +1180,36 @@ const ChatController = (() => {
    * On first call, captures the API key from the key input field.
    * Handles abort, timeout, and network errors with rollback.
    */
+  // ── Client-side rate limiter ──────────────────────────────────────
+  // Prevents runaway API spend from rapid-fire sends (spam-clicking,
+  // automated scripts, or malfunctioning retry loops).  Allows a burst
+  // of MAX_SENDS_PER_WINDOW requests within RATE_WINDOW_MS, then
+  // blocks until the oldest send falls outside the window.
+  const _sendTimestamps = [];
+  const RATE_WINDOW_MS = 60_000;   // 1 minute
+  const MAX_SENDS_PER_WINDOW = 20; // 20 requests/min — generous for human use
+
   async function send() {
     if (isSending) return;
     if (typeof OfflineManager !== 'undefined' && OfflineManager.isOffline()) {
       alert('You are offline. Messages cannot be sent without connectivity.');
       return;
     }
+
+    // Rate limiting: prune expired timestamps, then check
+    const now = Date.now();
+    while (_sendTimestamps.length > 0 && now - _sendTimestamps[0] > RATE_WINDOW_MS) {
+      _sendTimestamps.shift();
+    }
+    if (_sendTimestamps.length >= MAX_SENDS_PER_WINDOW) {
+      const waitSec = Math.ceil((RATE_WINDOW_MS - (now - _sendTimestamps[0])) / 1000);
+      alert(
+        `Rate limit reached (${MAX_SENDS_PER_WINDOW} messages/min). ` +
+        `Please wait ${waitSec}s before sending again.`
+      );
+      return;
+    }
+    _sendTimestamps.push(now);
 
     const prompt = UIController.getChatInput();
 
