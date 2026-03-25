@@ -12,6 +12,7 @@
     "README.md"
   ],
   "scripts": {
+    "build:sw": "node -e \"const fs=require('fs');const h=require('crypto').createHash('sha1');['index.html','app.js','style.css'].forEach(f=>h.update(fs.readFileSync(f)));const hash=h.digest('hex').slice(0,10);let sw=fs.readFileSync('sw.js','utf8');sw=sw.replace(/agenticchat-v[\\w]+/,'agenticchat-v'+hash);fs.writeFileSync('sw.js',sw);console.log('sw.js cache key: agenticchat-v'+hash);\"",
     "test": "jest --verbose",
     "test:coverage": "c8 --include=app.js --reporter=text --reporter=text-summary --reporter=lcov --reporter=json-summary npx jest --verbose",
     "prepublishOnly": "npm test"

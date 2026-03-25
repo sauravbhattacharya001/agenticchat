@@ -17902,7 +17902,41 @@ const OfflineManager = (function () {
         .catch(function (err) {
           console.warn('[SW] Registration failed:', err.message);
         });
+
+      /* Listen for update notifications from the service worker */
+      navigator.serviceWorker.addEventListener('message', function (event) {
+        if (event.data && event.data.type === 'SW_UPDATED') {
+          _showUpdateBanner();
+        }
+      });
     }
+  }
+
+  /**
+   * Show a non-intrusive banner prompting the user to reload for a new version.
+   * @private
+   */
+  function _showUpdateBanner() {
+    /* Avoid duplicate banners */
+    if (document.getElementById('sw-update-banner')) return;
+
+    var banner = document.createElement('div');
+    banner.id = 'sw-update-banner';
+    banner.setAttribute('role', 'alert');
+    banner.className = 'offline-banner';
+    banner.style.cssText = 'display:flex;background:#1976D2;';
+    banner.innerHTML =
+      '<span>\uD83D\uDD04 A new version is available.</span>' +
+      '<button class="btn-sm" id="sw-update-reload" title="Reload">Reload</button>' +
+      '<button class="btn-sm" id="sw-update-dismiss" title="Dismiss">\u2715</button>';
+    document.body.insertBefore(banner, document.body.firstChild);
+
+    document.getElementById('sw-update-reload').addEventListener('click', function () {
+      window.location.reload();
+    });
+    document.getElementById('sw-update-dismiss').addEventListener('click', function () {
+      banner.remove();
+    });
   }
 
   function isOffline() {

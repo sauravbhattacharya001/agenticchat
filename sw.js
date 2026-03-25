@@ -11,8 +11,12 @@
  */
 'use strict';
 
-/** @const {string} Current cache version key. Bump to bust stale caches. */
-const CACHE_NAME = 'agenticchat-v1';
+/**
+ * @const {string} Current cache version key.
+ * Update this value on every deployment to bust stale caches.
+ * The build script (`npm run build:sw`) replaces the placeholder automatically.
+ */
+const CACHE_NAME = 'agenticchat-v2025032500';
 
 /** @const {string[]} URLs pre-cached during the install phase. */
 const APP_SHELL = [
@@ -31,13 +35,22 @@ self.addEventListener('install', event => {
   );
 });
 
-/* Activate: clean up old caches */
+/* Activate: clean up old caches and notify clients of the update */
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(
-        keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k))
-      ))
+      .then(keys => {
+        const stale = keys.filter(k => k !== CACHE_NAME);
+        return Promise.all(stale.map(k => caches.delete(k)))
+          .then(() => {
+            /* Notify all open tabs that a new version is active */
+            if (stale.length > 0) {
+              self.clients.matchAll({ type: 'window' }).then(clients => {
+                clients.forEach(client => client.postMessage({ type: 'SW_UPDATED' }));
+              });
+            }
+          });
+      })
       .then(() => self.clients.claim())
   );
 });
