@@ -748,28 +748,58 @@ const UIController = (() => {
   }
 
   /** Set the chat output area to the given text (replaces content). */
-  // Streaming text node - kept as module-level state so appendChatOutput
-  // can append in O(1) instead of the old textContent += which was O(n²)
-  // (read full string → concat → write back on every single token).
+  // Streaming text node + RAF-batched buffer.
+  //
+  // Previous approach used `_streamNode.data += text` which is still O(n)
+  // per token: the browser must allocate a new string of length (old + new)
+  // on every call, making a full stream O(n²) in total characters.
+  //
+  // New approach: tokens are pushed into an array buffer and flushed to
+  // the DOM once per animation frame via requestAnimationFrame. This
+  // batches multiple SSE tokens into a single DOM write per frame (~60fps),
+  // reducing both string-copy overhead and layout thrashing.
   let _streamNode = null;
+  let _streamBuffer = [];
+  let _streamRAF = 0;
+
+  function _flushStreamBuffer() {
+    _streamRAF = 0;
+    if (_streamBuffer.length === 0 || !_streamNode) return;
+    _streamNode.data += _streamBuffer.join('');
+    _streamBuffer.length = 0;
+  }
+
   function setChatOutput(text) {
     const out = el('chat-output');
     out.textContent = text;
-    // Reset streaming node; appendChatOutput will lazily create a new one.
+    // Reset streaming state; appendChatOutput will lazily create a new one.
+    if (_streamRAF) { cancelAnimationFrame(_streamRAF); _streamRAF = 0; }
+    _streamBuffer.length = 0;
     _streamNode = null;
   }
   /** Append text to the chat output area (used during streaming).
-   *  Uses a dedicated Text node so each token append is O(1) via
-   *  nodeValue mutation rather than reading + rewriting the entire
-   *  container's textContent (which was O(n) per call, making a
-   *  full stream O(n²) in total tokens).
+   *  Tokens are buffered and flushed to the DOM once per animation frame
+   *  via requestAnimationFrame, batching multiple SSE chunks into a single
+   *  DOM write (~16ms cadence). This avoids the O(n²) string-copy cost
+   *  of appending to a Text node on every token and reduces layout reflows.
    */
   function appendChatOutput(text) {
     if (!_streamNode) {
       _streamNode = document.createTextNode('');
       el('chat-output').appendChild(_streamNode);
     }
-    _streamNode.data += text;
+    _streamBuffer.push(text);
+    if (!_streamRAF) {
+      _streamRAF = requestAnimationFrame(_flushStreamBuffer);
+    }
+  }
+  /** Synchronously flush any buffered stream tokens to the DOM.
+   *  Called after streaming ends to ensure the complete text is visible
+   *  before the UI transitions to the post-stream state.
+   */
+  function flushStreamBuffer() {
+    if (_streamRAF) { cancelAnimationFrame(_streamRAF); }
+    _flushStreamBuffer();
   }
   /**
    * Set the console/sandbox output area text and optional color.
@@ -916,7 +946,7 @@ const UIController = (() => {
   }
 
   return {
-    setChatOutput, appendChatOutput, setConsoleOutput, setLastPrompt,
+    setChatOutput, appendChatOutput, flushStreamBuffer, setConsoleOutput, setLastPrompt,
     setSendingState, setSandboxRunning, resetSandboxUI,
     showTokenUsage, showApiKeyInput, removeApiKeyInput,
     showServiceKeyModal, hideServiceKeyModal,
@@ -1265,6 +1295,8 @@ const ChatController = (() => {
 
         if (!result.ok) { TypingIndicatorBubble.hide(); _handleApiError(result); return; }
 
+        // Flush any buffered tokens so the complete response is visible
+        UIController.flushStreamBuffer();
         reply = result.text || 'No response';
         usage = result.usage;
       } else {
@@ -27817,153 +27849,9 @@ const EmojiPicker = (() => {
   return { open, close, toggle };
 })();
 
-/* ---------- Message Scheduler ---------- */
-/**
- * Queue messages to be sent automatically after a configurable delay.
- * Users compose a message, pick a delay (seconds or minutes), and the
- * scheduler counts down and auto-sends each queued message in order.
- *
- * Keyboard shortcut: Alt+Q
- * @namespace MessageScheduler
- */
-const MessageScheduler = (() => {
-  let _queue = [];          // { id, text, sendAt, timerId }
-  let _tickId = null;
-  let _idCounter = 0;
-
-  /* ---- DOM refs ---- */
-  const panel     = () => document.getElementById('scheduler-panel');
-  const overlay   = () => document.getElementById('scheduler-overlay');
-  const msgInput  = () => document.getElementById('scheduler-message');
-  const delayIn   = () => document.getElementById('scheduler-delay');
-  const unitSel   = () => document.getElementById('scheduler-unit');
-  const queueEl   = () => document.getElementById('scheduler-queue');
-  const emptyEl   = () => document.getElementById('scheduler-empty');
-
-  /* ---- open / close ---- */
-  function open() {
-    const p = panel(), o = overlay();
-    if (!p) return;
-    p.style.display = 'flex';
-    o.style.display = 'block';
-    o.onclick = close;
-    msgInput()?.focus();
-    renderQueue();
-  }
-  function close() {
-    const p = panel(), o = overlay();
-    if (p) p.style.display = 'none';
-    if (o) o.style.display = 'none';
-  }
-  function toggle() { panel()?.style.display === 'none' ? open() : close(); }
-
-  /* ---- schedule ---- */
-  function addScheduled() {
-    const ta = msgInput();
-    const text = ta?.value.trim();
-    if (!text) return;
-    const delay = Math.max(1, parseInt(delayIn()?.value || '30', 10));
-    const unit = unitSel()?.value || 'm';
-    const ms = unit === 'm' ? delay * 60000 : delay * 1000;
-    const id = ++_idCounter;
-    const sendAt = Date.now() + ms;
-
-    const timerId = setTimeout(() => sendMessage(id), ms);
-    _queue.push({ id, text, sendAt, timerId });
-    ta.value = '';
-    renderQueue();
-    startTick();
-  }
-
-  /* ---- send ---- */
-  function sendMessage(id) {
-    const idx = _queue.findIndex(q => q.id === id);
-    if (idx === -1) return;
-    const item = _queue.splice(idx, 1)[0];
-
-    // Inject text into the chat input and click Send
-    const chatInput = document.getElementById('chat-input');
-    const sendBtn = document.getElementById('send-btn');
-    if (chatInput && sendBtn) {
-      chatInput.value = item.text;
-      chatInput.dispatchEvent(new Event('input', { bubbles: true }));
-      sendBtn.click();
-    }
-    renderQueue();
-    if (_queue.length === 0) stopTick();
-  }
-
-  /* ---- cancel ---- */
-  function cancelItem(id) {
-    const idx = _queue.findIndex(q => q.id === id);
-    if (idx === -1) return;
-    clearTimeout(_queue[idx].timerId);
-    _queue.splice(idx, 1);
-    renderQueue();
-    if (_queue.length === 0) stopTick();
-  }
-
-  function cancelAll() {
-    _queue.forEach(q => clearTimeout(q.timerId));
-    _queue = [];
-    renderQueue();
-    stopTick();
-  }
-
-  /* ---- render ---- */
-  function renderQueue() {
-    const qe = queueEl(), ee = emptyEl();
-    if (!qe) return;
-    if (_queue.length === 0) {
-      qe.innerHTML = '';
-      if (ee) ee.style.display = '';
-      return;
-    }
-    if (ee) ee.style.display = 'none';
-    qe.innerHTML = _queue.map(q => {
-      const remaining = Math.max(0, q.sendAt - Date.now());
-      const secs = Math.ceil(remaining / 1000);
-      const display = secs >= 60 ? `${Math.floor(secs/60)}m ${secs%60}s` : `${secs}s`;
-      const preview = q.text.length > 60 ? q.text.slice(0, 57) + '…' : q.text;
-      return `<div class="scheduler-item" data-id="${q.id}">
-        <span class="scheduler-item-text" title="${q.text.replace(/"/g,'&quot;')}">${preview}</span>
-        <span class="scheduler-item-timer">${display}</span>
-        <button class="scheduler-item-cancel" title="Cancel">✕</button>
-      </div>`;
-    }).join('');
-    qe.querySelectorAll('.scheduler-item-cancel').forEach(btn => {
-      btn.onclick = () => {
-        const id = parseInt(btn.closest('.scheduler-item').dataset.id, 10);
-        cancelItem(id);
-      };
-    });
-  }
-
-  /* ---- tick (update countdown display) ---- */
-  function startTick() {
-    if (_tickId) return;
-    _tickId = setInterval(renderQueue, 1000);
-  }
-  function stopTick() {
-    if (_tickId) { clearInterval(_tickId); _tickId = null; }
-  }
-
-  /* ---- init ---- */
-  document.addEventListener('DOMContentLoaded', () => {
-    document.getElementById('scheduler-btn')?.addEventListener('click', toggle);
-    document.getElementById('scheduler-close')?.addEventListener('click', close);
-    document.getElementById('scheduler-add')?.addEventListener('click', addScheduled);
-    document.getElementById('scheduler-clear-all')?.addEventListener('click', cancelAll);
-    // Enter in textarea schedules (Shift+Enter for newline)
-    msgInput()?.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addScheduled(); }
-    });
-  });
-
-  // Keyboard shortcut: Alt+Q
-  document.addEventListener('keydown', (e) => {
-    if (e.altKey && e.key.toLowerCase() === 'q') { e.preventDefault(); toggle(); }
-  });
-
-  return { open, close, toggle, cancelAll };
-})();
+/* ---------- Message Scheduler duplicate removed ---------- */
+// A duplicate `const MessageScheduler` definition existed here which
+// caused a SyntaxError ("Identifier 'MessageScheduler' has already
+// been declared").  The primary MessageScheduler is defined above
+// (~line 15925) and is the full-featured implementation.  This
+// simpler version was removed to fix the parse error.
