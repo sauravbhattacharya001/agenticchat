@@ -294,6 +294,72 @@ agenticchat/
         └── stale.yml              # Stale issue/PR management
 ```
 
+## 🌐 Browser Compatibility
+
+| Browser | Version | Status | Notes |
+|---------|---------|--------|-------|
+| Chrome | 90+ | ✅ Full | Recommended — best sandbox + speech API support |
+| Firefox | 88+ | ✅ Full | Voice input requires `media.navigator.enabled` |
+| Safari | 15+ | ✅ Full | Minor speech recognition differences |
+| Edge | 90+ | ✅ Full | Chromium-based, same as Chrome |
+| Opera | 76+ | ✅ Full | Chromium-based |
+| Mobile Chrome | 90+ | ⚠️ Partial | Voice input may require user gesture; layout adapts |
+| Mobile Safari | 15+ | ⚠️ Partial | `sandbox` iframe works but some CSP edge cases exist |
+
+**Requirements:** All browsers must support `crypto.randomUUID()` (HTTPS or localhost only), `iframe sandbox`, and `BroadcastChannel`. No polyfills needed for modern browsers.
+
+## ❓ Troubleshooting
+
+<details>
+<summary><strong>"Failed to fetch" or network errors when sending prompts</strong></summary>
+
+- Verify your OpenAI API key is valid and has GPT-4o access
+- Check that your API key has sufficient credits/quota
+- Ensure you're not behind a corporate proxy that blocks `api.openai.com`
+- Try switching to a different model (e.g., GPT-4o-mini) in the model selector
+
+</details>
+
+<details>
+<summary><strong>Generated code doesn't execute / "Sandbox error"</strong></summary>
+
+- The sandbox iframe blocks DOM access by design — code that references `document`, `window.location`, or `localStorage` will fail
+- Code can only make outbound HTTPS requests (`connect-src https:`)
+- Check the browser console for CSP violation messages
+- If you see timeout errors, the generated code may be stuck in an infinite loop
+
+</details>
+
+<details>
+<summary><strong>Voice input not working</strong></summary>
+
+- Speech recognition requires HTTPS (or localhost) — it won't work over plain HTTP
+- Firefox: ensure `media.navigator.enabled` is `true` in `about:config`
+- Safari: grant microphone permission when prompted
+- Some browsers require a user gesture (click) to activate the microphone
+
+</details>
+
+<details>
+<summary><strong>Data lost between sessions</strong></summary>
+
+- All data is stored in `localStorage` — clearing browser data will erase it
+- Use the **Data Backup** feature (Settings → Backup) to export your data regularly
+- `localStorage` has a ~5 MB limit per origin — the quota indicator in Settings shows usage
+- Cross-tab sync uses `BroadcastChannel`; if you edit in two tabs simultaneously, the last write wins
+
+</details>
+
+<details>
+<summary><strong>Cost dashboard shows unexpected charges</strong></summary>
+
+- The cost tracker estimates based on token counts and published OpenAI pricing
+- Actual billing may differ slightly due to system prompt tokens and retry attempts
+- Reset the tracker via Settings → Cost Dashboard → Reset
+- Set a budget alert threshold to get warnings before hitting your limit
+
+</details>
+
 ## 🤝 Contributing
 
 Contributions are welcome! Here's how:
