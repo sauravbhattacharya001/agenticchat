@@ -81,6 +81,7 @@
  *   SessionCalendar      - visual month calendar to browse sessions by date (Alt+C)
  *   ResponseLengthPresets - pre-send verbosity control with 4 length modes (Alt+L)
  *   SessionArchive       - archive/unarchive sessions to declutter the sessions panel
+ *   EmojiPicker          - categorized emoji browser with search and recent tracking (Ctrl+Shift+;)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -27645,4 +27646,128 @@ const PinBoard = (() => {
   });
 
   return { open, close, toggle, init, pinMessage, unpinMessage, updateNote, addTag, removeTag, promptNote, promptTag, copyPin, exportPins, clearAll };
+})();
+
+/* ============================================================
+ *  EmojiPicker — categorized emoji browser with search and
+ *  one-click insert into chat input (Ctrl+Shift+;)
+ * ============================================================ */
+const EmojiPicker = (() => {
+  let _overlay = null;
+
+  const CATEGORIES = {
+    'Smileys':    ['😀','😃','😄','😁','😆','😅','🤣','😂','🙂','😊','😇','🥰','😍','🤩','😘','😗','😋','😛','😜','🤪','😝','🤑','🤗','🤭','🤫','🤔','🫡','🤐','🤨','😐','😑','😶','🫠','😏','😒','🙄','😬','😮‍💨','🤥','😌','😔','😪','🤤','😴','😷','🤒','🤕','🤢','🤮','🥵','🥶','🥴','😵','🤯','🤠','🥳','🥸','😎','🤓','🧐','😕','🫤','😟','🙁','☹️','😮','😯','😲','😳','🥺','🥹','😦','😧','😨','😰','😥','😢','😭','😱','😖','😣','😞','😓','😩','😫','🥱','😤','😡','😠','🤬','😈','👿','💀','☠️','💩','🤡','👹','👺','👻','👽','👾','🤖'],
+    'Gestures':   ['👋','🤚','🖐️','✋','🖖','🫱','🫲','🫳','🫴','👌','🤌','🤏','✌️','🤞','🫰','🤟','🤘','🤙','👈','👉','👆','🖕','👇','☝️','🫵','👍','👎','✊','👊','🤛','🤜','👏','🙌','🫶','👐','🤲','🤝','🙏'],
+    'Hearts':     ['❤️','🧡','💛','💚','💙','💜','🖤','🤍','🤎','💔','❤️‍🔥','❤️‍🩹','❣️','💕','💞','💓','💗','💖','💘','💝','💟'],
+    'Animals':    ['🐶','🐱','🐭','🐹','🐰','🦊','🐻','🐼','🐻‍❄️','🐨','🐯','🦁','🐮','🐷','🐸','🐵','🐔','🐧','🐦','🐤','🦆','🦅','🦉','🦇','🐺','🐗','🐴','🦄','🐝','🪱','🐛','🦋','🐌','🐞','🐜','🪰','🐢','🐍','🦎','🦖','🦕','🐙','🦑','🦐','🦞','🦀','🐳','🐋','🐬','🦭','🐟','🐠','🐡','🦈','🐊','🐅','🐆','🦓','🦍','🦧','🐘','🦛','🦏','🐪','🐫','🦒','🦘','🦬','🐃','🐂','🐄','🐎','🐖','🐏','🐑','🦙','🐐','🦌','🐕','🐩','🦮','🐕‍🦺','🐈','🐈‍⬛','🪶','🐓','🦃','🦤','🦚','🦜','🦢','🦩','🕊️','🐇','🦝','🦨','🦡','🦫','🦦','🦥','🐁','🐀','🐿️','🦔'],
+    'Food':       ['🍎','🍐','🍊','🍋','🍌','🍉','🍇','🍓','🫐','🍈','🍒','🍑','🥭','🍍','🥥','🥝','🍅','🍆','🥑','🥦','🥬','🥒','🌶️','🫑','🌽','🥕','🧄','🧅','🥔','🍠','🫘','🥐','🍞','🥖','🥨','🧀','🥚','🍳','🧈','🥞','🧇','🥓','🥩','🍗','🍖','🦴','🌭','🍔','🍟','🍕','🫓','🥪','🥙','🧆','🌮','🌯','🫔','🥗','🥘','🫕','🍝','🍜','🍲','🍛','🍣','🍱','🥟','🦪','🍤','🍙','🍚','🍘','🍥','🥠','🥮','🍢','🍡','🍧','🍨','🍦','🥧','🧁','🍰','🎂','🍮','🍭','🍬','🍫','🍿','🍩','🍪','🌰','🥜','🍯','🥛','🍼','☕','🫖','🍵','🧃','🥤','🧋','🍶','🍺','🍻','🥂','🍷','🥃','🍸','🍹','🧉','🍾','🧊'],
+    'Objects':    ['⌚','📱','💻','⌨️','🖥️','🖨️','🖱️','🖲️','🕹️','🗜️','💽','💾','💿','📀','📼','📷','📹','🎥','📽️','🎞️','📞','☎️','📟','📠','📺','📻','🎙️','🎚️','🎛️','🧭','⏱️','⏲️','⏰','🕰️','⌛','📡','🔋','🔌','💡','🔦','🕯️','🧯','🛢️','💸','💵','💴','💶','💷','🪙','💰','💳','💎','⚖️','🪜','🧰','🪛','🔧','🔨','⚒️','🛠️','⛏️','🪚','🔩','⚙️','🪤','🧲','🔫','💣','🧨','🪓','🔪','🗡️','⚔️','🛡️','🚬','⚰️','🪦','⚱️','🏺','🔮','📿','🧿','🪬','💈','⚗️','🔭','🔬','🕳️','🩹','🩺','🩻','💊','💉','🩸','🧬','🦠','🧫','🧪','🌡️','🧹','🪠','🧺','🧻','🚽','🚰','🚿','🛁','🛀','🧼','🪥','🪒','🧽','🪣','🧴','🛎️','🔑','🗝️','🚪','🪑','🛋️','🛏️','🛌','🧸','🪆','🖼️','🪞','🪟','🛍️','🛒','🎁','🎈','🎏','🎀','🪄','🪅','🎊','🎉','🎎','🏮','🎐','🧧','✉️','📩','📨','📧','💌','📥','📤','📦','🏷️','🪧','📪','📫','📬','📭','📮','📯','📜','📃','📄','📑','🧾','📊','📈','📉','🗒️','🗓️','📆','📅','🗑️','📇','🗃️','🗳️','🗄️','📋','📁','📂','🗂️','🗞️','📰','📓','📔','📒','📕','📗','📘','📙','📚','📖','🔖','🧷','🔗','📎','🖇️','📐','📏','🧮','📌','📍','✂️','🖊️','🖋️','✒️','🖌️','🖍️','📝','✏️','🔍','🔎','🔏','🔐','🔒','🔓'],
+    'Symbols':    ['❤️','💯','💢','💥','💫','💦','💨','🕳️','💬','👁️‍🗨️','🗨️','🗯️','💭','💤','🔴','🟠','🟡','🟢','🔵','🟣','⚫','⚪','🟤','🔺','🔻','🔸','🔹','🔶','🔷','🔳','🔲','▪️','▫️','◾','◽','◼️','◻️','🟥','🟧','🟨','🟩','🟦','🟪','⬛','⬜','🟫','✅','☑️','✔️','❌','❎','➕','➖','➗','✖️','♾️','‼️','⁉️','❓','❔','❕','❗','〰️','©️','®️','™️','#️⃣','*️⃣','0️⃣','1️⃣','2️⃣','3️⃣','4️⃣','5️⃣','6️⃣','7️⃣','8️⃣','9️⃣','🔟','🔠','🔡','🔢','🔣','🔤','🅰️','🆎','🅱️','🆑','🆒','🆓','ℹ️','🆔','Ⓜ️','🆕','🆖','🅾️','🆗','🅿️','🆘','🆙','🆚','🈁','🈂️','🈷️','🈶','🈯','🉐','🈹','🈚','🈲','🉑','🈸','🈴','🈳','㊗️','㊙️','🈺','🈵','🔴','🟠','🟡','🟢','🔵','🟣','⚫','⚪','🟤'],
+    'Flags':      ['🏳️','🏴','🏁','🚩','🏳️‍🌈','🏳️‍⚧️','🇺🇸','🇬🇧','🇫🇷','🇩🇪','🇯🇵','🇰🇷','🇨🇳','🇮🇳','🇧🇷','🇨🇦','🇦🇺','🇲🇽','🇮🇹','🇪🇸','🇷🇺','🇵🇹','🇳🇱','🇸🇪','🇳🇴','🇩🇰','🇫🇮','🇨🇭','🇦🇹','🇧🇪','🇮🇪','🇵🇱','🇬🇷','🇹🇷','🇪🇬','🇿🇦','🇳🇬','🇰🇪','🇦🇷','🇨🇴','🇵🇪','🇨🇱','🇻🇪','🇸🇦','🇦🇪','🇮🇱','🇹🇭','🇻🇳','🇮🇩','🇵🇭','🇲🇾','🇸🇬','🇳🇿','🇺🇦','🇷🇴','🇭🇺','🇨🇿','🇭🇷','🇧🇩','🇵🇰','🇱🇰']
+  };
+
+  const RECENT_KEY = 'agenticchat_emoji_recent';
+  const MAX_RECENT = 24;
+
+  function _loadRecent() {
+    try { return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]'); } catch { return []; }
+  }
+  function _saveRecent(arr) { localStorage.setItem(RECENT_KEY, JSON.stringify(arr.slice(0, MAX_RECENT))); }
+  function _addRecent(emoji) {
+    const r = _loadRecent().filter(e => e !== emoji);
+    r.unshift(emoji);
+    _saveRecent(r);
+  }
+
+  function _insertEmoji(emoji) {
+    const input = document.getElementById('chat-input');
+    if (!input) return;
+    const start = input.selectionStart || input.value.length;
+    const end = input.selectionEnd || start;
+    input.value = input.value.slice(0, start) + emoji + input.value.slice(end);
+    input.focus();
+    const pos = start + emoji.length;
+    input.setSelectionRange(pos, pos);
+    _addRecent(emoji);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  function _render(container, filter) {
+    container.innerHTML = '';
+    const q = (filter || '').toLowerCase();
+    const recent = _loadRecent();
+    if (recent.length && !q) {
+      const sec = document.createElement('div');
+      sec.className = 'emoji-picker__section';
+      sec.innerHTML = '<div class="emoji-picker__cat">Recent</div>';
+      const grid = document.createElement('div');
+      grid.className = 'emoji-picker__grid';
+      recent.forEach(e => {
+        const btn = document.createElement('button');
+        btn.className = 'emoji-picker__emoji';
+        btn.textContent = e;
+        btn.title = e;
+        btn.onclick = () => _insertEmoji(e);
+        grid.appendChild(btn);
+      });
+      sec.appendChild(grid);
+      container.appendChild(sec);
+    }
+    Object.entries(CATEGORIES).forEach(([cat, emojis]) => {
+      const filtered = q ? emojis.filter(e => e.includes(q)) : emojis;
+      if (!filtered.length) return;
+      const sec = document.createElement('div');
+      sec.className = 'emoji-picker__section';
+      sec.innerHTML = '<div class="emoji-picker__cat">' + cat + '</div>';
+      const grid = document.createElement('div');
+      grid.className = 'emoji-picker__grid';
+      filtered.forEach(e => {
+        const btn = document.createElement('button');
+        btn.className = 'emoji-picker__emoji';
+        btn.textContent = e;
+        btn.title = e;
+        btn.onclick = () => _insertEmoji(e);
+        grid.appendChild(btn);
+      });
+      sec.appendChild(grid);
+      container.appendChild(sec);
+    });
+  }
+
+  function open() {
+    if (_overlay) { close(); return; }
+    _overlay = document.createElement('div');
+    _overlay.className = 'emoji-picker__overlay';
+    _overlay.innerHTML =
+      '<div class="emoji-picker">' +
+        '<div class="emoji-picker__header">' +
+          '<input class="emoji-picker__search" placeholder="Search emojis…" autocomplete="off">' +
+          '<button class="emoji-picker__close" title="Close">✕</button>' +
+        '</div>' +
+        '<div class="emoji-picker__body"></div>' +
+      '</div>';
+    document.body.appendChild(_overlay);
+    const body = _overlay.querySelector('.emoji-picker__body');
+    const search = _overlay.querySelector('.emoji-picker__search');
+    const closeBtn = _overlay.querySelector('.emoji-picker__close');
+    _render(body, '');
+    search.addEventListener('input', () => _render(body, search.value));
+    closeBtn.addEventListener('click', close);
+    _overlay.addEventListener('click', (e) => { if (e.target === _overlay) close(); });
+    search.focus();
+  }
+
+  function close() {
+    if (_overlay && _overlay.parentNode) _overlay.parentNode.removeChild(_overlay);
+    _overlay = null;
+  }
+
+  function toggle() { _overlay ? close() : open(); }
+
+  // Keyboard shortcut: Ctrl+Shift+;
+  document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.shiftKey && e.key === ';') { e.preventDefault(); toggle(); }
+  });
+
+  return { open, close, toggle };
 })();
