@@ -498,7 +498,7 @@ const SandboxRunner = (() => {
 
       const iframeHTML = `<!DOCTYPE html><html><head>` +
         `<meta http-equiv="Content-Security-Policy" ` +
-        `content="default-src 'none'; script-src 'unsafe-inline'; connect-src https:;">` +
+        `content="default-src 'none'; script-src 'unsafe-inline'; connect-src https:; form-action 'none';">` +
         `</head><body><script>
         window.addEventListener('message', async function handler(evt) {
           if (!evt.data || evt.data.type !== 'sandbox-exec') return;
@@ -8997,6 +8997,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Prompt chain runner
   PromptChainRunner.init();
+
+  // --- Security: scrub sensitive key material on page unload ---
+  // Prevents API keys from lingering in JS heap memory after the tab
+  // is closed or navigated away.  Not a hard guarantee (GC timing),
+  // but reduces the window for memory-scraping attacks.
+  window.addEventListener('pagehide', () => {
+    ApiKeyManager.clearAll();
+  });
 });
 
 
