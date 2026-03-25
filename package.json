@@ -14,6 +14,7 @@
   "scripts": {
     "test": "jest --verbose",
     "test:coverage": "c8 --include=app.js --reporter=text --reporter=text-summary --reporter=lcov --reporter=json-summary npx jest --verbose",
+    "build:sw": "node scripts/stamp-sw.js",
     "prepublishOnly": "npm test"
   },
   "repository": {

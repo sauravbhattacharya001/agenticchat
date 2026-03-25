@@ -31,14 +31,24 @@ self.addEventListener('install', event => {
   );
 });
 
-/* Activate: clean up old caches */
+/* Activate: clean up old caches and notify clients of the update */
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(
-        keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k))
-      ))
-      .then(() => self.clients.claim())
+      .then(keys => {
+        const stale = keys.filter(k => k !== CACHE_NAME);
+        return Promise.all(stale.map(k => caches.delete(k)))
+          .then(() => stale.length); // pass count of evicted caches
+      })
+      .then(evicted => {
+        if (evicted > 0) {
+          // A new version replaced an old one — tell every open tab.
+          self.clients.matchAll({ type: 'window' }).then(clients => {
+            clients.forEach(c => c.postMessage({ type: 'SW_UPDATED' }));
+          });
+        }
+        return self.clients.claim();
+      })
   );
 });
 

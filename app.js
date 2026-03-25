@@ -17903,7 +17903,43 @@ const OfflineManager = (function () {
         .catch(function (err) {
           console.warn('[SW] Registration failed:', err.message);
         });
+
+      // Listen for update notifications from the service worker.
+      navigator.serviceWorker.addEventListener('message', function (evt) {
+        if (evt.data && evt.data.type === 'SW_UPDATED') {
+          _showUpdateToast();
+        }
+      });
     }
+  }
+
+  /**
+   * Show a non-intrusive toast prompting the user to reload for the new version.
+   * @private
+   */
+  function _showUpdateToast() {
+    if (document.getElementById('sw-update-toast')) return; // already visible
+    var toast = document.createElement('div');
+    toast.id = 'sw-update-toast';
+    toast.setAttribute('role', 'alert');
+    toast.style.cssText =
+      'position:fixed;bottom:1rem;left:50%;transform:translateX(-50%);' +
+      'background:#323232;color:#fff;padding:.75rem 1.25rem;border-radius:.5rem;' +
+      'font:14px/1.4 system-ui,sans-serif;z-index:10000;display:flex;align-items:center;gap:.75rem;' +
+      'box-shadow:0 4px 12px rgba(0,0,0,.25);';
+    toast.innerHTML =
+      '<span>A new version is available.</span>' +
+      '<button id="sw-reload-btn" style="background:#4caf50;color:#fff;border:none;' +
+      'padding:.35rem .75rem;border-radius:.25rem;cursor:pointer;font:inherit;">Reload</button>' +
+      '<button id="sw-dismiss-btn" style="background:transparent;color:#aaa;border:none;' +
+      'cursor:pointer;font:inherit;">\u2715</button>';
+    document.body.appendChild(toast);
+    document.getElementById('sw-reload-btn').addEventListener('click', function () {
+      window.location.reload();
+    });
+    document.getElementById('sw-dismiss-btn').addEventListener('click', function () {
+      toast.remove();
+    });
   }
 
   function isOffline() {
