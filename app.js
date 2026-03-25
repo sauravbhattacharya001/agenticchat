@@ -82,6 +82,7 @@
  *   ResponseLengthPresets - pre-send verbosity control with 4 length modes (Alt+L)
  *   SessionArchive       - archive/unarchive sessions to declutter the sessions panel
  *   EmojiPicker          - categorized emoji browser with search and recent tracking (Ctrl+Shift+;)
+ *   MessageScheduler     - queue messages with configurable delay for auto-send (Alt+Q)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -27778,4 +27779,155 @@ const EmojiPicker = (() => {
   });
 
   return { open, close, toggle };
+})();
+
+/* ---------- Message Scheduler ---------- */
+/**
+ * Queue messages to be sent automatically after a configurable delay.
+ * Users compose a message, pick a delay (seconds or minutes), and the
+ * scheduler counts down and auto-sends each queued message in order.
+ *
+ * Keyboard shortcut: Alt+Q
+ * @namespace MessageScheduler
+ */
+const MessageScheduler = (() => {
+  let _queue = [];          // { id, text, sendAt, timerId }
+  let _tickId = null;
+  let _idCounter = 0;
+
+  /* ---- DOM refs ---- */
+  const panel     = () => document.getElementById('scheduler-panel');
+  const overlay   = () => document.getElementById('scheduler-overlay');
+  const msgInput  = () => document.getElementById('scheduler-message');
+  const delayIn   = () => document.getElementById('scheduler-delay');
+  const unitSel   = () => document.getElementById('scheduler-unit');
+  const queueEl   = () => document.getElementById('scheduler-queue');
+  const emptyEl   = () => document.getElementById('scheduler-empty');
+
+  /* ---- open / close ---- */
+  function open() {
+    const p = panel(), o = overlay();
+    if (!p) return;
+    p.style.display = 'flex';
+    o.style.display = 'block';
+    o.onclick = close;
+    msgInput()?.focus();
+    renderQueue();
+  }
+  function close() {
+    const p = panel(), o = overlay();
+    if (p) p.style.display = 'none';
+    if (o) o.style.display = 'none';
+  }
+  function toggle() { panel()?.style.display === 'none' ? open() : close(); }
+
+  /* ---- schedule ---- */
+  function addScheduled() {
+    const ta = msgInput();
+    const text = ta?.value.trim();
+    if (!text) return;
+    const delay = Math.max(1, parseInt(delayIn()?.value || '30', 10));
+    const unit = unitSel()?.value || 'm';
+    const ms = unit === 'm' ? delay * 60000 : delay * 1000;
+    const id = ++_idCounter;
+    const sendAt = Date.now() + ms;
+
+    const timerId = setTimeout(() => sendMessage(id), ms);
+    _queue.push({ id, text, sendAt, timerId });
+    ta.value = '';
+    renderQueue();
+    startTick();
+  }
+
+  /* ---- send ---- */
+  function sendMessage(id) {
+    const idx = _queue.findIndex(q => q.id === id);
+    if (idx === -1) return;
+    const item = _queue.splice(idx, 1)[0];
+
+    // Inject text into the chat input and click Send
+    const chatInput = document.getElementById('chat-input');
+    const sendBtn = document.getElementById('send-btn');
+    if (chatInput && sendBtn) {
+      chatInput.value = item.text;
+      chatInput.dispatchEvent(new Event('input', { bubbles: true }));
+      sendBtn.click();
+    }
+    renderQueue();
+    if (_queue.length === 0) stopTick();
+  }
+
+  /* ---- cancel ---- */
+  function cancelItem(id) {
+    const idx = _queue.findIndex(q => q.id === id);
+    if (idx === -1) return;
+    clearTimeout(_queue[idx].timerId);
+    _queue.splice(idx, 1);
+    renderQueue();
+    if (_queue.length === 0) stopTick();
+  }
+
+  function cancelAll() {
+    _queue.forEach(q => clearTimeout(q.timerId));
+    _queue = [];
+    renderQueue();
+    stopTick();
+  }
+
+  /* ---- render ---- */
+  function renderQueue() {
+    const qe = queueEl(), ee = emptyEl();
+    if (!qe) return;
+    if (_queue.length === 0) {
+      qe.innerHTML = '';
+      if (ee) ee.style.display = '';
+      return;
+    }
+    if (ee) ee.style.display = 'none';
+    qe.innerHTML = _queue.map(q => {
+      const remaining = Math.max(0, q.sendAt - Date.now());
+      const secs = Math.ceil(remaining / 1000);
+      const display = secs >= 60 ? `${Math.floor(secs/60)}m ${secs%60}s` : `${secs}s`;
+      const preview = q.text.length > 60 ? q.text.slice(0, 57) + '…' : q.text;
+      return `<div class="scheduler-item" data-id="${q.id}">
+        <span class="scheduler-item-text" title="${q.text.replace(/"/g,'&quot;')}">${preview}</span>
+        <span class="scheduler-item-timer">${display}</span>
+        <button class="scheduler-item-cancel" title="Cancel">✕</button>
+      </div>`;
+    }).join('');
+    qe.querySelectorAll('.scheduler-item-cancel').forEach(btn => {
+      btn.onclick = () => {
+        const id = parseInt(btn.closest('.scheduler-item').dataset.id, 10);
+        cancelItem(id);
+      };
+    });
+  }
+
+  /* ---- tick (update countdown display) ---- */
+  function startTick() {
+    if (_tickId) return;
+    _tickId = setInterval(renderQueue, 1000);
+  }
+  function stopTick() {
+    if (_tickId) { clearInterval(_tickId); _tickId = null; }
+  }
+
+  /* ---- init ---- */
+  document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('scheduler-btn')?.addEventListener('click', toggle);
+    document.getElementById('scheduler-close')?.addEventListener('click', close);
+    document.getElementById('scheduler-add')?.addEventListener('click', addScheduled);
+    document.getElementById('scheduler-clear-all')?.addEventListener('click', cancelAll);
+    // Enter in textarea schedules (Shift+Enter for newline)
+    msgInput()?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addScheduled(); }
+    });
+  });
+
+  // Keyboard shortcut: Alt+Q
+  document.addEventListener('keydown', (e) => {
+    if (e.altKey && e.key.toLowerCase() === 'q') { e.preventDefault(); toggle(); }
+  });
+
+  return { open, close, toggle, cancelAll };
 })();

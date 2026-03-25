@@ -4283,3 +4283,21 @@ body.light .pinboard-item-note { background: #eee; color: #555; }
 .emoji-picker__grid{display:grid;grid-template-columns:repeat(8,1fr);gap:2px}
 .emoji-picker__emoji{background:none;border:none;font-size:22px;cursor:pointer;padding:4px;border-radius:6px;line-height:1;transition:background .1s}
 .emoji-picker__emoji:hover{background:var(--hover,#333)}
+
+/* ---------- Message Scheduler ---------- */
+.scheduler-panel{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:480px;max-width:92vw;max-height:80vh;background:var(--bg-secondary,#1e1e2e);border:1px solid var(--border,#333);border-radius:12px;z-index:10020;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.45);overflow:hidden}
+.scheduler-header{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border,#333)}
+.scheduler-title{font-weight:600;font-size:15px}
+.scheduler-controls{display:flex;gap:6px}
+.scheduler-compose{padding:12px 16px;border-bottom:1px solid var(--border,#333)}
+.scheduler-compose textarea{width:100%;background:var(--bg-primary,#121220);color:var(--text-primary,#e0e0e0);border:1px solid var(--border,#333);border-radius:8px;padding:8px;font-family:inherit;font-size:13px;resize:vertical}
+.scheduler-delay-row{display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap}
+.scheduler-delay-row label{font-size:13px;color:var(--text-secondary,#aaa)}
+.scheduler-delay-row input[type=number]{width:70px;background:var(--bg-primary,#121220);color:var(--text-primary,#e0e0e0);border:1px solid var(--border,#333);border-radius:6px;padding:4px 8px;font-size:13px}
+.scheduler-delay-row select{background:var(--bg-primary,#121220);color:var(--text-primary,#e0e0e0);border:1px solid var(--border,#333);border-radius:6px;padding:4px 8px;font-size:13px}
+.scheduler-queue{overflow-y:auto;flex:1;padding:8px 16px}
+.scheduler-item{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:var(--bg-primary,#121220);border-radius:8px;margin-bottom:6px;border:1px solid var(--border,#333)}
+.scheduler-item-text{flex:1;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-right:10px}
+.scheduler-item-timer{font-size:12px;font-variant-numeric:tabular-nums;color:var(--text-secondary,#aaa);margin-right:10px;min-width:50px;text-align:right}
+.scheduler-item-cancel{background:none;border:none;color:#e57373;cursor:pointer;font-size:14px;padding:2px 6px;border-radius:4px}
+.scheduler-item-cancel:hover{background:rgba(229,115,115,.15)}

@@ -68,6 +68,7 @@
     <button id="mindmap-btn" class="btn-secondary" title="Mind Map — interactive topic relationship graph (Ctrl+Shift+G)">🧠</button>
     <button id="chains-btn" class="btn-secondary" title="Prompt Chains - multi-step prompt workflows" onclick="PromptChainRunner.toggle()">&#x26D3;&#xFE0F;</button>
     <button id="command-palette-btn" class="btn-secondary" title="Command Palette — search all commands (Ctrl+Shift+P)" onclick="CommandPalette.toggle()">🎨</button>
+    <button id="scheduler-btn" class="btn-secondary" title="Message Scheduler — queue messages with delay (Alt+Q)">⏰</button>
     <button id="splitview-btn" class="btn-secondary" title="Split View — compare two sessions side by side (Ctrl+Shift+2)" onclick="SplitView.toggle()">📖</button>
     <button id="streak-btn" class="btn-secondary" title="Streak Tracker — daily activity streaks and milestones (Ctrl+Shift+K)" onclick="StreakTracker.toggle()">🔥</button>
     <button id="text-expander-btn" class="btn-secondary" title="Text Expander — auto-expanding text shortcuts (Ctrl+Shift+X)" onclick="TextExpander.toggle()">⚡</button>
@@ -493,6 +494,32 @@
   </div>
 
   <!-- Pin Board Panel -->
+  <!-- Message Scheduler -->
+  <div id="scheduler-overlay" class="modal-overlay" style="display:none"></div>
+  <div id="scheduler-panel" class="scheduler-panel" style="display:none;" role="dialog" aria-label="Message Scheduler" aria-modal="true">
+    <div class="scheduler-header">
+      <span class="scheduler-title">⏰ Message Scheduler</span>
+      <div class="scheduler-controls">
+        <button id="scheduler-clear-all" class="btn-sm" title="Cancel all scheduled">🗑️</button>
+        <button id="scheduler-close" class="btn-sm" title="Close">✕</button>
+      </div>
+    </div>
+    <div class="scheduler-compose">
+      <textarea id="scheduler-message" rows="3" placeholder="Type your message…" autocomplete="off"></textarea>
+      <div class="scheduler-delay-row">
+        <label for="scheduler-delay">Send after:</label>
+        <input id="scheduler-delay" type="number" min="1" max="3600" value="30" step="1">
+        <select id="scheduler-unit">
+          <option value="s">seconds</option>
+          <option value="m" selected>minutes</option>
+        </select>
+        <button id="scheduler-add" class="btn-sm" title="Schedule message">Schedule</button>
+      </div>
+    </div>
+    <div id="scheduler-queue" class="scheduler-queue"></div>
+    <div id="scheduler-empty" style="padding:1rem;text-align:center;color:var(--text-secondary);">No scheduled messages. Compose one above!</div>
+  </div>
+
   <div id="pinboard-overlay" class="modal-overlay" style="display:none"></div>
   <div id="pinboard-panel" class="pinboard-panel" style="display:none;" aria-label="Pin board">
     <div class="pinboard-header">
