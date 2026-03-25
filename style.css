@@ -4301,3 +4301,51 @@ body.light .pinboard-item-note { background: #eee; color: #555; }
 .scheduler-item-timer{font-size:12px;font-variant-numeric:tabular-nums;color:var(--text-secondary,#aaa);margin-right:10px;min-width:50px;text-align:right}
 .scheduler-item-cancel{background:none;border:none;color:#e57373;cursor:pointer;font-size:14px;padding:2px 6px;border-radius:4px}
 .scheduler-item-cancel:hover{background:rgba(229,115,115,.15)}
+
+/* ===== Message Translator ===== */
+.translator-overlay {
+  display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0,0,0,0.5); z-index: 9998;
+}
+.translator-panel {
+  display: none; flex-direction: column; position: fixed; top: 50%; left: 50%;
+  transform: translate(-50%, -50%); width: 480px; max-width: 95vw; max-height: 80vh;
+  background: var(--bg-secondary, #1e1e2e); border: 1px solid var(--border-color, #444);
+  border-radius: 12px; z-index: 9999; box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+  overflow: hidden;
+}
+.translator-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 16px; border-bottom: 1px solid var(--border-color, #444);
+}
+.translator-header h3 { margin: 0; font-size: 1.1rem; }
+.translator-close {
+  background: none; border: none; color: inherit; font-size: 1.4rem; cursor: pointer;
+  padding: 0 4px; opacity: 0.7;
+}
+.translator-close:hover { opacity: 1; }
+.translator-body {
+  padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px;
+}
+.translator-body label { font-size: 0.85rem; opacity: 0.8; }
+#translator-lang {
+  padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border-color, #444);
+  background: var(--bg-primary, #111); color: inherit; font-size: 0.95rem;
+}
+.translator-text-box {
+  padding: 10px; border-radius: 8px; background: var(--bg-primary, #111);
+  border: 1px solid var(--border-color, #333); min-height: 48px; max-height: 200px;
+  overflow-y: auto; white-space: pre-wrap; font-size: 0.9rem; line-height: 1.5;
+}
+#translator-go {
+  align-self: flex-start; padding: 8px 20px; border-radius: 6px;
+  background: var(--accent-color, #2196F3); color: #fff; border: none;
+  cursor: pointer; font-size: 0.95rem;
+}
+#translator-go:hover { filter: brightness(1.1); }
+#translator-go:disabled { opacity: 0.5; cursor: not-allowed; }
+.translator-actions { display: flex; gap: 8px; }
+.translator-replaced { font-style: italic; }
+.translator-original-note {
+  font-size: 0.8rem; opacity: 0.6; margin-top: 4px; font-style: normal;
+}

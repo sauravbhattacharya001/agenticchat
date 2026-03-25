@@ -27971,3 +27971,182 @@ const MessageScheduler = (() => {
 
   return { open, close, toggle, cancelAll };
 })();
+
+// ============================================================
+// Message Translator — translate any message via OpenAI API
+// ============================================================
+const MessageTranslator = (() => {
+  const LANGUAGES = [
+    'Spanish','French','German','Italian','Portuguese','Chinese','Japanese',
+    'Korean','Arabic','Hindi','Russian','Turkish','Dutch','Swedish','Polish',
+    'Vietnamese','Thai','Indonesian','Greek','Hebrew','Czech','Romanian',
+    'Hungarian','Finnish','Danish','Norwegian','Ukrainian','Bengali','Malay'
+  ];
+  let _panel = null;
+  let _overlay = null;
+  let _targetLang = 'Spanish';
+  let _sourceText = '';
+  let _sourceEl = null;
+
+  function getApiKey() {
+    const el = document.getElementById('api-key');
+    return el ? el.value.trim() : '';
+  }
+
+  function buildPanel() {
+    if (_panel) return;
+    _overlay = document.createElement('div');
+    _overlay.className = 'translator-overlay';
+    _overlay.addEventListener('click', close);
+
+    _panel = document.createElement('div');
+    _panel.className = 'translator-panel';
+    _panel.setAttribute('role', 'dialog');
+    _panel.setAttribute('aria-label', 'Message Translator');
+    _panel.innerHTML = `
+      <div class="translator-header">
+        <h3>🌐 Translate Message</h3>
+        <button class="translator-close" title="Close">&times;</button>
+      </div>
+      <div class="translator-body">
+        <label for="translator-lang">Target language:</label>
+        <select id="translator-lang">
+          ${LANGUAGES.map(l => `<option value="${l}"${l === _targetLang ? ' selected' : ''}>${l}</option>`).join('')}
+        </select>
+        <div class="translator-source">
+          <label>Original:</label>
+          <div id="translator-original" class="translator-text-box"></div>
+        </div>
+        <button id="translator-go" class="btn-primary">Translate</button>
+        <div class="translator-result">
+          <label>Translation:</label>
+          <div id="translator-output" class="translator-text-box"></div>
+        </div>
+        <div class="translator-actions" style="display:none">
+          <button id="translator-copy" class="btn-secondary" title="Copy translation">📋 Copy</button>
+          <button id="translator-replace" class="btn-secondary" title="Replace original message">Replace</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(_overlay);
+    document.body.appendChild(_panel);
+
+    _panel.querySelector('.translator-close').addEventListener('click', close);
+    _panel.querySelector('#translator-go').addEventListener('click', doTranslate);
+    _panel.querySelector('#translator-copy').addEventListener('click', copyResult);
+    _panel.querySelector('#translator-replace').addEventListener('click', replaceOriginal);
+    _panel.querySelector('#translator-lang').addEventListener('change', (e) => {
+      _targetLang = e.target.value;
+    });
+  }
+
+  async function doTranslate() {
+    const key = getApiKey();
+    if (!key) { alert('Please enter your OpenAI API key first.'); return; }
+    const goBtn = _panel.querySelector('#translator-go');
+    const output = _panel.querySelector('#translator-output');
+    const actions = _panel.querySelector('.translator-actions');
+    goBtn.disabled = true;
+    goBtn.textContent = 'Translating…';
+    output.textContent = '';
+    actions.style.display = 'none';
+
+    try {
+      const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          temperature: 0.3,
+          messages: [
+            { role: 'system', content: `You are a translator. Translate the user's text to ${_targetLang}. Return ONLY the translation, nothing else.` },
+            { role: 'user', content: _sourceText }
+          ]
+        })
+      });
+      if (!resp.ok) throw new Error(`API error: ${resp.status}`);
+      const data = await resp.json();
+      const translation = data.choices?.[0]?.message?.content?.trim() || '(no translation)';
+      output.textContent = translation;
+      actions.style.display = 'flex';
+    } catch (err) {
+      output.textContent = `Error: ${err.message}`;
+    } finally {
+      goBtn.disabled = false;
+      goBtn.textContent = 'Translate';
+    }
+  }
+
+  function copyResult() {
+    const text = _panel.querySelector('#translator-output').textContent;
+    navigator.clipboard.writeText(text).then(() => {
+      const btn = _panel.querySelector('#translator-copy');
+      btn.textContent = '✅ Copied!';
+      setTimeout(() => { btn.textContent = '📋 Copy'; }, 1500);
+    });
+  }
+
+  function replaceOriginal() {
+    if (!_sourceEl) return;
+    const translation = _panel.querySelector('#translator-output').textContent;
+    const original = _sourceEl.textContent;
+    _sourceEl.innerHTML = `<div class="translator-replaced">${_escapeHtml(translation)}<div class="translator-original-note">Original: ${_escapeHtml(original)}</div></div>`;
+    close();
+  }
+
+  function open(text, sourceElement) {
+    buildPanel();
+    _sourceText = text || '';
+    _sourceEl = sourceElement || null;
+    _panel.querySelector('#translator-original').textContent = _sourceText;
+    _panel.querySelector('#translator-output').textContent = '';
+    _panel.querySelector('.translator-actions').style.display = 'none';
+    _overlay.style.display = 'block';
+    _panel.style.display = 'flex';
+  }
+
+  function close() {
+    if (_overlay) _overlay.style.display = 'none';
+    if (_panel) _panel.style.display = 'none';
+  }
+
+  function toggle(text, el) {
+    if (_panel && _panel.style.display === 'flex') close();
+    else open(text, el);
+  }
+
+  // Add translate option to message context menu items
+  document.addEventListener('DOMContentLoaded', () => {
+    // Add toolbar button
+    const toolbarBtn = document.createElement('button');
+    toolbarBtn.id = 'translate-btn';
+    toolbarBtn.className = 'btn-secondary';
+    toolbarBtn.title = 'Message Translator — translate messages to other languages (Alt+T)';
+    toolbarBtn.textContent = '🌐';
+    toolbarBtn.addEventListener('click', () => {
+      // If text is selected, use that; otherwise prompt
+      const sel = window.getSelection().toString().trim();
+      if (sel) {
+        open(sel, null);
+      } else {
+        // Try to get the last assistant message
+        const msgs = document.querySelectorAll('.message.assistant .message-text, .message.assistant .msg-text');
+        const last = msgs.length ? msgs[msgs.length - 1] : null;
+        if (last) open(last.textContent.trim(), last);
+        else open('', null);
+      }
+    });
+    const toolbar = document.querySelector('.toolbar[role="form"][aria-label="Chat input"]');
+    if (toolbar) toolbar.appendChild(toolbarBtn);
+
+    // Keyboard shortcut: Alt+T
+    document.addEventListener('keydown', (e) => {
+      if (e.altKey && e.key.toLowerCase() === 't') {
+        e.preventDefault();
+        toolbarBtn.click();
+      }
+    });
+  });
+
+  return { open, close, toggle };
+})();
