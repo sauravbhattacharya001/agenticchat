@@ -953,12 +953,16 @@ const ChatController = (() => {
   function createRequestSignal(timeoutMs = 60000) {
     currentAbortController = new AbortController();
     // Combine user-cancel with auto-timeout
-    if (typeof AbortSignal.timeout === 'function') {
+    if (typeof AbortSignal.timeout === 'function' && typeof AbortSignal.any === 'function') {
       const timeoutSignal = AbortSignal.timeout(timeoutMs);
-      return AbortSignal.any
-        ? AbortSignal.any([currentAbortController.signal, timeoutSignal])
-        : currentAbortController.signal; // fallback for older browsers
+      return AbortSignal.any([currentAbortController.signal, timeoutSignal]);
     }
+    // Fallback for browsers without AbortSignal.any (Safari <17, Firefox <124):
+    // wire up a manual setTimeout so the request still times out instead of
+    // hanging indefinitely when the API is unresponsive.
+    const timer = setTimeout(() => currentAbortController.abort(), timeoutMs);
+    const origAbort = currentAbortController.abort.bind(currentAbortController);
+    currentAbortController.abort = () => { clearTimeout(timer); origAbort(); };
     return currentAbortController.signal;
   }
 
