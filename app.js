@@ -196,6 +196,48 @@ const DOMCache = (() => {
   };
 })();
 
+/* ---------- ModalHelper - shared overlay+modal factory ---------- */
+/**
+ * Creates a centered modal overlay with consistent styling.
+ * Returns { overlay, modal, close } where close() removes both.
+ *
+ * @param {Object} opts
+ * @param {string} [opts.overlayId]        - Optional id for the overlay element
+ * @param {number} [opts.zIndex=10000]     - z-index for the overlay
+ * @param {string} [opts.maxWidth='420px'] - Max width of the modal container
+ * @param {string} [opts.background]       - Override modal background color
+ * @returns {{ overlay: HTMLDivElement, modal: HTMLDivElement, close: () => void }}
+ */
+function createModalOverlay(opts = {}) {
+  const zIndex = opts.zIndex || 10000;
+  const maxWidth = opts.maxWidth || '420px';
+  const bg = opts.background || 'var(--bg, #1a1a2e)';
+
+  const overlay = document.createElement('div');
+  if (opts.overlayId) overlay.id = opts.overlayId;
+  overlay.style.cssText =
+    'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:' + zIndex + ';' +
+    'display:flex;align-items:center;justify-content:center;';
+
+  const modal = document.createElement('div');
+  modal.style.cssText =
+    'background:' + bg + ';color:var(--fg, #e0e0e0);' +
+    'border-radius:12px;padding:24px;max-width:' + maxWidth + ';width:90%;' +
+    'max-height:70vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.3);';
+
+  function close() {
+    overlay.remove();
+  }
+
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) close();
+  });
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+
+  return { overlay, modal, close };
+}
+
 /* ============================================================
  * ChatConfig - application constants and runtime configuration.
  *
@@ -11539,18 +11581,10 @@ const ConversationTags = (() => {
     const existing = DOMCache.get('tag-manager-overlay');
     if (existing) existing.remove();
 
-    const overlay = document.createElement('div');
-    overlay.id = 'tag-manager-overlay';
-    overlay.style.cssText =
-      'position:fixed;top:0;left:0;width:100%;height:100%;' +
-      'background:rgba(0,0,0,0.5);z-index:10000;display:flex;' +
-      'align-items:center;justify-content:center;';
-
-    const modal = document.createElement('div');
-    modal.style.cssText =
-      'background:var(--bg, #1a1a2e);color:var(--fg, #e0e0e0);' +
-      'border-radius:12px;padding:24px;max-width:400px;width:90%;' +
-      'max-height:70vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.3);';
+    const { overlay, modal, close: closeModal } = createModalOverlay({
+      overlayId: 'tag-manager-overlay',
+      maxWidth: '400px',
+    });
 
     const title = document.createElement('h3');
     title.textContent = '🏷️ Manage Tags';
@@ -11666,13 +11700,6 @@ const ConversationTags = (() => {
       'cursor:pointer;font-size:14px;';
     closeBtn.addEventListener('click', () => overlay.remove());
     modal.appendChild(closeBtn);
-
-    overlay.appendChild(modal);
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) overlay.remove();
-    });
-
-    document.body.appendChild(overlay);
 
     // Escape to close
     const onKey = (e) => {
@@ -12602,21 +12629,12 @@ const AutoTagger = (() => {
   function showSuggestionModal(sessionId) {
     const suggestions = suggestForSession(sessionId);
 
-    // Create overlay
-    const overlay = document.createElement('div');
-    overlay.style.cssText =
-      'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:10100;' +
-      'display:flex;align-items:center;justify-content:center;';
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) overlay.remove();
+    // Create overlay + modal via shared helper
+    const { overlay, modal } = createModalOverlay({
+      zIndex: 10100,
+      maxWidth: '420px',
+      background: '#1e1e2e',
     });
-
-    // Modal container
-    const modal = document.createElement('div');
-    modal.style.cssText =
-      'background:#1e1e2e;border:1px solid #444;border-radius:12px;' +
-      'padding:24px;max-width:420px;width:90%;color:#e0e0e0;' +
-      'box-shadow:0 8px 32px rgba(0,0,0,0.5);';
 
     // Title
     const title = document.createElement('h3');
@@ -12729,9 +12747,6 @@ const AutoTagger = (() => {
       closeBtn.addEventListener('click', () => overlay.remove());
       modal.appendChild(closeBtn);
     }
-
-    overlay.appendChild(modal);
-    document.body.appendChild(overlay);
   }
 
   /* ── Public API ──────────────────────────────────────────── */
@@ -13079,21 +13094,15 @@ const DataBackup = (() => {
     var existing = DOMCache.get('backup-modal-overlay');
     if (existing) existing.remove();
 
-    var overlay = document.createElement('div');
-    overlay.id = 'backup-modal-overlay';
-    overlay.style.cssText =
-      'position:fixed;top:0;left:0;width:100%;height:100%;' +
-      'background:rgba(0,0,0,0.6);z-index:10000;display:flex;' +
-      'align-items:center;justify-content:center;';
-    overlay.addEventListener('click', function (e) {
-      if (e.target === overlay) overlay.remove();
+    var result = createModalOverlay({
+      overlayId: 'backup-modal-overlay',
+      maxWidth: '440px',
+      background: '#1e1e2e',
     });
-
-    var modal = document.createElement('div');
-    modal.style.cssText =
-      'background:#1e1e2e;color:#cdd6f4;border-radius:12px;padding:24px;' +
-      'max-width:440px;width:90%;max-height:80vh;overflow-y:auto;' +
-      'box-shadow:0 8px 32px rgba(0,0,0,0.5);';
+    var overlay = result.overlay;
+    var modal = result.modal;
+    modal.style.color = '#cdd6f4';
+    modal.style.maxHeight = '80vh';
 
     var title = document.createElement('h3');
     title.textContent = '\uD83D\uDCBE Backup & Restore';
@@ -13218,9 +13227,6 @@ const DataBackup = (() => {
       'border:1px solid #555;background:transparent;color:inherit;cursor:pointer;font-size:13px;';
     closeBtn.addEventListener('click', function () { overlay.remove(); });
     modal.appendChild(closeBtn);
-
-    overlay.appendChild(modal);
-    document.body.appendChild(overlay);
   }
 
   return {
