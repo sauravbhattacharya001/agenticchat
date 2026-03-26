@@ -66,16 +66,15 @@ self.addEventListener('fetch', event => {
     caches.match(event.request)
       .then(cached => {
         if (cached) {
-          /* Return cached version, update cache in background */
-          const fetchPromise = fetch(event.request)
+          /* Return cached version, update cache in background (stale-while-revalidate) */
+          fetch(event.request)
             .then(response => {
               if (response.ok) {
                 const clone = response.clone();
                 caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
               }
-              return response;
             })
-            .catch(() => cached);
+            .catch(() => { /* background refresh failed — stale cache is fine */ });
           return cached;
         }
         /* Not cached — try network, cache the result */
