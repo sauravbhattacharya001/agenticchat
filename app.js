@@ -28178,6 +28178,98 @@ const MessageTranslator = (() => {
 //  NotificationSound - play a subtle chime when AI responds while tab is hidden
 // ═══════════════════════════════════════════════════════════════════════
 
+const PdfExport = (() => {
+  'use strict';
+
+  /**
+   * Export the current conversation as a styled PDF using a print window.
+   * No external dependencies — uses the browser's built-in print-to-PDF.
+   */
+  function exportToPdf() {
+    const messages = ConversationManager.getMessages();
+    if (!messages || messages.length === 0) {
+      alert('No conversation to export as PDF.');
+      return;
+    }
+
+    const sessionTitle = (() => {
+      try {
+        const current = SessionManager.getCurrent();
+        return current && current.name ? current.name : 'Agentic Chat';
+      } catch (_) { return 'Agentic Chat'; }
+    })();
+
+    const timestamp = new Date().toLocaleString();
+
+    // Build HTML content for print
+    const msgHtml = messages.map(m => {
+      const role = m.role === 'user' ? 'You' : m.role === 'assistant' ? 'AI' : m.role || 'System';
+      const roleClass = m.role === 'user' ? 'pdf-user' : m.role === 'assistant' ? 'pdf-assistant' : 'pdf-system';
+      const content = _escapeHtml(m.content || '').replace(/\n/g, '<br>');
+      const time = m.timestamp ? `<span class="pdf-time">${new Date(m.timestamp).toLocaleString()}</span>` : '';
+      return `<div class="pdf-msg ${roleClass}">
+        <div class="pdf-role">${role} ${time}</div>
+        <div class="pdf-content">${content}</div>
+      </div>`;
+    }).join('\n');
+
+    const html = `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>${_escapeHtml(sessionTitle)}</title>
+<style>
+  @media print { body { margin: 0.5in; } }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; color: #1a1a1a; font-size: 13px; line-height: 1.5; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .pdf-meta { color: #666; font-size: 11px; margin-bottom: 24px; border-bottom: 1px solid #ddd; padding-bottom: 12px; }
+  .pdf-msg { margin-bottom: 16px; padding: 10px 14px; border-radius: 8px; }
+  .pdf-user { background: #e8f0fe; }
+  .pdf-assistant { background: #f1f3f5; }
+  .pdf-system { background: #fff3cd; }
+  .pdf-role { font-weight: 600; font-size: 12px; margin-bottom: 4px; color: #333; }
+  .pdf-time { font-weight: 400; color: #888; margin-left: 8px; font-size: 11px; }
+  .pdf-content { white-space: pre-wrap; word-break: break-word; }
+  .pdf-footer { margin-top: 24px; text-align: center; color: #999; font-size: 10px; border-top: 1px solid #ddd; padding-top: 8px; }
+</style></head><body>
+  <h1>${_escapeHtml(sessionTitle)}</h1>
+  <div class="pdf-meta">Exported on ${timestamp} &bull; ${messages.length} message${messages.length !== 1 ? 's' : ''}</div>
+  ${msgHtml}
+  <div class="pdf-footer">Exported from Agentic Chat</div>
+  <script>window.onload = function() { window.print(); }</script>
+</body></html>`;
+
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      alert('Pop-up blocked. Please allow pop-ups for this site to export PDF.');
+      return;
+    }
+    printWindow.document.write(html);
+    printWindow.document.close();
+  }
+
+  function toggle() { exportToPdf(); }
+
+  // Add toolbar button
+  document.addEventListener('DOMContentLoaded', () => {
+    const btn = document.createElement('button');
+    btn.id = 'pdf-export-btn';
+    btn.className = 'btn-secondary';
+    btn.title = 'Export conversation as PDF (Ctrl+Shift+P)';
+    btn.textContent = '📄';
+    btn.addEventListener('click', exportToPdf);
+    const toolbar = document.querySelector('.toolbar[role="form"][aria-label="Chat input"]');
+    if (toolbar) toolbar.appendChild(btn);
+
+    // Keyboard shortcut
+    document.addEventListener('keydown', e => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'P') {
+        e.preventDefault();
+        exportToPdf();
+      }
+    });
+  });
+
+  return { toggle, exportToPdf };
+})();
+
 const NotificationSound = (() => {
   'use strict';
 
