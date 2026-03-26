@@ -190,3 +190,58 @@ jobs:
               console.log('| Lines | ' + fmt(c.lines) + ' |');
             " >> $GITHUB_STEP_SUMMARY
           fi
+
+  compatibility:
+    name: Node ${{ matrix.node-version }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ['18', '20', '22']
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npx jest --verbose --ci
+
+  audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: npm audit
+        run: npm audit --omit=dev || true
+
+      - name: Check for known vulnerable patterns
+        run: |
+          # Check for eval() usage in production code (not test files)
+          if grep -rn 'eval(' --include="*.js" --exclude-dir=node_modules --exclude-dir=tests .; then
+            echo "::warning::eval() usage detected — review for security implications"
+          fi
+
+          # Check for innerHTML assignments with user input
+          if grep -rn '\.innerHTML\s*=' --include="*.js" --exclude-dir=node_modules --exclude-dir=tests .; then
+            echo "::notice::innerHTML assignments found — ensure inputs are sanitized"
+          fi
