@@ -53,6 +53,7 @@
  *   ConversationReplay   - message-by-message playback with transport controls
  *   PromptLibrary        - user-created prompt snippets with folders, search, usage tracking, import/export
  *   MessageTranslator    - inline message translation to 20+ languages via OpenAI API
+ *   NotificationSound    - background tab notification chime when AI finishes responding
  *   MessageEditor        - edit & resend user messages (truncate + reload into input)
  *   SmartRetry           - automatic retry with exponential backoff for transient API failures
  *   UsageHeatmap         - GitHub-style 7×24 activity heatmap across all sessions
@@ -1363,6 +1364,9 @@ const ChatController = (() => {
 
       // Show response time badge
       ResponseTimeBadge.show(responseTimeMs);
+
+      // Play notification sound if tab is not focused
+      NotificationSound.notifyIfHidden();
 
       // Auto-save session if enabled
       SessionManager.autoSaveIfEnabled();
@@ -28156,4 +28160,89 @@ const MessageTranslator = (() => {
   });
 
   return { open, close, toggle };
+})();
+
+// ═══════════════════════════════════════════════════════════════════════
+//  NotificationSound - play a subtle chime when AI responds while tab is hidden
+// ═══════════════════════════════════════════════════════════════════════
+
+const NotificationSound = (() => {
+  'use strict';
+
+  const STORAGE_KEY = 'ac_notification_sound';
+  let _enabled = SafeStorage.get(STORAGE_KEY) !== 'off';
+  let _audioCtx = null;
+
+  /** Get or create the AudioContext (lazy, user-gesture gated). */
+  function _ctx() {
+    if (!_audioCtx) {
+      try { _audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+      catch (_) { return null; }
+    }
+    if (_audioCtx.state === 'suspended') _audioCtx.resume();
+    return _audioCtx;
+  }
+
+  /**
+   * Synthesize a pleasant two-tone chime using Web Audio API.
+   * No external sound files needed.
+   */
+  function _playChime() {
+    const ctx = _ctx();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+
+    // Two-note ascending chime (C5 → E5)
+    [523.25, 659.25].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0, now + i * 0.15);
+      gain.gain.linearRampToValueAtTime(0.15, now + i * 0.15 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.15 + 0.3);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now + i * 0.15);
+      osc.stop(now + i * 0.15 + 0.35);
+    });
+  }
+
+  /** Play the notification chime if the tab is hidden and notifications are enabled. */
+  function notifyIfHidden() {
+    if (_enabled && document.hidden) _playChime();
+  }
+
+  /** Toggle notification sound on/off. */
+  function toggle() {
+    _enabled = !_enabled;
+    SafeStorage.set(STORAGE_KEY, _enabled ? 'on' : 'off');
+    _updateButton();
+    return _enabled;
+  }
+
+  function isEnabled() { return _enabled; }
+
+  let _btn = null;
+  function _updateButton() {
+    if (_btn) {
+      _btn.textContent = _enabled ? '🔔' : '🔕';
+      _btn.title = _enabled
+        ? 'Notification sound ON — chime when AI responds while tab is hidden (click to disable)'
+        : 'Notification sound OFF — click to enable chime on background responses';
+    }
+  }
+
+  // Add toolbar button on DOM ready
+  document.addEventListener('DOMContentLoaded', () => {
+    _btn = document.createElement('button');
+    _btn.id = 'notification-sound-btn';
+    _btn.className = 'btn-secondary';
+    _btn.addEventListener('click', toggle);
+    _updateButton();
+    const toolbar = document.querySelector('.toolbar[role="form"][aria-label="Chat input"]');
+    if (toolbar) toolbar.appendChild(_btn);
+  });
+
+  return { notifyIfHidden, toggle, isEnabled };
 })();
