@@ -760,6 +760,76 @@ const ApiKeyManager = (() => {
   };
 })();
 
+/* ---------- OpenAI Client ---------- */
+/**
+ * Shared low-level OpenAI API client used by all modules that need
+ * chat completions (translation, A/B testing, tone adjustment, etc.).
+ *
+ * Centralises endpoint URL, auth headers, error handling, and model
+ * selection so individual features don't duplicate fetch boilerplate.
+ *
+ * @namespace OpenAIClient
+ */
+const OpenAIClient = (() => {
+  const ENDPOINT = 'https://api.openai.com/v1/chat/completions';
+
+  /**
+   * Send a chat completion request to OpenAI.
+   *
+   * @param {Object} opts
+   * @param {Array<{role: string, content: string}>} opts.messages - Conversation messages.
+   * @param {string}  [opts.apiKey]      - API key (defaults to ApiKeyManager.getKey()).
+   * @param {string}  [opts.model]       - Model id (defaults to ChatConfig.MODEL).
+   * @param {number}  [opts.maxTokens]   - Max tokens for the response.
+   * @param {number}  [opts.temperature] - Sampling temperature.
+   * @param {AbortSignal} [opts.signal]  - Optional abort signal.
+   * @returns {Promise<{ok: boolean, content?: string, data?: Object, usage?: Object, error?: string, status?: number}>}
+   */
+  async function complete({
+    messages,
+    apiKey,
+    model,
+    maxTokens,
+    temperature,
+    signal,
+  }) {
+    const key = apiKey || (typeof ApiKeyManager !== 'undefined' ? ApiKeyManager.getKey() : null);
+    if (!key) {
+      return { ok: false, error: 'No API key configured. Set your OpenAI key first.' };
+    }
+
+    const body = {
+      model: model || (typeof ChatConfig !== 'undefined' ? ChatConfig.MODEL : 'gpt-4o-mini'),
+      messages,
+    };
+    if (typeof maxTokens === 'number') body.max_tokens = maxTokens;
+    if (typeof temperature === 'number') body.temperature = temperature;
+
+    const rsp = await fetch(ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${key}`,
+      },
+      body: JSON.stringify(body),
+      ...(signal ? { signal } : {}),
+    });
+
+    if (!rsp.ok) {
+      const errData = await rsp.json().catch(() => ({}));
+      const errMsg = errData?.error?.message || `HTTP ${rsp.status}`;
+      return { ok: false, error: errMsg, status: rsp.status };
+    }
+
+    const data = await rsp.json();
+    const choice = data.choices && data.choices[0];
+    const content = choice ? (choice.message ? choice.message.content : '') : '';
+    return { ok: true, content, data, usage: data.usage || null };
+  }
+
+  return { complete, ENDPOINT };
+})();
+
 /* ---------- UI Controller ---------- */
 /**
  * Centralized DOM manipulation layer for all non-sandbox UI updates.
@@ -14829,42 +14899,24 @@ const MessageTranslator = (() => {
 
     showLoading(msgIndex);
 
-    var key = ApiKeyManager.getKey();
-    if (!key) {
-      removeLoading(msgIndex);
-      alert('Please set your OpenAI API key first.');
-      return;
-    }
-
     try {
-      var rsp = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + key
-        },
-        body: JSON.stringify({
-          model: ChatConfig.MODEL,
-          messages: [
-            { role: 'system', content: 'You are a translator. Translate the following text to ' + langName + '. Return ONLY the translation, nothing else. Preserve formatting, code blocks, and markdown.' },
-            { role: 'user', content: content }
-          ],
-          max_tokens: 4096,
-          temperature: 0.3
-        })
+      var result = await OpenAIClient.complete({
+        messages: [
+          { role: 'system', content: 'You are a translator. Translate the following text to ' + langName + '. Return ONLY the translation, nothing else. Preserve formatting, code blocks, and markdown.' },
+          { role: 'user', content: content }
+        ],
+        maxTokens: 4096,
+        temperature: 0.3,
       });
 
       removeLoading(msgIndex);
 
-      if (!rsp.ok) {
-        var errData = await rsp.json().catch(function () { return {}; });
-        alert('Translation failed: ' + (errData.error ? errData.error.message : rsp.statusText));
+      if (!result.ok) {
+        alert('Translation failed: ' + result.error);
         return;
       }
 
-      var data = await rsp.json();
-      var translation = data.choices && data.choices[0] && data.choices[0].message
-        ? data.choices[0].message.content : '';
+      var translation = result.content;
 
       if (!translation) {
         alert('No translation returned.');
@@ -14874,8 +14926,8 @@ const MessageTranslator = (() => {
       setCache(msgIndex, langCode, translation);
       showTranslation(msgIndex, langCode, langName, translation);
 
-      if (typeof CostDashboard !== 'undefined' && data.usage) {
-        CostDashboard.trackUsage(data.usage);
+      if (typeof CostDashboard !== 'undefined' && result.usage) {
+        CostDashboard.trackUsage(result.usage);
       }
     } catch (err) {
       removeLoading(msgIndex);
@@ -15137,37 +15189,20 @@ const ModelCompare = (() => {
    */
   async function _callModel(messages, modelId, temperature) {
     const apiKey = typeof ChatConfig !== 'undefined' ? ChatConfig.API_KEY : '';
-    if (!apiKey) {
-      throw new Error('API key not configured');
-    }
-
-    const body = {
+    const result = await OpenAIClient.complete({
+      apiKey,
       model: modelId,
-      messages: messages
-    };
-    if (typeof temperature === 'number') {
-      body.temperature = temperature;
-    }
-
-    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + apiKey
-      },
-      body: JSON.stringify(body)
+      messages,
+      temperature,
     });
 
-    if (!resp.ok) {
-      const errText = await resp.text().catch(function () { return ''; });
-      throw new Error('HTTP ' + resp.status + ': ' + errText.slice(0, 200));
+    if (!result.ok) {
+      throw new Error(result.error);
     }
 
-    const data = await resp.json();
-    const choice = data.choices && data.choices[0];
     return {
-      content: choice ? (choice.message ? choice.message.content : '') : '',
-      tokens: data.usage || null
+      content: result.content,
+      tokens: result.usage || null
     };
   }
 
@@ -25333,20 +25368,17 @@ const PromptABTester = (() => {
       { role: 'user', content: prompt }
     ];
     const start = performance.now();
-    const rsp = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
-      body: JSON.stringify({ model, messages, max_tokens: ChatConfig.MAX_TOKENS_RESPONSE })
+    const result = await OpenAIClient.complete({
+      apiKey: key,
+      model,
+      messages,
+      maxTokens: ChatConfig.MAX_TOKENS_RESPONSE,
     });
     const elapsed = Math.round(performance.now() - start);
-    if (!rsp.ok) {
-      const body = await rsp.json().catch(() => ({}));
-      return { ok: false, error: body?.error?.message || `HTTP ${rsp.status}`, elapsed };
+    if (!result.ok) {
+      return { ok: false, error: result.error, elapsed };
     }
-    const data = await rsp.json();
-    const text = data.choices?.[0]?.message?.content || '(empty response)';
-    const tokens = data.usage || {};
-    return { ok: true, text, tokens, elapsed };
+    return { ok: true, text: result.content || '(empty response)', tokens: result.usage || {}, elapsed };
   }
 
   async function _run() {
@@ -26615,35 +26647,19 @@ const ToneAdjuster = (() => {
     const key = _cacheKey(text, tone.id);
     if (_cache[key]) return _cache[key];
 
-    const apiKey = typeof ApiKeyManager !== 'undefined' ? ApiKeyManager.getKey() : null;
-    if (!apiKey) {
-      throw new Error('No API key configured. Set your OpenAI key first.');
-    }
-
-    const model = typeof ChatConfig !== 'undefined' ? ChatConfig.MODEL : 'gpt-4o-mini';
-    const rsp = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: 'system', content: tone.prompt },
-          { role: 'user', content: text }
-        ],
-        max_tokens: 2048
-      })
+    const result = await OpenAIClient.complete({
+      messages: [
+        { role: 'system', content: tone.prompt },
+        { role: 'user', content: text }
+      ],
+      maxTokens: 2048,
     });
 
-    if (!rsp.ok) {
-      const err = await rsp.json().catch(() => ({}));
-      throw new Error(err?.error?.message || `API error ${rsp.status}`);
+    if (!result.ok) {
+      throw new Error(result.error);
     }
 
-    const data = await rsp.json();
-    const result = data.choices?.[0]?.message?.content || text;
+    const rewritten = result.content || text;
 
     // Cache the result
     _cache[key] = result;
@@ -28063,21 +28079,17 @@ const MessageTranslator = (() => {
     actions.style.display = 'none';
 
     try {
-      const resp = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          temperature: 0.3,
-          messages: [
-            { role: 'system', content: `You are a translator. Translate the user's text to ${_targetLang}. Return ONLY the translation, nothing else.` },
-            { role: 'user', content: _sourceText }
-          ]
-        })
+      const result = await OpenAIClient.complete({
+        apiKey: key,
+        model: 'gpt-4o-mini',
+        temperature: 0.3,
+        messages: [
+          { role: 'system', content: `You are a translator. Translate the user's text to ${_targetLang}. Return ONLY the translation, nothing else.` },
+          { role: 'user', content: _sourceText }
+        ],
       });
-      if (!resp.ok) throw new Error(`API error: ${resp.status}`);
-      const data = await resp.json();
-      const translation = data.choices?.[0]?.message?.content?.trim() || '(no translation)';
+      if (!result.ok) throw new Error(result.error);
+      const translation = result.content?.trim() || '(no translation)';
       output.textContent = translation;
       actions.style.display = 'flex';
     } catch (err) {
