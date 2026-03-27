@@ -28350,3 +28350,172 @@ const NotificationSound = (() => {
 
   return { notifyIfHidden, toggle, isEnabled };
 })();
+
+// ============================================================
+// Conversation Export — export chat as Markdown/Text/HTML/JSON
+// ============================================================
+const ConversationExport = (() => {
+  'use strict';
+
+  const FORMATS = ['markdown', 'text', 'html', 'json'];
+
+  /** Gather messages from the current conversation. */
+  function _getMessages() {
+    const msgs = [];
+    document.querySelectorAll('#blackbox .message').forEach(el => {
+      const roleEl = el.querySelector('.role');
+      const contentEl = el.querySelector('.content');
+      if (!roleEl || !contentEl) return;
+      const role = roleEl.textContent.trim().replace(/:$/, '');
+      const content = contentEl.textContent.trim();
+      if (content) msgs.push({ role, content });
+    });
+    return msgs;
+  }
+
+  /** Convert messages to Markdown. */
+  function _toMarkdown(msgs, title) {
+    let md = `# ${title}\n\n`;
+    md += `*Exported ${new Date().toLocaleString()}*\n\n---\n\n`;
+    msgs.forEach(m => {
+      md += `**${m.role}:**\n\n${m.content}\n\n---\n\n`;
+    });
+    return md;
+  }
+
+  /** Convert messages to plain text. */
+  function _toText(msgs, title) {
+    let txt = `${title}\nExported ${new Date().toLocaleString()}\n${'='.repeat(50)}\n\n`;
+    msgs.forEach(m => {
+      txt += `[${m.role}]\n${m.content}\n\n${'-'.repeat(40)}\n\n`;
+    });
+    return txt;
+  }
+
+  /** Convert messages to simple HTML. */
+  function _toHtml(msgs, title) {
+    const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    let html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${esc(title)}</title>`;
+    html += `<style>body{font-family:system-ui,sans-serif;max-width:800px;margin:2rem auto;padding:0 1rem;line-height:1.6}`;
+    html += `.msg{margin:1rem 0;padding:1rem;border-radius:8px;border:1px solid #e0e0e0}`;
+    html += `.role{font-weight:700;margin-bottom:.5rem;text-transform:capitalize}`;
+    html += `.user .role{color:#2196F3}.assistant .role{color:#4CAF50}`;
+    html += `pre{background:#f5f5f5;padding:.75rem;border-radius:4px;overflow-x:auto}</style></head><body>`;
+    html += `<h1>${esc(title)}</h1><p><em>Exported ${new Date().toLocaleString()}</em></p>`;
+    msgs.forEach(m => {
+      const cls = m.role.toLowerCase().includes('user') ? 'user' : 'assistant';
+      html += `<div class="msg ${cls}"><div class="role">${esc(m.role)}</div><div>${esc(m.content).replace(/\n/g,'<br>')}</div></div>`;
+    });
+    html += `</body></html>`;
+    return html;
+  }
+
+  /** Convert messages to JSON. */
+  function _toJson(msgs, title) {
+    return JSON.stringify({ title, exportedAt: new Date().toISOString(), messages: msgs }, null, 2);
+  }
+
+  /** Export in the given format. */
+  function exportAs(format) {
+    const msgs = _getMessages();
+    if (!msgs.length) { alert('No messages to export.'); return; }
+    const title = document.title || 'Agentic Chat Export';
+    let content, mime, ext;
+    switch (format) {
+      case 'markdown': content = _toMarkdown(msgs, title); mime = 'text/markdown'; ext = 'md'; break;
+      case 'text': content = _toText(msgs, title); mime = 'text/plain'; ext = 'txt'; break;
+      case 'html': content = _toHtml(msgs, title); mime = 'text/html'; ext = 'html'; break;
+      case 'json': content = _toJson(msgs, title); mime = 'application/json'; ext = 'json'; break;
+      default: return;
+    }
+    const filename = `chat-export-${new Date().toISOString().slice(0,10)}.${ext}`;
+    downloadBlob(filename, content, mime);
+  }
+
+  /** Copy current conversation as Markdown to clipboard. */
+  function copyAsMarkdown() {
+    const msgs = _getMessages();
+    if (!msgs.length) { alert('No messages to copy.'); return; }
+    const title = document.title || 'Agentic Chat Export';
+    const md = _toMarkdown(msgs, title);
+    navigator.clipboard.writeText(md).then(
+      () => { _flashButton('✅'); },
+      () => { alert('Failed to copy to clipboard.'); }
+    );
+  }
+
+  let _btn = null;
+  let _dropdown = null;
+
+  function _flashButton(icon) {
+    if (!_btn) return;
+    const orig = _btn.textContent;
+    _btn.textContent = icon;
+    setTimeout(() => { _btn.textContent = orig; }, 1500);
+  }
+
+  function _hideDropdown() {
+    if (_dropdown) _dropdown.style.display = 'none';
+  }
+
+  function toggle() {
+    if (!_dropdown) return;
+    if (_dropdown.style.display === 'none') {
+      // Position relative to button
+      const rect = _btn.getBoundingClientRect();
+      _dropdown.style.top = (rect.bottom + 4) + 'px';
+      _dropdown.style.left = rect.left + 'px';
+      _dropdown.style.display = 'block';
+    } else {
+      _hideDropdown();
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    // Toolbar button
+    _btn = document.createElement('button');
+    _btn.id = 'export-btn';
+    _btn.className = 'btn-secondary';
+    _btn.textContent = '📤';
+    _btn.title = 'Export conversation — download or copy as Markdown/Text/HTML/JSON (Ctrl+Shift+E)';
+    _btn.addEventListener('click', toggle);
+    const toolbar = document.querySelector('.toolbar[role="form"][aria-label="Chat input"]');
+    if (toolbar) toolbar.appendChild(_btn);
+
+    // Dropdown menu
+    _dropdown = document.createElement('div');
+    _dropdown.className = 'export-dropdown';
+    _dropdown.style.cssText = 'display:none;position:fixed;z-index:9999;background:var(--bg-secondary,#2a2a2a);border:1px solid var(--border-color,#444);border-radius:8px;padding:4px 0;min-width:200px;box-shadow:0 4px 12px rgba(0,0,0,.3)';
+    const items = [
+      { label: '📋 Copy as Markdown', action: copyAsMarkdown },
+      { label: '📝 Download Markdown', action: () => exportAs('markdown') },
+      { label: '📄 Download Plain Text', action: () => exportAs('text') },
+      { label: '🌐 Download HTML', action: () => exportAs('html') },
+      { label: '📦 Download JSON', action: () => exportAs('json') },
+    ];
+    items.forEach(item => {
+      const el = document.createElement('div');
+      el.textContent = item.label;
+      el.style.cssText = 'padding:8px 16px;cursor:pointer;color:var(--text-primary,#eee);font-size:14px';
+      el.addEventListener('mouseenter', () => { el.style.background = 'var(--bg-hover,#383838)'; });
+      el.addEventListener('mouseleave', () => { el.style.background = 'none'; });
+      el.addEventListener('click', () => { _hideDropdown(); item.action(); });
+      _dropdown.appendChild(el);
+    });
+    document.body.appendChild(_dropdown);
+
+    // Close dropdown on outside click
+    document.addEventListener('click', (e) => {
+      if (_dropdown && _dropdown.style.display !== 'none' && !_dropdown.contains(e.target) && e.target !== _btn) {
+        _hideDropdown();
+      }
+    });
+
+    // Keyboard shortcut: Ctrl+Shift+E
+    document.addEventListener('keydown', (e) => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'E') { e.preventDefault(); toggle(); }
+    });
+  });
+
+  return { toggle, exportAs, copyAsMarkdown };
+})();
