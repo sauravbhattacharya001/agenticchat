@@ -12597,13 +12597,17 @@ const AutoTagger = (() => {
         }
       }
 
-      // Multi-word phrases: use pre-compiled RegExp patterns
+      // Multi-word phrases: use pre-compiled RegExp patterns.
+      // Count matches via exec() loop instead of .match() to avoid
+      // allocating a result array per pattern — reduces GC pressure
+      // when scoring many categories across long conversations.
       for (const { regex } of PHRASE_PATTERNS[catId]) {
-        regex.lastIndex = 0; // reset stateful regex
-        const phraseMatches = (combinedText.match(regex) || []).length;
-        if (phraseMatches > 0) {
+        regex.lastIndex = 0;
+        let phraseCount = 0;
+        while (regex.exec(combinedText) !== null) phraseCount++;
+        if (phraseCount > 0) {
           matches++;
-          weightedHits += phraseMatches * 2; // phrases worth double
+          weightedHits += phraseCount * 2; // phrases worth double
         }
       }
 
@@ -12708,10 +12712,13 @@ const AutoTagger = (() => {
    * @param {string} sessionId
    * @returns {{ tag: string, score: number, source: string }[]}
    */
-  function suggestForSession(sessionId) {
+  function suggestForSession(sessionId, sessionObj) {
     if (typeof SessionManager === 'undefined') return [];
-    const sessions = SessionManager.getAll();
-    const session = sessions.find(s => s.id === sessionId);
+    let session = sessionObj;
+    if (!session) {
+      const sessions = SessionManager.getAll();
+      session = sessions.find(s => s.id === sessionId);
+    }
     if (!session || !session.messages) return [];
     return analyze(session.messages);
   }
@@ -12719,11 +12726,13 @@ const AutoTagger = (() => {
   /**
    * Apply auto-detected tags to a session (skips duplicates).
    * @param {string} sessionId
+   * @param {Object} [sessionObj] - optional pre-loaded session object
+   *   to avoid redundant SessionManager.getAll() when called in bulk
    * @returns {number} Count of tags actually applied
    */
-  function applyToSession(sessionId) {
+  function applyToSession(sessionId, sessionObj) {
     if (typeof ConversationTags === 'undefined') return 0;
-    const suggestions = suggestForSession(sessionId);
+    const suggestions = suggestForSession(sessionId, sessionObj);
     let applied = 0;
     for (const s of suggestions) {
       if (ConversationTags.addTag(sessionId, s.tag)) {
@@ -12737,6 +12746,11 @@ const AutoTagger = (() => {
    * Auto-tag all saved sessions that currently have no tags.
    * @returns {{ tagged: number, totalApplied: number }}
    */
+  /**
+   * Auto-tag all untagged sessions. Loads the session list once and
+   * passes each session object to applyToSession to avoid O(n²)
+   * repeated SessionManager.getAll() calls.
+   */
   function applyToAll() {
     if (typeof SessionManager === 'undefined' || typeof ConversationTags === 'undefined') {
       return { tagged: 0, totalApplied: 0 };
@@ -12747,7 +12761,7 @@ const AutoTagger = (() => {
     for (const session of sessions) {
       const existing = ConversationTags.getTagsForSession(session.id);
       if (existing.length > 0) continue; // skip already-tagged sessions
-      const count = applyToSession(session.id);
+      const count = applyToSession(session.id, session);
       if (count > 0) {
         tagged++;
         totalApplied += count;
