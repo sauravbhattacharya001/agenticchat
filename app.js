@@ -397,6 +397,22 @@ function sanitizeStorageObject(obj) {
   return clean;
 }
 
+/* ---------- Safe JSON Parse + Sanitize ---------- */
+/**
+ * Parse a JSON string and sanitize the result in one step.
+ * Replaces the repeated `_safeParse(raw)` pattern
+ * found across 49+ call-sites, reducing boilerplate and centralising
+ * error-prone parse-then-sanitize logic.
+ *
+ * @param {string} raw - JSON string to parse
+ * @param {*} [fallback] - value to return when raw is falsy (default: undefined)
+ * @returns {*} sanitized parsed value, or fallback
+ */
+function _safeParse(raw, fallback) {
+  if (!raw) return fallback !== undefined ? fallback : undefined;
+  return _safeParse(raw);
+}
+
 /* ---------- Shared HTML Escape ---------- */
 /**
  * Escape HTML special characters to prevent XSS in rendered content.
@@ -2182,7 +2198,7 @@ const SnippetLibrary = (() => {
   function load() {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
-      return raw ? sanitizeStorageObject(JSON.parse(raw)) : [];
+      return _safeParse(raw, []);
     } catch { return []; }
   }
 
@@ -4122,7 +4138,7 @@ const SessionManager = (() => {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
       _cacheRawLen = raw ? raw.length : 0;
-      _cache = raw ? sanitizeStorageObject(JSON.parse(raw)) : [];
+      _cache = _safeParse(raw, []);
     } catch { _cache = []; _cacheRawLen = -1; }
     _cacheDirty = false;
     return _cache;
@@ -4218,7 +4234,7 @@ const SessionManager = (() => {
   function _getPinnedIds() {
     try {
       const raw = SafeStorage.get(PINNED_KEY);
-      return raw ? new Set(sanitizeStorageObject(JSON.parse(raw))) : new Set();
+      return new Set(_safeParse(raw, []));
     } catch { return new Set(); }
   }
 
@@ -4572,7 +4588,7 @@ const SessionManager = (() => {
   /** Import a session from a JSON file. */
   function importSession(jsonString) {
     try {
-      const data = sanitizeStorageObject(JSON.parse(jsonString));
+      const data = _safeParse(jsonString);
       if (!data.session || !data.session.messages) {
         throw new Error('Invalid session format');
       }
@@ -5053,7 +5069,7 @@ const SessionNotes = (() => {
   function _loadAll() {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
-      return raw ? sanitizeStorageObject(JSON.parse(raw)) : {};
+      return _safeParse(raw, {});
     } catch { return {}; }
   }
 
@@ -5782,7 +5798,7 @@ const CostDashboard = (() => {
   function _load() {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
-      return raw ? sanitizeStorageObject(JSON.parse(raw)) : [];
+      return _safeParse(raw, []);
     } catch (_) { return []; }
   }
 
@@ -6178,7 +6194,7 @@ const PersonaPresets = (() => {
     try {
       const saved = SafeStorage.get(STORAGE_KEY);
       if (saved) {
-        const parsed = sanitizeStorageObject(JSON.parse(saved));
+        const parsed = _safeParse(saved);
         return parsed.id || 'default';
       }
     } catch (_) {}
@@ -6189,7 +6205,7 @@ const PersonaPresets = (() => {
     try {
       const saved = SafeStorage.get(STORAGE_KEY);
       if (saved) {
-        const parsed = sanitizeStorageObject(JSON.parse(saved));
+        const parsed = _safeParse(saved);
         if (parsed.id === 'custom') return parsed.prompt || ChatConfig.SYSTEM_PROMPT;
         const preset = presets.find(p => p.id === parsed.id);
         return preset ? preset.prompt : ChatConfig.SYSTEM_PROMPT;
@@ -6643,7 +6659,7 @@ const InputHistory = (() => {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
       if (raw) {
-        const parsed = sanitizeStorageObject(JSON.parse(raw));
+        const parsed = _safeParse(raw);
         if (Array.isArray(parsed)) {
           entries = parsed.slice(-MAX_ENTRIES);
         }
@@ -7509,7 +7525,7 @@ const MessagePinning = (() => {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
       if (raw) {
-        const parsed = sanitizeStorageObject(JSON.parse(raw));
+        const parsed = _safeParse(raw);
         if (Array.isArray(parsed)) {
           pins = parsed.filter(p =>
             typeof p.messageIndex === 'number' &&
@@ -7965,7 +7981,7 @@ const ReadAloud = (() => {
     try {
       let data = SafeStorage.get(STORAGE_KEY);
       if (data) {
-        let parsed = sanitizeStorageObject(JSON.parse(data));
+        let parsed = _safeParse(data);
         if (parsed && typeof parsed === 'object') {
           if (parsed.voiceURI) prefs.voiceURI = String(parsed.voiceURI);
           if (typeof parsed.rate === 'number') prefs.rate = Math.max(MIN_RATE, Math.min(MAX_RATE, parsed.rate));
@@ -10078,7 +10094,7 @@ const MessageAnnotations = (() => {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
       if (raw) {
-        annotations = sanitizeStorageObject(JSON.parse(raw));
+        annotations = _safeParse(raw);
       }
     } catch (_) {
       annotations = {};
@@ -10659,7 +10675,7 @@ const ConversationChapters = (() => {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
       if (raw) {
-        const parsed = sanitizeStorageObject(JSON.parse(raw));
+        const parsed = _safeParse(raw);
         if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
           chapters = parsed;
         }
@@ -10846,7 +10862,7 @@ const ConversationChapters = (() => {
 
   function importChapters(json) {
     try {
-      var arr = typeof json === 'string' ? sanitizeStorageObject(JSON.parse(json)) : json;
+      var arr = typeof json === 'string' ? _safeParse(json) : json;
       if (!Array.isArray(arr)) return 0;
       var imported = 0;
       for (var j = 0; j < arr.length; j++) {
@@ -11381,7 +11397,7 @@ const ConversationTags = (() => {
   function load() {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
-      tagMap = raw ? sanitizeStorageObject(JSON.parse(raw)) : {};
+      tagMap = _safeParse(raw, {});
     } catch { tagMap = {}; }
   }
 
@@ -12957,7 +12973,7 @@ const DataBackup = (() => {
     }
 
     try {
-      var sessions = data.sessions ? sanitizeStorageObject(JSON.parse(data.sessions)) : null;
+      var sessions = data.sessions ? _safeParse(data.sessions) : null;
       if (sessions) {
         if (Array.isArray(sessions)) {
           stats.sessionCount = sessions.length;
@@ -12968,17 +12984,17 @@ const DataBackup = (() => {
     } catch (_) { /* non-critical */ }
 
     try {
-      var snippets = data.snippets ? sanitizeStorageObject(JSON.parse(data.snippets)) : [];
+      var snippets = data.snippets ? _safeParse(data.snippets) : [];
       stats.snippetCount = Array.isArray(snippets) ? snippets.length : 0;
     } catch (_) { /* non-critical */ }
 
     try {
-      var bookmarks = data.bookmarks ? sanitizeStorageObject(JSON.parse(data.bookmarks)) : [];
+      var bookmarks = data.bookmarks ? _safeParse(data.bookmarks) : [];
       stats.bookmarkCount = Array.isArray(bookmarks) ? bookmarks.length : 0;
     } catch (_) { /* non-critical */ }
 
     try {
-      var pins = data.pins ? sanitizeStorageObject(JSON.parse(data.pins)) : {};
+      var pins = data.pins ? _safeParse(data.pins) : {};
       stats.pinCount = typeof pins === 'object' ? Object.keys(pins).length : 0;
     } catch (_) { /* non-critical */ }
 
@@ -13143,7 +13159,7 @@ const DataBackup = (() => {
       var reader = new FileReader();
       reader.onload = function () {
         try {
-          var backup = sanitizeStorageObject(JSON.parse(reader.result));
+          var backup = _safeParse(reader.result);
           resolve(restoreBackup(backup, options));
         } catch (e) {
           resolve({ success: false, restored: [], skipped: [], error: 'Invalid JSON: ' + (e.message || e), warnings: [] });
@@ -13396,7 +13412,7 @@ const ResponseRating = (() => {
   function load() {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
-      if (raw) ratings = sanitizeStorageObject(JSON.parse(raw));
+      if (raw) ratings = _safeParse(raw);
       if (!Array.isArray(ratings)) ratings = [];
     } catch (_) { ratings = []; }
   }
@@ -14279,7 +14295,7 @@ const PromptLibrary = (() => {
   function _load() {
     try {
       var raw = SafeStorage.get(STORAGE_KEY);
-      prompts = raw ? sanitizeStorageObject(JSON.parse(raw)) : [];
+      prompts = _safeParse(raw, []);
     } catch (_) { prompts = []; }
   }
 
@@ -14590,7 +14606,7 @@ const PromptLibrary = (() => {
     var MAX_PROMPT_TEXT = 50000; // 50 KB per prompt text
     var MAX_PROMPT_NAME = 500;
     try {
-      var imported = sanitizeStorageObject(JSON.parse(jsonStr));
+      var imported = _safeParse(jsonStr);
       if (!Array.isArray(imported)) return 0;
       if (imported.length > MAX_IMPORT_PROMPTS) return -1;
       _load();
@@ -14785,7 +14801,7 @@ const MessageTranslator = (() => {
   function load() {
     try {
       var raw = SafeStorage.get(STORAGE_KEY);
-      if (raw) cache = sanitizeStorageObject(JSON.parse(raw));
+      if (raw) cache = _safeParse(raw);
       if (typeof cache !== 'object' || cache === null) cache = {};
     } catch (_) { cache = {}; }
     var pref = SafeStorage.get('agenticchat_translate_lang');
@@ -15134,7 +15150,7 @@ const ModelCompare = (() => {
   function _load() {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
-      _history = raw ? sanitizeStorageObject(JSON.parse(raw)) : [];
+      _history = _safeParse(raw, []);
     } catch (_) { _history = []; }
   }
 
@@ -15804,7 +15820,7 @@ const MessageEditor = (() => {
   function _loadEdits() {
     try {
       const raw = SafeStorage.get(STORE_KEY);
-      return raw ? sanitizeStorageObject(JSON.parse(raw)) : [];
+      return _safeParse(raw, []);
     } catch (_) { return []; }
   }
 
@@ -15996,7 +16012,7 @@ const MessageScheduler = (() => {
     try {
       const raw = SafeStorage.get(STORE_KEY);
       if (!raw) return [];
-      const arr = sanitizeStorageObject(JSON.parse(raw));
+      const arr = _safeParse(raw);
       if (!Array.isArray(arr)) return [];
       return arr.filter(m =>
         m && typeof m.id === 'string' &&
@@ -16459,7 +16475,7 @@ const SmartRetry = (() => {
     const raw = SafeStorage.get(STORAGE_KEY);
     if (raw) {
       try {
-        const data = sanitizeStorageObject(JSON.parse(raw));
+        const data = _safeParse(raw);
         _enabled = data.enabled !== false;
         if (data.stats) _retryStats = data.stats;
       } catch (_) {}
@@ -17171,7 +17187,7 @@ const ConversationAgenda = (() => {
   function _load() {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
-      agendas = raw ? sanitizeStorageObject(JSON.parse(raw)) : {};
+      agendas = _safeParse(raw, {});
     } catch (_) { agendas = {}; }
   }
 
@@ -17513,7 +17529,7 @@ const ClipboardHistory = (() => {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
       if (raw) {
-        const parsed = sanitizeStorageObject(JSON.parse(raw));
+        const parsed = _safeParse(raw);
         entries = Array.isArray(parsed) ? sanitizeStorageObject(parsed) : [];
       }
     } catch (_) {
@@ -18946,7 +18962,7 @@ const ChatGPTImporter = (() => {
   function importFromJSON(jsonString) {
     let data;
     try {
-      data = sanitizeStorageObject(JSON.parse(jsonString));
+      data = _safeParse(jsonString);
     } catch (_) {
       throw new Error('Invalid JSON file');
     }
@@ -19117,11 +19133,11 @@ const PromptChainRunner = (() => {
   function _load() {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
-      _chains = raw ? sanitizeStorageObject(JSON.parse(raw)) : [];
+      _chains = _safeParse(raw, []);
     } catch (_) { _chains = []; }
     try {
       const raw = SafeStorage.get(HISTORY_KEY);
-      _runHistory = raw ? sanitizeStorageObject(JSON.parse(raw)) : [];
+      _runHistory = _safeParse(raw, []);
     } catch (_) { _runHistory = []; }
   }
 
@@ -19292,7 +19308,7 @@ const PromptChainRunner = (() => {
       const reader = new FileReader();
       reader.onload = () => {
         try {
-          const imported = sanitizeStorageObject(JSON.parse(reader.result));
+          const imported = _safeParse(reader.result);
           if (!Array.isArray(imported)) throw new Error('Expected array');
           let count = 0;
           for (const c of imported) {
@@ -20214,7 +20230,7 @@ const TypingSpeedMonitor = (() => {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
       if (raw) {
-        const data = sanitizeStorageObject(JSON.parse(raw));
+        const data = _safeParse(raw);
         _peakWpm = data.peakWpm || 0;
         _totalWords = data.totalWords || 0;
         _totalChars = data.totalChars || 0;
@@ -20289,7 +20305,7 @@ const FocusTimer = (() => {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
       if (raw) {
-        const d = sanitizeStorageObject(JSON.parse(raw));
+        const d = _safeParse(raw);
         _sessionsCompleted = d.sessionsCompleted || 0;
         _totalFocusSeconds = d.totalFocusSeconds || 0;
         _todaySessions = d.todaySessions || 0;
@@ -21217,7 +21233,7 @@ const CommandPalette = (() => {
   function _loadRecent() {
     try {
       const raw = (typeof SafeStorage !== 'undefined' ? SafeStorage : localStorage).getItem('cp_recent');
-      if (raw) _recentIds = sanitizeStorageObject(JSON.parse(raw));
+      if (raw) _recentIds = _safeParse(raw);
     } catch (e) { _recentIds = []; }
   }
 
@@ -22030,7 +22046,7 @@ const DraftRecovery = (() => {
   function _loadDrafts() {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
-      return raw ? sanitizeStorageObject(JSON.parse(raw)) : {};
+      return _safeParse(raw, {});
     } catch { return {}; }
   }
 
@@ -22329,7 +22345,7 @@ const CustomThemeCreator = (() => {
   function _loadCustomThemes() {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
-      return raw ? sanitizeStorageObject(JSON.parse(raw)) : {};
+      return _safeParse(raw, {});
     } catch (_) { return {}; }
   }
 
@@ -22651,7 +22667,7 @@ const CustomThemeCreator = (() => {
       const reader = new FileReader();
       reader.onload = (e) => {
         try {
-          const imported = sanitizeStorageObject(JSON.parse(e.target.result));
+          const imported = _safeParse(e.target.result);
           if (typeof imported !== 'object' || Array.isArray(imported)) {
             alert('Invalid theme file format.');
             return;
@@ -22767,7 +22783,7 @@ const TextExpander = (() => {
   function _load() {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
-      return raw ? sanitizeStorageObject(JSON.parse(raw)) : {};
+      return _safeParse(raw, {});
     } catch { return {}; }
   }
 
@@ -22778,7 +22794,7 @@ const TextExpander = (() => {
   function _loadUsage() {
     try {
       const raw = SafeStorage.get(USAGE_KEY);
-      return raw ? sanitizeStorageObject(JSON.parse(raw)) : {};
+      return _safeParse(raw, {});
     } catch { return {}; }
   }
 
@@ -22845,7 +22861,7 @@ const TextExpander = (() => {
   /** Import snippets from JSON string. Returns count imported. */
   function importJSON(jsonStr) {
     try {
-      const data = sanitizeStorageObject(JSON.parse(jsonStr));
+      const data = _safeParse(jsonStr);
       if (typeof data !== 'object' || Array.isArray(data)) return 0;
       const snippets = _load();
       let count = 0;
@@ -23126,7 +23142,7 @@ const PreferencesPanel = (() => {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
       if (raw) {
-        const parsed = sanitizeStorageObject(JSON.parse(raw));
+        const parsed = _safeParse(raw);
         if (parsed && typeof parsed === 'object') {
           Object.assign(_prefs, parsed);
         }
@@ -23555,7 +23571,7 @@ const SessionTemplates = (() => {
   function _loadTemplates() {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
-      return raw ? sanitizeStorageObject(JSON.parse(raw)) : [];
+      return _safeParse(raw, []);
     } catch { return []; }
   }
 
@@ -23684,7 +23700,7 @@ const SessionTemplates = (() => {
 
   function importFromJSON(jsonString) {
     try {
-      const imported = sanitizeStorageObject(JSON.parse(jsonString));
+      const imported = _safeParse(jsonString);
       if (!Array.isArray(imported)) return 0;
       const existing = _loadTemplates();
       const existingIds = new Set(existing.map(t => t.id));
@@ -26418,7 +26434,7 @@ const MessageDiffViewer = (() => {
   /** Save diff to history. */
   function saveDiffHistory(indexA, indexB, stats) {
     try {
-      const hist = sanitizeStorageObject(JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'));
+      const hist = _safeParse(localStorage.getItem(STORAGE_KEY), []);
       hist.unshift({ indexA, indexB, stats, timestamp: Date.now() });
       if (hist.length > MAX_HISTORY) hist.length = MAX_HISTORY;
       localStorage.setItem(STORAGE_KEY, JSON.stringify(hist));
@@ -26654,7 +26670,7 @@ const ToneAdjuster = (() => {
   let _activePicker = null;
 
   function _loadCache() {
-    try { _cache = sanitizeStorageObject(JSON.parse(localStorage.getItem(CACHE_KEY)) || {}); } catch (_) { _cache = {}; }
+    try { _cache = _safeParse(localStorage.getItem(CACHE_KEY) || {}); } catch (_) { _cache = {}; }
   }
   function _saveCache() {
     try { localStorage.setItem(CACHE_KEY, JSON.stringify(_cache)); } catch (_) {}
@@ -27091,7 +27107,7 @@ const SessionArchive = (() => {
   function _load() {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
-      return raw ? new Set(sanitizeStorageObject(JSON.parse(raw))) : new Set();
+      return new Set(_safeParse(raw, []));
     } catch { return new Set(); }
   }
 
@@ -27199,7 +27215,7 @@ const SessionCalendar = (() => {
   function _allSessions() {
     try {
       const raw = SafeStorage.get('agenticchat_sessions');
-      return raw ? sanitizeStorageObject(JSON.parse(raw)) : [];
+      return _safeParse(raw, []);
     } catch { return []; }
   }
 
