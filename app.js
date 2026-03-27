@@ -28721,3 +28721,222 @@ const ChatGPTImporter = (() => {
 
   return { toggle, show, hide };
 })();
+
+/* ============================================================
+ *  MoodTracker — real-time conversation sentiment analysis
+ *  Shows an evolving mood emoji + color bar based on message tone.
+ * ============================================================ */
+const MoodTracker = (function () {
+  'use strict';
+
+  let _panel = null;
+  let _visible = false;
+
+  /* ---- Keyword-based sentiment scoring ---- */
+  const POS = ['thanks','thank','great','awesome','excellent','love','happy','good','nice','perfect',
+    'wonderful','amazing','cool','brilliant','fantastic','helpful','appreciate','glad','excited','joy',
+    'beautiful','fun','yes','agree','correct','right','well done','bravo','superb','cheers'];
+  const NEG = ['error','fail','wrong','bad','terrible','hate','awful','broken','bug','issue',
+    'problem','unfortunately','sorry','annoying','frustrating','confused','stuck','crash','ugly',
+    'slow','difficult','impossible','no','disagree','worse','horrible','sad','angry','disappointed','useless'];
+
+  function _score(text) {
+    if (!text) return 0;
+    const words = text.toLowerCase().split(/\W+/);
+    let s = 0;
+    words.forEach(function (w) {
+      if (POS.indexOf(w) !== -1) s += 1;
+      if (NEG.indexOf(w) !== -1) s -= 1;
+    });
+    return s;
+  }
+
+  function _moodEmoji(score) {
+    if (score >= 3) return '😄';
+    if (score >= 1) return '🙂';
+    if (score >= -1) return '😐';
+    if (score >= -3) return '😟';
+    return '😢';
+  }
+
+  function _moodColor(score) {
+    if (score >= 3) return '#4caf50';
+    if (score >= 1) return '#8bc34a';
+    if (score >= -1) return '#ff9800';
+    if (score >= -3) return '#ff5722';
+    return '#f44336';
+  }
+
+  function _moodLabel(score) {
+    if (score >= 3) return 'Very Positive';
+    if (score >= 1) return 'Positive';
+    if (score >= -1) return 'Neutral';
+    if (score >= -3) return 'Negative';
+    return 'Very Negative';
+  }
+
+  function _getMessages() {
+    var msgs = document.querySelectorAll('#blackbox .message');
+    var results = [];
+    msgs.forEach(function (el) {
+      var textEl = el.querySelector('.message-text') || el;
+      results.push({
+        text: textEl.textContent || '',
+        isUser: el.classList.contains('user-message')
+      });
+    });
+    return results;
+  }
+
+  function _analyze() {
+    var messages = _getMessages();
+    if (messages.length === 0) return { overall: 0, timeline: [], userMood: 0, aiMood: 0, msgCount: 0 };
+
+    var timeline = [];
+    var running = 0;
+    var userScore = 0, aiScore = 0, userCount = 0, aiCount = 0;
+
+    messages.forEach(function (m) {
+      var s = _score(m.text);
+      running += s;
+      timeline.push({ score: running, isUser: m.isUser });
+      if (m.isUser) { userScore += s; userCount++; }
+      else { aiScore += s; aiCount++; }
+    });
+
+    return {
+      overall: running,
+      timeline: timeline,
+      userMood: userCount ? userScore / userCount : 0,
+      aiMood: aiCount ? aiScore / aiCount : 0,
+      msgCount: messages.length
+    };
+  }
+
+  function _buildPanel() {
+    var panel = document.createElement('div');
+    panel.id = 'mood-panel';
+    panel.className = 'mood-panel';
+    panel.innerHTML = '<div class="mood-panel-header">' +
+      '<span>😊 Mood Tracker</span>' +
+      '<button class="mood-close-btn" title="Close">✕</button>' +
+      '</div>' +
+      '<div class="mood-panel-body">' +
+      '<div class="mood-current"></div>' +
+      '<div class="mood-details"></div>' +
+      '<div class="mood-chart-label">Sentiment over time</div>' +
+      '<canvas class="mood-canvas" width="300" height="80"></canvas>' +
+      '</div>';
+    panel.querySelector('.mood-close-btn').addEventListener('click', hide);
+    document.body.appendChild(panel);
+    return panel;
+  }
+
+  function _renderChart(canvas, timeline) {
+    var ctx = canvas.getContext('2d');
+    var w = canvas.width, h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    if (timeline.length < 2) {
+      ctx.fillStyle = 'var(--text-secondary, #888)';
+      ctx.font = '12px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Need more messages for chart', w / 2, h / 2);
+      return;
+    }
+
+    var scores = timeline.map(function (t) { return t.score; });
+    var minS = Math.min.apply(null, scores);
+    var maxS = Math.max.apply(null, scores);
+    var range = maxS - minS || 1;
+    var pad = 8;
+
+    // Zero line
+    var zeroY = h - pad - ((0 - minS) / range) * (h - pad * 2);
+    ctx.strokeStyle = '#555';
+    ctx.lineWidth = 0.5;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(0, zeroY);
+    ctx.lineTo(w, zeroY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Gradient line
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    timeline.forEach(function (t, i) {
+      var x = pad + (i / (timeline.length - 1)) * (w - pad * 2);
+      var y = h - pad - ((t.score - minS) / range) * (h - pad * 2);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    var grad = ctx.createLinearGradient(0, 0, w, 0);
+    var lastScore = timeline[timeline.length - 1].score;
+    grad.addColorStop(0, _moodColor(timeline[0].score));
+    grad.addColorStop(1, _moodColor(lastScore));
+    ctx.strokeStyle = grad;
+    ctx.stroke();
+
+    // Dots
+    timeline.forEach(function (t, i) {
+      var x = pad + (i / (timeline.length - 1)) * (w - pad * 2);
+      var y = h - pad - ((t.score - minS) / range) * (h - pad * 2);
+      ctx.beginPath();
+      ctx.arc(x, y, 3, 0, Math.PI * 2);
+      ctx.fillStyle = t.isUser ? '#2196F3' : '#9c27b0';
+      ctx.fill();
+    });
+  }
+
+  function _refresh() {
+    if (!_panel) return;
+    var data = _analyze();
+    var body = _panel.querySelector('.mood-panel-body');
+    var currentDiv = body.querySelector('.mood-current');
+    var detailsDiv = body.querySelector('.mood-details');
+    var canvas = body.querySelector('.mood-canvas');
+
+    currentDiv.innerHTML = '<span class="mood-big-emoji">' + _moodEmoji(data.overall) + '</span>' +
+      '<span class="mood-label" style="color:' + _moodColor(data.overall) + '">' + _moodLabel(data.overall) + '</span>' +
+      '<span class="mood-score">Score: ' + (data.overall > 0 ? '+' : '') + data.overall + '</span>';
+
+    detailsDiv.innerHTML =
+      '<div class="mood-detail-row"><span>📨 Messages analyzed:</span><span>' + data.msgCount + '</span></div>' +
+      '<div class="mood-detail-row"><span>👤 Your avg tone:</span><span>' + _moodEmoji(Math.round(data.userMood)) + ' (' + data.userMood.toFixed(1) + ')</span></div>' +
+      '<div class="mood-detail-row"><span>🤖 AI avg tone:</span><span>' + _moodEmoji(Math.round(data.aiMood)) + ' (' + data.aiMood.toFixed(1) + ')</span></div>';
+
+    _renderChart(canvas, data.timeline);
+  }
+
+  function show() {
+    if (!_panel) _panel = _buildPanel();
+    _refresh();
+    _panel.style.display = 'flex';
+    _visible = true;
+  }
+
+  function hide() {
+    if (_panel) _panel.style.display = 'none';
+    _visible = false;
+  }
+
+  function toggle() {
+    _visible ? hide() : show();
+  }
+
+  /* Auto-refresh when new messages appear */
+  var _refreshTimer = null;
+  new MutationObserver(function () {
+    if (!_visible) return;
+    clearTimeout(_refreshTimer);
+    _refreshTimer = setTimeout(_refresh, 500);
+  }).observe(document.body, { childList: true, subtree: true });
+
+  /* Alt+M shortcut */
+  document.addEventListener('keydown', function (e) {
+    if (e.altKey && e.key === 'm') { e.preventDefault(); toggle(); }
+  });
+
+  return { toggle: toggle, show: show, hide: hide, refresh: _refresh };
+})();

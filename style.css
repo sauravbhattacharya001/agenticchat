@@ -4349,3 +4349,38 @@ body.light .pinboard-item-note { background: #eee; color: #555; }
 .translator-original-note {
   font-size: 0.8rem; opacity: 0.6; margin-top: 4px; font-style: normal;
 }
+
+/* --- Mood Tracker --- */
+.mood-panel {
+  display: none; flex-direction: column; position: fixed; right: 20px; top: 80px;
+  width: 320px; max-height: 400px; background: var(--bg-secondary, #1e1e2e);
+  border: 1px solid var(--border, #333); border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4); z-index: 10000; font-family: inherit;
+}
+.mood-panel-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 14px; border-bottom: 1px solid var(--border, #333);
+  font-weight: 600; font-size: 0.95rem;
+}
+.mood-close-btn {
+  background: none; border: none; color: var(--text-secondary, #aaa);
+  cursor: pointer; font-size: 1.1rem; padding: 2px 6px; border-radius: 4px;
+}
+.mood-close-btn:hover { background: var(--hover, #ffffff15); }
+.mood-panel-body { padding: 14px; overflow-y: auto; }
+.mood-current {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 12px;
+}
+.mood-big-emoji { font-size: 2.2rem; }
+.mood-label { font-size: 1.1rem; font-weight: 600; }
+.mood-score { font-size: 0.85rem; color: var(--text-secondary, #aaa); margin-left: auto; }
+.mood-details { margin-bottom: 12px; }
+.mood-detail-row {
+  display: flex; justify-content: space-between; padding: 3px 0;
+  font-size: 0.85rem; color: var(--text-secondary, #ccc);
+}
+.mood-chart-label {
+  font-size: 0.8rem; color: var(--text-secondary, #888);
+  margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;
+}
+.mood-canvas { width: 100%; border-radius: 6px; background: var(--bg-primary, #12121a); }
