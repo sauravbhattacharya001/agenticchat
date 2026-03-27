@@ -28519,3 +28519,205 @@ const ConversationExport = (() => {
 
   return { toggle, exportAs, copyAsMarkdown };
 })();
+
+/* ============================================================
+ * ChatGPTImporter — Import ChatGPT conversation exports (JSON)
+ *
+ * ChatGPT allows users to export their data as a ZIP containing
+ * conversations.json. This module lets users upload that JSON file
+ * (or the full ZIP) and import selected conversations as sessions.
+ * ============================================================ */
+const ChatGPTImporter = (() => {
+  let _modal = null;
+  let _conversations = [];
+
+  function toggle() {
+    if (_modal && _modal.style.display !== 'none') { hide(); return; }
+    show();
+  }
+
+  function show() {
+    if (_modal) { _modal.style.display = 'flex'; return; }
+    _modal = document.createElement('div');
+    _modal.className = 'modal-overlay';
+    _modal.style.cssText = 'display:flex;position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.6);align-items:center;justify-content:center';
+    _modal.innerHTML = `
+      <div style="background:var(--bg-secondary,#2a2a2a);border-radius:12px;padding:24px;max-width:600px;width:90%;max-height:80vh;overflow:auto;color:var(--text-primary,#eee)">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+          <h3 style="margin:0;font-size:18px">📥 Import ChatGPT Conversations</h3>
+          <button onclick="ChatGPTImporter.hide()" style="background:none;border:none;color:var(--text-secondary,#aaa);font-size:20px;cursor:pointer">✕</button>
+        </div>
+        <p style="margin:0 0 12px;color:var(--text-secondary,#aaa);font-size:13px">
+          Upload your <code>conversations.json</code> file from a ChatGPT data export.
+          Go to <em>ChatGPT → Settings → Data Controls → Export Data</em> to get your export.
+        </p>
+        <div id="chatgpt-import-drop" style="border:2px dashed var(--border-color,#555);border-radius:8px;padding:32px;text-align:center;cursor:pointer;margin-bottom:16px;transition:border-color .2s">
+          <div style="font-size:32px;margin-bottom:8px">📂</div>
+          <div style="font-size:14px;color:var(--text-secondary,#aaa)">Click or drag & drop <code>conversations.json</code></div>
+          <input type="file" id="chatgpt-import-file" accept=".json" style="display:none">
+        </div>
+        <div id="chatgpt-import-preview" style="display:none">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <span id="chatgpt-import-count" style="font-size:13px;color:var(--text-secondary,#aaa)"></span>
+            <div>
+              <button id="chatgpt-import-all" style="background:var(--accent,#2196F3);color:#fff;border:none;border-radius:6px;padding:6px 14px;cursor:pointer;font-size:13px;margin-right:6px">Import All</button>
+              <button id="chatgpt-import-selected" style="background:var(--bg-hover,#383838);color:var(--text-primary,#eee);border:1px solid var(--border-color,#555);border-radius:6px;padding:6px 14px;cursor:pointer;font-size:13px">Import Selected</button>
+            </div>
+          </div>
+          <div id="chatgpt-import-list" style="max-height:40vh;overflow-y:auto"></div>
+        </div>
+        <div id="chatgpt-import-status" style="display:none;margin-top:12px;padding:10px;border-radius:6px;font-size:13px"></div>
+      </div>`;
+    document.body.appendChild(_modal);
+    _modal.addEventListener('click', (e) => { if (e.target === _modal) hide(); });
+
+    const dropZone = _modal.querySelector('#chatgpt-import-drop');
+    const fileInput = _modal.querySelector('#chatgpt-import-file');
+    dropZone.addEventListener('click', () => fileInput.click());
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.style.borderColor = 'var(--accent,#2196F3)'; });
+    dropZone.addEventListener('dragleave', () => { dropZone.style.borderColor = 'var(--border-color,#555)'; });
+    dropZone.addEventListener('drop', (e) => { e.preventDefault(); dropZone.style.borderColor = 'var(--border-color,#555)'; if (e.dataTransfer.files.length) _handleFile(e.dataTransfer.files[0]); });
+    fileInput.addEventListener('change', () => { if (fileInput.files.length) _handleFile(fileInput.files[0]); });
+
+    _modal.querySelector('#chatgpt-import-all').addEventListener('click', () => _importConversations(_conversations));
+    _modal.querySelector('#chatgpt-import-selected').addEventListener('click', () => {
+      const checked = [..._modal.querySelectorAll('.chatgpt-conv-cb:checked')].map(cb => _conversations[parseInt(cb.dataset.idx)]);
+      if (!checked.length) { _showStatus('⚠️ No conversations selected.', '#ff9800'); return; }
+      _importConversations(checked);
+    });
+  }
+
+  function hide() { if (_modal) _modal.style.display = 'none'; }
+
+  function _handleFile(file) {
+    if (!file.name.endsWith('.json')) { _showStatus('⚠️ Please select a .json file.', '#ff9800'); return; }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = JSON.parse(e.target.result);
+        if (!Array.isArray(data)) throw new Error('Expected an array of conversations');
+        _conversations = data.filter(c => c && c.mapping);
+        _renderPreview();
+      } catch (err) {
+        _showStatus('❌ Invalid ChatGPT export: ' + err.message, '#f44336');
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  function _renderPreview() {
+    const preview = _modal.querySelector('#chatgpt-import-preview');
+    const list = _modal.querySelector('#chatgpt-import-list');
+    const count = _modal.querySelector('#chatgpt-import-count');
+    preview.style.display = 'block';
+    count.textContent = `${_conversations.length} conversation${_conversations.length !== 1 ? 's' : ''} found`;
+    list.innerHTML = '';
+    _conversations.forEach((conv, idx) => {
+      const msgCount = _countMessages(conv);
+      const date = conv.create_time ? new Date(conv.create_time * 1000).toLocaleDateString() : 'Unknown date';
+      const el = document.createElement('label');
+      el.style.cssText = 'display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid var(--border-color,#333);cursor:pointer;font-size:13px';
+      el.innerHTML = `<input type="checkbox" class="chatgpt-conv-cb" data-idx="${idx}" checked>
+        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(conv.title || 'Untitled')}</span>
+        <span style="color:var(--text-secondary,#888);font-size:12px">${msgCount} msgs · ${date}</span>`;
+      list.appendChild(el);
+    });
+  }
+
+  function _countMessages(conv) {
+    if (!conv.mapping) return 0;
+    let count = 0;
+    for (const node of Object.values(conv.mapping)) {
+      if (node.message && node.message.content && node.message.content.parts &&
+          node.message.author && (node.message.author.role === 'user' || node.message.author.role === 'assistant')) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  function _extractMessages(conv) {
+    if (!conv.mapping) return [];
+    // Build tree to get linear order
+    const nodes = conv.mapping;
+    const childMap = {};
+    let rootId = null;
+    for (const [id, node] of Object.entries(nodes)) {
+      if (!node.parent) { rootId = id; }
+      else {
+        if (!childMap[node.parent]) childMap[node.parent] = [];
+        childMap[node.parent].push(id);
+      }
+    }
+    // Walk tree depth-first (follow first child for main branch)
+    const messages = [];
+    let current = rootId;
+    while (current) {
+      const node = nodes[current];
+      if (node && node.message && node.message.content && node.message.author) {
+        const role = node.message.author.role;
+        if (role === 'user' || role === 'assistant') {
+          const parts = node.message.content.parts || [];
+          const text = parts.filter(p => typeof p === 'string').join('\n');
+          if (text.trim()) messages.push({ role, content: text });
+        }
+      }
+      const children = childMap[current];
+      current = children && children.length > 0 ? children[children.length - 1] : null;
+    }
+    return messages;
+  }
+
+  function _importConversations(convs) {
+    if (typeof SessionManager === 'undefined') { _showStatus('❌ SessionManager not available.', '#f44336'); return; }
+    let imported = 0;
+    for (const conv of convs) {
+      const messages = _extractMessages(conv);
+      if (!messages.length) continue;
+      const now = new Date().toISOString();
+      const session = {
+        id: crypto.randomUUID(),
+        name: (conv.title || 'ChatGPT Import').substring(0, 100),
+        messages: messages,
+        messageCount: messages.length,
+        preview: messages[0] ? messages[0].content.substring(0, 80) : '',
+        createdAt: conv.create_time ? new Date(conv.create_time * 1000).toISOString() : now,
+        updatedAt: now
+      };
+      // Use internal _loadAll/_saveAll via the public importSession if available,
+      // otherwise fall back to direct localStorage manipulation
+      if (typeof SessionManager.importSession === 'function') {
+        SessionManager.importSession(session);
+      } else {
+        try {
+          const raw = SafeStorage.get('agenticchat_sessions');
+          const sessions = raw ? JSON.parse(raw) : [];
+          sessions.unshift(session);
+          SafeStorage.set('agenticchat_sessions', JSON.stringify(sessions));
+        } catch { /* skip */ }
+      }
+      imported++;
+    }
+    _showStatus(`✅ Imported ${imported} conversation${imported !== 1 ? 's' : ''}! Open Sessions panel to browse.`, '#4caf50');
+    if (typeof SessionManager !== 'undefined' && typeof SessionManager.refresh === 'function') {
+      SessionManager.refresh();
+    }
+  }
+
+  function _showStatus(msg, color) {
+    const el = _modal.querySelector('#chatgpt-import-status');
+    el.style.display = 'block';
+    el.style.background = color + '22';
+    el.style.border = '1px solid ' + color;
+    el.style.color = color;
+    el.textContent = msg;
+  }
+
+  function _esc(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  return { toggle, show, hide };
+})();
