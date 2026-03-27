@@ -877,7 +877,37 @@ const OpenAIClient = (() => {
     return { ok: true, content, data, usage: data.usage || null };
   }
 
-  return { complete, ENDPOINT };
+  /**
+   * Low-level fetch wrapper for the OpenAI chat completions endpoint.
+   * Returns the raw Response object so callers can handle streaming or
+   * custom response processing while still reusing shared auth/headers.
+   *
+   * @param {Object} opts
+   * @param {Object}       opts.body   - JSON body to send.
+   * @param {string}       [opts.apiKey] - API key (defaults to ApiKeyManager.getKey()).
+   * @param {AbortSignal}  [opts.signal] - Optional abort signal.
+   * @returns {Promise<{ok: boolean, response?: Response, error?: string}>}
+   */
+  async function fetchRaw({ body, apiKey, signal }) {
+    const key = apiKey || (typeof ApiKeyManager !== 'undefined' ? ApiKeyManager.getKey() : null);
+    if (!key) {
+      return { ok: false, error: 'No API key configured. Set your OpenAI key first.' };
+    }
+
+    const rsp = await fetch(ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${key}`,
+      },
+      body: JSON.stringify(body),
+      ...(signal ? { signal } : {}),
+    });
+
+    return { ok: rsp.ok, response: rsp };
+  }
+
+  return { complete, fetchRaw, ENDPOINT };
 })();
 
 /* ---------- UI Controller ---------- */
@@ -1159,26 +1189,20 @@ const ChatController = (() => {
     abortCurrentRequest();
     const signal = createRequestSignal();
 
-    const rsp = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${key}`
-      },
-      body: JSON.stringify({
-        model: ChatConfig.MODEL,
-        messages,
-        max_tokens: ChatConfig.MAX_TOKENS_RESPONSE
-      }),
-      signal
+    const result = await OpenAIClient.complete({
+      messages,
+      apiKey: key,
+      model: ChatConfig.MODEL,
+      maxTokens: ChatConfig.MAX_TOKENS_RESPONSE,
+      signal,
     });
 
-    if (!rsp.ok) {
-      return buildErrorResult(rsp);
+    if (!result.ok) {
+      return { ok: false, error: result.error, status: result.status };
     }
 
     currentAbortController = null;
-    return { ok: true, data: await rsp.json() };
+    return { ok: true, data: result.data };
   }
 
   /**
@@ -1189,24 +1213,22 @@ const ChatController = (() => {
     abortCurrentRequest();
     const signal = createRequestSignal();
 
-    const rsp = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${key}`
-      },
-      body: JSON.stringify({
+    const result = await OpenAIClient.fetchRaw({
+      body: {
         model: ChatConfig.MODEL,
         messages,
         max_tokens: ChatConfig.MAX_TOKENS_RESPONSE,
-        stream: true
-      }),
-      signal
+        stream: true,
+      },
+      apiKey: key,
+      signal,
     });
 
-    if (!rsp.ok) {
-      return buildErrorResult(rsp);
+    if (!result.ok) {
+      return buildErrorResult(result.response);
     }
+
+    const rsp = result.response;
 
     const reader = rsp.body.getReader();
     const decoder = new TextDecoder();
