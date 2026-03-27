@@ -84,6 +84,7 @@
  *   SessionArchive       - archive/unarchive sessions to declutter the sessions panel
  *   EmojiPicker          - categorized emoji browser with search and recent tracking (Ctrl+Shift+;)
  *   MessageScheduler     - queue messages with configurable delay for auto-send (Alt+Q)
+ *   MessageHighlighter   - select text in messages and apply colored highlights (Alt+H)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -28971,4 +28972,267 @@ const MoodTracker = (function () {
   });
 
   return { toggle: toggle, show: show, hide: hide, refresh: _refresh };
+})();
+
+
+// ═══════════════════════════════════════════════════════════════════════
+//  MessageHighlighter - select text in messages and highlight with colors
+// ═══════════════════════════════════════════════════════════════════════
+
+const MessageHighlighter = (() => {
+  'use strict';
+
+  const STORAGE_KEY = 'ac_highlights';
+  const COLORS = [
+    { name: 'Yellow', color: '#fff176', text: '#333' },
+    { name: 'Green',  color: '#a5d6a7', text: '#1b5e20' },
+    { name: 'Blue',   color: '#90caf9', text: '#0d47a1' },
+    { name: 'Pink',   color: '#f48fb1', text: '#880e4f' },
+    { name: 'Orange', color: '#ffcc80', text: '#e65100' },
+  ];
+
+  let _active = false;
+  let _currentColor = 0;
+  let _toolbarEl = null;
+  let _styleInjected = false;
+
+  // ── Persistence ──
+
+  function _loadHighlights() {
+    try {
+      return JSON.parse(SafeStorage.get(STORAGE_KEY) || '{}');
+    } catch (_) { return {}; }
+  }
+
+  function _saveHighlights(data) {
+    SafeStorage.set(STORAGE_KEY, JSON.stringify(data));
+  }
+
+  function _sessionKey() {
+    return (typeof SessionManager !== 'undefined' && SessionManager.currentId)
+      ? SessionManager.currentId()
+      : '_default';
+  }
+
+  function _getSessionHighlights() {
+    var all = _loadHighlights();
+    return all[_sessionKey()] || [];
+  }
+
+  function _setSessionHighlights(arr) {
+    var all = _loadHighlights();
+    all[_sessionKey()] = arr;
+    _saveHighlights(all);
+  }
+
+  // ── Styles ──
+
+  function _injectStyles() {
+    if (_styleInjected) return;
+    _styleInjected = true;
+    var style = document.createElement('style');
+    style.textContent = [
+      '.hl-toolbar{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);z-index:10000;',
+      'display:flex;gap:6px;align-items:center;padding:8px 14px;border-radius:24px;',
+      'background:var(--bg-secondary,#1e1e1e);border:1px solid var(--border-color,#444);',
+      'box-shadow:0 4px 20px rgba(0,0,0,.3);font-size:13px;transition:opacity .2s}',
+      '.hl-toolbar.hidden{display:none}',
+      '.hl-swatch{width:24px;height:24px;border-radius:50%;cursor:pointer;border:2px solid transparent;transition:border-color .15s,transform .15s}',
+      '.hl-swatch:hover{transform:scale(1.15)}',
+      '.hl-swatch.active{border-color:#fff;transform:scale(1.2)}',
+      '.hl-label{color:var(--text-secondary,#aaa);margin-right:4px}',
+      '.hl-clear-btn{background:none;border:1px solid var(--border-color,#555);color:var(--text-primary,#ddd);',
+      'border-radius:12px;padding:3px 10px;cursor:pointer;font-size:12px;margin-left:6px}',
+      '.hl-clear-btn:hover{background:var(--bg-hover,#333)}',
+      '.hl-mark{border-radius:2px;padding:0 1px;cursor:pointer;transition:opacity .15s}',
+      '.hl-mark:hover{opacity:.7}',
+      '.hl-count{color:var(--text-secondary,#aaa);font-size:12px;margin-left:4px}',
+    ].join('\n');
+    document.head.appendChild(style);
+  }
+
+  // ── Toolbar ──
+
+  function _buildToolbar() {
+    _injectStyles();
+    var bar = document.createElement('div');
+    bar.className = 'hl-toolbar hidden';
+    bar.innerHTML = '<span class="hl-label">🖍️ Highlight:</span>';
+
+    COLORS.forEach(function (c, i) {
+      var swatch = document.createElement('div');
+      swatch.className = 'hl-swatch' + (i === _currentColor ? ' active' : '');
+      swatch.style.background = c.color;
+      swatch.title = c.name;
+      swatch.addEventListener('click', function () {
+        _currentColor = i;
+        bar.querySelectorAll('.hl-swatch').forEach(function (s, j) {
+          s.classList.toggle('active', j === i);
+        });
+      });
+      bar.appendChild(swatch);
+    });
+
+    var countSpan = document.createElement('span');
+    countSpan.className = 'hl-count';
+    bar.appendChild(countSpan);
+
+    var clearBtn = document.createElement('button');
+    clearBtn.className = 'hl-clear-btn';
+    clearBtn.textContent = 'Clear All';
+    clearBtn.addEventListener('click', function () {
+      _setSessionHighlights([]);
+      _applyHighlights();
+      _updateCount();
+    });
+    bar.appendChild(clearBtn);
+
+    document.body.appendChild(bar);
+    return bar;
+  }
+
+  function _updateCount() {
+    if (!_toolbarEl) return;
+    var c = _toolbarEl.querySelector('.hl-count');
+    var n = _getSessionHighlights().length;
+    c.textContent = n ? '(' + n + ' highlight' + (n > 1 ? 's' : '') + ')' : '';
+  }
+
+  // ── Highlight logic ──
+
+  function _getMessageIndex(el) {
+    var msgEl = el.closest('.message');
+    if (!msgEl) return -1;
+    var msgs = document.querySelectorAll('.message');
+    for (var i = 0; i < msgs.length; i++) {
+      if (msgs[i] === msgEl) return i;
+    }
+    return -1;
+  }
+
+  function _handleSelection() {
+    if (!_active) return;
+    var sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount) return;
+
+    var range = sel.getRangeAt(0);
+    var container = range.commonAncestorContainer;
+    var msgEl = (container.nodeType === 3 ? container.parentElement : container);
+    if (!msgEl) return;
+    var msgContainer = msgEl.closest('.message');
+    if (!msgContainer) return;
+
+    var text = sel.toString().trim();
+    if (!text || text.length < 2) return;
+
+    var msgIdx = _getMessageIndex(msgContainer);
+    if (msgIdx < 0) return;
+
+    var highlights = _getSessionHighlights();
+    // Avoid duplicate
+    var exists = highlights.some(function (h) {
+      return h.msgIdx === msgIdx && h.text === text;
+    });
+    if (exists) { sel.removeAllRanges(); return; }
+
+    highlights.push({
+      msgIdx: msgIdx,
+      text: text,
+      colorIdx: _currentColor,
+      ts: Date.now()
+    });
+    _setSessionHighlights(highlights);
+    sel.removeAllRanges();
+    _applyHighlights();
+    _updateCount();
+  }
+
+  function _applyHighlights() {
+    // Strip existing highlights first
+    document.querySelectorAll('.hl-mark').forEach(function (mark) {
+      var parent = mark.parentNode;
+      parent.replaceChild(document.createTextNode(mark.textContent), mark);
+      parent.normalize();
+    });
+
+    var highlights = _getSessionHighlights();
+    if (!highlights.length) return;
+
+    var msgs = document.querySelectorAll('.message');
+
+    highlights.forEach(function (h) {
+      if (h.msgIdx >= msgs.length) return;
+      var msgEl = msgs[h.msgIdx];
+      var c = COLORS[h.colorIdx] || COLORS[0];
+      _highlightTextIn(msgEl, h.text, c, h);
+    });
+  }
+
+  function _highlightTextIn(root, text, color, hlData) {
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null, false);
+    var node;
+    while ((node = walker.nextNode())) {
+      var idx = node.textContent.indexOf(text);
+      if (idx < 0) continue;
+
+      var range = document.createRange();
+      range.setStart(node, idx);
+      range.setEnd(node, idx + text.length);
+
+      var mark = document.createElement('span');
+      mark.className = 'hl-mark';
+      mark.style.background = color.color;
+      mark.style.color = color.text;
+      mark.title = 'Click to remove highlight';
+      mark.addEventListener('click', function () {
+        var highlights = _getSessionHighlights();
+        var filtered = highlights.filter(function (h) {
+          return !(h.msgIdx === hlData.msgIdx && h.text === hlData.text && h.ts === hlData.ts);
+        });
+        _setSessionHighlights(filtered);
+        _applyHighlights();
+        _updateCount();
+      });
+
+      range.surroundContents(mark);
+      break; // Only first occurrence per highlight entry
+    }
+  }
+
+  // ── Public API ──
+
+  function toggle() {
+    _active ? hide() : show();
+  }
+
+  function show() {
+    if (!_toolbarEl) _toolbarEl = _buildToolbar();
+    _toolbarEl.classList.remove('hidden');
+    _active = true;
+    _applyHighlights();
+    _updateCount();
+    document.addEventListener('mouseup', _handleSelection);
+  }
+
+  function hide() {
+    if (_toolbarEl) _toolbarEl.classList.add('hidden');
+    _active = false;
+    document.removeEventListener('mouseup', _handleSelection);
+  }
+
+  // Re-apply highlights when chat updates
+  var _reapplyTimer = null;
+  new MutationObserver(function () {
+    clearTimeout(_reapplyTimer);
+    _reapplyTimer = setTimeout(function () {
+      if (_getSessionHighlights().length) _applyHighlights();
+    }, 300);
+  }).observe(document.body, { childList: true, subtree: true });
+
+  // Alt+H shortcut
+  document.addEventListener('keydown', function (e) {
+    if (e.altKey && e.key === 'h') { e.preventDefault(); toggle(); }
+  });
+
+  return { toggle: toggle, show: show, hide: hide, applyHighlights: _applyHighlights };
 })();
