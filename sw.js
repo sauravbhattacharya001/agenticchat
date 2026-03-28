@@ -52,6 +52,18 @@ self.addEventListener('activate', event => {
   );
 });
 
+/**
+ * Minimum interval (ms) between background revalidation attempts for the
+ * same URL.  Prevents redundant network fetches on rapid successive loads
+ * (e.g. soft-reloads, SPA navigations).  The app shell is only ~1.2 MB
+ * total — re-downloading it on every sub-resource request was wasteful.
+ * With this throttle, each asset is revalidated at most once per interval.
+ */
+const REVALIDATE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+
+/** Tracks the last revalidation timestamp per URL path. */
+const _lastRevalidated = new Map();
+
 /* Fetch: cache-first for app shell, network-first for API calls */
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
@@ -61,21 +73,34 @@ self.addEventListener('fetch', event => {
     return;
   }
 
+  /* Only handle GET requests */
+  if (event.request.method !== 'GET') {
+    return;
+  }
+
   /* Cache-first for app shell assets */
   event.respondWith(
     caches.match(event.request)
       .then(cached => {
         if (cached) {
-          /* Return cached version, update cache in background */
-          const fetchPromise = fetch(event.request)
-            .then(response => {
-              if (response.ok) {
-                const clone = response.clone();
-                caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
-              }
-              return response;
-            })
-            .catch(() => cached);
+          /* Throttled background revalidation: only refetch if enough
+             time has elapsed since the last revalidation for this URL.
+             This avoids re-downloading app.js (1 MB) on every request
+             while still picking up updates within a few minutes. */
+          const path = url.pathname;
+          const now = Date.now();
+          const last = _lastRevalidated.get(path) || 0;
+          if (now - last > REVALIDATE_INTERVAL_MS) {
+            _lastRevalidated.set(path, now);
+            fetch(event.request)
+              .then(response => {
+                if (response.ok) {
+                  const clone = response.clone();
+                  caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
+                }
+              })
+              .catch(() => { /* revalidation failed — stale cache is fine */ });
+          }
           return cached;
         }
         /* Not cached — try network, cache the result */

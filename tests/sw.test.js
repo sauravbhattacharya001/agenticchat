@@ -67,10 +67,10 @@ global.fetch = jest.fn(() =>
 );
 
 // Helper: create a FetchEvent-like object
-function makeFetchEvent(url, origin) {
+function makeFetchEvent(url, origin, method = 'GET') {
   let respondWithCallback = null;
   return {
-    request: { url, clone: () => ({ url }) },
+    request: { url, method, clone: () => ({ url, method }) },
     waitUntil: jest.fn((p) => p),
     respondWith: jest.fn((p) => { respondWithCallback = p; }),
     get _response() { return respondWithCallback; },
@@ -202,5 +202,31 @@ describe('Service Worker - Fetch', () => {
       ([req]) => (typeof req === 'string' ? req : req.url) === 'https://agenticchat.app/missing.html'
     );
     expect(putCalls).toHaveLength(0);
+  });
+
+  test('ignores non-GET requests', () => {
+    const event = makeFetchEvent('https://agenticchat.app/api/data', undefined, 'POST');
+    fetchHandler(event);
+    expect(event.respondWith).not.toHaveBeenCalled();
+  });
+
+  test('throttles background revalidation on cache hits', async () => {
+    // Pre-populate cache
+    const cache = mockCache('agenticchat-v1');
+    cache._store.set('https://agenticchat.app/style.css', 'cached-css');
+
+    // First hit — should trigger background fetch
+    const event1 = makeFetchEvent('https://agenticchat.app/style.css');
+    fetchHandler(event1);
+    await event1._response;
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+
+    global.fetch.mockClear();
+
+    // Second hit immediately — should be throttled (no fetch)
+    const event2 = makeFetchEvent('https://agenticchat.app/style.css');
+    fetchHandler(event2);
+    await event2._response;
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 });
