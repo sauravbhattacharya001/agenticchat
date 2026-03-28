@@ -409,7 +409,14 @@ function sanitizeStorageObject(obj) {
  */
 function _safeParse(raw, fallback) {
   if (!raw) return fallback !== undefined ? fallback : undefined;
-  return _safeParse(raw);
+  try {
+    const parsed = JSON.parse(raw);
+    return (parsed !== null && typeof parsed === 'object')
+      ? sanitizeStorageObject(parsed)
+      : parsed;
+  } catch (_) {
+    return fallback !== undefined ? fallback : undefined;
+  }
 }
 
 /* ---------- Shared HTML Escape ---------- */
@@ -6322,20 +6329,21 @@ const PersonaPresets = (() => {
       activeEl.textContent = active ? 'Active: ' + active.name : 'Active: Unknown';
     }
 
-    listEl.innerHTML = presets.map(p => {
+    // Build all cards (presets + custom) as a single string to avoid
+    // innerHTML += which re-serializes and re-parses the entire list.
+    const isCustom = activeId === 'custom';
+    const cardsHTML = presets.map(p => {
       const isActive = p.id === activeId;
       return '<div class="persona-card' + (isActive ? ' active' : '') + '" data-persona-id="' + _esc(p.id) + '">'
         + '<div class="persona-card-title">' + _esc(p.name) + (isActive ? ' ✓' : '') + '</div>'
         + '<div class="persona-card-desc">' + _esc(p.desc) + '</div>'
         + '</div>';
-    }).join('');
-
-    // Add custom card
-    const isCustom = activeId === 'custom';
-    listEl.innerHTML += '<div class="persona-card' + (isCustom ? ' active' : '') + '" data-persona-id="custom">'
+    }).join('')
+      + '<div class="persona-card' + (isCustom ? ' active' : '') + '" data-persona-id="custom">'
       + '<div class="persona-card-title">✏️ Custom' + (isCustom ? ' ✓' : '') + '</div>'
       + '<div class="persona-card-desc">Use the custom prompt below.</div>'
       + '</div>';
+    listEl.innerHTML = cardsHTML;
 
     // Bind click handlers
     listEl.querySelectorAll('.persona-card').forEach(card => {
@@ -22580,15 +22588,17 @@ const CustomThemeCreator = (() => {
     // Preset dropdown
     const presetSelect = document.createElement('select');
     presetSelect.style.cssText = 'flex:1;min-width:100px;padding:4px 8px;background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border);border-radius:4px;font-size:12px;';
-    presetSelect.innerHTML = '<option value="">- Apply Preset -</option>';
+    // Build all options at once to avoid innerHTML += re-parsing
+    const optionParts = ['<option value="">- Apply Preset -</option>'];
     Object.keys(PRESETS).forEach(name => {
-      presetSelect.innerHTML += `<option value="${name}">${name}</option>`;
+      optionParts.push(`<option value="${name}">${name}</option>`);
     });
     // Add saved custom themes
     const customs = _loadCustomThemes();
     Object.keys(customs).forEach(name => {
-      presetSelect.innerHTML += `<option value="custom:${_escapeHtml(name)}">★ ${_escapeHtml(name)}</option>`;
+      optionParts.push(`<option value="custom:${_escapeHtml(name)}">★ ${_escapeHtml(name)}</option>`);
     });
+    presetSelect.innerHTML = optionParts.join('');
     presetSelect.onchange = () => {
       const val = presetSelect.value;
       if (!val) return;
@@ -26143,10 +26153,15 @@ const ReadabilityAnalyzer = (() => {
   function renderStats(data, container, label, color) {
     const sec = document.createElement('div');
     sec.className = 'rp-section';
-    sec.innerHTML = `<h3>${label}</h3>`;
+    // Build all HTML fragments in an array and assign innerHTML once.
+    // The previous innerHTML += pattern forced the browser to serialize,
+    // concatenate, and re-parse the entire element on every append — O(n²)
+    // for n rows.  A single join + assign is O(n).
+    const parts = [`<h3>${label}</h3>`];
 
     if (data.msgCount === 0) {
-      sec.innerHTML += '<div class="rp-empty">No messages yet</div>';
+      parts.push('<div class="rp-empty">No messages yet</div>');
+      sec.innerHTML = parts.join('');
       container.appendChild(sec);
       return;
     }
@@ -26162,19 +26177,20 @@ const ReadabilityAnalyzer = (() => {
     ];
 
     rows.forEach(([lbl, val]) => {
-      sec.innerHTML += `<div class="rp-row"><span class="rp-label">${lbl}</span><span class="rp-value">${val}</span></div>`;
+      parts.push(`<div class="rp-row"><span class="rp-label">${lbl}</span><span class="rp-value">${val}</span></div>`);
     });
 
     // Reading ease meter
-    sec.innerHTML += `<div class="rp-meter"><div class="rp-meter-fill" style="width:${data.avgFleschEase}%;background:${color}"></div></div>`;
+    parts.push(`<div class="rp-meter"><div class="rp-meter-fill" style="width:${data.avgFleschEase}%;background:${color}"></div></div>`);
 
     // Sparkline of per-message ease scores
     if (data.perMessage && data.perMessage.length >= 2) {
       const easeScores = data.perMessage.map(m => m.fleschEase);
-      sec.innerHTML += '<div class="rp-label" style="margin-top:8px">Ease over time:</div>';
-      sec.innerHTML += sparkline(easeScores, 300, 40, color);
+      parts.push('<div class="rp-label" style="margin-top:8px">Ease over time:</div>');
+      parts.push(sparkline(easeScores, 300, 40, color));
     }
 
+    sec.innerHTML = parts.join('');
     container.appendChild(sec);
   }
 
