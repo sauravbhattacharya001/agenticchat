@@ -84,6 +84,7 @@
  *   EmojiPicker          - categorized emoji browser with search and recent tracking (Ctrl+Shift+;)
  *   MessageScheduler     - queue messages with configurable delay for auto-send (Alt+Q)
  *   MessageHighlighter   - select text in messages and apply colored highlights (Alt+H)
+ *   AutoSaveDraft        - auto-persist unsent chat input across page refreshes
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -1105,7 +1106,7 @@ const UIController = (() => {
   /** Get the trimmed value of the chat input field. */
   function getChatInput()   { return el('chat-input').value.trim(); }
   /** Clear the chat input field and return focus to it. */
-  function clearChatInput() { const inp = el('chat-input'); inp.value = ''; inp.focus(); if (typeof DraftRecovery !== 'undefined') DraftRecovery.clearDraft(); }
+  function clearChatInput() { const inp = el('chat-input'); inp.value = ''; inp.focus(); if (typeof DraftRecovery !== 'undefined') DraftRecovery.clearDraft(); if (typeof AutoSaveDraft !== 'undefined') AutoSaveDraft.clear(); }
   /** Set the chat input field value and return focus to it. */
   function setChatInput(text) { const inp = el('chat-input'); inp.value = text; inp.focus(); }
   /** Get the trimmed API key input value, or empty string if field is absent. */
@@ -9005,7 +9006,11 @@ document.addEventListener('DOMContentLoaded', () => {
   DOMCache.get('chat-input').addEventListener('input', function () {
     InputHistory.resetCursor(); // typing resets history navigation
     UIController.updateCharCount(this.value.length);
+    AutoSaveDraft.handleInput(this.value);
   });
+
+  // Restore any previously saved draft
+  AutoSaveDraft.restore();
 
   DOMCache.get('user-api-key').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); ChatController.submitServiceKey(); }
@@ -29160,4 +29165,61 @@ const MessageHighlighter = (() => {
   });
 
   return { toggle: toggle, show: show, hide: hide, applyHighlights: _applyHighlights };
+})();
+
+// ============================================================
+// Module: AutoSaveDraft
+// Automatically saves the current chat input to localStorage so
+// unsent messages survive page refreshes and accidental tab closes.
+// Restores the draft on page load and clears it after sending.
+// ============================================================
+var AutoSaveDraft = (function () {
+  'use strict';
+
+  var STORAGE_KEY = 'agenticchat_draft';
+  var _timer = null;
+  var DEBOUNCE_MS = 400;
+
+  function _save(text) {
+    try {
+      if (text && text.trim().length > 0) {
+        localStorage.setItem(STORAGE_KEY, text);
+      } else {
+        localStorage.removeItem(STORAGE_KEY);
+      }
+    } catch (_) { /* quota or restricted storage */ }
+  }
+
+  function _restore() {
+    try {
+      return localStorage.getItem(STORAGE_KEY) || '';
+    } catch (_) { return ''; }
+  }
+
+  /** Call on input events — debounced save */
+  function handleInput(text) {
+    clearTimeout(_timer);
+    _timer = setTimeout(function () { _save(text); }, DEBOUNCE_MS);
+  }
+
+  /** Call after a message is sent — clear the draft */
+  function clear() {
+    clearTimeout(_timer);
+    try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
+  }
+
+  /** Restore draft into the input field on page load */
+  function restore() {
+    var draft = _restore();
+    if (!draft) return;
+    var input = document.getElementById('chat-input');
+    if (input && !input.value) {
+      input.value = draft;
+      if (typeof UIController !== 'undefined' && UIController.updateCharCount) {
+        UIController.updateCharCount(draft.length);
+      }
+    }
+  }
+
+  return { handleInput: handleInput, clear: clear, restore: restore };
 })();
