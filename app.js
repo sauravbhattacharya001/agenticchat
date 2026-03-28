@@ -589,6 +589,11 @@ const ConversationManager = (() => {
  * timeout ({@link ChatConfig.SANDBOX_TIMEOUT_MS}) after which execution is
  * forcefully terminated. Only one sandbox can run at a time.
  *
+ * Security: The sandbox CSP blocks all network access (`connect-src 'none'`)
+ * to prevent exfiltration of sensitive data (e.g. API keys injected via
+ * {@link ApiKeyManager.substituteServiceKey}). Sandboxed code can only
+ * return results via postMessage to the parent frame.
+ *
  * @namespace SandboxRunner
  */
 const SandboxRunner = (() => {
@@ -611,7 +616,7 @@ const SandboxRunner = (() => {
 
       const iframeHTML = `<!DOCTYPE html><html><head>` +
         `<meta http-equiv="Content-Security-Policy" ` +
-        `content="default-src 'none'; script-src 'unsafe-inline'; connect-src https://api.openai.com https://jsonplaceholder.typicode.com https://wttr.in; form-action 'none';">` +
+        `content="default-src 'none'; script-src 'unsafe-inline'; connect-src 'none'; form-action 'none';">` +
         `</head><body><script>
         window.addEventListener('message', async function handler(evt) {
           if (!evt.data || evt.data.type !== 'sandbox-exec') return;
