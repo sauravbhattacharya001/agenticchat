@@ -22408,10 +22408,17 @@ const CustomThemeCreator = (() => {
     return vals;
   }
 
+  // Validate that a CSS variable value looks like a safe color/font value.
+  // Blocks url(), expression(), and other potentially dangerous CSS functions.
+  const _UNSAFE_CSS_RE = /url\s*\(|expression\s*\(|javascript:|@import|behavior\s*:/i;
+
   function _applyThemeValues(values) {
     if (typeof document === 'undefined') return;
     const root = document.documentElement;
     Object.entries(values).forEach(([key, val]) => {
+      // Only apply CSS custom properties (--prefixed) with safe values
+      if (typeof key !== 'string' || !key.startsWith('--')) return;
+      if (typeof val !== 'string' || _UNSAFE_CSS_RE.test(val)) return;
       root.style.setProperty(key, val);
     });
   }
@@ -22497,7 +22504,7 @@ const CustomThemeCreator = (() => {
     // Add saved custom themes
     const customs = _loadCustomThemes();
     Object.keys(customs).forEach(name => {
-      presetSelect.innerHTML += `<option value="custom:${name}">★ ${name}</option>`;
+      presetSelect.innerHTML += `<option value="custom:${_escapeHtml(name)}">★ ${_escapeHtml(name)}</option>`;
     });
     presetSelect.onchange = () => {
       const val = presetSelect.value;
@@ -22648,14 +22655,17 @@ const CustomThemeCreator = (() => {
   }
 
   function _saveCurrentTheme() {
-    const name = prompt('Theme name:');
-    if (!name || !name.trim()) return;
+    const raw = prompt('Theme name:');
+    if (!raw || !raw.trim()) return;
+    // Sanitize: strip control characters, limit length
+    const name = raw.trim().replace(/[\x00-\x1f]/g, '').slice(0, 100);
+    if (!name) return;
     const themes = _loadCustomThemes();
-    themes[name.trim()] = _getCurrentValues();
+    themes[name] = _getCurrentValues();
     _saveCustomThemes(themes);
-    _setActiveCustomTheme(name.trim());
+    _setActiveCustomTheme(name);
     if (typeof UIController !== 'undefined') {
-      UIController.setChatOutput(`Custom theme "${name.trim()}" saved! 🎨`);
+      UIController.setChatOutput(`Custom theme "${name}" saved! 🎨`);
     }
     // Rebuild panel to refresh preset list
     _buildPanel();
@@ -22713,7 +22723,10 @@ const CustomThemeCreator = (() => {
           let count = 0;
           Object.entries(imported).forEach(([name, vars]) => {
             if (typeof vars === 'object' && !Array.isArray(vars)) {
-              existing[name] = vars;
+              // Sanitize theme name: limit length, strip control characters
+              const safeName = String(name).replace(/[\x00-\x1f]/g, '').slice(0, 100);
+              if (!safeName) return;
+              existing[safeName] = vars;
               count++;
             }
           });
