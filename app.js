@@ -835,8 +835,11 @@ const ApiKeyManager = (() => {
     pendingDomain = null;
   }
 
+  /** Alias for getOpenAIKey — used by OpenAIClient and other callers. */
+  const getKey = getOpenAIKey;
+
   return {
-    getOpenAIKey, setOpenAIKey, clearOpenAIKey,
+    getKey, getOpenAIKey, setOpenAIKey, clearOpenAIKey,
     clearServiceKeys, clearAll,
     substituteServiceKey, submitServiceKey,
     getPendingDomain, extractDomain
