@@ -13726,15 +13726,37 @@ const ResponseRating = (() => {
       html += '</div></details>';
     }
 
-    // Actions
+    // Actions — use data attributes + delegated listener instead of inline
+    // onclick handlers, which are blocked by the page's CSP (script-src 'self').
     html += '<div class="rating-actions">';
-    html += '<button onclick="ResponseRating.exportRatings(\'json\')" title="Export as JSON">📋 JSON</button>';
-    html += '<button onclick="ResponseRating.exportRatings(\'csv\')" title="Export as CSV">📊 CSV</button>';
-    html += '<button class="btn-danger-sm" onclick="if(confirm(\'Clear all ratings?\')){ResponseRating.clearAll();ResponseRating.closeDashboard();ResponseRating.openDashboard();}">🗑️ Clear</button>';
-    html += '<button onclick="ResponseRating.closeDashboard()">Close</button>';
+    html += '<button data-action="export-json" title="Export as JSON">📋 JSON</button>';
+    html += '<button data-action="export-csv" title="Export as CSV">📊 CSV</button>';
+    html += '<button class="btn-danger-sm" data-action="clear-all">🗑️ Clear</button>';
+    html += '<button data-action="close">Close</button>';
     html += '</div>';
 
     panel.innerHTML = html;
+
+    // Bind button actions via event delegation on the actions container
+    const actionsDiv = panel.querySelector('.rating-actions');
+    if (actionsDiv) {
+      actionsDiv.addEventListener('click', function(e) {
+        const btn = e.target.closest('button[data-action]');
+        if (!btn) return;
+        const action = btn.dataset.action;
+        if (action === 'export-json') exportRatings('json');
+        else if (action === 'export-csv') exportRatings('csv');
+        else if (action === 'clear-all') {
+          if (confirm('Clear all ratings?')) {
+            clearAll();
+            closeDashboard();
+            openDashboard();
+          }
+        }
+        else if (action === 'close') closeDashboard();
+      });
+    }
+
     document.body.appendChild(panel);
     dashboardEl = panel;
   }
@@ -19434,11 +19456,14 @@ const PromptChainRunner = (() => {
           </div>
         </div>
         ${currentPrompt ? `<p style="font-size:13px;opacity:0.7;margin:8px 0;max-height:60px;overflow:hidden;text-overflow:ellipsis;">${_esc(currentPrompt).substring(0, 120)}${currentPrompt.length > 120 ? '…' : ''}</p>` : ''}
-        <button onclick="PromptChainRunner.stopChain()" style="margin-top:12px;padding:8px 24px;background:#f38ba8;color:#1e1e2e;border:none;border-radius:6px;cursor:pointer;font-weight:600;">
+        <button data-chain-action="stop" style="margin-top:12px;padding:8px 24px;background:#f38ba8;color:#1e1e2e;border:none;border-radius:6px;cursor:pointer;font-weight:600;">
           ⏹ Stop Chain
         </button>
       </div>
     `;
+    // Bind stop button
+    const stopBtn = _panelEl.querySelector('[data-chain-action="stop"]');
+    if (stopBtn) stopBtn.addEventListener('click', stopChain);
   }
 
   function _renderPanel() {
@@ -19455,10 +19480,10 @@ const PromptChainRunner = (() => {
             ${c.steps.map((s, i) => `<span title="${_esc(s)}">Step ${i+1}: ${_esc(s.substring(0, 40))}${s.length > 40 ? '…' : ''}</span>`).join(' → ')}
           </div>
           <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">
-            <button onclick="PromptChainRunner.runChain('${c.id}')" style="padding:4px 12px;background:#a6e3a1;color:#1e1e2e;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600;" ${_isRunning ? 'disabled' : ''}>▶ Run</button>
-            <button onclick="PromptChainRunner._editChain('${c.id}')" style="padding:4px 12px;background:#89b4fa;color:#1e1e2e;border:none;border-radius:4px;cursor:pointer;font-size:12px;">✏️ Edit</button>
-            <button onclick="PromptChainRunner.duplicateChain('${c.id}');PromptChainRunner._renderPanel();" style="padding:4px 12px;background:#cba6f7;color:#1e1e2e;border:none;border-radius:4px;cursor:pointer;font-size:12px;">📋 Duplicate</button>
-            <button onclick="if(confirm('Delete this chain?')){PromptChainRunner.deleteChain('${c.id}');PromptChainRunner._renderPanel();}" style="padding:4px 12px;background:#f38ba8;color:#1e1e2e;border:none;border-radius:4px;cursor:pointer;font-size:12px;">🗑️ Delete</button>
+            <button data-chain-action="run" data-chain-id="${c.id}" style="padding:4px 12px;background:#a6e3a1;color:#1e1e2e;border:none;border-radius:4px;cursor:pointer;font-size:12px;font-weight:600;" ${_isRunning ? 'disabled' : ''}>▶ Run</button>
+            <button data-chain-action="edit" data-chain-id="${c.id}" style="padding:4px 12px;background:#89b4fa;color:#1e1e2e;border:none;border-radius:4px;cursor:pointer;font-size:12px;">✏️ Edit</button>
+            <button data-chain-action="duplicate" data-chain-id="${c.id}" style="padding:4px 12px;background:#cba6f7;color:#1e1e2e;border:none;border-radius:4px;cursor:pointer;font-size:12px;">📋 Duplicate</button>
+            <button data-chain-action="delete" data-chain-id="${c.id}" style="padding:4px 12px;background:#f38ba8;color:#1e1e2e;border:none;border-radius:4px;cursor:pointer;font-size:12px;">🗑️ Delete</button>
           </div>
         </div>
       `).join('');
@@ -19477,37 +19502,72 @@ const PromptChainRunner = (() => {
     _panelEl.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
         <h2 style="margin:0;font-size:20px;">⛓️ Prompt Chains</h2>
-        <button onclick="PromptChainRunner.close()" style="background:none;border:none;color:var(--text,#cdd6f4);font-size:20px;cursor:pointer;padding:4px 8px;" title="Close">✕</button>
+        <button data-chain-action="close" style="background:none;border:none;color:var(--text,#cdd6f4);font-size:20px;cursor:pointer;padding:4px 8px;" title="Close">✕</button>
       </div>
       <p style="font-size:13px;opacity:0.6;margin:0 0 12px 0;">
         Create multi-step prompt sequences. Use <code>{{prev}}</code> for the last step's output or <code>{{step.N}}</code> for a specific step.
       </p>
       <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;">
-        <button onclick="PromptChainRunner._newChainUI()" style="padding:6px 16px;background:#a6e3a1;color:#1e1e2e;border:none;border-radius:6px;cursor:pointer;font-weight:600;">+ New Chain</button>
-        <button onclick="PromptChainRunner.importChains()" style="padding:6px 16px;background:var(--border,#45475a);color:var(--text,#cdd6f4);border:none;border-radius:6px;cursor:pointer;">📥 Import</button>
-        <button onclick="PromptChainRunner.exportChains()" style="padding:6px 16px;background:var(--border,#45475a);color:var(--text,#cdd6f4);border:none;border-radius:6px;cursor:pointer;" ${_chains.length === 0 ? 'disabled' : ''}>📤 Export</button>
+        <button data-chain-action="new" style="padding:6px 16px;background:#a6e3a1;color:#1e1e2e;border:none;border-radius:6px;cursor:pointer;font-weight:600;">+ New Chain</button>
+        <button data-chain-action="import" style="padding:6px 16px;background:var(--border,#45475a);color:var(--text,#cdd6f4);border:none;border-radius:6px;cursor:pointer;">📥 Import</button>
+        <button data-chain-action="export" style="padding:6px 16px;background:var(--border,#45475a);color:var(--text,#cdd6f4);border:none;border-radius:6px;cursor:pointer;" ${_chains.length === 0 ? 'disabled' : ''}>📤 Export</button>
       </div>
       ${chainsHtml}
       ${historyHtml}
     `;
+
+    // Bind panel actions via event delegation
+    _panelEl.addEventListener('click', function _panelHandler(e) {
+      const btn = e.target.closest('button[data-chain-action]');
+      if (!btn) return;
+      const action = btn.dataset.chainAction;
+      const chainId = btn.dataset.chainId;
+      switch (action) {
+        case 'close': close(); break;
+        case 'new': _newChainUI(); break;
+        case 'import': importChains(); break;
+        case 'export': exportChains(); break;
+        case 'run': if (chainId) runChain(chainId); break;
+        case 'edit': if (chainId) _editChain(chainId); break;
+        case 'duplicate':
+          if (chainId) { duplicateChain(chainId); _renderPanel(); }
+          break;
+        case 'delete':
+          if (chainId && confirm('Delete this chain?')) {
+            deleteChain(chainId); _renderPanel();
+          }
+          break;
+      }
+    });
   }
 
   function _newChainUI() {
     _panelEl.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
         <h2 style="margin:0;font-size:20px;">⛓️ New Chain</h2>
-        <button onclick="PromptChainRunner._renderPanel()" style="background:none;border:none;color:var(--text,#cdd6f4);font-size:20px;cursor:pointer;" title="Back">←</button>
+        <button data-chain-action="back" style="background:none;border:none;color:var(--text,#cdd6f4);font-size:20px;cursor:pointer;" title="Back">←</button>
       </div>
       <label style="font-size:13px;font-weight:600;">Chain Name</label>
       <input id="chain-name-input" type="text" placeholder="e.g. Build REST API" style="width:100%;padding:8px;margin:4px 0 12px 0;background:var(--input-bg,#313244);color:var(--text,#cdd6f4);border:1px solid var(--border,#45475a);border-radius:6px;box-sizing:border-box;" />
       <label style="font-size:13px;font-weight:600;">Steps</label>
       <div id="chain-steps-container"></div>
-      <button onclick="PromptChainRunner._addStepInput()" style="margin:8px 0;padding:4px 12px;background:var(--border,#45475a);color:var(--text,#cdd6f4);border:none;border-radius:4px;cursor:pointer;font-size:12px;">+ Add Step</button>
+      <button data-chain-action="add-step" style="margin:8px 0;padding:4px 12px;background:var(--border,#45475a);color:var(--text,#cdd6f4);border:none;border-radius:4px;cursor:pointer;font-size:12px;">+ Add Step</button>
       <div style="margin-top:16px;display:flex;gap:8px;">
-        <button onclick="PromptChainRunner._saveNewChain()" style="padding:8px 20px;background:#a6e3a1;color:#1e1e2e;border:none;border-radius:6px;cursor:pointer;font-weight:600;">💾 Save Chain</button>
-        <button onclick="PromptChainRunner._renderPanel()" style="padding:8px 20px;background:var(--border,#45475a);color:var(--text,#cdd6f4);border:none;border-radius:6px;cursor:pointer;">Cancel</button>
+        <button data-chain-action="save-new" style="padding:8px 20px;background:#a6e3a1;color:#1e1e2e;border:none;border-radius:6px;cursor:pointer;font-weight:600;">💾 Save Chain</button>
+        <button data-chain-action="cancel" style="padding:8px 20px;background:var(--border,#45475a);color:var(--text,#cdd6f4);border:none;border-radius:6px;cursor:pointer;">Cancel</button>
       </div>
     `;
+
+    // Bind new-chain UI actions
+    _panelEl.addEventListener('click', function _newChainHandler(e) {
+      const btn = e.target.closest('button[data-chain-action]');
+      if (!btn) return;
+      const action = btn.dataset.chainAction;
+      if (action === 'back' || action === 'cancel') _renderPanel();
+      else if (action === 'add-step') _addStepInput();
+      else if (action === 'save-new') _saveNewChain();
+    });
+
     _addStepInput(); // Start with one step
   }
 
@@ -19523,8 +19583,13 @@ const PromptChainRunner = (() => {
     stepDiv.innerHTML = `
       <span style="font-size:12px;font-weight:600;padding-top:10px;min-width:20px;opacity:0.6;">${container.children.length + 1}.</span>
       <textarea class="chain-step-input" rows="2" placeholder="Enter prompt for this step… (use {{prev}} for previous output)" style="flex:1;padding:8px;background:var(--input-bg,#313244);color:var(--text,#cdd6f4);border:1px solid var(--border,#45475a);border-radius:6px;resize:vertical;font-family:inherit;font-size:13px;">${_esc(value || '')}</textarea>
-      <button onclick="this.parentElement.remove();PromptChainRunner._renumberSteps()" style="background:none;border:none;color:#f38ba8;cursor:pointer;padding:8px;font-size:16px;" title="Remove step">✕</button>
+      <button data-chain-action="remove-step" style="background:none;border:none;color:#f38ba8;cursor:pointer;padding:8px;font-size:16px;" title="Remove step">✕</button>
     `;
+    // Bind remove button
+    stepDiv.querySelector('[data-chain-action="remove-step"]').addEventListener('click', function() {
+      stepDiv.remove();
+      _renumberSteps();
+    });
     container.appendChild(stepDiv);
   }
 
@@ -19560,18 +19625,28 @@ const PromptChainRunner = (() => {
     _panelEl.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
         <h2 style="margin:0;font-size:20px;">✏️ Edit: ${_esc(chain.name)}</h2>
-        <button onclick="PromptChainRunner._renderPanel()" style="background:none;border:none;color:var(--text,#cdd6f4);font-size:20px;cursor:pointer;" title="Back">←</button>
+        <button data-chain-action="back" style="background:none;border:none;color:var(--text,#cdd6f4);font-size:20px;cursor:pointer;" title="Back">←</button>
       </div>
       <label style="font-size:13px;font-weight:600;">Chain Name</label>
       <input id="chain-name-input" type="text" value="${_esc(chain.name)}" style="width:100%;padding:8px;margin:4px 0 12px 0;background:var(--input-bg,#313244);color:var(--text,#cdd6f4);border:1px solid var(--border,#45475a);border-radius:6px;box-sizing:border-box;" />
       <label style="font-size:13px;font-weight:600;">Steps</label>
       <div id="chain-steps-container"></div>
-      <button onclick="PromptChainRunner._addStepInput()" style="margin:8px 0;padding:4px 12px;background:var(--border,#45475a);color:var(--text,#cdd6f4);border:none;border-radius:4px;cursor:pointer;font-size:12px;">+ Add Step</button>
+      <button data-chain-action="add-step" style="margin:8px 0;padding:4px 12px;background:var(--border,#45475a);color:var(--text,#cdd6f4);border:none;border-radius:4px;cursor:pointer;font-size:12px;">+ Add Step</button>
       <div style="margin-top:16px;display:flex;gap:8px;">
-        <button onclick="PromptChainRunner._saveEditedChain('${chain.id}')" style="padding:8px 20px;background:#a6e3a1;color:#1e1e2e;border:none;border-radius:6px;cursor:pointer;font-weight:600;">💾 Save</button>
-        <button onclick="PromptChainRunner._renderPanel()" style="padding:8px 20px;background:var(--border,#45475a);color:var(--text,#cdd6f4);border:none;border-radius:6px;cursor:pointer;">Cancel</button>
+        <button data-chain-action="save-edit" data-chain-id="${chain.id}" style="padding:8px 20px;background:#a6e3a1;color:#1e1e2e;border:none;border-radius:6px;cursor:pointer;font-weight:600;">💾 Save</button>
+        <button data-chain-action="cancel" style="padding:8px 20px;background:var(--border,#45475a);color:var(--text,#cdd6f4);border:none;border-radius:6px;cursor:pointer;">Cancel</button>
       </div>
     `;
+
+    // Bind edit UI actions
+    _panelEl.addEventListener('click', function _editHandler(e) {
+      const btn = e.target.closest('button[data-chain-action]');
+      if (!btn) return;
+      const action = btn.dataset.chainAction;
+      if (action === 'back' || action === 'cancel') _renderPanel();
+      else if (action === 'add-step') _addStepInput();
+      else if (action === 'save-edit') _saveEditedChain(btn.dataset.chainId);
+    });
 
     // Populate existing steps
     chain.steps.forEach(s => _addStepInput(s));
