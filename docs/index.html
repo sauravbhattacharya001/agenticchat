@@ -283,7 +283,76 @@
         <div class="card">
           <h3>⏱️ Response Timing</h3>
           <p>Track and display API response times on messages for latency awareness and performance monitoring.</p>
-        </div>      </div>
+        </div>
+        <div class="card">
+          <h3>📖 Reader View</h3>
+          <p>Full-width overlay for distraction-free reading of long messages, with adjustable font size and width.</p>
+        </div>
+        <div class="card">
+          <h3>⌨️ Text Expander</h3>
+          <p>Define shorthand triggers (e.g. <code>;sig</code>) that auto-expand into longer text snippets inline (<code>Ctrl+Shift+X</code>).</p>
+        </div>
+        <div class="card">
+          <h3>⬇️ SmartScroll</h3>
+          <p>Floating jump-to-latest button with unread message badge and per-session scroll position memory.</p>
+        </div>
+        <div class="card">
+          <h3>🔀 Prompt A/B Tester</h3>
+          <p>Compare two model responses side-by-side for the same prompt to evaluate quality and style (<code>Ctrl+Shift+B</code>).</p>
+        </div>
+        <div class="card">
+          <h3>🍅 Pomodoro Timer</h3>
+          <p>Built-in focus timer with configurable work/break cycles and session tracking.</p>
+        </div>
+        <div class="card">
+          <h3>📋 Smart Paste</h3>
+          <p>Auto-detects and formats pasted content — JSON, code, CSV, SQL, URLs, and stack traces get proper formatting.</p>
+        </div>
+        <div class="card">
+          <h3>🗂️ Session Templates</h3>
+          <p>Save and load reusable session configurations (system prompt, model, settings) for quick setup (<code>Ctrl+Shift+N</code>).</p>
+        </div>
+        <div class="card">
+          <h3>🃏 Conversation Flashcards</h3>
+          <p>Extract Q&amp;A pairs from conversations as study flashcards for spaced-repetition review.</p>
+        </div>
+        <div class="card">
+          <h3>🏷️ Smart Titles</h3>
+          <p>Auto-generate descriptive session titles from conversation content for easier session management.</p>
+        </div>
+        <div class="card">
+          <h3>⚙️ Preferences Panel</h3>
+          <p>Centralized settings UI (<code>Ctrl+,</code>) for configuring all app preferences in one place.</p>
+        </div>
+        <div class="card">
+          <h3>🎨 Custom Theme Creator</h3>
+          <p>Interactive theme builder with color pickers, 8 preset themes (Nord, Dracula, Monokai, Solarized, and more), import/export JSON.</p>
+        </div>
+        <div class="card">
+          <h3>📝 Draft Recovery</h3>
+          <p>Auto-saves unsent message drafts per session and restores them when you return.</p>
+        </div>
+        <div class="card">
+          <h3>🔥 Session Streaks</h3>
+          <p>Daily activity streak tracker with milestones and motivation (<code>Ctrl+Shift+K</code>).</p>
+        </div>
+        <div class="card">
+          <h3>🪟 Split View</h3>
+          <p>Side-by-side session comparison for referencing one conversation while working in another (<code>Ctrl+Shift+2</code>).</p>
+        </div>
+        <div class="card">
+          <h3>🚀 Command Palette</h3>
+          <p>VS Code-style universal command launcher for quick access to any feature (<code>Ctrl+Shift+P</code>).</p>
+        </div>
+        <div class="card">
+          <h3>⌨️ Typing Speed Monitor</h3>
+          <p>Live WPM indicator with sparkline dashboard to track your typing patterns.</p>
+        </div>
+        <div class="card">
+          <h3>🖱️ Context Menu</h3>
+          <p>Right-click context menu on chat messages for quick actions: copy, bookmark, pin, annotate, and more.</p>
+        </div>
+      </div>
     </section>
 
     <!-- Quick Start -->
@@ -821,6 +890,57 @@ open index.html</code></pre>
 
       <h3>MessageEditor</h3>
       <p>Edit and resend user messages. Truncates the conversation back to the edited message, reloads its content into the input area, and lets the user modify and re-send. Enables iterative prompt refinement without manual copy-paste.</p>
+
+      <h3>ReaderView</h3>
+      <p>Full-width reading overlay for long messages. Opens a clean, distraction-free view with adjustable font size and max-width. Triggered from the message context menu or keyboard shortcut.</p>
+
+      <h3>TextExpander</h3>
+      <p>Shorthand trigger system (<code>Ctrl+Shift+X</code> to manage). Define abbreviations like <code>;sig</code> that auto-expand into full text when typed. Triggers and expansions are persisted to localStorage.</p>
+
+      <h3>SmartScroll</h3>
+      <p>Floating jump-to-latest button that appears when scrolled up, with an unread message count badge. Remembers scroll position per session so you return to where you left off.</p>
+
+      <h3>PromptABTester</h3>
+      <p>Side-by-side prompt comparison tool (<code>Ctrl+Shift+B</code>). Send the same prompt to two models (or the same model twice) and view responses in a split pane for quality evaluation.</p>
+
+      <h3>PomodoroTimer</h3>
+      <p>Built-in focus timer with configurable work/break intervals. Tracks completed sessions and provides notifications when cycles end. Integrates with the session streak tracker.</p>
+
+      <h3>SmartPaste</h3>
+      <p>Intercepts paste events and auto-detects content type — JSON gets pretty-printed, code gets fenced, CSV becomes a table, URLs get linked, and stack traces get formatted. Preserves raw paste with Ctrl+Shift+V.</p>
+
+      <h3>SessionTemplates</h3>
+      <p>Save reusable session configurations (system prompt, model, persona, settings) as named templates. Load with <code>Ctrl+Shift+N</code> for quick session setup. Templates are persisted and can be exported.</p>
+
+      <h3>ConversationFlashcards</h3>
+      <p>Extract question-answer pairs from conversations into flashcards for review. Supports manual card creation and basic spaced-repetition scheduling.</p>
+
+      <h3>SmartTitleGenerator</h3>
+      <p>Heuristic title generation from conversation content. Auto-titles sessions based on key topics and first messages, replacing generic "Session N" names.</p>
+
+      <h3>PreferencesPanel</h3>
+      <p>Centralized settings panel (<code>Ctrl+,</code>) that aggregates all configuration options in a single tabbed UI. Changes are applied live and persisted.</p>
+
+      <h3>CustomThemeCreator</h3>
+      <p>Interactive theme builder with color pickers for all CSS variables. Ships with 8 preset themes (Nord, Dracula, Monokai, Solarized, Gruvbox, Catppuccin, High Contrast). Themes can be imported/exported as JSON.</p>
+
+      <h3>DraftRecovery</h3>
+      <p>Auto-saves the current input field content per session at regular intervals. When switching sessions or reloading, unsent drafts are restored automatically.</p>
+
+      <h3>SessionStreakTracker</h3>
+      <p>Tracks daily usage streaks (<code>Ctrl+Shift+K</code>). Awards milestones at streak thresholds and displays current/longest streak stats.</p>
+
+      <h3>SplitView</h3>
+      <p>Side-by-side session display (<code>Ctrl+Shift+2</code>). Opens a second session pane for cross-referencing conversations while working.</p>
+
+      <h3>CommandPalette</h3>
+      <p>VS Code-style command launcher (<code>Ctrl+Shift+P</code>). Fuzzy-searches all available commands, slash commands, and features with keyboard navigation.</p>
+
+      <h3>TypingSpeedMonitor</h3>
+      <p>Real-time WPM indicator with a sparkline mini-chart showing typing speed over time. Tracks average and peak speeds per session.</p>
+
+      <h3>MessageContextMenu</h3>
+      <p>Right-click context menu on chat messages. Provides quick access to copy, bookmark, pin, annotate, react, fork, edit, diff, and read-aloud actions.</p>
     </section>
 
     <!-- Configuration -->
@@ -870,6 +990,13 @@ const _cfg = {
           <tr><td><code>Ctrl+F</code></td><td>Toggle message search</td></tr>
           <tr><td><code>Ctrl+/</code></td><td>Focus input and show slash commands</td></tr>
           <tr><td><code>?</code></td><td>Show keyboard shortcuts help</td></tr>
+          <tr><td><code>Ctrl+Shift+B</code></td><td>Open Prompt A/B Tester</td></tr>
+          <tr><td><code>Ctrl+Shift+N</code></td><td>Load session template</td></tr>
+          <tr><td><code>Ctrl+Shift+P</code></td><td>Open command palette</td></tr>
+          <tr><td><code>Ctrl+Shift+X</code></td><td>Manage text expanders</td></tr>
+          <tr><td><code>Ctrl+Shift+K</code></td><td>View session streaks</td></tr>
+          <tr><td><code>Ctrl+Shift+2</code></td><td>Toggle split view</td></tr>
+          <tr><td><code>Ctrl+,</code></td><td>Open preferences panel</td></tr>
           <tr><td><code>Escape</code></td><td>Close all open panels, modals, and search</td></tr>
         </tbody>
       </table>
