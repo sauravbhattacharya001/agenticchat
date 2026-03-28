@@ -28542,9 +28542,9 @@ const ChatGPTImporter = (() => {
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
-        const data = JSON.parse(e.target.result);
+        const data = sanitizeStorageObject(JSON.parse(e.target.result));
         if (!Array.isArray(data)) throw new Error('Expected an array of conversations');
-        _conversations = data.filter(c => c && c.mapping);
+        _conversations = data.filter(c => c && typeof c === 'object' && c.mapping && typeof c.mapping === 'object');
         _renderPreview();
       } catch (err) {
         _showStatus('❌ Invalid ChatGPT export: ' + err.message, '#f44336');
@@ -28588,13 +28588,18 @@ const ChatGPTImporter = (() => {
     if (!conv.mapping) return [];
     // Build tree to get linear order
     const nodes = conv.mapping;
-    const childMap = {};
+    // Use null-prototype object to prevent prototype pollution from
+    // user-supplied keys (e.g. "__proto__", "constructor") in the
+    // imported ChatGPT conversation mapping.
+    const childMap = Object.create(null);
     let rootId = null;
     for (const [id, node] of Object.entries(nodes)) {
+      if (typeof node !== 'object' || node === null) continue;
       if (!node.parent) { rootId = id; }
       else {
-        if (!childMap[node.parent]) childMap[node.parent] = [];
-        childMap[node.parent].push(id);
+        const parentId = String(node.parent);
+        if (!childMap[parentId]) childMap[parentId] = [];
+        childMap[parentId].push(id);
       }
     }
     // Walk tree depth-first (follow first child for main branch)
