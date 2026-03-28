@@ -4384,3 +4384,50 @@ body.light .pinboard-item-note { background: #eee; color: #555; }
   margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px;
 }
 .mood-canvas { width: 100%; border-radius: 6px; background: var(--bg-primary, #12121a); }
+
+/* ── ScrollLock pill ── */
+.scroll-lock-pill {
+  position: fixed;
+  bottom: 100px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--accent, #2196F3);
+  color: #fff;
+  border: none;
+  border-radius: 24px;
+  padding: 8px 20px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+  z-index: 9999;
+  transition: opacity 0.2s, transform 0.2s;
+  opacity: 1;
+}
+.scroll-lock-pill.hidden {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%) translateY(12px);
+}
+.scroll-lock-pill:hover {
+  filter: brightness(1.15);
+}
+.scroll-lock-arrow {
+  font-size: 1.1rem;
+  font-weight: bold;
+}
+.scroll-lock-badge {
+  display: none;
+  background: #ff4444;
+  color: #fff;
+  border-radius: 12px;
+  padding: 1px 7px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  margin-left: 4px;
+}
+.scroll-lock-badge.visible {
+  display: inline-block;
+}

@@ -85,6 +85,7 @@
  *   MessageScheduler     - queue messages with configurable delay for auto-send (Alt+Q)
  *   MessageHighlighter   - select text in messages and apply colored highlights (Alt+H)
  *   AutoSaveDraft        - auto-persist unsent chat input across page refreshes
+ *   ScrollLock           - suppress auto-scroll when reading history, floating jump-to-bottom pill
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -2011,8 +2012,12 @@ const HistoryPanel = (() => {
     container.textContent = '';
     container.appendChild(fragment);
 
-    // Auto-scroll to bottom
-    container.scrollTop = container.scrollHeight;
+    // Auto-scroll to bottom (respects ScrollLock)
+    if (typeof ScrollLock === 'undefined' || !ScrollLock.isLocked()) {
+      container.scrollTop = container.scrollHeight;
+    } else {
+      ScrollLock.notifyNewContent();
+    }
 
     // Decorate messages - single DOM traversal instead of 5 separate passes.
     // See issue #40: each decorateMessages() was doing its own querySelectorAll,
@@ -29225,4 +29230,142 @@ var AutoSaveDraft = (function () {
   }
 
   return { handleInput: handleInput, clear: clear, restore: restore };
+})();
+
+// ============================================================
+// Module: ScrollLock
+// Prevents auto-scroll when the user is reading earlier messages.
+// Shows a floating "Jump to bottom" pill when locked, with an
+// unread-count badge. Auto-unlocks when user scrolls to bottom.
+// Toggle: Alt+J or click the floating pill.
+// ============================================================
+var ScrollLock = (function () {
+  'use strict';
+
+  var _locked = false;
+  var _newCount = 0;
+  var _pillEl = null;
+
+  function _getChatOutput() {
+    return document.getElementById('chat-output');
+  }
+
+  function _isNearBottom(el) {
+    // Consider "near bottom" if within 80px of the end
+    return el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  }
+
+  function _buildPill() {
+    var pill = document.createElement('div');
+    pill.id = 'scroll-lock-pill';
+    pill.className = 'scroll-lock-pill hidden';
+    pill.setAttribute('role', 'button');
+    pill.setAttribute('tabindex', '0');
+    pill.setAttribute('title', 'Jump to bottom (Alt+J)');
+    pill.innerHTML = '<span class="scroll-lock-arrow">↓</span> <span class="scroll-lock-text">Jump to bottom</span><span class="scroll-lock-badge" id="scroll-lock-badge"></span>';
+    pill.addEventListener('click', function () { jumpToBottom(); });
+    pill.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); jumpToBottom(); }
+    });
+
+    // Insert after chat-output
+    var chatOutput = _getChatOutput();
+    if (chatOutput && chatOutput.parentNode) {
+      chatOutput.parentNode.insertBefore(pill, chatOutput.nextSibling);
+    } else {
+      document.body.appendChild(pill);
+    }
+    return pill;
+  }
+
+  function _showPill() {
+    if (!_pillEl) _pillEl = _buildPill();
+    _pillEl.classList.remove('hidden');
+  }
+
+  function _hidePill() {
+    if (_pillEl) _pillEl.classList.add('hidden');
+  }
+
+  function _updateBadge() {
+    var badge = document.getElementById('scroll-lock-badge');
+    if (!badge) return;
+    if (_newCount > 0) {
+      badge.textContent = _newCount > 99 ? '99+' : String(_newCount);
+      badge.classList.add('visible');
+    } else {
+      badge.textContent = '';
+      badge.classList.remove('visible');
+    }
+  }
+
+  function lock() {
+    _locked = true;
+    _showPill();
+  }
+
+  function unlock() {
+    _locked = false;
+    _newCount = 0;
+    _hidePill();
+    _updateBadge();
+  }
+
+  function jumpToBottom() {
+    var el = _getChatOutput();
+    if (el) el.scrollTop = el.scrollHeight;
+    unlock();
+  }
+
+  function isLocked() {
+    return _locked;
+  }
+
+  /** Called when new content arrives while locked */
+  function notifyNewContent() {
+    _newCount++;
+    _updateBadge();
+    _showPill();
+  }
+
+  // ── Listen for user scroll on chat-output ──
+  function _init() {
+    var el = _getChatOutput();
+    if (!el) return;
+
+    el.addEventListener('scroll', function () {
+      if (_isNearBottom(el)) {
+        // User scrolled back to bottom → unlock
+        if (_locked) unlock();
+      } else {
+        // User scrolled up → lock
+        if (!_locked) lock();
+      }
+    });
+  }
+
+  // Alt+J shortcut
+  document.addEventListener('keydown', function (e) {
+    if (e.altKey && e.key === 'j') {
+      e.preventDefault();
+      if (_locked) {
+        jumpToBottom();
+      }
+    }
+  });
+
+  // Init when DOM is ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _init);
+  } else {
+    _init();
+  }
+
+  return {
+    isLocked: isLocked,
+    lock: lock,
+    unlock: unlock,
+    jumpToBottom: jumpToBottom,
+    notifyNewContent: notifyNewContent
+  };
 })();
