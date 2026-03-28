@@ -13735,11 +13735,7 @@ const ResponseRating = (() => {
     decorateMessages();
   }
 
-  function _esc(s) {
-    const d = document.createElement('div');
-    d.textContent = s;
-    return d.innerHTML;
-  }
+  const _esc = _escapeHtml;
 
   function _download(name, content, mime) {
     const blob = new Blob([content], { type: mime });
@@ -13970,11 +13966,7 @@ const ConversationMerge = (() => {
     close();
   }
 
-  function _esc(s) {
-    const d = document.createElement('div');
-    d.textContent = s;
-    return d.innerHTML;
-  }
+  const _esc = _escapeHtml;
 
   return { open, close };
 })();
@@ -14463,11 +14455,7 @@ const PromptLibrary = (() => {
     }
   }
 
-  function _esc(s) {
-    var d = document.createElement('div');
-    d.textContent = s;
-    return d.innerHTML;
-  }
+  const _esc = _escapeHtml;
 
   function toggle() {
     visible ? close() : open();
@@ -16173,11 +16161,7 @@ const MessageScheduler = (() => {
 
   /* ── Panel UI ────────────────────────────────────────────── */
 
-  function _esc(str) {
-    const d = document.createElement('div');
-    d.textContent = str;
-    return d.innerHTML;
-  }
+  const _esc = _escapeHtml;
 
   function _fmtTime(ts) {
     const d = new Date(ts);
@@ -17438,11 +17422,7 @@ const ConversationAgenda = (() => {
     if (label) label.textContent = total === 0 ? '' : `${done}/${total} completed (${pct}%)`;
   }
 
-  function _escHtml(str) {
-    const d = document.createElement('div');
-    d.textContent = str;
-    return d.innerHTML;
-  }
+  const _escHtml = _escapeHtml;
 
   // ── API ──
 
@@ -18311,9 +18291,7 @@ const MessageFilter = (() => {
     });
   }
 
-  function _escHtml(s) {
-    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  }
+  const _escHtml = _escapeHtml;
 
   /* ── Toggle ─────────────────────────────────────────────────── */
 
@@ -18795,11 +18773,7 @@ const QuickSwitcher = (() => {
     });
   }
 
-  function _escapeHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
-  }
+  // uses global _escapeHtml
 
   function show() {
     const overlay = _createOverlay();
@@ -19623,11 +19597,7 @@ const PromptChainRunner = (() => {
 
   // ── Helpers ──
 
-  function _esc(str) {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
-  }
+  const _esc = _escapeHtml;
 
   // ── Init ──
 
@@ -21522,11 +21492,7 @@ const SplitView = (() => {
   let _rightSession = null;
   let _syncScroll = true;
 
-  function _escapeHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
-  }
+  // uses global _escapeHtml
 
   function _truncate(text, max) {
     if (!text) return '';
@@ -21908,11 +21874,7 @@ const StreakTracker = (() => {
     };
   }
 
-  function _escapeHtml(str) {
-    const d = document.createElement('div');
-    d.textContent = str;
-    return d.innerHTML;
-  }
+  // uses global _escapeHtml
 
   function _buildCalendar(dateSet) {
     const today = new Date();
@@ -24095,11 +24057,7 @@ const ConversationFlashcards = (() => {
   }
 
   /* ---- helpers ---- */
-  function _escHtml(s) {
-    var d = document.createElement('div');
-    d.textContent = s;
-    return d.innerHTML;
-  }
+  const _escHtml = _escapeHtml;
 
   function _css(obj) {
     return Object.keys(obj).map(function(k) { return k + ':' + obj[k]; }).join(';');
@@ -25334,7 +25292,7 @@ const PromptABTester = (() => {
     `).join('');
   }
 
-  function _esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+  const _esc = _escapeHtml;
 
   function toggle() {
     if (!_overlay) _build();
@@ -27475,7 +27433,7 @@ const PinBoard = (() => {
     }).join('');
   }
 
-  function _esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+  const _esc = _escapeHtml;
 
   function promptNote(id) {
     const pins = _load();
