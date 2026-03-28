@@ -32,12 +32,12 @@ describe('ConversationMerge', () => {
     ConversationManager.addMessage('user', 'Hello from session 1');
     ConversationManager.addMessage('assistant', 'Hi there!');
     SessionManager.save('Session One');
-    ConversationManager.clearHistory();
+    ConversationManager.clear();
 
     ConversationManager.addMessage('user', 'Hello from session 2');
     ConversationManager.addMessage('assistant', 'Hey!');
     SessionManager.save('Session Two');
-    ConversationManager.clearHistory();
+    ConversationManager.clear();
 
     ConversationMerge.open();
 
@@ -54,10 +54,10 @@ describe('ConversationMerge', () => {
   test('close() removes modal and overlay', () => {
     ConversationManager.addMessage('user', 'A');
     SessionManager.save('S1');
-    ConversationManager.clearHistory();
+    ConversationManager.clear();
     ConversationManager.addMessage('user', 'B');
     SessionManager.save('S2');
-    ConversationManager.clearHistory();
+    ConversationManager.clear();
 
     ConversationMerge.open();
     expect(document.querySelector('[role="dialog"]')).not.toBeNull();
@@ -69,10 +69,10 @@ describe('ConversationMerge', () => {
   test('merge button is disabled until 2+ sessions selected', () => {
     ConversationManager.addMessage('user', 'A');
     SessionManager.save('S1');
-    ConversationManager.clearHistory();
+    ConversationManager.clear();
     ConversationManager.addMessage('user', 'B');
     SessionManager.save('S2');
-    ConversationManager.clearHistory();
+    ConversationManager.clear();
 
     ConversationMerge.open();
     const btn = document.getElementById('merge-go');
@@ -95,12 +95,12 @@ describe('ConversationMerge', () => {
     ConversationManager.addMessage('user', 'Alpha');
     ConversationManager.addMessage('assistant', 'Beta');
     SessionManager.save('First');
-    ConversationManager.clearHistory();
+    ConversationManager.clear();
 
     ConversationManager.addMessage('user', 'Gamma');
     ConversationManager.addMessage('assistant', 'Delta');
     SessionManager.save('Second');
-    ConversationManager.clearHistory();
+    ConversationManager.clear();
 
     const before = SessionManager.getAll();
     expect(before.length).toBe(2);
@@ -133,11 +133,11 @@ describe('ConversationMerge', () => {
   test('merge with delete originals removes source sessions', () => {
     ConversationManager.addMessage('user', 'One');
     SessionManager.save('S1');
-    ConversationManager.clearHistory();
+    ConversationManager.clear();
 
     ConversationManager.addMessage('user', 'Two');
     SessionManager.save('S2');
-    ConversationManager.clearHistory();
+    ConversationManager.clear();
 
     ConversationMerge.open();
     const cbs = document.querySelectorAll('.merge-cb');
@@ -159,11 +159,11 @@ describe('ConversationMerge', () => {
   test('merge with custom name uses provided name', () => {
     ConversationManager.addMessage('user', 'A');
     SessionManager.save('SA');
-    ConversationManager.clearHistory();
+    ConversationManager.clear();
 
     ConversationManager.addMessage('user', 'B');
     SessionManager.save('SB');
-    ConversationManager.clearHistory();
+    ConversationManager.clear();
 
     ConversationMerge.open();
     const cbs = document.querySelectorAll('.merge-cb');
@@ -182,11 +182,11 @@ describe('ConversationMerge', () => {
   test('merged messages include separator markers between sources', () => {
     ConversationManager.addMessage('user', 'X');
     SessionManager.save('SX');
-    ConversationManager.clearHistory();
+    ConversationManager.clear();
 
     ConversationManager.addMessage('user', 'Y');
     SessionManager.save('SY');
-    ConversationManager.clearHistory();
+    ConversationManager.clear();
 
     ConversationMerge.open();
     const cbs = document.querySelectorAll('.merge-cb');
