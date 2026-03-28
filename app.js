@@ -409,7 +409,11 @@ function sanitizeStorageObject(obj) {
  */
 function _safeParse(raw, fallback) {
   if (!raw) return fallback !== undefined ? fallback : undefined;
-  return _safeParse(raw);
+  try {
+    return sanitizeStorageObject(JSON.parse(raw));
+  } catch (_) {
+    return fallback !== undefined ? fallback : undefined;
+  }
 }
 
 /* ---------- Shared HTML Escape ---------- */
