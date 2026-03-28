@@ -3668,7 +3668,7 @@ const MessageReactions = (() => {
 
     function _getState() {
         return {
-            reactions: JSON.parse(JSON.stringify(reactions)),
+            reactions: structuredClone(reactions),
             availableEmojis: AVAILABLE_EMOJIS.slice()
         };
     }
@@ -4432,13 +4432,20 @@ const SessionManager = (() => {
   }
 
   /** Auto-save the current session (called after each message). */
+  let _autoSaveTimer = null;
   function autoSaveIfEnabled() {
     if (!autoSave) return;
-    const messages = ConversationManager.getUserMessages();
-    if (messages.length === 0) return;
+    // Debounce auto-save to avoid redundant localStorage writes when
+    // multiple messages arrive in quick succession (e.g. streaming).
+    if (_autoSaveTimer) clearTimeout(_autoSaveTimer);
+    _autoSaveTimer = setTimeout(() => {
+      _autoSaveTimer = null;
+      const messages = ConversationManager.getUserMessages();
+      if (messages.length === 0) return;
 
-    save();
-    if (isOpen) refresh();
+      save();
+      if (isOpen) refresh();
+    }, 500);
   }
 
   /** Generate a session name from conversation content using SmartTitle. */
@@ -4572,7 +4579,7 @@ const SessionManager = (() => {
     const copy = {
       id: crypto.randomUUID(),
       name: original.name + ' (copy)',
-      messages: JSON.parse(JSON.stringify(original.messages)),
+      messages: structuredClone(original.messages),
       messageCount: original.messageCount,
       preview: original.preview,
       createdAt: now,
