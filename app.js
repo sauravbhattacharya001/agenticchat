@@ -10753,6 +10753,27 @@ const ConversationChapters = (() => {
   // chapters: { [messageIndex: number]: { title, createdAt } }
   let chapters = {};
   let panelEl = null;
+
+  // Pre-compiled regex table for topic keyword matching in suggestTitle().
+  // Built once at module init instead of creating ~22 RegExp objects per call.
+  var _topicKeywordMap = {
+    'bug': 'Bug Fix', 'error': 'Error Resolution', 'fix': 'Bug Fix',
+    'setup': 'Setup Discussion', 'install': 'Installation',
+    'config': 'Configuration', 'deploy': 'Deployment',
+    'test': 'Testing', 'refactor': 'Refactoring',
+    'design': 'Design Discussion', 'review': 'Code Review',
+    'performance': 'Performance', 'optimize': 'Optimization',
+    'security': 'Security', 'auth': 'Authentication',
+    'api': 'API Discussion', 'database': 'Database',
+    'ui': 'UI Discussion', 'style': 'Styling',
+    'debug': 'Debugging', 'help': 'Help Request',
+    'explain': 'Explanation', 'implement': 'Implementation',
+    'feature': 'Feature Discussion', 'update': 'Update',
+    'migration': 'Migration', 'documentation': 'Documentation',
+  };
+  var _topicEntries = Object.keys(_topicKeywordMap).map(function(kw) {
+    return { re: new RegExp('\\b' + kw + '\\b', 'i'), label: _topicKeywordMap[kw] };
+  });
   let overlayEl = null;
   let styleInjected = false;
 
@@ -11312,30 +11333,12 @@ const ConversationChapters = (() => {
       }
     }
 
-    // 3. Topic extraction via keyword matching
-    var topicKeywords = {
-      'bug': 'Bug Fix', 'error': 'Error Resolution', 'fix': 'Bug Fix',
-      'setup': 'Setup Discussion', 'install': 'Installation',
-      'config': 'Configuration', 'deploy': 'Deployment',
-      'test': 'Testing', 'refactor': 'Refactoring',
-      'design': 'Design Discussion', 'review': 'Code Review',
-      'performance': 'Performance', 'optimize': 'Optimization',
-      'security': 'Security', 'auth': 'Authentication',
-      'api': 'API Discussion', 'database': 'Database',
-      'ui': 'UI Discussion', 'style': 'Styling',
-      'debug': 'Debugging', 'help': 'Help Request',
-      'explain': 'Explanation', 'implement': 'Implementation',
-      'feature': 'Feature Discussion', 'update': 'Update',
-      'migration': 'Migration', 'documentation': 'Documentation',
-    };
-
+    // 3. Topic extraction via keyword matching (pre-compiled regexes)
     var lowerContent = content.toLowerCase();
     var matchedTopics = [];
-    var keywords = Object.keys(topicKeywords);
-    for (var k = 0; k < keywords.length; k++) {
-      var re = new RegExp('\\b' + keywords[k] + '\\b', 'i');
-      if (re.test(lowerContent)) {
-        matchedTopics.push(topicKeywords[keywords[k]]);
+    for (var k = 0; k < _topicEntries.length; k++) {
+      if (_topicEntries[k].re.test(lowerContent)) {
+        matchedTopics.push(_topicEntries[k].label);
         if (matchedTopics.length >= 2) break;
       }
     }
