@@ -25357,7 +25357,12 @@ const PromptABTester = (() => {
   }
 
   async function _run() {
-    const key = ApiKeyManager?.getKey?.() || SafeStorage.get('ac-api-key');
+    // Only use the session-scoped key from ApiKeyManager.
+    // Previously this fell back to SafeStorage.get('ac-api-key') which
+    // could read an API key persisted in localStorage in plain text —
+    // a security risk since localStorage is accessible to any script
+    // on the same origin and persists indefinitely.
+    const key = ApiKeyManager?.getKey?.();
     if (!key) { alert('Please set your OpenAI API key first.'); return; }
 
     const prompt = _overlay.querySelector('.ab-tester-prompt').value.trim();
