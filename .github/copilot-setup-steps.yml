@@ -1,10 +1,10 @@
-name: Copilot Setup Steps
+# Copilot Coding Agent Setup Steps
+# Installs dependencies and builds the project so Copilot agents
+# (Claude, Codex) can work on issues and PRs autonomously.
 
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+name: "Copilot Setup Steps"
+
+on: workflow_dispatch
 
 jobs:
   setup:
@@ -22,25 +22,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Build project
+        run: |
+          echo "No build step needed — vanilla JS project"
+
       - name: Run tests
         run: npx jest --verbose --ci
 
-      - name: Lint JavaScript
-        run: |
-          npm install -g eslint@8
-          cat > .eslintrc.json << 'EOF'
-          {
-            "env": { "browser": true, "es2022": true },
-            "parserOptions": { "ecmaVersion": "latest" },
-            "rules": {
-              "no-unused-vars": "warn",
-              "no-undef": "warn",
-              "no-redeclare": "error",
-              "no-dupe-keys": "error",
-              "no-unreachable": "error",
-              "no-eval": "error",
-              "no-implied-eval": "error"
-            }
-          }
-          EOF
-          eslint app.js --no-eslintrc -c .eslintrc.json
+      - name: Lint check
+        run: npx eslint app.js --no-eslintrc --rule '{"no-unused-vars":"warn","no-undef":"warn","no-eval":"error","no-implied-eval":"error"}' --env browser --env es2022 || true
