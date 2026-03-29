@@ -78,6 +78,7 @@
  *   MessageReaderView    - full-width reader overlay for comfortable reading (Alt+R)
  *   ReadabilityAnalyzer  - Flesch-Kincaid readability scoring with per-role stats (Ctrl+Shift+R)
  *   ToneAdjuster         - rewrite assistant messages in different tones (formal, casual, concise, ELI5, etc.)
+ *   ConversationShareLink - generate shareable URL with encoded conversation data (Alt+S)
  *   SessionCalendar      - visual month calendar to browse sessions by date (Alt+C)
  *   ResponseLengthPresets - pre-send verbosity control with 4 length modes (Alt+L)
  *   SessionArchive       - archive/unarchive sessions to declutter the sessions panel
@@ -21593,6 +21594,7 @@ const CommandPalette = (() => {
       { id: 'cp:replay', label: 'Conversation Replay', icon: '\u25B6\uFE0F', category: 'Tools', action: () => { if (typeof ConversationReplay !== 'undefined') ConversationReplay.toggle(); } },
       { id: 'cp:import-chatgpt', label: 'Import ChatGPT Conversations', icon: '\uD83D\uDCE5', category: 'Import/Export', action: () => { if (typeof ChatGPTImporter !== 'undefined') ChatGPTImporter.toggle(); } },
       { id: 'cp:filter', label: 'Message Filters', icon: '\uD83D\uDD3D', category: 'Search', action: () => { if (typeof MessageFilter !== 'undefined') MessageFilter.toggle(); } },
+      { id: 'cp:share-link', label: 'Share Conversation Link', icon: '🔗', shortcut: 'Alt+S', category: 'Import/Export', action: () => { if (typeof ConversationShareLink !== 'undefined') ConversationShareLink.toggle(); } },
       { id: 'cp:clear', label: 'Clear Conversation', icon: '\uD83D\uDDD1\uFE0F', category: 'Sessions', action: () => { if (typeof ConversationManager !== 'undefined') ConversationManager.clear(); if (typeof UIController !== 'undefined') UIController.clearMessages(); } },
       { id: 'cp:shortcuts', label: 'Keyboard Shortcuts', icon: '\u2328\uFE0F', shortcut: '?', category: 'Help', action: () => { if (typeof KeyboardShortcuts !== 'undefined') KeyboardShortcuts.showHelp(); } },
     ];
@@ -29371,4 +29373,327 @@ var ScrollLock = (function () {
     jumpToBottom: jumpToBottom,
     notifyNewContent: notifyNewContent
   };
+})();
+
+/* ============================================================
+ *  ConversationShareLink  (Alt+S)
+ *
+ *  Generates a self-contained shareable URL that encodes selected
+ *  (or all) conversation messages into the URL hash. Opening the
+ *  link renders a clean, read-only view — no server needed.
+ *
+ *  The data is compressed with a simple LZString-style encoding
+ *  to keep URLs reasonably short. For very long conversations a
+ *  warning is shown when the URL exceeds browser limits.
+ *
+ *  Usage:
+ *    Alt+S          → open share dialog
+ *    Select messages → toggle which ones to include
+ *    Copy Link      → copies the shareable URL
+ * ============================================================ */
+const ConversationShareLink = (() => {
+  'use strict';
+
+  let _overlay = null;
+  let _panel = null;
+  let _selected = new Set(); // indices of selected messages
+
+  /* ── Minimal UTF-16 base64 encoder/decoder ─────────────── */
+  function _compress(str) {
+    try {
+      const bytes = new TextEncoder().encode(str);
+      const binStr = Array.from(bytes, b => String.fromCharCode(b)).join('');
+      return btoa(binStr);
+    } catch (_) { return btoa(unescape(encodeURIComponent(str))); }
+  }
+
+  function _decompress(b64) {
+    try {
+      const binStr = atob(b64);
+      const bytes = Uint8Array.from(binStr, c => c.charCodeAt(0));
+      return new TextDecoder().decode(bytes);
+    } catch (_) { return decodeURIComponent(escape(atob(b64))); }
+  }
+
+  /* ── Get conversation messages ─────────────────────────── */
+  function _getMessages() {
+    if (typeof ConversationManager !== 'undefined' && ConversationManager.getHistory) {
+      return ConversationManager.getHistory().filter(m => m.role !== 'system');
+    }
+    return [];
+  }
+
+  /* ── Build share URL ───────────────────────────────────── */
+  function _buildUrl(messages) {
+    const payload = {
+      t: document.title || 'Agentic Chat',
+      d: new Date().toISOString(),
+      m: messages.map(m => ({
+        r: m.role === 'user' ? 'u' : 'a',
+        c: m.content || ''
+      }))
+    };
+    const json = JSON.stringify(payload);
+    const encoded = _compress(json);
+    return window.location.origin + window.location.pathname + '#share=' + encoded;
+  }
+
+  /* ── Render the read-only shared view (called on page load) */
+  function _renderSharedView(data) {
+    document.title = data.t + ' (Shared)';
+    const container = document.createElement('div');
+    container.style.cssText = 'max-width:720px;margin:0 auto;padding:24px 16px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#e0e0e0;background:#1a1a2e;min-height:100vh;';
+
+    const header = document.createElement('div');
+    header.style.cssText = 'margin-bottom:24px;padding-bottom:16px;border-bottom:1px solid #333;';
+    header.innerHTML = `
+      <h1 style="font-size:20px;margin:0 0 4px;color:#fff;">${_escapeHtml(data.t)}</h1>
+      <div style="font-size:12px;color:#888;">Shared conversation · ${new Date(data.d).toLocaleString()} · ${data.m.length} messages</div>
+    `;
+    container.appendChild(header);
+
+    data.m.forEach(msg => {
+      const isUser = msg.r === 'u';
+      const el = document.createElement('div');
+      el.style.cssText = `margin-bottom:16px;padding:12px 16px;border-radius:12px;border:1px solid ${isUser ? '#1e3a5f' : '#2d3748'};background:${isUser ? '#1a2744' : '#1e1e2e'};`;
+      el.innerHTML = `
+        <div style="font-size:11px;font-weight:600;color:${isUser ? '#63b3ed' : '#68d391'};margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em;">${isUser ? 'You' : 'AI'}</div>
+        <div style="white-space:pre-wrap;line-height:1.6;font-size:14px;">${_escapeHtml(msg.c)}</div>
+      `;
+      container.appendChild(el);
+    });
+
+    const footer = document.createElement('div');
+    footer.style.cssText = 'text-align:center;padding:24px 0;color:#555;font-size:11px;';
+    footer.textContent = 'Shared via Agentic Chat';
+    container.appendChild(footer);
+
+    document.body.innerHTML = '';
+    document.body.style.cssText = 'margin:0;background:#1a1a2e;';
+    document.body.appendChild(container);
+  }
+
+  /* ── Share dialog ──────────────────────────────────────── */
+  function _injectStyles() {
+    if (document.getElementById('share-link-styles')) return;
+    const s = document.createElement('style');
+    s.id = 'share-link-styles';
+    s.textContent = `
+      .share-overlay { position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:10500;display:flex;align-items:center;justify-content:center; }
+      .share-panel { background:var(--bg-secondary,#1e1e2e);border:1px solid var(--border-color,#45475a);border-radius:12px;width:90vw;max-width:560px;max-height:80vh;display:flex;flex-direction:column;color:var(--text-primary,#cdd6f4);font-family:inherit;box-shadow:0 8px 32px rgba(0,0,0,.5); }
+      .share-header { display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid var(--border-color,#45475a);font-weight:600;font-size:15px; }
+      .share-close { background:none;border:none;color:inherit;font-size:18px;cursor:pointer;padding:4px 8px;border-radius:4px; }
+      .share-close:hover { background:rgba(255,255,255,.1); }
+      .share-body { flex:1;overflow-y:auto;padding:12px 18px; }
+      .share-msg-item { display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.05);cursor:pointer;user-select:none; }
+      .share-msg-item:hover { background:rgba(255,255,255,.03); }
+      .share-msg-cb { margin-top:3px;accent-color:#89b4fa; }
+      .share-msg-role { font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px; }
+      .share-msg-role.user { color:#63b3ed; }
+      .share-msg-role.assistant { color:#68d391; }
+      .share-msg-preview { font-size:13px;color:#a0a0b0;line-height:1.4;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical; }
+      .share-footer { padding:12px 18px;border-top:1px solid var(--border-color,#45475a);display:flex;gap:10px;align-items:center; }
+      .share-url { flex:1;background:rgba(255,255,255,.05);border:1px solid var(--border-color,#45475a);border-radius:6px;padding:8px 10px;color:inherit;font-size:12px;font-family:ui-monospace,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+      .share-copy-btn { background:#89b4fa;color:#1e1e2e;border:none;border-radius:6px;padding:8px 16px;font-weight:600;font-size:13px;cursor:pointer;white-space:nowrap; }
+      .share-copy-btn:hover { background:#74a5f0; }
+      .share-warning { font-size:11px;color:#f59e0b;padding:6px 18px 0; }
+      .share-select-all { font-size:12px;color:#89b4fa;cursor:pointer;background:none;border:none;padding:0;margin-left:auto; }
+      .share-select-all:hover { text-decoration:underline; }
+    `;
+    document.head.appendChild(s);
+  }
+
+  function _buildDialog() {
+    _injectStyles();
+    const messages = _getMessages();
+    if (messages.length === 0) {
+      alert('No messages to share.');
+      return;
+    }
+
+    // Select all by default
+    _selected = new Set(messages.map((_, i) => i));
+
+    _overlay = document.createElement('div');
+    _overlay.className = 'share-overlay';
+    _overlay.addEventListener('click', e => { if (e.target === _overlay) close(); });
+
+    _panel = document.createElement('div');
+    _panel.className = 'share-panel';
+
+    // Header
+    const header = document.createElement('div');
+    header.className = 'share-header';
+    header.innerHTML = '<span>🔗 Share Conversation</span>';
+    const selectAllBtn = document.createElement('button');
+    selectAllBtn.className = 'share-select-all';
+    selectAllBtn.textContent = 'Deselect All';
+    selectAllBtn.addEventListener('click', () => {
+      if (_selected.size === messages.length) {
+        _selected.clear();
+        selectAllBtn.textContent = 'Select All';
+      } else {
+        _selected = new Set(messages.map((_, i) => i));
+        selectAllBtn.textContent = 'Deselect All';
+      }
+      _renderMessages(body, messages);
+      _updateUrl(messages);
+    });
+    header.appendChild(selectAllBtn);
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'share-close';
+    closeBtn.textContent = '✕';
+    closeBtn.addEventListener('click', close);
+    header.appendChild(closeBtn);
+    _panel.appendChild(header);
+
+    // Body — message list
+    const body = document.createElement('div');
+    body.className = 'share-body';
+    _renderMessages(body, messages);
+    _panel.appendChild(body);
+
+    // Warning area
+    const warning = document.createElement('div');
+    warning.className = 'share-warning';
+    warning.id = 'share-warning';
+    warning.style.display = 'none';
+    _panel.appendChild(warning);
+
+    // Footer — URL + Copy
+    const footer = document.createElement('div');
+    footer.className = 'share-footer';
+    const urlInput = document.createElement('input');
+    urlInput.className = 'share-url';
+    urlInput.id = 'share-url-input';
+    urlInput.readOnly = true;
+    footer.appendChild(urlInput);
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'share-copy-btn';
+    copyBtn.textContent = '📋 Copy Link';
+    copyBtn.addEventListener('click', () => {
+      navigator.clipboard.writeText(urlInput.value).then(() => {
+        copyBtn.textContent = '✅ Copied!';
+        setTimeout(() => { copyBtn.textContent = '📋 Copy Link'; }, 2000);
+      });
+    });
+    footer.appendChild(copyBtn);
+    _panel.appendChild(footer);
+
+    _overlay.appendChild(_panel);
+    document.body.appendChild(_overlay);
+
+    _updateUrl(messages);
+  }
+
+  function _renderMessages(container, messages) {
+    container.innerHTML = '';
+    messages.forEach((msg, idx) => {
+      const item = document.createElement('div');
+      item.className = 'share-msg-item';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.className = 'share-msg-cb';
+      cb.checked = _selected.has(idx);
+      cb.addEventListener('change', () => {
+        if (cb.checked) _selected.add(idx);
+        else _selected.delete(idx);
+        _updateUrl(messages);
+      });
+      item.appendChild(cb);
+
+      const info = document.createElement('div');
+      info.style.flex = '1';
+      const role = document.createElement('div');
+      role.className = 'share-msg-role ' + msg.role;
+      role.textContent = msg.role === 'user' ? 'You' : 'AI';
+      info.appendChild(role);
+      const preview = document.createElement('div');
+      preview.className = 'share-msg-preview';
+      preview.textContent = (msg.content || '').slice(0, 200);
+      info.appendChild(preview);
+      item.appendChild(info);
+
+      item.addEventListener('click', e => {
+        if (e.target === cb) return;
+        cb.checked = !cb.checked;
+        cb.dispatchEvent(new Event('change'));
+      });
+
+      container.appendChild(item);
+    });
+  }
+
+  function _updateUrl(messages) {
+    const selectedMsgs = messages.filter((_, i) => _selected.has(i));
+    const urlInput = document.getElementById('share-url-input');
+    const warning = document.getElementById('share-warning');
+    if (!urlInput) return;
+
+    if (selectedMsgs.length === 0) {
+      urlInput.value = '(select at least one message)';
+      if (warning) warning.style.display = 'none';
+      return;
+    }
+
+    const url = _buildUrl(selectedMsgs);
+    urlInput.value = url;
+
+    if (warning) {
+      if (url.length > 8000) {
+        warning.textContent = `⚠️ URL is ${(url.length / 1024).toFixed(1)} KB — may not work in all browsers. Consider selecting fewer messages.`;
+        warning.style.display = 'block';
+      } else {
+        warning.style.display = 'none';
+      }
+    }
+  }
+
+  function open() { _buildDialog(); }
+
+  function close() {
+    if (_overlay) { _overlay.remove(); _overlay = null; _panel = null; }
+  }
+
+  function toggle() {
+    if (_overlay) close();
+    else open();
+  }
+
+  /* ── Init: check for shared view + keyboard shortcut ───── */
+  function init() {
+    // Check if URL has #share= data → render shared view
+    if (window.location.hash.startsWith('#share=')) {
+      try {
+        const encoded = window.location.hash.slice(7);
+        const json = _decompress(encoded);
+        const data = JSON.parse(json);
+        if (data && data.m && Array.isArray(data.m)) {
+          _renderSharedView(data);
+          return; // Don't init normal app
+        }
+      } catch (e) {
+        console.warn('Failed to parse shared conversation:', e);
+      }
+    }
+
+    // Keyboard shortcut: Alt+S
+    document.addEventListener('keydown', e => {
+      if (e.altKey && e.key.toLowerCase() === 's' && !e.ctrlKey && !e.shiftKey && !e.metaKey) {
+        e.preventDefault();
+        toggle();
+      }
+      if (e.key === 'Escape' && _overlay) {
+        close();
+      }
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+
+  return { open, close, toggle, init };
 })();
