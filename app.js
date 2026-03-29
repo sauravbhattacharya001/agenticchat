@@ -29445,15 +29445,20 @@ const ConversationShareLink = (() => {
 
   /* ── Render the read-only shared view (called on page load) */
   function _renderSharedView(data) {
-    document.title = data.t + ' (Shared)';
+    // Validate untrusted share-link payload shape
+    const title = typeof data.t === 'string' ? data.t : 'Shared Conversation';
+    const dateStr = typeof data.d === 'string' ? data.d : new Date().toISOString();
+    // Filter messages to only those with expected string properties
+    data.m = data.m.filter(msg => msg && typeof msg.c === 'string' && typeof msg.r === 'string');
+    document.title = title + ' (Shared)';
     const container = document.createElement('div');
     container.style.cssText = 'max-width:720px;margin:0 auto;padding:24px 16px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#e0e0e0;background:#1a1a2e;min-height:100vh;';
 
     const header = document.createElement('div');
     header.style.cssText = 'margin-bottom:24px;padding-bottom:16px;border-bottom:1px solid #333;';
     header.innerHTML = `
-      <h1 style="font-size:20px;margin:0 0 4px;color:#fff;">${_escapeHtml(data.t)}</h1>
-      <div style="font-size:12px;color:#888;">Shared conversation · ${new Date(data.d).toLocaleString()} · ${data.m.length} messages</div>
+      <h1 style="font-size:20px;margin:0 0 4px;color:#fff;">${_escapeHtml(title)}</h1>
+      <div style="font-size:12px;color:#888;">Shared conversation · ${new Date(dateStr).toLocaleString()} · ${data.m.length} messages</div>
     `;
     container.appendChild(header);
 
@@ -29672,7 +29677,7 @@ const ConversationShareLink = (() => {
       try {
         const encoded = window.location.hash.slice(7);
         const json = _decompress(encoded);
-        const data = JSON.parse(json);
+        const data = sanitizeStorageObject(JSON.parse(json));
         if (data && data.m && Array.isArray(data.m)) {
           _renderSharedView(data);
           return; // Don't init normal app
