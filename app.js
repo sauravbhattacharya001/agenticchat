@@ -27397,12 +27397,22 @@ const WordCloudGenerator = (() => {
     return Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 80);
   }
 
+  // Cached DOM references — avoids repeated getElementById on every
+  // render/open/close/download cycle (this module was the last holdout
+  // still using raw getElementById instead of DOMCache).
+  let _els = null;
+  function _dom(id) {
+    if (!_els) _els = {};
+    if (!_els[id]) _els[id] = DOMCache.get(id);
+    return _els[id];
+  }
+
   function _render() {
-    const canvas = document.getElementById('wordcloud-canvas');
-    const emptyEl = document.getElementById('wordcloud-empty');
+    const canvas = _dom('wordcloud-canvas');
+    const emptyEl = _dom('wordcloud-empty');
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
-    const source = document.getElementById('wordcloud-source')?.value || 'all';
+    const source = _dom('wordcloud-source')?.value || 'all';
     const words = _extractWords(source);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     if (words.length === 0) {
@@ -27453,8 +27463,8 @@ const WordCloudGenerator = (() => {
 
   function open() {
     isOpen = true;
-    const panel = document.getElementById('wordcloud-panel');
-    const overlay = document.getElementById('wordcloud-overlay');
+    const panel = _dom('wordcloud-panel');
+    const overlay = _dom('wordcloud-overlay');
     if (panel) panel.style.display = '';
     if (overlay) overlay.style.display = '';
     _render();
@@ -27462,8 +27472,8 @@ const WordCloudGenerator = (() => {
 
   function close() {
     isOpen = false;
-    const panel = document.getElementById('wordcloud-panel');
-    const overlay = document.getElementById('wordcloud-overlay');
+    const panel = _dom('wordcloud-panel');
+    const overlay = _dom('wordcloud-overlay');
     if (panel) panel.style.display = 'none';
     if (overlay) overlay.style.display = 'none';
   }
@@ -27471,7 +27481,7 @@ const WordCloudGenerator = (() => {
   function toggle() { isOpen ? close() : open(); }
 
   function download() {
-    const canvas = document.getElementById('wordcloud-canvas');
+    const canvas = _dom('wordcloud-canvas');
     if (!canvas) return;
     const a = document.createElement('a');
     a.download = 'word-cloud.png';
@@ -27480,11 +27490,11 @@ const WordCloudGenerator = (() => {
   }
 
   function init() {
-    document.getElementById('wordcloud-close')?.addEventListener('click', close);
-    document.getElementById('wordcloud-overlay')?.addEventListener('click', close);
-    document.getElementById('wordcloud-refresh')?.addEventListener('click', _render);
-    document.getElementById('wordcloud-download')?.addEventListener('click', download);
-    document.getElementById('wordcloud-source')?.addEventListener('change', _render);
+    _dom('wordcloud-close')?.addEventListener('click', close);
+    _dom('wordcloud-overlay')?.addEventListener('click', close);
+    _dom('wordcloud-refresh')?.addEventListener('click', _render);
+    _dom('wordcloud-download')?.addEventListener('click', download);
+    _dom('wordcloud-source')?.addEventListener('change', _render);
     document.addEventListener('keydown', (e) => {
       if (e.altKey && e.key.toLowerCase() === 'w' && !e.ctrlKey && !e.shiftKey && !e.metaKey) {
         e.preventDefault();
