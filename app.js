@@ -26494,7 +26494,7 @@ const MessageDiffViewer = (() => {
 
   /** Get message text content from DOM by index. */
   function getMessageText(index) {
-    const output = DOMCache ? DOMCache.get('chat-output') : DOMCache.get('chat-output');
+    const output = DOMCache.get('chat-output');
     if (!output) return null;
     const msgs = output.querySelectorAll('.chat-msg');
     if (index < 0 || index >= msgs.length) return null;
@@ -26503,7 +26503,7 @@ const MessageDiffViewer = (() => {
 
   /** Get message role from DOM. */
   function getMessageRole(index) {
-    const output = DOMCache ? DOMCache.get('chat-output') : DOMCache.get('chat-output');
+    const output = DOMCache.get('chat-output');
     if (!output) return 'unknown';
     const msgs = output.querySelectorAll('.chat-msg');
     if (index < 0 || index >= msgs.length) return 'unknown';
@@ -26523,7 +26523,7 @@ const MessageDiffViewer = (() => {
 
   /** Start selection mode - user clicks two messages to compare. */
   function startSelection() {
-    const output = DOMCache ? DOMCache.get('chat-output') : DOMCache.get('chat-output');
+    const output = DOMCache.get('chat-output');
     if (!output) return;
     const msgs = output.querySelectorAll('.chat-msg');
     if (msgs.length < 2) { alert('Need at least 2 messages to compare.'); return; }
@@ -26561,7 +26561,7 @@ const MessageDiffViewer = (() => {
 
   function _endSelection() {
     selecting = false;
-    const output = DOMCache ? DOMCache.get('chat-output') : DOMCache.get('chat-output');
+    const output = DOMCache.get('chat-output');
     if (output) {
       output.querySelectorAll('.chat-msg').forEach(msg => {
         msg.style.cursor = '';
@@ -26602,15 +26602,17 @@ const MessageDiffViewer = (() => {
     const stats = diffStats(tokens);
     saveDiffHistory(indexA, indexB, stats);
 
-    // Build overlay
+    // Build overlay using shared helper
     if (overlay) overlay.remove();
-    overlay = document.createElement('div');
-    overlay.id = 'diff-viewer-overlay';
-    overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,0.85);display:flex;align-items:center;justify-content:center;padding:20px';
-    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
-
-    const panel = document.createElement('div');
-    panel.style.cssText = 'background:#1a1a2e;border:1px solid #333;border-radius:12px;width:90vw;max-width:900px;max-height:85vh;display:flex;flex-direction:column;overflow:hidden';
+    const { overlay: _ov, modal: panel, close: _close } = createModalOverlay({
+      overlayId: 'diff-viewer-overlay',
+      maxWidth: '900px',
+      background: '#1a1a2e',
+    });
+    overlay = _ov;
+    overlay.style.padding = '20px';
+    overlay.style.background = 'rgba(0,0,0,0.85)';
+    panel.style.cssText = 'background:#1a1a2e;border:1px solid #333;border-radius:12px;width:90vw;max-width:900px;max-height:85vh;display:flex;flex-direction:column;overflow:hidden;padding:0';
 
     // Header
     const header = document.createElement('div');
@@ -26687,8 +26689,6 @@ const MessageDiffViewer = (() => {
     panel.appendChild(statsBar);
     panel.appendChild(tabs);
     panel.appendChild(content);
-    overlay.appendChild(panel);
-    document.body.appendChild(overlay);
 
     // Close button
     header.querySelector('#diff-close-btn').addEventListener('click', close);
