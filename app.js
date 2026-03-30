@@ -29005,13 +29005,15 @@ const MoodTracker = (function () {
     _visible ? hide() : show();
   }
 
-  /* Auto-refresh when new messages appear */
+  /* Auto-refresh when new messages appear — uses the shared
+   * ChatOutputObserver instead of a dedicated MutationObserver on
+   * document.body, which fired on *every* DOM mutation site-wide. */
   var _refreshTimer = null;
-  new MutationObserver(function () {
+  ChatOutputObserver.register('conversation-sentiment', function () {
     if (!_visible) return;
     clearTimeout(_refreshTimer);
     _refreshTimer = setTimeout(_refresh, 500);
-  }).observe(document.body, { childList: true, subtree: true });
+  });
 
   /* Alt+M shortcut */
   document.addEventListener('keydown', function (e) {
@@ -29267,14 +29269,16 @@ const MessageHighlighter = (() => {
     document.removeEventListener('mouseup', _handleSelection);
   }
 
-  // Re-apply highlights when chat updates
+  // Re-apply highlights when chat updates — uses the shared
+  // ChatOutputObserver instead of a dedicated MutationObserver on
+  // document.body, which fired on *every* DOM mutation site-wide.
   var _reapplyTimer = null;
-  new MutationObserver(function () {
+  ChatOutputObserver.register('message-highlighter', function () {
     clearTimeout(_reapplyTimer);
     _reapplyTimer = setTimeout(function () {
       if (_getSessionHighlights().length) _applyHighlights();
     }, 300);
-  }).observe(document.body, { childList: true, subtree: true });
+  });
 
   // Alt+H shortcut
   document.addEventListener('keydown', function (e) {
