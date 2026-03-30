@@ -27594,17 +27594,17 @@ const PinBoard = (() => {
     list.innerHTML = pins.map(pin => {
       const date = new Date(pin.pinnedAt);
       const dateStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
-      const tagsHtml = pin.tags.map(t => `<span class="pinboard-tag">${_esc(t)} <span style="cursor:pointer" onclick="PinBoard.removeTag('${pin.id}','${_esc(t)}')">&times;</span></span>`).join('');
+      const tagsHtml = pin.tags.map(t => `<span class="pinboard-tag">${_esc(t)} <span style="cursor:pointer" class="pinboard-remove-tag" data-pin-id="${_esc(pin.id)}" data-tag="${_esc(t)}">&times;</span></span>`).join('');
       const preview = pin.content.length > 300 ? pin.content.slice(0, 300) + '…' : pin.content;
-      return `<div class="pinboard-item" data-id="${pin.id}">
+      return `<div class="pinboard-item" data-id="${_esc(pin.id)}">
         <div class="pinboard-item-header">
-          <span class="pinboard-item-role ${pin.role}">${pin.role}</span>
+          <span class="pinboard-item-role ${_esc(pin.role)}">${_esc(pin.role)}</span>
           <span>${pin.session ? _esc(pin.session) + ' · ' : ''}${dateStr}</span>
           <div class="pinboard-item-actions">
-            <button onclick="PinBoard.promptNote('${pin.id}')" title="Add/edit note">📝</button>
-            <button onclick="PinBoard.promptTag('${pin.id}')" title="Add tag">🏷️</button>
-            <button onclick="PinBoard.copyPin('${pin.id}')" title="Copy content">📋</button>
-            <button onclick="PinBoard.unpinMessage('${pin.id}')" title="Unpin">❌</button>
+            <button class="pinboard-action" data-action="note" data-pin-id="${_esc(pin.id)}" title="Add/edit note">📝</button>
+            <button class="pinboard-action" data-action="tag" data-pin-id="${_esc(pin.id)}" title="Add tag">🏷️</button>
+            <button class="pinboard-action" data-action="copy" data-pin-id="${_esc(pin.id)}" title="Copy content">📋</button>
+            <button class="pinboard-action" data-action="unpin" data-pin-id="${_esc(pin.id)}" title="Unpin">❌</button>
           </div>
         </div>
         <div class="pinboard-item-content">${_esc(preview)}</div>
@@ -27612,6 +27612,25 @@ const PinBoard = (() => {
         ${pin.note ? '<div class="pinboard-item-note">📝 ' + _esc(pin.note) + '</div>' : ''}
       </div>`;
     }).join('');
+
+    // Bind actions via event delegation instead of inline onclick handlers
+    list.querySelectorAll('.pinboard-action').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const action = btn.dataset.action;
+        const pinId = btn.dataset.pinId;
+        if (action === 'note') PinBoard.promptNote(pinId);
+        else if (action === 'tag') PinBoard.promptTag(pinId);
+        else if (action === 'copy') PinBoard.copyPin(pinId);
+        else if (action === 'unpin') PinBoard.unpinMessage(pinId);
+      });
+    });
+    list.querySelectorAll('.pinboard-remove-tag').forEach(el => {
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        PinBoard.removeTag(el.dataset.pinId, el.dataset.tag);
+      });
+    });
   }
 
   const _esc = _escapeHtml;
