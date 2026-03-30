@@ -5530,33 +5530,75 @@ const CrossTabSync = (() => {
 })();
 
 /* ---------- Conversation Sessions (facade) ---------- */
+/* ============================================================
+ * ConversationSessions - high-level session management facade.
+ *
+ * Wraps {@link SessionManager} with a simpler public API for
+ * saving, loading, searching, importing/exporting, and listing
+ * chat sessions.  Provides a two-step confirmation guard for
+ * the destructive "clear all" operation.
+ *
+ * @namespace ConversationSessions
+ * ============================================================ */
 const ConversationSessions = (function () {
+  /** Whether a clear-all confirmation is pending (two-step guard). */
   let _confirmPending = false;
 
+  /**
+   * Save the current conversation as a named session.
+   * @param {string} [name] - Optional session name; auto-generated if omitted.
+   * @returns {string} The saved session's ID.
+   */
   function save(name) {
     return SessionManager.save(name || undefined);
   }
 
+  /**
+   * Load a previously saved session by its ID, replacing the current conversation.
+   * @param {string} id - Session ID to load.
+   */
   function load(id) {
     return SessionManager.load(id);
   }
 
+  /**
+   * Rename an existing session.
+   * @param {string} id - Session ID.
+   * @param {string} newName - New display name.
+   */
   function rename(id, newName) {
     SessionManager.rename(id, newName);
   }
 
+  /**
+   * Permanently delete a saved session.
+   * @param {string} id - Session ID to remove.
+   */
   function deleteSession(id) {
     SessionManager.remove(id);
   }
 
+  /**
+   * List all saved sessions (metadata only, without full message bodies).
+   * @returns {Array<Object>} Array of session summary objects.
+   */
   function list() {
     return SessionManager.getAll();
   }
 
+  /**
+   * Get the ID of the currently active session.
+   * @returns {string|null} Active session ID, or null if none.
+   */
   function getCurrent() {
     return SessionManager._getActiveId();
   }
 
+  /**
+   * Export a session as a JSON string for backup or sharing.
+   * @param {string} id - Session ID to export.
+   * @returns {string|null} JSON string of the exported session, or null if not found.
+   */
   function exportSession(id) {
     let sessions = SessionManager._loadAll();
     let session = sessions.find(function (s) { return s.id === id; });
@@ -5573,10 +5615,20 @@ const ConversationSessions = (function () {
     });
   }
 
+  /**
+   * Import a session from a JSON string (produced by {@link exportSession}).
+   * @param {string} jsonStr - JSON string to import.
+   * @returns {Object} The imported session object.
+   */
   function importSession(jsonStr) {
     return SessionManager.importSession(jsonStr);
   }
 
+  /**
+   * Full-text search across all sessions by name, notes, and message content.
+   * @param {string} query - Search term (case-insensitive).
+   * @returns {Array<Object>} Matching session objects.
+   */
   function search(query) {
     if (!query || typeof query !== 'string') return [];
     let q = query.toLowerCase();
@@ -5597,6 +5649,11 @@ const ConversationSessions = (function () {
     });
   }
 
+  /**
+   * Compute aggregate statistics for a session.
+   * @param {string} id - Session ID.
+   * @returns {{ messageCount: number, created: string, lastModified: string, wordCount: number }|null}
+   */
   function getStats(id) {
     let sessions = SessionManager._loadAll();
     let session = sessions.find(function (s) { return s.id === id; });
@@ -5616,6 +5673,12 @@ const ConversationSessions = (function () {
     };
   }
 
+  /**
+   * Clear all sessions with a two-step confirmation guard.
+   * First call sets the pending flag and returns false.
+   * Second consecutive call performs the deletion and returns true.
+   * @returns {boolean} True if sessions were actually cleared.
+   */
   function clear() {
     if (!_confirmPending) {
       _confirmPending = true;
@@ -5626,22 +5689,30 @@ const ConversationSessions = (function () {
     return true;
   }
 
+  /** Reset the two-step confirmation flag without clearing. */
   function resetConfirm() {
     _confirmPending = false;
   }
 
+  /** Trigger an auto-save of the current session if auto-save is enabled. */
   function autoSave() {
     SessionManager.autoSaveIfEnabled();
   }
 
+  /**
+   * Check whether the sessions panel is currently visible.
+   * @returns {boolean}
+   */
   function isOpen() {
     return SessionManager._isOpen ? SessionManager._isOpen() : false;
   }
 
+  /** Open the sessions panel if it is not already visible. */
   function open() {
     if (!isOpen()) SessionManager.toggle();
   }
 
+  /** Close the sessions panel. */
   function close() {
     SessionManager.close();
   }
@@ -6705,10 +6776,28 @@ const FileDropZone = (() => {
  *
  * @namespace FocusMode
  */
+/* ============================================================
+ * FocusMode - distraction-free "zen" mode for the chat UI.
+ *
+ * Toggles a CSS class on `document.body` that hides secondary UI
+ * elements (sidebar, panels, toolbars) so the user can concentrate
+ * on the conversation.  State persists in localStorage.
+ *
+ * Keyboard shortcuts:
+ *   Ctrl+Shift+F  — toggle focus mode
+ *   Escape        — exit focus mode (when no modal is open)
+ *
+ * @namespace FocusMode
+ * ============================================================ */
 const FocusMode = (() => {
   const STORAGE_KEY = 'ac-focus-mode';
+  /** @type {boolean} Whether focus mode is currently active. */
   let active = SafeStorage.getJSON(STORAGE_KEY, false);
 
+  /**
+   * Apply the current focus-mode state to the DOM.
+   * Toggles the `zen-mode` body class and updates the toolbar button.
+   */
   function apply() {
     document.body.classList.toggle('zen-mode', active);
     const btn = DOMCache.get('zen-btn');
@@ -6721,12 +6810,20 @@ const FocusMode = (() => {
     SafeStorage.trySetJSON(STORAGE_KEY, active);
   }
 
+  /**
+   * Toggle focus mode on/off.
+   * @returns {boolean} The new active state.
+   */
   function toggle() {
     active = !active;
     apply();
     return active;
   }
 
+  /**
+   * Initialize focus mode: apply saved state and register keyboard shortcuts.
+   * Call once on DOMContentLoaded.
+   */
   function init() {
     apply();
     // Global shortcut: Ctrl+Shift+F
