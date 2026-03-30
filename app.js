@@ -6363,20 +6363,20 @@ const PersonaPresets = (() => {
       activeEl.textContent = active ? 'Active: ' + active.name : 'Active: Unknown';
     }
 
-    listEl.innerHTML = presets.map(p => {
+    // Build all cards in one pass to avoid innerHTML += re-parsing
+    const isCustom = activeId === 'custom';
+    const cards = presets.map(p => {
       const isActive = p.id === activeId;
       return '<div class="persona-card' + (isActive ? ' active' : '') + '" data-persona-id="' + _esc(p.id) + '">'
         + '<div class="persona-card-title">' + _esc(p.name) + (isActive ? ' ✓' : '') + '</div>'
         + '<div class="persona-card-desc">' + _esc(p.desc) + '</div>'
         + '</div>';
-    }).join('');
-
-    // Add custom card
-    const isCustom = activeId === 'custom';
-    listEl.innerHTML += '<div class="persona-card' + (isCustom ? ' active' : '') + '" data-persona-id="custom">'
+    });
+    cards.push('<div class="persona-card' + (isCustom ? ' active' : '') + '" data-persona-id="custom">'
       + '<div class="persona-card-title">✏️ Custom' + (isCustom ? ' ✓' : '') + '</div>'
       + '<div class="persona-card-desc">Use the custom prompt below.</div>'
-      + '</div>';
+      + '</div>');
+    listEl.innerHTML = cards.join('');
 
     // Bind click handlers
     listEl.querySelectorAll('.persona-card').forEach(card => {
@@ -26217,10 +26217,15 @@ const ReadabilityAnalyzer = (() => {
   function renderStats(data, container, label, color) {
     const sec = document.createElement('div');
     sec.className = 'rp-section';
-    sec.innerHTML = `<h3>${label}</h3>`;
+
+    // Build all HTML in a single string to avoid repeated innerHTML +=
+    // which forces the browser to re-parse and re-serialize the entire
+    // subtree on every concatenation.
+    const parts = [`<h3>${label}</h3>`];
 
     if (data.msgCount === 0) {
-      sec.innerHTML += '<div class="rp-empty">No messages yet</div>';
+      parts.push('<div class="rp-empty">No messages yet</div>');
+      sec.innerHTML = parts.join('');
       container.appendChild(sec);
       return;
     }
@@ -26236,19 +26241,20 @@ const ReadabilityAnalyzer = (() => {
     ];
 
     rows.forEach(([lbl, val]) => {
-      sec.innerHTML += `<div class="rp-row"><span class="rp-label">${lbl}</span><span class="rp-value">${val}</span></div>`;
+      parts.push(`<div class="rp-row"><span class="rp-label">${lbl}</span><span class="rp-value">${val}</span></div>`);
     });
 
     // Reading ease meter
-    sec.innerHTML += `<div class="rp-meter"><div class="rp-meter-fill" style="width:${data.avgFleschEase}%;background:${color}"></div></div>`;
+    parts.push(`<div class="rp-meter"><div class="rp-meter-fill" style="width:${data.avgFleschEase}%;background:${color}"></div></div>`);
 
     // Sparkline of per-message ease scores
     if (data.perMessage && data.perMessage.length >= 2) {
       const easeScores = data.perMessage.map(m => m.fleschEase);
-      sec.innerHTML += '<div class="rp-label" style="margin-top:8px">Ease over time:</div>';
-      sec.innerHTML += sparkline(easeScores, 300, 40, color);
+      parts.push('<div class="rp-label" style="margin-top:8px">Ease over time:</div>');
+      parts.push(sparkline(easeScores, 300, 40, color));
     }
 
+    sec.innerHTML = parts.join('');
     container.appendChild(sec);
   }
 
