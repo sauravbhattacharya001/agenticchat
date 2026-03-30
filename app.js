@@ -164,6 +164,28 @@ const SafeStorage = (() => {
     setJSON(key, value) {
       this.set(key, JSON.stringify(value));
     },
+    /**
+     * Fire-and-forget version of set that silently swallows all
+     * exceptions (quota exceeded, security errors, etc.).
+     * @param {string} key
+     * @param {string} value
+     */
+    trySet(key, value) {
+      try { this.set(key, value); } catch (_) { /* best-effort persist */ }
+    },
+    /**
+     * Fire-and-forget version of setJSON that silently swallows all
+     * exceptions (quota exceeded, security errors, etc.).
+     *
+     * Replaces the pervasive `try { SafeStorage.setJSON(k, v); } catch {}` pattern
+     * found throughout the codebase, making intent explicit and reducing boilerplate.
+     *
+     * @param {string} key
+     * @param {*} value  - must be JSON-serializable
+     */
+    trySetJSON(key, value) {
+      try { this.setJSON(key, value); } catch (_) { /* best-effort persist */ }
+    },
   };
 })();
 
@@ -341,7 +363,7 @@ Always \`return\` the final value.
       'o4-mini':        [1.10,   4.40]
     },
     get MODEL() { return _cfg._model; },
-    set MODEL(v) { _cfg._model = v; try { SafeStorage.set('ac-selected-model', v); } catch (_) {} }
+    set MODEL(v) { _cfg._model = v; SafeStorage.trySet('ac-selected-model', v); }
   };
   return _cfg;
 })();
@@ -489,7 +511,7 @@ const ConversationManager = (() => {
     /** Toggle response-time badge visibility; persists preference. */
     toggleTiming() {
       showTimingBadges = !showTimingBadges;
-      try { SafeStorage.setJSON('ac-show-timing', showTimingBadges); } catch (_) {}
+      SafeStorage.trySetJSON('ac-show-timing', showTimingBadges);
       return showTimingBadges;
     },
 
@@ -3246,7 +3268,7 @@ const SlashCommands = (() => {
         { name: 'stream', description: 'Toggle streaming responses on/off', icon: '⚡',
           action: () => {
             ChatConfig.STREAMING_ENABLED = !ChatConfig.STREAMING_ENABLED;
-            try { SafeStorage.setJSON('ac-streaming', ChatConfig.STREAMING_ENABLED); } catch (_) {}
+            SafeStorage.trySetJSON('ac-streaming', ChatConfig.STREAMING_ENABLED);
             UIController.setChatOutput(`Streaming ${ChatConfig.STREAMING_ENABLED ? 'enabled ⚡' : 'disabled'}`);
           } },
         { name: 'file', description: 'Open file picker to attach text files', icon: '📎',
@@ -4134,7 +4156,7 @@ const ThemeManager = (() => {
   }
 
   function _save(theme) {
-    try { SafeStorage.set(STORAGE_KEY, theme); } catch (_) {}
+    SafeStorage.trySet(STORAGE_KEY, theme);
   }
 
   function _loadSaved() {
@@ -4312,7 +4334,7 @@ const SessionManager = (() => {
 
   /** Save the set of pinned session IDs. */
   function _savePinnedIds(pinnedSet) {
-    try { SafeStorage.setJSON(PINNED_KEY, [...pinnedSet]); } catch {}
+    SafeStorage.trySetJSON(PINNED_KEY, [...pinnedSet]);
   }
 
   /** Check if a session is pinned. */
@@ -4355,7 +4377,7 @@ const SessionManager = (() => {
 
   function toggleAutoSave() {
     autoSave = !autoSave;
-    try { SafeStorage.set(AUTO_SAVE_KEY, String(autoSave)); } catch {}
+    SafeStorage.trySet(AUTO_SAVE_KEY, String(autoSave));
     _updateAutoSaveUI();
     return autoSave;
   }
@@ -4376,7 +4398,7 @@ const SessionManager = (() => {
 
   /** Set sort preference. */
   function setSortMode(mode) {
-    try { SafeStorage.set(SORT_KEY, mode); } catch {}
+    SafeStorage.trySet(SORT_KEY, mode);
     if (isOpen) refresh();
   }
 
@@ -5163,7 +5185,7 @@ const SessionNotes = (() => {
 
   /** Save all notes to storage. */
   function _saveAll(notes) {
-    try { SafeStorage.setJSON(STORAGE_KEY, notes); } catch {}
+    SafeStorage.trySetJSON(STORAGE_KEY, notes);
   }
 
   /** Get the note for a session. */
@@ -6305,7 +6327,7 @@ const PersonaPresets = (() => {
   function save(id, customPrompt) {
     const data = { id };
     if (id === 'custom' && customPrompt) data.prompt = customPrompt;
-    try { SafeStorage.setJSON(STORAGE_KEY, data); } catch (_) {}
+    SafeStorage.trySetJSON(STORAGE_KEY, data);
   }
 
   function applyPrompt(prompt) {
@@ -6688,7 +6710,7 @@ const FocusMode = (() => {
         ? 'Exit focus mode (Ctrl+Shift+F)'
         : 'Focus mode - hide distractions (Ctrl+Shift+F)';
     }
-    try { SafeStorage.setJSON(STORAGE_KEY, active); } catch (_) {}
+    SafeStorage.trySetJSON(STORAGE_KEY, active);
   }
 
   function toggle() {
@@ -6883,7 +6905,7 @@ const Scratchpad = (() => {
 
   /** Save notes to localStorage. */
   function _save(text) {
-    try { SafeStorage.set(STORAGE_KEY, text); } catch {}
+    SafeStorage.trySet(STORAGE_KEY, text);
   }
 
   /** Update the word/char count display. */
@@ -10781,7 +10803,7 @@ const ConversationChapters = (() => {
   // -- Persistence --
 
   function save() {
-    try { SafeStorage.setJSON(STORAGE_KEY, chapters); } catch (_) {}
+    SafeStorage.trySetJSON(STORAGE_KEY, chapters);
   }
 
   function load() {
@@ -13527,7 +13549,7 @@ const ResponseRating = (() => {
   }
 
   function save() {
-    try { SafeStorage.setJSON(STORAGE_KEY, ratings); } catch (_) {}
+    SafeStorage.trySetJSON(STORAGE_KEY, ratings);
   }
 
   function injectStyles() {
@@ -14928,11 +14950,11 @@ const MessageTranslator = (() => {
   }
 
   function save() {
-    try { SafeStorage.setJSON(STORAGE_KEY, cache); } catch (_) {}
+    SafeStorage.trySetJSON(STORAGE_KEY, cache);
   }
 
   function savePref() {
-    try { SafeStorage.set('agenticchat_translate_lang', lastPreferredLang); } catch (_) {}
+    SafeStorage.trySet('agenticchat_translate_lang', lastPreferredLang);
   }
 
   function injectStyles() {
@@ -16142,7 +16164,7 @@ const MessageScheduler = (() => {
   }
 
   function _save(items) {
-    try { SafeStorage.setJSON(STORE_KEY, items); } catch (_) {}
+    SafeStorage.trySetJSON(STORE_KEY, items);
   }
 
   /* ── Core ────────────────────────────────────────────────── */
@@ -17212,7 +17234,7 @@ const ContextWindowMeter = (() => {
     if (!_container) return _visible;
     _visible = !_visible;
     _container.style.display = _visible ? '' : 'none';
-    try { SafeStorage.setJSON('ac-context-meter-visible', _visible); } catch (_) {}
+    SafeStorage.trySetJSON('ac-context-meter-visible', _visible);
     return _visible;
   }
 
@@ -17307,7 +17329,7 @@ const ConversationAgenda = (() => {
   }
 
   function _save() {
-    try { SafeStorage.setJSON(STORAGE_KEY, agendas); } catch (_) {}
+    SafeStorage.trySetJSON(STORAGE_KEY, agendas);
   }
 
   function _sessionId() {
@@ -22223,7 +22245,7 @@ const DraftRecovery = (() => {
 
   /** Save all drafts to storage. */
   function _saveDrafts(drafts) {
-    try { SafeStorage.setJSON(STORAGE_KEY, drafts); } catch {}
+    SafeStorage.trySetJSON(STORAGE_KEY, drafts);
   }
 
   /** Get the current session ID (or '__default__' if none). */
@@ -22521,7 +22543,7 @@ const CustomThemeCreator = (() => {
   }
 
   function _saveCustomThemes(themes) {
-    try { SafeStorage.setJSON(STORAGE_KEY, themes); } catch (_) {}
+    SafeStorage.trySetJSON(STORAGE_KEY, themes);
   }
 
   function _getActiveCustomTheme() {
@@ -22529,7 +22551,7 @@ const CustomThemeCreator = (() => {
   }
 
   function _setActiveCustomTheme(name) {
-    try { SafeStorage.set(ACTIVE_KEY, name || ''); } catch (_) {}
+    SafeStorage.trySet(ACTIVE_KEY, name || '');
   }
 
   function _getCurrentValues() {
@@ -22972,7 +22994,7 @@ const TextExpander = (() => {
   }
 
   function _save(snippets) {
-    try { SafeStorage.setJSON(STORAGE_KEY, snippets); } catch {}
+    SafeStorage.trySetJSON(STORAGE_KEY, snippets);
   }
 
   function _loadUsage() {
@@ -22983,7 +23005,7 @@ const TextExpander = (() => {
   }
 
   function _saveUsage(usage) {
-    try { SafeStorage.setJSON(USAGE_KEY, usage); } catch {}
+    SafeStorage.trySetJSON(USAGE_KEY, usage);
   }
 
   function _trackUsage(trigger) {
@@ -23335,7 +23357,7 @@ const PreferencesPanel = (() => {
   }
 
   function _save() {
-    try { SafeStorage.setJSON(STORAGE_KEY, _prefs); } catch (_) {}
+    SafeStorage.trySetJSON(STORAGE_KEY, _prefs);
   }
 
   /** Apply preferences to the running config. */
@@ -23344,7 +23366,7 @@ const PreferencesPanel = (() => {
     ChatConfig.MAX_INPUT_CHARS = _prefs.maxInputChars;
     ChatConfig.STREAMING_ENABLED = _prefs.streaming;
     ChatConfig.SANDBOX_TIMEOUT_MS = _prefs.sandboxTimeoutMs;
-    try { SafeStorage.setJSON('ac-streaming', _prefs.streaming); } catch (_) {}
+    SafeStorage.trySetJSON('ac-streaming', _prefs.streaming);
     document.documentElement.style.setProperty('--ac-font-size', _prefs.fontSize + 'px');
     document.body.classList.toggle('ac-compact', _prefs.compactMode);
   }
@@ -25218,7 +25240,7 @@ const MessageContextMenu = (() => {
         description: 'Toggle right-click context menu on messages',
         action: function() {
           _enabled = !_enabled;
-          try { SafeStorage.setJSON(STORAGE_KEY, _enabled); } catch (_) {}
+          SafeStorage.trySetJSON(STORAGE_KEY, _enabled);
           _toast('Context menu ' + (_enabled ? 'enabled' : 'disabled'));
         }
       });
@@ -25231,7 +25253,7 @@ const MessageContextMenu = (() => {
         label: '🖱️ Toggle Message Context Menu',
         action: function() {
           _enabled = !_enabled;
-          try { SafeStorage.setJSON(STORAGE_KEY, _enabled); } catch (_) {}
+          SafeStorage.trySetJSON(STORAGE_KEY, _enabled);
           _toast('Context menu ' + (_enabled ? 'enabled' : 'disabled'));
         }
       });
@@ -25244,13 +25266,13 @@ const MessageContextMenu = (() => {
         label: 'Message right-click context menu',
         type: 'toggle',
         default: true,
-        onChange: function(val) { _enabled = val; try { SafeStorage.setJSON(STORAGE_KEY, val); } catch (_) {} }
+        onChange: function(val) { _enabled = val; SafeStorage.trySetJSON(STORAGE_KEY, val); }
       });
     }
   }
 
-  function enable()  { _enabled = true;  try { SafeStorage.set(STORAGE_KEY, 'true'); } catch (_) {} }
-  function disable() { _enabled = false; try { SafeStorage.set(STORAGE_KEY, 'false'); } catch (_) {} }
+  function enable()  { _enabled = true;  SafeStorage.trySet(STORAGE_KEY, 'true'); }
+  function disable() { _enabled = false; SafeStorage.trySet(STORAGE_KEY, 'false'); }
   function isEnabled() { return _enabled; }
 
   return {
@@ -26896,7 +26918,7 @@ const ResponseLengthPresets = (() => {
   }
 
   function _save() {
-    try { SafeStorage.set(STORAGE_KEY, currentPreset); } catch (_) {}
+    SafeStorage.trySet(STORAGE_KEY, currentPreset);
   }
 
   function _getPreset(id) {
@@ -27060,7 +27082,7 @@ const SessionArchive = (() => {
 
   /** Save archived IDs set. */
   function _save(ids) {
-    try { SafeStorage.set(STORAGE_KEY, JSON.stringify([...ids])); } catch {}
+    SafeStorage.trySetJSON(STORAGE_KEY, [...ids]);
   }
 
   /** Check if a session is archived. */
