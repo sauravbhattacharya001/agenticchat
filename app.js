@@ -24890,21 +24890,14 @@ const SmartPaste = (() => {
     e.preventDefault();
     var input = e.target;
 
-    if (input.tagName === 'INPUT') {
-      // For <input> elements, insert at cursor
+    if (input.tagName === 'INPUT' || input.tagName === 'TEXTAREA') {
+      // For <input> and <textarea>, insert at cursor position
       var start = input.selectionStart || 0;
       var end = input.selectionEnd || 0;
       var val = input.value;
       input.value = val.slice(0, start) + result.formatted + val.slice(end);
       var newPos = start + result.formatted.length;
       input.setSelectionRange(newPos, newPos);
-    } else if (input.tagName === 'TEXTAREA') {
-      var start2 = input.selectionStart || 0;
-      var end2 = input.selectionEnd || 0;
-      var val2 = input.value;
-      input.value = val2.slice(0, start2) + result.formatted + val2.slice(end2);
-      var newPos2 = start2 + result.formatted.length;
-      input.setSelectionRange(newPos2, newPos2);
     } else if (input.isContentEditable) {
       document.execCommand('insertText', false, result.formatted);
     }
@@ -25013,8 +25006,13 @@ const MessageContextMenu = (() => {
 
   /* ---- helpers ---- */
 
+  /** Find the closest message element from a DOM node. */
+  function _getMessageElement(el) {
+    return el.closest('.msg-user, .msg-assistant, .msg-system, [data-msg-index]');
+  }
+
   function _getMessageIndex(el) {
-    const msgEl = el.closest('.msg-user, .msg-assistant, .msg-system, [data-msg-index]');
+    const msgEl = _getMessageElement(el);
     if (!msgEl) return -1;
     if (msgEl.dataset.msgIndex !== undefined) return parseInt(msgEl.dataset.msgIndex, 10);
     const output = DOMCache.get('chat-output');
@@ -25024,13 +25022,13 @@ const MessageContextMenu = (() => {
   }
 
   function _getMessageText(el) {
-    const msgEl = el.closest('.msg-user, .msg-assistant, .msg-system, [data-msg-index]');
+    const msgEl = _getMessageElement(el);
     if (!msgEl) return '';
     return msgEl.innerText || msgEl.textContent || '';
   }
 
   function _getMessageRole(el) {
-    const msgEl = el.closest('.msg-user, .msg-assistant, .msg-system, [data-msg-index]');
+    const msgEl = _getMessageElement(el);
     if (!msgEl) return 'unknown';
     if (msgEl.classList.contains('msg-user')) return 'user';
     if (msgEl.classList.contains('msg-assistant')) return 'assistant';
@@ -25039,6 +25037,24 @@ const MessageContextMenu = (() => {
   }
 
   /* ---- menu item definitions ---- */
+
+  /**
+   * Helper to create a context menu item that delegates to an optional module.
+   * Reduces boilerplate: each item just declares the module reference, method,
+   * and optional condition.
+   */
+  function _moduleItem(icon, label, id, moduleRef, methodName, opts) {
+    const item = { icon: icon, label: label, id: id };
+    if (opts && opts.condition) item.condition = opts.condition;
+    item.action = function() {
+      if (moduleRef && typeof moduleRef[methodName] === 'function') {
+        moduleRef[methodName](_targetIndex);
+      } else {
+        _toast(label + ' not available');
+      }
+    };
+    return item;
+  }
 
   function _buildMenuItems() {
     const items = [];
@@ -25068,123 +25084,48 @@ const MessageContextMenu = (() => {
 
     items.push({ type: 'separator' });
 
-    // Bookmark
-    if (typeof ChatBookmarks !== 'undefined') {
-      items.push({
-        icon: '🔖', label: 'Bookmark', id: 'ctx-bookmark',
-        action: function() {
-          if (ChatBookmarks.toggle) ChatBookmarks.toggle(_targetIndex);
-          else _toast('Bookmark not available');
-        }
-      });
-    }
+    // Module-backed actions — declarative registration
+    if (typeof ChatBookmarks !== 'undefined')
+      items.push(_moduleItem('🔖', 'Bookmark', 'ctx-bookmark', ChatBookmarks, 'toggle'));
 
-    // Pin
-    if (typeof MessagePinning !== 'undefined') {
-      items.push({
-        icon: '📌', label: 'Pin Message', id: 'ctx-pin',
-        action: function() {
-          if (MessagePinning.togglePin) MessagePinning.togglePin(_targetIndex);
-          else _toast('Pinning not available');
-        }
-      });
-    }
+    if (typeof MessagePinning !== 'undefined')
+      items.push(_moduleItem('📌', 'Pin Message', 'ctx-pin', MessagePinning, 'togglePin'));
 
-    // Annotate
-    if (typeof MessageAnnotations !== 'undefined') {
-      items.push({
-        icon: '🏷️', label: 'Annotate', id: 'ctx-annotate',
-        action: function() {
-          if (MessageAnnotations.openAnnotation) MessageAnnotations.openAnnotation(_targetIndex);
-          else if (MessageAnnotations.addAnnotation) MessageAnnotations.addAnnotation(_targetIndex);
-          else _toast('Annotations not available');
-        }
-      });
-    }
+    if (typeof MessageAnnotations !== 'undefined')
+      items.push(_moduleItem('🏷️', 'Annotate', 'ctx-annotate', MessageAnnotations,
+        MessageAnnotations.openAnnotation ? 'openAnnotation' : 'addAnnotation'));
 
-    // React
-    if (typeof MessageReactions !== 'undefined') {
-      items.push({
-        icon: '😀', label: 'React', id: 'ctx-react',
-        action: function() {
-          if (MessageReactions.showPicker) MessageReactions.showPicker(_targetIndex);
-          else _toast('Reactions not available');
-        }
-      });
-    }
+    if (typeof MessageReactions !== 'undefined')
+      items.push(_moduleItem('😀', 'React', 'ctx-react', MessageReactions, 'showPicker'));
 
     items.push({ type: 'separator' });
 
-    // Read aloud
-    if (typeof ReadAloud !== 'undefined') {
-      items.push({
-        icon: '🔊', label: 'Read Aloud', id: 'ctx-read',
-        action: function() {
-          if (ReadAloud.speak) ReadAloud.speak(_targetIndex);
-          else if (ReadAloud.readMessage) ReadAloud.readMessage(_targetIndex);
-          else _toast('Read aloud not available');
-        }
-      });
-    }
+    if (typeof ReadAloud !== 'undefined')
+      items.push(_moduleItem('🔊', 'Read Aloud', 'ctx-read', ReadAloud,
+        ReadAloud.speak ? 'speak' : 'readMessage'));
 
-    // Translate
-    if (typeof MessageTranslator !== 'undefined') {
-      items.push({
-        icon: '🌐', label: 'Translate', id: 'ctx-translate',
-        action: function() {
-          if (MessageTranslator.translateMessage) MessageTranslator.translateMessage(_targetIndex);
-          else _toast('Translation not available');
-        }
-      });
-    }
+    if (typeof MessageTranslator !== 'undefined')
+      items.push(_moduleItem('🌐', 'Translate', 'ctx-translate', MessageTranslator, 'translateMessage'));
 
-    // Diff
-    if (typeof MessageDiff !== 'undefined') {
-      items.push({
-        icon: '🔀', label: 'Compare (Diff)', id: 'ctx-diff',
-        action: function() {
-          if (MessageDiff.selectForDiff) MessageDiff.selectForDiff(_targetIndex);
-          else _toast('Diff not available');
-        }
-      });
-    }
+    if (typeof MessageDiff !== 'undefined')
+      items.push(_moduleItem('🔀', 'Compare (Diff)', 'ctx-diff', MessageDiff, 'selectForDiff'));
 
     items.push({ type: 'separator' });
 
-    // Fork conversation
-    if (typeof ConversationFork !== 'undefined') {
-      items.push({
-        icon: '🔱', label: 'Fork from Here', id: 'ctx-fork',
-        action: function() {
-          if (ConversationFork.forkFrom) ConversationFork.forkFrom(_targetIndex);
-          else _toast('Fork not available');
-        }
-      });
-    }
+    if (typeof ConversationFork !== 'undefined')
+      items.push(_moduleItem('🔱', 'Fork from Here', 'ctx-fork', ConversationFork, 'forkFrom'));
 
     // Edit & resend (user messages only)
-    if (typeof MessageEditor !== 'undefined') {
-      items.push({
-        icon: '✏️', label: 'Edit & Resend', id: 'ctx-edit',
-        condition: function() { return _getMessageRole(_targetMsg) === 'user'; },
-        action: function() {
-          if (MessageEditor.editMessage) MessageEditor.editMessage(_targetIndex);
-          else _toast('Edit not available');
-        }
-      });
-    }
+    if (typeof MessageEditor !== 'undefined')
+      items.push(_moduleItem('✏️', 'Edit & Resend', 'ctx-edit', MessageEditor, 'editMessage', {
+        condition: function() { return _getMessageRole(_targetMsg) === 'user'; }
+      }));
 
     // Rate (assistant messages only)
-    if (typeof ResponseRating !== 'undefined') {
-      items.push({
-        icon: '⭐', label: 'Rate Response', id: 'ctx-rate',
-        condition: function() { return _getMessageRole(_targetMsg) === 'assistant'; },
-        action: function() {
-          if (ResponseRating.rateMessage) ResponseRating.rateMessage(_targetIndex);
-          else _toast('Rating not available');
-        }
-      });
-    }
+    if (typeof ResponseRating !== 'undefined')
+      items.push(_moduleItem('⭐', 'Rate Response', 'ctx-rate', ResponseRating, 'rateMessage', {
+        condition: function() { return _getMessageRole(_targetMsg) === 'assistant'; }
+      }));
 
     return items;
   }
