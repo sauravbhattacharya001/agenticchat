@@ -20183,6 +20183,29 @@ const TypingSpeedMonitor = (() => {
   let _lastInputLength = 0;
   let _updateTimer = null;
   let _isOpen = false;
+  let _idleTimeout = null;
+  const IDLE_STOP_MS = 5000; // stop polling after 5s of no typing
+
+  function _startUpdateTimer() {
+    if (_updateTimer) return;
+    _updateTimer = setInterval(_updateWpm, 500);
+  }
+
+  function _stopUpdateTimer() {
+    if (_updateTimer) { clearInterval(_updateTimer); _updateTimer = null; }
+  }
+
+  /** Reset the idle countdown — called on every keystroke. */
+  function _resetIdleStop() {
+    _startUpdateTimer();
+    clearTimeout(_idleTimeout);
+    _idleTimeout = setTimeout(() => {
+      // Final update to show 0 WPM, then stop polling
+      _currentWpm = 0;
+      _updateIndicator();
+      _stopUpdateTimer();
+    }, IDLE_STOP_MS);
+  }
 
   function init() {
     _loadStats();
@@ -20197,8 +20220,8 @@ const TypingSpeedMonitor = (() => {
     const indicator = DOMCache.get('wpm-indicator');
     if (indicator) indicator.addEventListener('click', toggle);
 
-    // Periodic WPM update
-    _updateTimer = setInterval(_updateWpm, 500);
+    // WPM update timer starts on-demand when user types (see _resetIdleStop)
+    // No always-on interval — saves CPU when user is idle
 
     // Keyboard shortcut Ctrl+Shift+T
     document.addEventListener('keydown', (e) => {
@@ -20219,6 +20242,7 @@ const TypingSpeedMonitor = (() => {
     if (e.key.length === 1 || e.key === 'Backspace' || e.key === 'Delete') {
       _keystrokes.push(Date.now());
       _totalChars++;
+      _resetIdleStop();
     }
   }
 
@@ -25634,8 +25658,9 @@ const SmartScroll = (() => {
     _buildFAB();
     _observeNewMessages();
 
-    // Throttled scroll handler
+    // Throttled scroll handler — combines position check and debounced save
     let _scrollTick = false;
+    let _saveTick = null;
     _chatOutput.addEventListener('scroll', () => {
       if (!_scrollTick) {
         _scrollTick = true;
@@ -25644,11 +25669,6 @@ const SmartScroll = (() => {
           _scrollTick = false;
         });
       }
-    });
-
-    // Save position periodically and on unload
-    let _saveTick = null;
-    _chatOutput.addEventListener('scroll', () => {
       clearTimeout(_saveTick);
       _saveTick = setTimeout(savePosition, 1000);
     });
@@ -27946,10 +27966,24 @@ const MessageScheduler = (() => {
     });
   }
 
+  /** Lightweight tick: only update countdown text without rebuilding DOM. */
+  function _updateTimers() {
+    const qe = queueEl();
+    if (!qe || _queue.length === 0) return;
+    const timerEls = qe.querySelectorAll('.scheduler-item-timer');
+    timerEls.forEach((el, i) => {
+      if (i >= _queue.length) return;
+      const remaining = Math.max(0, _queue[i].sendAt - Date.now());
+      const secs = Math.ceil(remaining / 1000);
+      const display = secs >= 60 ? `${Math.floor(secs/60)}m ${secs%60}s` : `${secs}s`;
+      if (el.textContent !== display) el.textContent = display;
+    });
+  }
+
   /* ---- tick (update countdown display) ---- */
   function startTick() {
     if (_tickId) return;
-    _tickId = setInterval(renderQueue, 1000);
+    _tickId = setInterval(_updateTimers, 1000);
   }
   function stopTick() {
     if (_tickId) { clearInterval(_tickId); _tickId = null; }
