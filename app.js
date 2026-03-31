@@ -12272,6 +12272,9 @@ const GlobalSessionSearch = (() => {
 
     const sessions = SessionManager.getAllUnsorted();
     if (sessions.length === 0) {
+      _setStatus('No saved sessions to search');
+      return;
+    }
 
     const results = []; // { session, matches: [{ role, content, index }] }
     let totalMatches = 0;
@@ -16886,6 +16889,58 @@ const SmartRetry = (() => {
   // Uses the shared _escapeHtml defined at file scope (line ~223).
 
   /**
+   * Wait for the given delay, but resolve early if _cancelled becomes true.
+   * Polls _cancelled every 100 ms to stay responsive to user cancellation.
+   *
+   * @param {number} delayMs - Milliseconds to wait
+   * @returns {Promise<void>}
+   */
+  function _cancellableDelay(delayMs) {
+    return new Promise((resolve) => {
+      const timer = setTimeout(resolve, delayMs);
+      const checkCancel = setInterval(() => {
+        if (_cancelled) {
+          clearTimeout(timer);
+          clearInterval(checkCancel);
+          resolve();
+        }
+      }, 100);
+      setTimeout(() => clearInterval(checkCancel), delayMs + 100);
+    });
+  }
+
+  /**
+   * Handle the retry-wait cycle: increment stats, show indicator, wait,
+   * and check cancellation. Returns true if the caller should continue
+   * to the next attempt, false if cancelled (caller should return).
+   *
+   * @param {number} attempt - Current attempt index (0-based)
+   * @param {string} errorMsg - Error description to display
+   * @param {boolean} showIndicator - Whether to show the visual indicator
+   * @returns {Promise<boolean>} true = proceed to next attempt, false = cancelled
+   */
+  async function _waitForRetry(attempt, errorMsg, showIndicator) {
+    _retryStats.totalRetries++;
+    const delay = getDelay(attempt);
+
+    if (showIndicator) {
+      _showRetryIndicator(attempt, delay, errorMsg);
+    }
+
+    await _cancellableDelay(delay);
+
+    if (_cancelled) {
+      _clearIndicator();
+      _retryStats.failedRetries++;
+      _save();
+      return false;
+    }
+
+    _clearIndicator();
+    return true;
+  }
+
+  /**
    * Wrap an async API call with automatic retry logic.
    *
    * @param {Function} fn - Async function returning {ok, status?, error?, networkError?}
@@ -16904,99 +16959,46 @@ const SmartRetry = (() => {
     let lastResult = null;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      let result;
+      let isNetworkError = false;
+
       try {
-        const result = await fn();
-
-        if (result && result.ok) {
-          if (attempt > 0) {
-            _retryStats.successfulRetries++;
-            _save();
-            _clearIndicator();
-          }
-          return result;
-        }
-
-        lastResult = result;
-
-        if (attempt < maxRetries && isRetryable(result)) {
-          _retryStats.totalRetries++;
-          const delay = getDelay(attempt);
-
-          if (showIndicator) {
-            _showRetryIndicator(attempt, delay, result.error);
-          }
-
-          await new Promise((resolve) => {
-            const timer = setTimeout(resolve, delay);
-            const checkCancel = setInterval(() => {
-              if (_cancelled) {
-                clearTimeout(timer);
-                clearInterval(checkCancel);
-                resolve();
-              }
-            }, 100);
-            setTimeout(() => clearInterval(checkCancel), delay + 100);
-          });
-
-          if (_cancelled) {
-            _clearIndicator();
-            _retryStats.failedRetries++;
-            _save();
-            return lastResult;
-          }
-
-          _clearIndicator();
-          continue;
-        }
-
-        if (attempt > 0) {
-          _retryStats.failedRetries++;
-          _save();
-        }
-        return result;
-
+        result = await fn();
       } catch (err) {
-        lastResult = {
+        result = {
           ok: false,
           error: 'Network error: ' + err.message,
           networkError: true
         };
+        isNetworkError = true;
+      }
 
-        if (attempt < maxRetries) {
-          _retryStats.totalRetries++;
-          const delay = getDelay(attempt);
-
-          if (showIndicator) {
-            _showRetryIndicator(attempt, delay, lastResult.error);
-          }
-
-          await new Promise((resolve) => {
-            const timer = setTimeout(resolve, delay);
-            const checkCancel = setInterval(() => {
-              if (_cancelled) {
-                clearTimeout(timer);
-                clearInterval(checkCancel);
-                resolve();
-              }
-            }, 100);
-            setTimeout(() => clearInterval(checkCancel), delay + 100);
-          });
-
-          if (_cancelled) {
-            _clearIndicator();
-            _retryStats.failedRetries++;
-            _save();
-            return lastResult;
-          }
-
+      if (result && result.ok) {
+        if (attempt > 0) {
+          _retryStats.successfulRetries++;
+          _save();
           _clearIndicator();
-          continue;
         }
+        return result;
+      }
 
+      lastResult = result;
+
+      const canRetry = isNetworkError
+        ? attempt < maxRetries
+        : attempt < maxRetries && isRetryable(result);
+
+      if (canRetry) {
+        const shouldContinue = await _waitForRetry(attempt, result.error, showIndicator);
+        if (!shouldContinue) return lastResult;
+        continue;
+      }
+
+      if (attempt > 0 || isNetworkError) {
         _retryStats.failedRetries++;
         _save();
-        return lastResult;
       }
+      return result;
     }
 
     return lastResult;
@@ -28029,346 +28031,6 @@ const EmojiPicker = (() => {
   return { open, close, toggle };
 })();
 
-/* ---------- Message Scheduler ---------- */
-/**
- * Queue messages to be sent automatically after a configurable delay.
- * Users compose a message, pick a delay (seconds or minutes), and the
- * scheduler counts down and auto-sends each queued message in order.
- *
- * Keyboard shortcut: Alt+Q
- * @namespace MessageScheduler
- */
-const MessageScheduler = (() => {
-  let _queue = [];          // { id, text, sendAt, timerId }
-  let _tickId = null;
-  let _idCounter = 0;
-
-  /* ---- DOM refs ---- */
-  const panel     = () => DOMCache.get('scheduler-panel');
-  const overlay   = () => DOMCache.get('scheduler-overlay');
-  const msgInput  = () => DOMCache.get('scheduler-message');
-  const delayIn   = () => DOMCache.get('scheduler-delay');
-  const unitSel   = () => DOMCache.get('scheduler-unit');
-  const queueEl   = () => DOMCache.get('scheduler-queue');
-  const emptyEl   = () => DOMCache.get('scheduler-empty');
-
-  /* ---- open / close ---- */
-  function open() {
-    const p = panel(), o = overlay();
-    if (!p) return;
-    p.style.display = 'flex';
-    o.style.display = 'block';
-    o.onclick = close;
-    msgInput()?.focus();
-    renderQueue();
-  }
-  function close() {
-    const p = panel(), o = overlay();
-    if (p) p.style.display = 'none';
-    if (o) o.style.display = 'none';
-  }
-  function toggle() { panel()?.style.display === 'none' ? open() : close(); }
-
-  /* ---- schedule ---- */
-  function addScheduled() {
-    const ta = msgInput();
-    const text = ta?.value.trim();
-    if (!text) return;
-    const delay = Math.max(1, parseInt(delayIn()?.value || '30', 10));
-    const unit = unitSel()?.value || 'm';
-    const ms = unit === 'm' ? delay * 60000 : delay * 1000;
-    const id = ++_idCounter;
-    const sendAt = Date.now() + ms;
-
-    const timerId = setTimeout(() => sendMessage(id), ms);
-    _queue.push({ id, text, sendAt, timerId });
-    ta.value = '';
-    renderQueue();
-    startTick();
-  }
-
-  /* ---- send ---- */
-  function sendMessage(id) {
-    const idx = _queue.findIndex(q => q.id === id);
-    if (idx === -1) return;
-    const item = _queue.splice(idx, 1)[0];
-
-    // Inject text into the chat input and click Send
-    const chatInput = DOMCache.get('chat-input');
-    const sendBtn = DOMCache.get('send-btn');
-    if (chatInput && sendBtn) {
-      chatInput.value = item.text;
-      chatInput.dispatchEvent(new Event('input', { bubbles: true }));
-      sendBtn.click();
-    }
-    renderQueue();
-    if (_queue.length === 0) stopTick();
-  }
-
-  /* ---- cancel ---- */
-  function cancelItem(id) {
-    const idx = _queue.findIndex(q => q.id === id);
-    if (idx === -1) return;
-    clearTimeout(_queue[idx].timerId);
-    _queue.splice(idx, 1);
-    renderQueue();
-    if (_queue.length === 0) stopTick();
-  }
-
-  function cancelAll() {
-    _queue.forEach(q => clearTimeout(q.timerId));
-    _queue = [];
-    renderQueue();
-    stopTick();
-  }
-
-  /* ---- render ---- */
-  function renderQueue() {
-    const qe = queueEl(), ee = emptyEl();
-    if (!qe) return;
-    if (_queue.length === 0) {
-      qe.innerHTML = '';
-      if (ee) ee.style.display = '';
-      return;
-    }
-    if (ee) ee.style.display = 'none';
-    qe.innerHTML = _queue.map(q => {
-      const remaining = Math.max(0, q.sendAt - Date.now());
-      const secs = Math.ceil(remaining / 1000);
-      const display = secs >= 60 ? `${Math.floor(secs/60)}m ${secs%60}s` : `${secs}s`;
-      const preview = q.text.length > 60 ? q.text.slice(0, 57) + '…' : q.text;
-      return `<div class="scheduler-item" data-id="${q.id}">
-        <span class="scheduler-item-text" title="${q.text.replace(/"/g,'&quot;')}">${preview}</span>
-        <span class="scheduler-item-timer">${display}</span>
-        <button class="scheduler-item-cancel" title="Cancel">✕</button>
-      </div>`;
-    }).join('');
-    qe.querySelectorAll('.scheduler-item-cancel').forEach(btn => {
-      btn.onclick = () => {
-        const id = parseInt(btn.closest('.scheduler-item').dataset.id, 10);
-        cancelItem(id);
-      };
-    });
-  }
-
-  /** Lightweight tick: only update countdown text without rebuilding DOM. */
-  function _updateTimers() {
-    const qe = queueEl();
-    if (!qe || _queue.length === 0) return;
-    const timerEls = qe.querySelectorAll('.scheduler-item-timer');
-    timerEls.forEach((el, i) => {
-      if (i >= _queue.length) return;
-      const remaining = Math.max(0, _queue[i].sendAt - Date.now());
-      const secs = Math.ceil(remaining / 1000);
-      const display = secs >= 60 ? `${Math.floor(secs/60)}m ${secs%60}s` : `${secs}s`;
-      if (el.textContent !== display) el.textContent = display;
-    });
-  }
-
-  /* ---- tick (update countdown display) ---- */
-  function startTick() {
-    if (_tickId) return;
-    _tickId = setInterval(_updateTimers, 1000);
-  }
-  function stopTick() {
-    if (_tickId) { clearInterval(_tickId); _tickId = null; }
-  }
-
-  /* ---- init ---- */
-  document.addEventListener('DOMContentLoaded', () => {
-    DOMCache.get('scheduler-btn')?.addEventListener('click', toggle);
-    DOMCache.get('scheduler-close')?.addEventListener('click', close);
-    DOMCache.get('scheduler-add')?.addEventListener('click', addScheduled);
-    DOMCache.get('scheduler-clear-all')?.addEventListener('click', cancelAll);
-    // Enter in textarea schedules (Shift+Enter for newline)
-    msgInput()?.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addScheduled(); }
-    });
-  });
-
-  // Keyboard shortcut: Alt+Q
-  document.addEventListener('keydown', (e) => {
-    if (e.altKey && e.key.toLowerCase() === 'q') { e.preventDefault(); toggle(); }
-  });
-
-  return { open, close, toggle, cancelAll };
-})();
-
-// ============================================================
-// Message Translator — translate any message via OpenAI API
-// ============================================================
-const MessageTranslator = (() => {
-  const LANGUAGES = [
-    'Spanish','French','German','Italian','Portuguese','Chinese','Japanese',
-    'Korean','Arabic','Hindi','Russian','Turkish','Dutch','Swedish','Polish',
-    'Vietnamese','Thai','Indonesian','Greek','Hebrew','Czech','Romanian',
-    'Hungarian','Finnish','Danish','Norwegian','Ukrainian','Bengali','Malay'
-  ];
-  let _panel = null;
-  let _overlay = null;
-  let _targetLang = 'Spanish';
-  let _sourceText = '';
-  let _sourceEl = null;
-
-  function getApiKey() {
-    const el = document.getElementById('api-key');
-    return el ? el.value.trim() : '';
-  }
-
-  function buildPanel() {
-    if (_panel) return;
-    _overlay = document.createElement('div');
-    _overlay.className = 'translator-overlay';
-    _overlay.addEventListener('click', close);
-
-    _panel = document.createElement('div');
-    _panel.className = 'translator-panel';
-    _panel.setAttribute('role', 'dialog');
-    _panel.setAttribute('aria-label', 'Message Translator');
-    _panel.innerHTML = `
-      <div class="translator-header">
-        <h3>🌐 Translate Message</h3>
-        <button class="translator-close" title="Close">&times;</button>
-      </div>
-      <div class="translator-body">
-        <label for="translator-lang">Target language:</label>
-        <select id="translator-lang">
-          ${LANGUAGES.map(l => `<option value="${l}"${l === _targetLang ? ' selected' : ''}>${l}</option>`).join('')}
-        </select>
-        <div class="translator-source">
-          <label>Original:</label>
-          <div id="translator-original" class="translator-text-box"></div>
-        </div>
-        <button id="translator-go" class="btn-primary">Translate</button>
-        <div class="translator-result">
-          <label>Translation:</label>
-          <div id="translator-output" class="translator-text-box"></div>
-        </div>
-        <div class="translator-actions" style="display:none">
-          <button id="translator-copy" class="btn-secondary" title="Copy translation">📋 Copy</button>
-          <button id="translator-replace" class="btn-secondary" title="Replace original message">Replace</button>
-        </div>
-      </div>
-    `;
-    document.body.appendChild(_overlay);
-    document.body.appendChild(_panel);
-
-    _panel.querySelector('.translator-close').addEventListener('click', close);
-    _panel.querySelector('#translator-go').addEventListener('click', doTranslate);
-    _panel.querySelector('#translator-copy').addEventListener('click', copyResult);
-    _panel.querySelector('#translator-replace').addEventListener('click', replaceOriginal);
-    _panel.querySelector('#translator-lang').addEventListener('change', (e) => {
-      _targetLang = e.target.value;
-    });
-  }
-
-  async function doTranslate() {
-    const key = getApiKey();
-    if (!key) { alert('Please enter your OpenAI API key first.'); return; }
-    const goBtn = _panel.querySelector('#translator-go');
-    const output = _panel.querySelector('#translator-output');
-    const actions = _panel.querySelector('.translator-actions');
-    goBtn.disabled = true;
-    goBtn.textContent = 'Translating…';
-    output.textContent = '';
-    actions.style.display = 'none';
-
-    try {
-      const result = await OpenAIClient.complete({
-        apiKey: key,
-        model: 'gpt-4o-mini',
-        temperature: 0.3,
-        messages: [
-          { role: 'system', content: `You are a translator. Translate the user's text to ${_targetLang}. Return ONLY the translation, nothing else.` },
-          { role: 'user', content: _sourceText }
-        ],
-      });
-      if (!result.ok) throw new Error(result.error);
-      const translation = result.content?.trim() || '(no translation)';
-      output.textContent = translation;
-      actions.style.display = 'flex';
-    } catch (err) {
-      output.textContent = `Error: ${err.message}`;
-    } finally {
-      goBtn.disabled = false;
-      goBtn.textContent = 'Translate';
-    }
-  }
-
-  function copyResult() {
-    const text = _panel.querySelector('#translator-output').textContent;
-    navigator.clipboard.writeText(text).then(() => {
-      const btn = _panel.querySelector('#translator-copy');
-      btn.textContent = '✅ Copied!';
-      setTimeout(() => { btn.textContent = '📋 Copy'; }, 1500);
-    });
-  }
-
-  function replaceOriginal() {
-    if (!_sourceEl) return;
-    const translation = _panel.querySelector('#translator-output').textContent;
-    const original = _sourceEl.textContent;
-    _sourceEl.innerHTML = `<div class="translator-replaced">${_escapeHtml(translation)}<div class="translator-original-note">Original: ${_escapeHtml(original)}</div></div>`;
-    close();
-  }
-
-  function open(text, sourceElement) {
-    buildPanel();
-    _sourceText = text || '';
-    _sourceEl = sourceElement || null;
-    _panel.querySelector('#translator-original').textContent = _sourceText;
-    _panel.querySelector('#translator-output').textContent = '';
-    _panel.querySelector('.translator-actions').style.display = 'none';
-    _overlay.style.display = 'block';
-    _panel.style.display = 'flex';
-  }
-
-  function close() {
-    if (_overlay) _overlay.style.display = 'none';
-    if (_panel) _panel.style.display = 'none';
-  }
-
-  function toggle(text, el) {
-    if (_panel && _panel.style.display === 'flex') close();
-    else open(text, el);
-  }
-
-  // Add translate option to message context menu items
-  document.addEventListener('DOMContentLoaded', () => {
-    // Add toolbar button
-    const toolbarBtn = document.createElement('button');
-    toolbarBtn.id = 'translate-btn';
-    toolbarBtn.className = 'btn-secondary';
-    toolbarBtn.title = 'Message Translator — translate messages to other languages (Alt+T)';
-    toolbarBtn.textContent = '🌐';
-    toolbarBtn.addEventListener('click', () => {
-      // If text is selected, use that; otherwise prompt
-      const sel = window.getSelection().toString().trim();
-      if (sel) {
-        open(sel, null);
-      } else {
-        // Try to get the last assistant message
-        const msgs = document.querySelectorAll('.message.assistant .message-text, .message.assistant .msg-text');
-        const last = msgs.length ? msgs[msgs.length - 1] : null;
-        if (last) open(last.textContent.trim(), last);
-        else open('', null);
-      }
-    });
-    const toolbar = document.querySelector('.toolbar[role="form"][aria-label="Chat input"]');
-    if (toolbar) toolbar.appendChild(toolbarBtn);
-
-    // Keyboard shortcut: Alt+T
-    document.addEventListener('keydown', (e) => {
-      if (e.altKey && e.key.toLowerCase() === 't') {
-        e.preventDefault();
-        toolbarBtn.click();
-      }
-    });
-  });
-
-  return { open, close, toggle };
-})();
-
 // ═══════════════════════════════════════════════════════════════════════
 //  NotificationSound - play a subtle chime when AI responds while tab is hidden
 // ═══════════════════════════════════════════════════════════════════════
@@ -28713,219 +28375,6 @@ const ConversationExport = (() => {
   });
 
   return { toggle, exportAs, copyAsMarkdown };
-})();
-
-/* ============================================================
- * ChatGPTImporter — Import ChatGPT conversation exports (JSON)
- *
- * ChatGPT allows users to export their data as a ZIP containing
- * conversations.json. This module lets users upload that JSON file
- * (or the full ZIP) and import selected conversations as sessions.
- * ============================================================ */
-const ChatGPTImporter = (() => {
-  let _modal = null;
-  let _closeFn = null;
-  let _conversations = [];
-
-  function toggle() {
-    if (_modal && _modal.style.display !== 'none') { hide(); return; }
-    show();
-  }
-
-  function show() {
-    if (_modal) { _modal.style.display = 'flex'; return; }
-    const { overlay, modal, close } = createModalOverlay({
-      overlayId: 'chatgpt-import-overlay',
-      maxWidth: '600px',
-      background: 'var(--bg-secondary, #2a2a2a)'
-    });
-    _modal = overlay;
-    _closeFn = close;
-    modal.style.maxHeight = '80vh';
-    modal.style.overflowY = 'auto';
-    modal.style.color = 'var(--text-primary, #eee)';
-    modal.innerHTML = `
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-          <h3 style="margin:0;font-size:18px">📥 Import ChatGPT Conversations</h3>
-          <button onclick="ChatGPTImporter.hide()" style="background:none;border:none;color:var(--text-secondary,#aaa);font-size:20px;cursor:pointer">✕</button>
-        </div>
-        <p style="margin:0 0 12px;color:var(--text-secondary,#aaa);font-size:13px">
-          Upload your <code>conversations.json</code> file from a ChatGPT data export.
-          Go to <em>ChatGPT → Settings → Data Controls → Export Data</em> to get your export.
-        </p>
-        <div id="chatgpt-import-drop" style="border:2px dashed var(--border-color,#555);border-radius:8px;padding:32px;text-align:center;cursor:pointer;margin-bottom:16px;transition:border-color .2s">
-          <div style="font-size:32px;margin-bottom:8px">📂</div>
-          <div style="font-size:14px;color:var(--text-secondary,#aaa)">Click or drag & drop <code>conversations.json</code></div>
-          <input type="file" id="chatgpt-import-file" accept=".json" style="display:none">
-        </div>
-        <div id="chatgpt-import-preview" style="display:none">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-            <span id="chatgpt-import-count" style="font-size:13px;color:var(--text-secondary,#aaa)"></span>
-            <div>
-              <button id="chatgpt-import-all" style="background:var(--accent,#2196F3);color:#fff;border:none;border-radius:6px;padding:6px 14px;cursor:pointer;font-size:13px;margin-right:6px">Import All</button>
-              <button id="chatgpt-import-selected" style="background:var(--bg-hover,#383838);color:var(--text-primary,#eee);border:1px solid var(--border-color,#555);border-radius:6px;padding:6px 14px;cursor:pointer;font-size:13px">Import Selected</button>
-            </div>
-          </div>
-          <div id="chatgpt-import-list" style="max-height:40vh;overflow-y:auto"></div>
-        </div>
-        <div id="chatgpt-import-status" style="display:none;margin-top:12px;padding:10px;border-radius:6px;font-size:13px"></div>`;
-
-    const dropZone = _modal.querySelector('#chatgpt-import-drop');
-    const fileInput = _modal.querySelector('#chatgpt-import-file');
-    dropZone.addEventListener('click', () => fileInput.click());
-    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.style.borderColor = 'var(--accent,#2196F3)'; });
-    dropZone.addEventListener('dragleave', () => { dropZone.style.borderColor = 'var(--border-color,#555)'; });
-    dropZone.addEventListener('drop', (e) => { e.preventDefault(); dropZone.style.borderColor = 'var(--border-color,#555)'; if (e.dataTransfer.files.length) _handleFile(e.dataTransfer.files[0]); });
-    fileInput.addEventListener('change', () => { if (fileInput.files.length) _handleFile(fileInput.files[0]); });
-
-    _modal.querySelector('#chatgpt-import-all').addEventListener('click', () => _importConversations(_conversations));
-    _modal.querySelector('#chatgpt-import-selected').addEventListener('click', () => {
-      const checked = [..._modal.querySelectorAll('.chatgpt-conv-cb:checked')].map(cb => _conversations[parseInt(cb.dataset.idx)]);
-      if (!checked.length) { _showStatus('⚠️ No conversations selected.', '#ff9800'); return; }
-      _importConversations(checked);
-    });
-  }
-
-  function hide() {
-    if (_modal) _modal.style.display = 'none';
-  }
-
-  function _handleFile(file) {
-    if (!file.name.endsWith('.json')) { _showStatus('⚠️ Please select a .json file.', '#ff9800'); return; }
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const data = sanitizeStorageObject(JSON.parse(e.target.result));
-        if (!Array.isArray(data)) throw new Error('Expected an array of conversations');
-        _conversations = data.filter(c => c && typeof c === 'object' && c.mapping && typeof c.mapping === 'object');
-        _renderPreview();
-      } catch (err) {
-        _showStatus('❌ Invalid ChatGPT export: ' + err.message, '#f44336');
-      }
-    };
-    reader.readAsText(file);
-  }
-
-  function _renderPreview() {
-    const preview = _modal.querySelector('#chatgpt-import-preview');
-    const list = _modal.querySelector('#chatgpt-import-list');
-    const count = _modal.querySelector('#chatgpt-import-count');
-    preview.style.display = 'block';
-    count.textContent = `${_conversations.length} conversation${_conversations.length !== 1 ? 's' : ''} found`;
-    list.innerHTML = '';
-    _conversations.forEach((conv, idx) => {
-      const msgCount = _countMessages(conv);
-      const date = conv.create_time ? new Date(conv.create_time * 1000).toLocaleDateString() : 'Unknown date';
-      const el = document.createElement('label');
-      el.style.cssText = 'display:flex;align-items:center;gap:8px;padding:8px;border-bottom:1px solid var(--border-color,#333);cursor:pointer;font-size:13px';
-      el.innerHTML = `<input type="checkbox" class="chatgpt-conv-cb" data-idx="${idx}" checked>
-        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${_esc(conv.title || 'Untitled')}</span>
-        <span style="color:var(--text-secondary,#888);font-size:12px">${msgCount} msgs · ${date}</span>`;
-      list.appendChild(el);
-    });
-  }
-
-  function _countMessages(conv) {
-    if (!conv.mapping) return 0;
-    let count = 0;
-    for (const node of Object.values(conv.mapping)) {
-      if (node.message && node.message.content && node.message.content.parts &&
-          node.message.author && (node.message.author.role === 'user' || node.message.author.role === 'assistant')) {
-        count++;
-      }
-    }
-    return count;
-  }
-
-  function _extractMessages(conv) {
-    if (!conv.mapping) return [];
-    // Build tree to get linear order
-    const nodes = conv.mapping;
-    // Use null-prototype object to prevent prototype pollution from
-    // user-supplied keys (e.g. "__proto__", "constructor") in the
-    // imported ChatGPT conversation mapping.
-    const childMap = Object.create(null);
-    let rootId = null;
-    for (const [id, node] of Object.entries(nodes)) {
-      if (typeof node !== 'object' || node === null) continue;
-      if (!node.parent) { rootId = id; }
-      else {
-        const parentId = String(node.parent);
-        if (!childMap[parentId]) childMap[parentId] = [];
-        childMap[parentId].push(id);
-      }
-    }
-    // Walk tree depth-first (follow first child for main branch)
-    const messages = [];
-    let current = rootId;
-    while (current) {
-      const node = nodes[current];
-      if (node && node.message && node.message.content && node.message.author) {
-        const role = node.message.author.role;
-        if (role === 'user' || role === 'assistant') {
-          const parts = node.message.content.parts || [];
-          const text = parts.filter(p => typeof p === 'string').join('\n');
-          if (text.trim()) messages.push({ role, content: text });
-        }
-      }
-      const children = childMap[current];
-      current = children && children.length > 0 ? children[children.length - 1] : null;
-    }
-    return messages;
-  }
-
-  function _importConversations(convs) {
-    if (typeof SessionManager === 'undefined') { _showStatus('❌ SessionManager not available.', '#f44336'); return; }
-    let imported = 0;
-    for (const conv of convs) {
-      const messages = _extractMessages(conv);
-      if (!messages.length) continue;
-      const now = new Date().toISOString();
-      const session = {
-        id: crypto.randomUUID(),
-        name: (conv.title || 'ChatGPT Import').substring(0, 100),
-        messages: messages,
-        messageCount: messages.length,
-        preview: messages[0] ? messages[0].content.substring(0, 80) : '',
-        createdAt: conv.create_time ? new Date(conv.create_time * 1000).toISOString() : now,
-        updatedAt: now
-      };
-      // Use internal _loadAll/_saveAll via the public importSession if available,
-      // otherwise fall back to direct localStorage manipulation
-      if (typeof SessionManager.importSession === 'function') {
-        SessionManager.importSession(session);
-      } else {
-        try {
-          const raw = SafeStorage.get('agenticchat_sessions');
-          const sessions = raw ? JSON.parse(raw) : [];
-          sessions.unshift(session);
-          SafeStorage.set('agenticchat_sessions', JSON.stringify(sessions));
-        } catch { /* skip */ }
-      }
-      imported++;
-    }
-    _showStatus(`✅ Imported ${imported} conversation${imported !== 1 ? 's' : ''}! Open Sessions panel to browse.`, '#4caf50');
-    if (typeof SessionManager !== 'undefined' && typeof SessionManager.refresh === 'function') {
-      SessionManager.refresh();
-    }
-  }
-
-  function _showStatus(msg, color) {
-    const el = _modal.querySelector('#chatgpt-import-status');
-    el.style.display = 'block';
-    el.style.background = color + '22';
-    el.style.border = '1px solid ' + color;
-    el.style.color = color;
-    el.textContent = msg;
-  }
-
-  function _esc(s) {
-    const d = document.createElement('div');
-    d.textContent = s;
-    return d.innerHTML;
-  }
-
-  return { toggle, show, hide };
 })();
 
 /* ============================================================
