@@ -167,6 +167,7 @@
     <a href="#quickstart">Quick Start</a>
     <a href="#architecture">Architecture</a>
     <a href="#api">API Reference</a>
+    <a href="#additional-modules">Additional Modules</a>
     <a href="#configuration">Configuration</a>
     <a href="#keyboard-shortcuts">Keyboard Shortcuts</a>
     <a href="#security">Security Model</a>
@@ -941,6 +942,146 @@ open index.html</code></pre>
 
       <h3>MessageContextMenu</h3>
       <p>Right-click context menu on chat messages. Provides quick access to copy, bookmark, pin, annotate, react, fork, edit, diff, and read-aloud actions.</p>
+    </section>
+
+    <!-- Additional Modules -->
+    <section id="additional-modules">
+      <h2>Additional Modules</h2>
+      <p>These modules extend AgenticChat with data management, productivity, analytics, and UX enhancements.</p>
+
+      <h3>ChatGPTImporter</h3>
+      <p>Import conversations exported from ChatGPT (JSON format) into AgenticChat sessions. Parses the official ChatGPT export schema and maps messages to the internal conversation format.</p>
+      <pre><code>ChatGPTImporter.import(jsonData) → { imported, skipped, names }</code></pre>
+
+      <h3>ClipboardHistory</h3>
+      <p>Tracks clipboard paste events and maintains a searchable history of pasted content. Useful for quickly re-pasting earlier snippets without leaving the chat.</p>
+
+      <h3>ContextWindowMeter</h3>
+      <p>Visual token-budget gauge showing how much of the model's context window is in use. Turns yellow at 70% and red at 90%.</p>
+      <pre><code>ContextWindowMeter.init()
+ContextWindowMeter.refresh()
+ContextWindowMeter.toggle()
+ContextWindowMeter.destroy()</code></pre>
+
+      <h3>ConversationAgenda</h3>
+      <p>Create and track discussion agendas within a conversation. Add topic items, check them off as discussed, and keep conversations on track.</p>
+
+      <h3>ConversationExport</h3>
+      <p>Export conversations in multiple formats: JSON (full fidelity), Markdown, plain text, and HTML. Includes metadata such as timestamps and model info.</p>
+
+      <h3>ConversationHealthCheck</h3>
+      <p>Scores conversation quality on multiple dimensions (length balance, topic drift, engagement) and returns a letter grade with actionable suggestions.</p>
+      <pre><code>ConversationHealthCheck.analyze(messages) → { score, grade, checks }</code></pre>
+
+      <h3>ConversationMindMap</h3>
+      <p>Extracts topics and their co-occurrence from conversation messages to generate a mind-map visualization of discussion themes.</p>
+      <pre><code>ConversationMindMap.build(messages) → { topics, cooccur }</code></pre>
+
+      <h3>ConversationSentiment</h3>
+      <p>Lexicon-based sentiment analysis across the conversation. Tracks per-message scores, overall mood, and trend direction (improving/declining/stable).</p>
+      <pre><code>ConversationSentiment.analyze(messages) → { scores, average, mood, trend, messageCount }</code></pre>
+
+      <h3>ConversationShareLink</h3>
+      <p>Generate shareable links that encode a conversation snapshot into a URL-safe format, allowing read-only sharing without a backend.</p>
+
+      <h3>ConversationTimer</h3>
+      <p>Tracks elapsed time for the current conversation session. Useful for consulting, tutoring, or time-boxed brainstorming sessions.</p>
+
+      <h3>DataBackup</h3>
+      <p>Full application state backup and restore. Exports all sessions, settings, bookmarks, and templates as a single versioned JSON file with integrity checks.</p>
+
+      <h3>FocusTimer</h3>
+      <p>Dedicated focus/deep-work timer (distinct from Pomodoro). Set a custom duration and get notified when time is up, with optional notification sounds.</p>
+
+      <h3>IncognitoMode</h3>
+      <p>Temporarily disable conversation persistence. Messages sent in incognito mode are not saved to local storage or session history.</p>
+      <pre><code>IncognitoMode.enable()
+IncognitoMode.disable()
+IncognitoMode.toggle()
+IncognitoMode.isActive()</code></pre>
+
+      <h3>MessageFilter</h3>
+      <p>Filter the visible message history by role (user/assistant/system), date range, or content keywords without affecting the underlying data.</p>
+
+      <h3>MessageHighlighter</h3>
+      <p>Highlight specific text spans within messages with customizable colors. Highlights persist across page reloads.</p>
+
+      <h3>MessageScheduler</h3>
+      <p>Schedule messages to be sent at a future time. Queued messages are stored locally and dispatched when the scheduled time arrives.</p>
+
+      <h3>ModelCompare</h3>
+      <p>Send the same prompt to multiple models simultaneously and compare responses side-by-side, including token usage and latency metrics.</p>
+      <pre><code>ModelCompare.run(prompt, modelIds) → [{ modelId, modelLabel, content, tokens, latencyMs }]</code></pre>
+
+      <h3>MoodTracker</h3>
+      <p>Sentiment timeline for the conversation, broken down by user vs. assistant mood. Visualizes emotional tone over time.</p>
+      <pre><code>MoodTracker.analyze(messages) → { overall, timeline, userMood, aiMood, msgCount }</code></pre>
+
+      <h3>NotificationSound</h3>
+      <p>Play an audio notification when a response arrives while the browser tab is not focused. Toggleable via the UI.</p>
+      <pre><code>NotificationSound.notifyIfHidden()
+NotificationSound.toggle()
+NotificationSound.isEnabled()</code></pre>
+
+      <h3>OfflineManager</h3>
+      <p>Detect network connectivity changes and queue outbound API calls when offline. Replays queued requests when connectivity is restored.</p>
+      <pre><code>OfflineManager.init()
+OfflineManager.isOffline()</code></pre>
+
+      <h3>PinBoard</h3>
+      <p>Pin important messages to a persistent sidebar board for quick reference during long conversations.</p>
+
+      <h3>PromptChainRunner</h3>
+      <p>Execute multi-step prompt chains where each step's output feeds into the next. Supports conditional branching and variable interpolation.</p>
+
+      <h3>QuickSwitcher</h3>
+      <p>VS Code / Slack-style quick session switcher (<code>Ctrl+K</code>). Opens a fuzzy-search overlay to instantly jump between sessions with keyboard navigation.</p>
+
+      <h3>ReadabilityAnalyzer</h3>
+      <p>Computes readability metrics (Flesch-Kincaid, sentence length, word diversity) for assistant responses to help gauge response complexity.</p>
+      <pre><code>ReadabilityAnalyzer.analyze(text) → { sentences, words, syllables, fleschEase, fleschKincaid, diversity, … }</code></pre>
+
+      <h3>ResponseLengthPresets</h3>
+      <p>Pre-send control for response verbosity. Choose between Concise, Normal, Detailed, or Exhaustive modes that inject length guidance into the system prompt.</p>
+
+      <h3>ScrollLock</h3>
+      <p>Lock scroll position to prevent auto-scrolling when reviewing earlier messages while new content streams in.</p>
+
+      <h3>SessionArchive</h3>
+      <p>Archive sessions to hide them from the main list without deleting data. Archived sessions can be toggled visible via a toolbar button.</p>
+      <pre><code>SessionArchive.archive(id)
+SessionArchive.unarchive(id)
+SessionArchive.isArchived(id)
+SessionArchive.toggleShowArchived()
+SessionArchive.getArchivedCount()</code></pre>
+
+      <h3>SessionCalendar</h3>
+      <p>Visual month-calendar showing sessions by date. Click a day to see its sessions; click a session to load it. Navigate months with arrow buttons.</p>
+
+      <h3>SessionNotes</h3>
+      <p>Attach free-form notes or memos to saved sessions. Notes are stored separately to keep session data lightweight.</p>
+
+      <h3>SmartRetry</h3>
+      <p>Automatic retry with exponential backoff for failed API requests. Handles rate limits and transient errors transparently.</p>
+
+      <h3>ToneAdjuster</h3>
+      <p>Rewrite assistant messages in different tones (formal, casual, technical, friendly) via the OpenAI API. Adds a 🎭 button to each assistant message.</p>
+
+      <h3>UsageHeatmap</h3>
+      <p>GitHub-style contribution heatmap showing chat activity by day. Visualizes usage patterns over time.</p>
+      <pre><code>UsageHeatmap.build() → { grid, total, sessionCount }</code></pre>
+
+      <h3>WordCloud</h3>
+      <p>Interactive word cloud visualization from conversation content. Words are sized by frequency, colored by role (user vs. assistant), and clickable to search.</p>
+
+      <h3>AutoSaveDraft</h3>
+      <p>Automatically saves the current input field content at regular intervals so unsent messages survive page reloads or accidental navigation.</p>
+
+      <h3>PdfExport</h3>
+      <p>Export the current conversation as a formatted PDF document, preserving code blocks, markdown formatting, and message metadata.</p>
+
+      <h3>MessageReply</h3>
+      <p>Reply to specific messages within a conversation thread, creating quoted reply chains similar to messaging apps.</p>
     </section>
 
     <!-- Configuration -->
