@@ -88,6 +88,7 @@
  *   AutoSaveDraft        - auto-persist unsent chat input across page refreshes
  *   ScrollLock           - suppress auto-scroll when reading history, floating jump-to-bottom pill
  *   IncognitoMode        - private session mode that suppresses localStorage persistence (Alt+I)
+ *   MessageReply         - reply-to / quote a specific message with visual preview bar
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -1567,7 +1568,13 @@ const ChatController = (() => {
     QuickReplies.hide();
 
     try {
-      ConversationManager.addMessage('user', prompt);
+      // If replying to a specific message, prepend quoted context
+      var _replyCtx = (typeof MessageReply !== 'undefined') ? MessageReply.consumeReply() : null;
+      var _finalPrompt = prompt;
+      if (_replyCtx) {
+        _finalPrompt = '> [Replying to ' + _replyCtx.role + ']: ' + _replyCtx.snippet + '\n\n' + prompt;
+      }
+      ConversationManager.addMessage('user', _finalPrompt);
       InputHistory.push(prompt);
 
       let reply;
@@ -2166,6 +2173,9 @@ const HistoryPanel = (() => {
       if (role === 'assistant') {
         ToneAdjuster.decorateOne(msgEl, nonSystemIdx);
       }
+
+      // MessageReply: all messages
+      MessageReply.decorateOne(msgEl, i);
 
       nonSystemIdx++;
     }
@@ -30027,4 +30037,135 @@ const IncognitoMode = (() => {
   }
 
   return { isActive, enable, disable, toggle, init };
+})();
+
+// ============================================================
+// Module: MessageReply
+// Reply-to / quote a specific message. Adds a ↩️ button on each
+// message. Clicking it shows a reply preview bar above the chat
+// input, and the quoted context is prepended to the sent message
+// so the AI understands what the user is referring to.
+// ============================================================
+var MessageReply = (function () {
+  'use strict';
+
+  var _replyTarget = null; // { index, role, snippet }
+  var _barEl = null;
+  var _styleInjected = false;
+
+  function _injectStyles() {
+    if (_styleInjected) return;
+    _styleInjected = true;
+    var s = document.createElement('style');
+    s.textContent = [
+      '.msg-reply-btn { cursor:pointer; opacity:0; transition:opacity .15s; background:none; border:none; font-size:14px; padding:2px 4px; margin-left:4px; vertical-align:middle; }',
+      '.history-msg:hover .msg-reply-btn { opacity:0.6; }',
+      '.msg-reply-btn:hover { opacity:1 !important; }',
+      '.reply-bar { display:flex; align-items:center; gap:8px; padding:6px 12px; margin:0 0 4px 0; border-left:3px solid var(--accent, #2196F3); border-radius:4px; background:var(--bg-secondary, #f5f5f5); font-size:13px; color:var(--text-secondary, #666); animation: reply-bar-in .15s ease; }',
+      '.reply-bar .reply-bar-role { font-weight:600; white-space:nowrap; }',
+      '.reply-bar .reply-bar-text { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }',
+      '.reply-bar .reply-bar-close { cursor:pointer; background:none; border:none; font-size:16px; padding:0 4px; color:var(--text-secondary, #666); }',
+      '.reply-bar .reply-bar-close:hover { color:var(--text-primary, #333); }',
+      '@keyframes reply-bar-in { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:translateY(0); } }',
+      '.msg-quote-block { border-left:3px solid var(--accent, #2196F3); padding:4px 10px; margin:0 0 6px 0; font-size:0.88em; color:var(--text-secondary, #888); background:var(--bg-secondary, rgba(33,150,243,0.06)); border-radius:3px; white-space:pre-wrap; max-height:60px; overflow:hidden; }',
+    ].join('\n');
+    document.head.appendChild(s);
+  }
+
+  /** Truncate text to maxLen chars */
+  function _snippet(text, maxLen) {
+    maxLen = maxLen || 120;
+    if (!text) return '';
+    var clean = text.replace(/\s+/g, ' ').trim();
+    return clean.length > maxLen ? clean.substring(0, maxLen) + '…' : clean;
+  }
+
+  /** Build or return the reply preview bar */
+  function _ensureBar() {
+    if (_barEl) return _barEl;
+    var bar = document.createElement('div');
+    bar.className = 'reply-bar';
+    bar.id = 'reply-bar';
+    bar.style.display = 'none';
+    bar.innerHTML = '<span class="reply-bar-role"></span><span class="reply-bar-text"></span><button class="reply-bar-close" title="Cancel reply">✕</button>';
+    bar.querySelector('.reply-bar-close').addEventListener('click', cancelReply);
+
+    // Insert before chat-input's parent toolbar
+    var chatInput = document.getElementById('chat-input');
+    if (chatInput && chatInput.parentNode && chatInput.parentNode.parentNode) {
+      chatInput.parentNode.parentNode.insertBefore(bar, chatInput.parentNode);
+    }
+    _barEl = bar;
+    return bar;
+  }
+
+  /** Set reply target and show preview bar */
+  function setReply(historyIndex, role, content) {
+    _injectStyles();
+    _replyTarget = {
+      index: historyIndex,
+      role: role,
+      snippet: _snippet(content, 200)
+    };
+    var bar = _ensureBar();
+    bar.querySelector('.reply-bar-role').textContent = role === 'user' ? '↩️ You' : '↩️ Assistant';
+    bar.querySelector('.reply-bar-text').textContent = _snippet(content, 100);
+    bar.style.display = 'flex';
+
+    // Focus input
+    var inp = document.getElementById('chat-input');
+    if (inp) inp.focus();
+  }
+
+  /** Cancel pending reply */
+  function cancelReply() {
+    _replyTarget = null;
+    if (_barEl) _barEl.style.display = 'none';
+  }
+
+  /** Get reply target (if any) and clear it */
+  function consumeReply() {
+    var target = _replyTarget;
+    cancelReply();
+    return target;
+  }
+
+  /** Check if a reply is pending */
+  function hasPendingReply() {
+    return _replyTarget !== null;
+  }
+
+  /** Decorate a single message element with a reply button */
+  function decorateOne(msgEl, historyIndex) {
+    if (msgEl.querySelector('.msg-reply-btn')) return;
+    _injectStyles();
+
+    var history = ConversationManager.getHistory();
+    if (historyIndex >= history.length) return;
+    var msg = history[historyIndex];
+    if (msg.role === 'system') return;
+
+    var btn = document.createElement('button');
+    btn.className = 'msg-reply-btn';
+    btn.title = 'Reply to this message';
+    btn.textContent = '↩️';
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      setReply(historyIndex, msg.role, msg.content);
+    });
+
+    // Add to role label row
+    var roleEl = msgEl.querySelector('.msg-role');
+    if (roleEl) {
+      roleEl.appendChild(btn);
+    }
+  }
+
+  return {
+    decorateOne: decorateOne,
+    setReply: setReply,
+    cancelReply: cancelReply,
+    consumeReply: consumeReply,
+    hasPendingReply: hasPendingReply
+  };
 })();
