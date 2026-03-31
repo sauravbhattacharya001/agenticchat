@@ -1043,27 +1043,43 @@ const UIController = (() => {
 
   /** Set the chat output area to the given text (replaces content). */
   // Streaming text node - kept as module-level state so appendChatOutput
-  // can append in O(1) instead of the old textContent += which was O(n²)
-  // (read full string → concat → write back on every single token).
+  // can append without reading the entire existing string.
   let _streamNode = null;
-  function setChatOutput(text) {
-    const out = el('chat-output');
-    out.textContent = text;
-    // Reset streaming node; appendChatOutput will lazily create a new one.
-    _streamNode = null;
-  }
-  /** Append text to the chat output area (used during streaming).
-   *  Uses a dedicated Text node so each token append is O(1) via
-   *  nodeValue mutation rather than reading + rewriting the entire
-   *  container's textContent (which was O(n) per call, making a
-   *  full stream O(n²) in total tokens).
-   */
-  function appendChatOutput(text) {
+  // Buffer incoming tokens and flush once per animation frame.
+  // Each `_streamNode.data += text` still copies the full string (O(n))
+  // because JS strings are immutable; batching N tokens into a single
+  // DOM write per frame reduces total copies from O(N·L) to O(F·L)
+  // where F = frames ≪ N = token count and L = final string length.
+  let _streamBuffer = [];
+  let _streamRafId = 0;
+  function _flushStreamBuffer() {
+    _streamRafId = 0;
+    if (_streamBuffer.length === 0) return;
     if (!_streamNode) {
       _streamNode = document.createTextNode('');
       el('chat-output').appendChild(_streamNode);
     }
-    _streamNode.data += text;
+    _streamNode.data += _streamBuffer.join('');
+    _streamBuffer.length = 0;
+  }
+  function setChatOutput(text) {
+    const out = el('chat-output');
+    out.textContent = text;
+    // Reset streaming state; appendChatOutput will lazily create a new node.
+    _streamNode = null;
+    _streamBuffer.length = 0;
+    if (_streamRafId) { cancelAnimationFrame(_streamRafId); _streamRafId = 0; }
+  }
+  /** Append text to the chat output area (used during streaming).
+   *  Buffers incoming tokens and flushes to the DOM once per animation
+   *  frame via requestAnimationFrame, reducing string copy overhead
+   *  from O(N) DOM writes to O(F) where F = frame count.
+   */
+  function appendChatOutput(text) {
+    _streamBuffer.push(text);
+    if (!_streamRafId) {
+      _streamRafId = requestAnimationFrame(_flushStreamBuffer);
+    }
   }
   /**
    * Set the console/sandbox output area text and optional color.
