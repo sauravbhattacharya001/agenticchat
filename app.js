@@ -4489,6 +4489,17 @@ const SessionManager = (() => {
       existing.messageCount = messages.length;
       existing.updatedAt = now;
       if (name && name.trim()) existing.name = name.trim().substring(0, 200);
+      // Smart Auto-Rename: after the first assistant reply, regenerate the
+      // session title using SmartTitle so it reflects the actual conversation
+      // topic rather than just the truncated first message.
+      else if (!existing._autoRenamed && messages.length >= 2
+               && messages.some(m => m.role === 'assistant')) {
+        const betterName = _generateName(messages);
+        if (betterName && betterName !== existing.name) {
+          existing.name = betterName;
+          existing._autoRenamed = true;
+        }
+      }
       // Update preview from last user message
       const lastUser = messages.filter(m => m.role === 'user').pop();
       existing.preview = lastUser
