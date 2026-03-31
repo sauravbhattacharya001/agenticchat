@@ -87,6 +87,7 @@
  *   MessageHighlighter   - select text in messages and apply colored highlights (Alt+H)
  *   AutoSaveDraft        - auto-persist unsent chat input across page refreshes
  *   ScrollLock           - suppress auto-scroll when reading history, floating jump-to-bottom pill
+ *   IncognitoMode        - private session mode that suppresses localStorage persistence (Alt+I)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -29858,4 +29859,108 @@ const ConversationShareLink = (() => {
   }
 
   return { open, close, toggle, init };
+})();
+
+/* ============================================================
+ * Incognito Mode - private sessions that skip localStorage
+ *
+ * When active, the current session's messages are NOT saved to
+ * localStorage. On page refresh or close, the conversation is
+ * gone - just like browser incognito mode. Useful for sensitive
+ * prompts, API key discussions, or temporary explorations.
+ *
+ * Toggle: button in toolbar or Alt+I keyboard shortcut.
+ * ============================================================ */
+const IncognitoMode = (() => {
+  let _active = false;
+  let _banner = null;
+  let _originalAutoSave = null;
+  let _originalSave = null;
+
+  function isActive() { return _active; }
+
+  function enable() {
+    if (_active) return;
+    _active = true;
+    if (!_originalAutoSave) {
+      _originalAutoSave = SessionManager.autoSaveIfEnabled;
+      _originalSave = SessionManager.save;
+    }
+    SessionManager.autoSaveIfEnabled = function () { /* skip in incognito */ };
+    SessionManager.save = function () {
+      if (typeof UIController !== 'undefined' && UIController.setLastPrompt) {
+        UIController.setLastPrompt('Incognito - session not saved');
+      }
+      return false;
+    };
+    _showBanner();
+    _updateButton(true);
+  }
+
+  function disable() {
+    if (!_active) return;
+    _active = false;
+    if (_originalAutoSave) {
+      SessionManager.autoSaveIfEnabled = _originalAutoSave;
+      SessionManager.save = _originalSave;
+      _originalAutoSave = null;
+      _originalSave = null;
+    }
+    _hideBanner();
+    _updateButton(false);
+  }
+
+  function toggle() {
+    if (_active) disable();
+    else enable();
+  }
+
+  function _showBanner() {
+    if (_banner) return;
+    _banner = document.createElement('div');
+    _banner.id = 'incognito-banner';
+    _banner.setAttribute('role', 'status');
+    _banner.setAttribute('aria-live', 'polite');
+    _banner.innerHTML = '<span>&#x1F575;&#xFE0F; <strong>Incognito Mode</strong> &mdash; this session will not be saved</span>' +
+      '<button id="incognito-dismiss" class="btn-sm" title="Exit incognito mode">Exit</button>';
+    const ref = document.getElementById('offline-banner');
+    if (ref && ref.parentNode) ref.parentNode.insertBefore(_banner, ref.nextSibling);
+    else document.body.insertBefore(_banner, document.body.firstChild);
+    document.getElementById('incognito-dismiss').addEventListener('click', () => disable());
+  }
+
+  function _hideBanner() {
+    if (_banner) { _banner.remove(); _banner = null; }
+  }
+
+  function _updateButton(active) {
+    const btn = document.getElementById('incognito-btn');
+    if (!btn) return;
+    if (active) {
+      btn.classList.add('incognito-active');
+      btn.title = 'Incognito Mode ON - click to exit (Alt+I)';
+    } else {
+      btn.classList.remove('incognito-active');
+      btn.title = 'Incognito Mode - private session (Alt+I)';
+    }
+  }
+
+  function init() {
+    const btn = document.getElementById('incognito-btn');
+    if (btn) btn.addEventListener('click', toggle);
+    document.addEventListener('keydown', e => {
+      if (e.altKey && e.key.toLowerCase() === 'i' && !e.ctrlKey && !e.shiftKey && !e.metaKey) {
+        e.preventDefault();
+        toggle();
+      }
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+
+  return { isActive, enable, disable, toggle, init };
 })();
