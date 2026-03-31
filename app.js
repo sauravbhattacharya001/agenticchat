@@ -28698,6 +28698,7 @@ const ConversationExport = (() => {
  * ============================================================ */
 const ChatGPTImporter = (() => {
   let _modal = null;
+  let _closeFn = null;
   let _conversations = [];
 
   function toggle() {
@@ -28707,11 +28708,17 @@ const ChatGPTImporter = (() => {
 
   function show() {
     if (_modal) { _modal.style.display = 'flex'; return; }
-    _modal = document.createElement('div');
-    _modal.className = 'modal-overlay';
-    _modal.style.cssText = 'display:flex;position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.6);align-items:center;justify-content:center';
-    _modal.innerHTML = `
-      <div style="background:var(--bg-secondary,#2a2a2a);border-radius:12px;padding:24px;max-width:600px;width:90%;max-height:80vh;overflow:auto;color:var(--text-primary,#eee)">
+    const { overlay, modal, close } = createModalOverlay({
+      overlayId: 'chatgpt-import-overlay',
+      maxWidth: '600px',
+      background: 'var(--bg-secondary, #2a2a2a)'
+    });
+    _modal = overlay;
+    _closeFn = close;
+    modal.style.maxHeight = '80vh';
+    modal.style.overflowY = 'auto';
+    modal.style.color = 'var(--text-primary, #eee)';
+    modal.innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
           <h3 style="margin:0;font-size:18px">📥 Import ChatGPT Conversations</h3>
           <button onclick="ChatGPTImporter.hide()" style="background:none;border:none;color:var(--text-secondary,#aaa);font-size:20px;cursor:pointer">✕</button>
@@ -28735,10 +28742,7 @@ const ChatGPTImporter = (() => {
           </div>
           <div id="chatgpt-import-list" style="max-height:40vh;overflow-y:auto"></div>
         </div>
-        <div id="chatgpt-import-status" style="display:none;margin-top:12px;padding:10px;border-radius:6px;font-size:13px"></div>
-      </div>`;
-    document.body.appendChild(_modal);
-    _modal.addEventListener('click', (e) => { if (e.target === _modal) hide(); });
+        <div id="chatgpt-import-status" style="display:none;margin-top:12px;padding:10px;border-radius:6px;font-size:13px"></div>`;
 
     const dropZone = _modal.querySelector('#chatgpt-import-drop');
     const fileInput = _modal.querySelector('#chatgpt-import-file');
@@ -28756,7 +28760,9 @@ const ChatGPTImporter = (() => {
     });
   }
 
-  function hide() { if (_modal) _modal.style.display = 'none'; }
+  function hide() {
+    if (_modal) _modal.style.display = 'none';
+  }
 
   function _handleFile(file) {
     if (!file.name.endsWith('.json')) { _showStatus('⚠️ Please select a .json file.', '#ff9800'); return; }
