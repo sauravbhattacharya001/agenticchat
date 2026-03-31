@@ -89,6 +89,7 @@
  *   ScrollLock           - suppress auto-scroll when reading history, floating jump-to-bottom pill
  *   IncognitoMode        - private session mode that suppresses localStorage persistence (Alt+I)
  *   MessageReply         - reply-to / quote a specific message with visual preview bar
+ *   ConversationTimer    - per-session active time tracking with auto-pause and time log dashboard (Alt+T)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -21831,6 +21832,7 @@ const CommandPalette = (() => {
       { id: 'cp:filter', label: 'Message Filters', icon: '\uD83D\uDD3D', category: 'Search', action: () => { if (typeof MessageFilter !== 'undefined') MessageFilter.toggle(); } },
       { id: 'cp:share-link', label: 'Share Conversation Link', icon: '🔗', shortcut: 'Alt+S', category: 'Import/Export', action: () => { if (typeof ConversationShareLink !== 'undefined') ConversationShareLink.toggle(); } },
       { id: 'cp:clear', label: 'Clear Conversation', icon: '\uD83D\uDDD1\uFE0F', category: 'Sessions', action: () => { if (typeof ConversationManager !== 'undefined') ConversationManager.clear(); if (typeof UIController !== 'undefined') UIController.clearMessages(); } },
+      { id: 'cp:conv-timer', label: 'Conversation Timer', icon: '⏱️', shortcut: 'Alt+T', category: 'Tools', action: () => { if (typeof ConversationTimer !== 'undefined') ConversationTimer.toggle(); } },
       { id: 'cp:shortcuts', label: 'Keyboard Shortcuts', icon: '\u2328\uFE0F', shortcut: '?', category: 'Help', action: () => { if (typeof KeyboardShortcuts !== 'undefined') KeyboardShortcuts.showHelp(); } },
     ];
     registerMany(builtIn);
@@ -29617,4 +29619,275 @@ var MessageReply = (function () {
     consumeReply: consumeReply,
     hasPendingReply: hasPendingReply
   };
+})();
+
+/* ============================================================
+ *  ConversationTimer — per-session time tracking (Alt+T)
+ *
+ *  Tracks active time spent in each session with:
+ *  - Live timer display in header area
+ *  - Auto-pause after 2 minutes of inactivity
+ *  - Per-session time persistence in localStorage
+ *  - Time Log dashboard showing totals per session
+ *  - Start/pause/reset controls
+ *  - Keyboard shortcut Alt+T to toggle dashboard
+ * ============================================================ */
+const ConversationTimer = (() => {
+  const STORAGE_KEY = 'ac_conversation_timer';
+  const IDLE_TIMEOUT = 120000; // 2 minutes
+
+  let _elapsed = 0;        // ms accumulated this session
+  let _running = false;
+  let _lastTick = null;
+  let _intervalId = null;
+  let _idleTimer = null;
+  let _timerEl = null;
+  let _panelEl = null;
+  let _stylesInjected = false;
+
+  function _injectStyles() {
+    if (_stylesInjected) return;
+    _stylesInjected = true;
+    const s = document.createElement('style');
+    s.textContent = `
+      .conv-timer { display:inline-flex; align-items:center; gap:6px; margin-left:12px; font-family:monospace; font-size:13px; cursor:pointer; user-select:none; padding:2px 8px; border-radius:4px; background:var(--bg-secondary,#f0f0f0); color:var(--text-primary,#333); }
+      .conv-timer.running { background:#e8f5e9; color:#2e7d32; }
+      .conv-timer.paused { background:#fff3e0; color:#e65100; }
+      .conv-timer .timer-dot { width:8px; height:8px; border-radius:50%; background:#aaa; }
+      .conv-timer.running .timer-dot { background:#4caf50; animation:timer-pulse 1s infinite; }
+      .conv-timer.paused .timer-dot { background:#ff9800; }
+      @keyframes timer-pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+      .conv-timer-panel { display:none; position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); width:480px; max-width:92vw; max-height:80vh; background:var(--bg-primary,#fff); border:1px solid var(--border-color,#ccc); border-radius:10px; box-shadow:0 8px 32px rgba(0,0,0,.2); z-index:10100; overflow:hidden; flex-direction:column; }
+      .conv-timer-panel.open { display:flex; }
+      .conv-timer-panel-hdr { display:flex; align-items:center; justify-content:space-between; padding:14px 18px; border-bottom:1px solid var(--border-color,#ddd); font-weight:600; font-size:15px; }
+      .conv-timer-panel-hdr button { background:none; border:none; font-size:20px; cursor:pointer; color:var(--text-secondary,#666); }
+      .conv-timer-body { padding:16px 18px; overflow-y:auto; flex:1; }
+      .conv-timer-controls { display:flex; gap:8px; margin-bottom:16px; }
+      .conv-timer-controls button { padding:6px 14px; border-radius:6px; border:1px solid var(--border-color,#ccc); background:var(--bg-secondary,#f5f5f5); cursor:pointer; font-size:13px; }
+      .conv-timer-controls button:hover { background:var(--bg-hover,#e8e8e8); }
+      .conv-timer-current { text-align:center; font-size:32px; font-family:monospace; margin:12px 0; font-weight:700; }
+      .conv-timer-log { width:100%; border-collapse:collapse; font-size:13px; }
+      .conv-timer-log th { text-align:left; padding:6px 8px; border-bottom:2px solid var(--border-color,#ccc); font-weight:600; }
+      .conv-timer-log td { padding:5px 8px; border-bottom:1px solid var(--border-color,#eee); }
+      .conv-timer-log tr:hover td { background:var(--bg-secondary,#f9f9f9); }
+      .conv-timer-total { font-weight:700; margin-top:12px; font-size:14px; text-align:right; }
+    `;
+    document.head.appendChild(s);
+  }
+
+  function _fmt(ms) {
+    const s = Math.floor(ms / 1000);
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    if (h > 0) return h + ':' + String(m).padStart(2, '0') + ':' + String(sec).padStart(2, '0');
+    return m + ':' + String(sec).padStart(2, '0');
+  }
+
+  function _sessionId() {
+    return (typeof SessionManager !== 'undefined' && SessionManager.currentId)
+      ? SessionManager.currentId()
+      : '__default__';
+  }
+
+  function _loadAll() {
+    return SafeStorage.getJSON(STORAGE_KEY, {});
+  }
+
+  function _saveAll(data) {
+    SafeStorage.trySet(STORAGE_KEY, JSON.stringify(data));
+  }
+
+  function _loadSession() {
+    const all = _loadAll();
+    const sid = _sessionId();
+    _elapsed = (all[sid] && all[sid].elapsed) || 0;
+  }
+
+  function _saveSession() {
+    const all = _loadAll();
+    const sid = _sessionId();
+    if (!all[sid]) all[sid] = {};
+    all[sid].elapsed = _elapsed;
+    all[sid].lastActive = Date.now();
+    _saveAll(all);
+  }
+
+  function _updateDisplay() {
+    if (_timerEl) {
+      _timerEl.querySelector('.timer-time').textContent = _fmt(_elapsed);
+      _timerEl.className = 'conv-timer ' + (_running ? 'running' : 'paused');
+    }
+  }
+
+  function _tick() {
+    if (!_running) return;
+    const now = Date.now();
+    if (_lastTick) _elapsed += now - _lastTick;
+    _lastTick = now;
+    _updateDisplay();
+    // Save every 10 seconds to reduce writes
+    if (Math.floor(_elapsed / 10000) !== Math.floor((_elapsed - (now - (_lastTick || now))) / 10000)) {
+      _saveSession();
+    }
+  }
+
+  function start() {
+    if (_running) return;
+    _running = true;
+    _lastTick = Date.now();
+    if (!_intervalId) _intervalId = setInterval(_tick, 1000);
+    _resetIdleTimer();
+    _updateDisplay();
+  }
+
+  function pause() {
+    if (!_running) return;
+    _tick(); // capture final tick
+    _running = false;
+    _lastTick = null;
+    _saveSession();
+    _updateDisplay();
+  }
+
+  function reset() {
+    pause();
+    _elapsed = 0;
+    _saveSession();
+    _updateDisplay();
+  }
+
+  function _resetIdleTimer() {
+    clearTimeout(_idleTimer);
+    _idleTimer = setTimeout(() => { pause(); }, IDLE_TIMEOUT);
+  }
+
+  function _onActivity() {
+    if (!_running) start();
+    _resetIdleTimer();
+  }
+
+  function toggle() {
+    if (!_panelEl) _buildPanel();
+    const open = _panelEl.classList.toggle('open');
+    if (open) _renderLog();
+  }
+
+  function _buildPanel() {
+    _injectStyles();
+    _panelEl = document.createElement('div');
+    _panelEl.className = 'conv-timer-panel';
+    _panelEl.innerHTML = `
+      <div class="conv-timer-panel-hdr">
+        <span>⏱️ Conversation Timer</span>
+        <button class="conv-timer-close" title="Close">&times;</button>
+      </div>
+      <div class="conv-timer-body">
+        <div class="conv-timer-current" id="ct-current">0:00</div>
+        <div class="conv-timer-controls">
+          <button id="ct-start">▶ Start</button>
+          <button id="ct-pause">⏸ Pause</button>
+          <button id="ct-reset">↺ Reset</button>
+        </div>
+        <h4 style="margin:16px 0 8px">Time Log (All Sessions)</h4>
+        <div id="ct-log-container"></div>
+      </div>
+    `;
+    document.body.appendChild(_panelEl);
+
+    _panelEl.querySelector('.conv-timer-close').addEventListener('click', () => _panelEl.classList.remove('open'));
+    _panelEl.querySelector('#ct-start').addEventListener('click', start);
+    _panelEl.querySelector('#ct-pause').addEventListener('click', pause);
+    _panelEl.querySelector('#ct-reset').addEventListener('click', () => {
+      if (confirm('Reset timer for this session?')) reset();
+      _renderLog();
+    });
+  }
+
+  function _renderLog() {
+    if (!_panelEl) return;
+    const cur = _panelEl.querySelector('#ct-current');
+    if (cur) cur.textContent = _fmt(_elapsed);
+
+    const container = _panelEl.querySelector('#ct-log-container');
+    if (!container) return;
+
+    const all = _loadAll();
+    const entries = Object.entries(all).filter(([, v]) => v.elapsed > 0).sort((a, b) => (b[1].lastActive || 0) - (a[1].lastActive || 0));
+
+    if (entries.length === 0) {
+      container.innerHTML = '<p style="color:var(--text-secondary,#888)">No time logged yet.</p>';
+      return;
+    }
+
+    let total = 0;
+    let html = '<table class="conv-timer-log"><thead><tr><th>Session</th><th>Time</th><th>Last Active</th></tr></thead><tbody>';
+    for (const [sid, data] of entries) {
+      total += data.elapsed || 0;
+      const name = sid === '__default__' ? 'Default' : sid.substring(0, 20);
+      const last = data.lastActive ? new Date(data.lastActive).toLocaleDateString() : '—';
+      html += `<tr><td title="${sid}">${name}</td><td>${_fmt(data.elapsed)}</td><td>${last}</td></tr>`;
+    }
+    html += '</tbody></table>';
+    html += `<div class="conv-timer-total">Total: ${_fmt(total)}</div>`;
+    container.innerHTML = html;
+  }
+
+  function init() {
+    _injectStyles();
+    _loadSession();
+
+    // Create timer display element
+    _timerEl = document.createElement('div');
+    _timerEl.className = 'conv-timer paused';
+    _timerEl.title = 'Conversation Timer — click to open dashboard (Alt+T)';
+    _timerEl.innerHTML = '<span class="timer-dot"></span> <span class="timer-time">' + _fmt(_elapsed) + '</span>';
+    _timerEl.addEventListener('click', toggle);
+
+    // Insert after the h2 heading
+    const h2 = document.querySelector('h2');
+    if (h2 && h2.parentNode) {
+      h2.parentNode.insertBefore(_timerEl, h2.nextSibling);
+    }
+
+    // Start on first user interaction
+    if (!_intervalId) _intervalId = setInterval(_tick, 1000);
+
+    // Listen for activity signals
+    const input = document.getElementById('chat-input');
+    if (input) {
+      input.addEventListener('keydown', _onActivity);
+      input.addEventListener('focus', _onActivity);
+    }
+    document.getElementById('send-btn')?.addEventListener('click', _onActivity);
+
+    // Keyboard shortcut Alt+T
+    document.addEventListener('keydown', (e) => {
+      if (e.altKey && e.key.toLowerCase() === 't' && !e.ctrlKey && !e.shiftKey && !e.metaKey) {
+        e.preventDefault();
+        toggle();
+      }
+    });
+
+    // Reload timer data on session switch
+    if (typeof SessionManager !== 'undefined') {
+      const origLoad = SessionManager.load;
+      if (typeof origLoad === 'function') {
+        SessionManager.load = function () {
+          const result = origLoad.apply(this, arguments);
+          pause();
+          _loadSession();
+          _updateDisplay();
+          return result;
+        };
+      }
+    }
+
+    // Save on page unload
+    window.addEventListener('beforeunload', () => { if (_running) { _tick(); _saveSession(); } });
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  return { init, start, pause, reset, toggle };
 })();

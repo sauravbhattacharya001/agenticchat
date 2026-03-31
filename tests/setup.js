@@ -334,7 +334,8 @@ function loadApp() {
     'ChatGPTImporter',
     'PromptChainRunner',
     'CustomThemeCreator',
-    'CrossTabSync'
+    'CrossTabSync',
+    'ConversationTimer'
   ];
 
   for (const mod of modules) {
