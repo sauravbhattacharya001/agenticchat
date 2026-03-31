@@ -272,6 +272,46 @@ const ChatOutputObserver = (() => {
   return { register, unregister, reinit };
 })();
 
+/**
+ * PanelRegistry — centralised panel/modal lifecycle manager.
+ *
+ * Modules register their close callbacks here instead of being hardcoded
+ * in a monolithic Escape handler.  This eliminates the maintenance burden
+ * of updating a growing list every time a new panel is added, and ensures
+ * newly-registered panels automatically participate in Escape-to-close.
+ *
+ * Usage:
+ *   PanelRegistry.register('history', HistoryPanel.close);
+ *   PanelRegistry.closeAll();  // called on Escape
+ */
+const PanelRegistry = (() => {
+  /** @type {Map<string, Function>} */
+  const _panels = new Map();
+
+  /**
+   * Register a panel's close callback.
+   * @param {string} id - unique identifier for the panel
+   * @param {Function} closeFn - called to dismiss/close the panel
+   */
+  function register(id, closeFn) {
+    _panels.set(id, closeFn);
+  }
+
+  /** Unregister a panel. */
+  function unregister(id) {
+    _panels.delete(id);
+  }
+
+  /** Close all registered panels (safe — swallows errors). */
+  function closeAll() {
+    for (const [, closeFn] of _panels) {
+      try { closeFn(); } catch (_) { /* swallow */ }
+    }
+  }
+
+  return { register, unregister, closeAll };
+})();
+
 /* ---------- ModalHelper - shared overlay+modal factory ---------- */
 /**
  * Creates a centered modal overlay with consistent styling.
@@ -9182,25 +9222,29 @@ document.addEventListener('DOMContentLoaded', () => {
   DOMCache.get('templates-overlay').addEventListener('click', PromptTemplates.close);
   DOMCache.get('templates-search').addEventListener('input', PromptTemplates.handleSearchDebounced);
 
-  // Keyboard shortcut: Escape closes history panel
+  // Register all closable panels/modals with PanelRegistry so Escape
+  // dismisses them without maintaining a hardcoded list.
+  PanelRegistry.register('message-diff', MessageDiff.closeModal);
+  PanelRegistry.register('history', HistoryPanel.close);
+  PanelRegistry.register('templates', PromptTemplates.close);
+  PanelRegistry.register('snippets', SnippetLibrary.close);
+  PanelRegistry.register('snippets-save', SnippetLibrary.closeSaveDialog);
+  PanelRegistry.register('sessions', SessionManager.close);
+  PanelRegistry.register('sessions-save', SessionManager.closeSaveDialog);
+  PanelRegistry.register('shortcuts', KeyboardShortcuts.hideHelp);
+  PanelRegistry.register('stats', ChatStats.close);
+  PanelRegistry.register('persona', PersonaPresets.close);
+  PanelRegistry.register('model-selector', ModelSelector.close);
+  PanelRegistry.register('scratchpad', Scratchpad.close);
+  PanelRegistry.register('chapters', ConversationChapters.closePanel);
+  PanelRegistry.register('heatmap', UsageHeatmap.close);
+  PanelRegistry.register('health-check', ConversationHealthCheck.close);
+  PanelRegistry.register('typing-speed', TypingSpeedMonitor.close);
+
+  // Escape closes all registered panels
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
-      MessageDiff.closeModal();
-      HistoryPanel.close();
-      PromptTemplates.close();
-      SnippetLibrary.close();
-      SnippetLibrary.closeSaveDialog();
-      SessionManager.close();
-      SessionManager.closeSaveDialog();
-      KeyboardShortcuts.hideHelp();
-      ChatStats.close();
-      PersonaPresets.close();
-      ModelSelector.close();
-      Scratchpad.close();
-      ConversationChapters.closePanel();
-      UsageHeatmap.close();
-      ConversationHealthCheck.close();
-      TypingSpeedMonitor.close();
+      PanelRegistry.closeAll();
     }
   });
 
