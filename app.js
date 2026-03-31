@@ -27639,7 +27639,7 @@ const TypingIndicatorBubble = (() => {
         '<span class="typing-indicator__dot"></span>' +
       '</div>' +
       '<span class="typing-indicator__label">' + _randomLabel() + '</span>';
-    const chatOutput = document.getElementById('chat-output');
+    const chatOutput = DOMCache.get('chat-output');
     if (chatOutput) {
       chatOutput.appendChild(_el);
       _el.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -27714,10 +27714,10 @@ const PinBoard = (() => {
   }
 
   function _render() {
-    const list = document.getElementById('pinboard-list');
-    const empty = document.getElementById('pinboard-empty');
-    const filter = document.getElementById('pinboard-filter')?.value || 'all';
-    const search = (document.getElementById('pinboard-search')?.value || '').toLowerCase();
+    const list = DOMCache.get('pinboard-list');
+    const empty = DOMCache.get('pinboard-empty');
+    const filter = DOMCache.get('pinboard-filter')?.value || 'all';
+    const search = (DOMCache.get('pinboard-search')?.value || '').toLowerCase();
     if (!list) return;
 
     let pins = _load();
@@ -27808,8 +27808,8 @@ const PinBoard = (() => {
 
   function open() {
     isOpen = true;
-    const panel = document.getElementById('pinboard-panel');
-    const overlay = document.getElementById('pinboard-overlay');
+    const panel = DOMCache.get('pinboard-panel');
+    const overlay = DOMCache.get('pinboard-overlay');
     if (panel) panel.style.display = '';
     if (overlay) overlay.style.display = '';
     _render();
@@ -27817,8 +27817,8 @@ const PinBoard = (() => {
 
   function close() {
     isOpen = false;
-    const panel = document.getElementById('pinboard-panel');
-    const overlay = document.getElementById('pinboard-overlay');
+    const panel = DOMCache.get('pinboard-panel');
+    const overlay = DOMCache.get('pinboard-overlay');
     if (panel) panel.style.display = 'none';
     if (overlay) overlay.style.display = 'none';
   }
@@ -27826,12 +27826,12 @@ const PinBoard = (() => {
   function toggle() { isOpen ? close() : open(); }
 
   function init() {
-    document.getElementById('pinboard-close')?.addEventListener('click', close);
-    document.getElementById('pinboard-overlay')?.addEventListener('click', close);
-    document.getElementById('pinboard-export')?.addEventListener('click', exportPins);
-    document.getElementById('pinboard-clear')?.addEventListener('click', clearAll);
-    document.getElementById('pinboard-filter')?.addEventListener('change', _render);
-    document.getElementById('pinboard-search')?.addEventListener('input', _render);
+    DOMCache.get('pinboard-close')?.addEventListener('click', close);
+    DOMCache.get('pinboard-overlay')?.addEventListener('click', close);
+    DOMCache.get('pinboard-export')?.addEventListener('click', exportPins);
+    DOMCache.get('pinboard-clear')?.addEventListener('click', clearAll);
+    DOMCache.get('pinboard-filter')?.addEventListener('change', _render);
+    DOMCache.get('pinboard-search')?.addEventListener('input', _render);
     document.addEventListener('keydown', (e) => {
       if (e.altKey && e.key.toLowerCase() === 'p' && !e.ctrlKey && !e.shiftKey && !e.metaKey) {
         e.preventDefault();
@@ -27911,7 +27911,7 @@ const EmojiPicker = (() => {
   }
 
   function _insertEmoji(emoji) {
-    const input = document.getElementById('chat-input');
+    const input = DOMCache.get('chat-input');
     if (!input) return;
     const start = input.selectionStart || input.value.length;
     const end = input.selectionEnd || start;
@@ -28018,13 +28018,13 @@ const MessageScheduler = (() => {
   let _idCounter = 0;
 
   /* ---- DOM refs ---- */
-  const panel     = () => document.getElementById('scheduler-panel');
-  const overlay   = () => document.getElementById('scheduler-overlay');
-  const msgInput  = () => document.getElementById('scheduler-message');
-  const delayIn   = () => document.getElementById('scheduler-delay');
-  const unitSel   = () => document.getElementById('scheduler-unit');
-  const queueEl   = () => document.getElementById('scheduler-queue');
-  const emptyEl   = () => document.getElementById('scheduler-empty');
+  const panel     = () => DOMCache.get('scheduler-panel');
+  const overlay   = () => DOMCache.get('scheduler-overlay');
+  const msgInput  = () => DOMCache.get('scheduler-message');
+  const delayIn   = () => DOMCache.get('scheduler-delay');
+  const unitSel   = () => DOMCache.get('scheduler-unit');
+  const queueEl   = () => DOMCache.get('scheduler-queue');
+  const emptyEl   = () => DOMCache.get('scheduler-empty');
 
   /* ---- open / close ---- */
   function open() {
@@ -28068,8 +28068,8 @@ const MessageScheduler = (() => {
     const item = _queue.splice(idx, 1)[0];
 
     // Inject text into the chat input and click Send
-    const chatInput = document.getElementById('chat-input');
-    const sendBtn = document.getElementById('send-btn');
+    const chatInput = DOMCache.get('chat-input');
+    const sendBtn = DOMCache.get('send-btn');
     if (chatInput && sendBtn) {
       chatInput.value = item.text;
       chatInput.dispatchEvent(new Event('input', { bubbles: true }));
@@ -28150,10 +28150,10 @@ const MessageScheduler = (() => {
 
   /* ---- init ---- */
   document.addEventListener('DOMContentLoaded', () => {
-    document.getElementById('scheduler-btn')?.addEventListener('click', toggle);
-    document.getElementById('scheduler-close')?.addEventListener('click', close);
-    document.getElementById('scheduler-add')?.addEventListener('click', addScheduled);
-    document.getElementById('scheduler-clear-all')?.addEventListener('click', cancelAll);
+    DOMCache.get('scheduler-btn')?.addEventListener('click', toggle);
+    DOMCache.get('scheduler-close')?.addEventListener('click', close);
+    DOMCache.get('scheduler-add')?.addEventListener('click', addScheduled);
+    DOMCache.get('scheduler-clear-all')?.addEventListener('click', cancelAll);
     // Enter in textarea schedules (Shift+Enter for newline)
     msgInput()?.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addScheduled(); }
