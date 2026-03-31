@@ -26467,10 +26467,10 @@ const MessageDiffViewer = (() => {
   /** Save diff to history. */
   function saveDiffHistory(indexA, indexB, stats) {
     try {
-      const hist = _safeParse(localStorage.getItem(STORAGE_KEY), []);
+      const hist = _safeParse(SafeStorage.get(STORAGE_KEY), []);
       hist.unshift({ indexA, indexB, stats, timestamp: Date.now() });
       if (hist.length > MAX_HISTORY) hist.length = MAX_HISTORY;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(hist));
+      SafeStorage.trySetJSON(STORAGE_KEY, hist);
     } catch (_) { /* ignore */ }
   }
 
@@ -26703,10 +26703,10 @@ const ToneAdjuster = (() => {
   let _activePicker = null;
 
   function _loadCache() {
-    try { _cache = _safeParse(localStorage.getItem(CACHE_KEY) || {}); } catch (_) { _cache = {}; }
+    try { _cache = SafeStorage.getJSON(CACHE_KEY, {}); } catch (_) { _cache = {}; }
   }
   function _saveCache() {
-    try { localStorage.setItem(CACHE_KEY, JSON.stringify(_cache)); } catch (_) {}
+    SafeStorage.trySetJSON(CACHE_KEY, _cache);
   }
 
   /**
@@ -27621,11 +27621,11 @@ const PinBoard = (() => {
   let isOpen = false;
 
   function _load() {
-    try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); } catch { return []; }
+    try { return JSON.parse(SafeStorage.get(STORAGE_KEY) || '[]'); } catch { return []; }
   }
 
   function _save(pins) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(pins));
+    SafeStorage.trySetJSON(STORAGE_KEY, pins);
   }
 
   function pinMessage(role, content, opts = {}) {
@@ -27857,9 +27857,9 @@ const EmojiPicker = (() => {
   const MAX_RECENT = 24;
 
   function _loadRecent() {
-    try { return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]'); } catch { return []; }
+    try { return JSON.parse(SafeStorage.get(RECENT_KEY) || '[]'); } catch { return []; }
   }
-  function _saveRecent(arr) { localStorage.setItem(RECENT_KEY, JSON.stringify(arr.slice(0, MAX_RECENT))); }
+  function _saveRecent(arr) { SafeStorage.trySetJSON(RECENT_KEY, arr.slice(0, MAX_RECENT)); }
   function _addRecent(emoji) {
     const r = _loadRecent().filter(e => e !== emoji);
     r.unshift(emoji);
@@ -29354,17 +29354,15 @@ var AutoSaveDraft = (function () {
   function _save(text) {
     try {
       if (text && text.trim().length > 0) {
-        localStorage.setItem(STORAGE_KEY, text);
+        SafeStorage.set(STORAGE_KEY, text);
       } else {
-        localStorage.removeItem(STORAGE_KEY);
+        SafeStorage.remove(STORAGE_KEY);
       }
     } catch (_) { /* quota or restricted storage */ }
   }
 
   function _restore() {
-    try {
-      return localStorage.getItem(STORAGE_KEY) || '';
-    } catch (_) { return ''; }
+    return SafeStorage.get(STORAGE_KEY) || '';
   }
 
   /** Call on input events — debounced save */
@@ -29376,7 +29374,7 @@ var AutoSaveDraft = (function () {
   /** Call after a message is sent — clear the draft */
   function clear() {
     clearTimeout(_timer);
-    try { localStorage.removeItem(STORAGE_KEY); } catch (_) {}
+    SafeStorage.remove(STORAGE_KEY);
   }
 
   /** Restore draft into the input field on page load */
