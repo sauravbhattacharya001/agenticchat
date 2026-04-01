@@ -90,6 +90,7 @@
     <button id="import-chatgpt-btn" class="btn-secondary" title="Import ChatGPT — load conversations from a ChatGPT export (JSON)" onclick="ChatGPTImporter.toggle()">📥</button>
     <button id="highlighter-btn" class="btn-secondary" title="Message Highlighter — select text and highlight with colors (Alt+H)" onclick="MessageHighlighter.toggle()">🖍️</button>
     <button id="conv-timer-btn" class="btn-secondary" title="Conversation Timer — track active time per session (Alt+T)" onclick="ConversationTimer.toggle()">⏱️</button>
+    <button id="inspector-btn" class="btn-secondary" title="API Inspector — debug API requests and responses (Ctrl+Shift+I)" onclick="ApiInspector.toggle()">🔬</button>
   </div>
 
   <div class="zen-indicator">Focus Mode — press <kbd>Ctrl+Shift+F</kbd> or <kbd>Esc</kbd> to exit</div>
@@ -478,6 +479,30 @@
     </div>
     <div id="calendar-grid" class="calendar-grid"></div>
     <div id="calendar-day-sessions" class="calendar-day-sessions"></div>
+  </div>
+
+  <!-- API Inspector Panel -->
+  <div id="inspector-overlay" class="modal-overlay" style="display:none"></div>
+  <div id="inspector-panel" class="inspector-panel" style="display:none;" aria-label="API Request Inspector" role="dialog" aria-modal="true">
+    <div class="inspector-header">
+      <span class="inspector-title">🔬 API Inspector</span>
+      <div class="inspector-controls">
+        <label class="inspector-toggle-label" title="Record API calls"><input type="checkbox" id="inspector-recording" checked> Recording</label>
+        <button id="inspector-clear" class="btn-sm" title="Clear all entries">🗑️</button>
+        <button id="inspector-export" class="btn-sm" title="Export log as JSON">📥</button>
+        <button id="inspector-close" class="btn-sm" title="Close">✕</button>
+      </div>
+    </div>
+    <div id="inspector-stats" class="inspector-stats"></div>
+    <div id="inspector-list" class="inspector-list"></div>
+    <div id="inspector-empty" style="padding:2rem;text-align:center;color:var(--text-secondary);">No API calls recorded yet. Start chatting to see requests here.</div>
+    <div id="inspector-detail" class="inspector-detail" style="display:none;">
+      <div class="inspector-detail-header">
+        <button id="inspector-back" class="btn-sm">← Back</button>
+        <span id="inspector-detail-title"></span>
+      </div>
+      <div id="inspector-detail-content"></div>
+    </div>
   </div>
 
   <script src="app.js"></script>

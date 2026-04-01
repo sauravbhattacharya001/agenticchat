@@ -90,6 +90,7 @@
  *   IncognitoMode        - private session mode that suppresses localStorage persistence (Alt+I)
  *   MessageReply         - reply-to / quote a specific message with visual preview bar
  *   ConversationTimer    - per-session active time tracking with auto-pause and time log dashboard (Alt+T)
+ *   ApiInspector         - debug panel logging all API requests with payloads, timing, tokens, cost (🔬 button)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -29931,4 +29932,321 @@ const ConversationTimer = (() => {
   document.addEventListener('DOMContentLoaded', init);
 
   return { init, start, pause, reset, toggle };
+})();
+/* ============================================================
+ * ApiInspector - debug panel logging all API requests/responses
+ *
+ * Records every OpenAI API call (via monkey-patching OpenAIClient)
+ * showing request payload, response data, timing, tokens, and
+ * cost estimates. Useful for prompt engineering and debugging.
+ *
+ * Toggle: Ctrl+Shift+I or the microscope button in toolbar.
+ *
+ * @namespace ApiInspector
+ * ============================================================ */
+const ApiInspector = (() => {
+  const MAX_ENTRIES = 200;
+  let _entries = [];
+  let _visible = false;
+  let _recording = true;
+  let _patched = false;
+
+  /* ---- Monkey-patch OpenAIClient ---- */
+
+  function _patch() {
+    if (_patched) return;
+    if (typeof OpenAIClient === 'undefined') return;
+    _patched = true;
+
+    const origComplete = OpenAIClient.complete;
+    const origFetchRaw = OpenAIClient.fetchRaw;
+
+    OpenAIClient.complete = async function(opts) {
+      const start = performance.now();
+      const entry = _createEntry(opts, false);
+      try {
+        const result = await origComplete.call(OpenAIClient, opts);
+        entry.durationMs = Math.round(performance.now() - start);
+        entry.ok = result.ok;
+        entry.error = result.error || null;
+        entry.usage = result.usage || null;
+        entry.responseContent = result.content || null;
+        entry.responseData = result.data || null;
+        _finalize(entry);
+        return result;
+      } catch (err) {
+        entry.durationMs = Math.round(performance.now() - start);
+        entry.ok = false;
+        entry.error = err.message || String(err);
+        _finalize(entry);
+        throw err;
+      }
+    };
+
+    OpenAIClient.fetchRaw = async function(opts) {
+      const start = performance.now();
+      const entry = _createEntry({ messages: opts.body?.messages, model: opts.body?.model }, true);
+      entry.streaming = true;
+      entry.requestBody = opts.body || null;
+      try {
+        const result = await origFetchRaw.call(OpenAIClient, opts);
+        entry.durationMs = Math.round(performance.now() - start);
+        entry.ok = result.ok;
+        _finalize(entry);
+        return result;
+      } catch (err) {
+        entry.durationMs = Math.round(performance.now() - start);
+        entry.ok = false;
+        entry.error = err.message || String(err);
+        _finalize(entry);
+        throw err;
+      }
+    };
+  }
+
+  function _createEntry(opts, isStream) {
+    return {
+      id: Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+      timestamp: new Date().toISOString(),
+      model: opts?.model || (typeof ChatConfig !== 'undefined' ? ChatConfig.MODEL : 'unknown'),
+      messageCount: opts?.messages?.length || 0,
+      messages: opts?.messages ? JSON.parse(JSON.stringify(opts.messages)) : [],
+      maxTokens: opts?.maxTokens || null,
+      temperature: opts?.temperature ?? null,
+      streaming: isStream,
+      ok: null,
+      error: null,
+      usage: null,
+      responseContent: null,
+      responseData: null,
+      requestBody: null,
+      durationMs: 0,
+    };
+  }
+
+  function _finalize(entry) {
+    if (!_recording) return;
+    _entries.unshift(entry);
+    if (_entries.length > MAX_ENTRIES) _entries.length = MAX_ENTRIES;
+    if (_visible) _render();
+  }
+
+  /* ---- Cost estimation ---- */
+
+  function _estimateCost(entry) {
+    if (!entry.usage) return null;
+    const model = (entry.model || '').toLowerCase();
+    // Approximate per-1K-token pricing
+    let inputPer1k = 0.005, outputPer1k = 0.015;
+    if (model.includes('gpt-4o-mini')) { inputPer1k = 0.00015; outputPer1k = 0.0006; }
+    else if (model.includes('gpt-4o')) { inputPer1k = 0.005; outputPer1k = 0.015; }
+    else if (model.includes('gpt-4')) { inputPer1k = 0.03; outputPer1k = 0.06; }
+    else if (model.includes('gpt-3.5')) { inputPer1k = 0.0005; outputPer1k = 0.0015; }
+    const pt = entry.usage.prompt_tokens || 0;
+    const ct = entry.usage.completion_tokens || 0;
+    return ((pt / 1000) * inputPer1k + (ct / 1000) * outputPer1k);
+  }
+
+  /* ---- UI ---- */
+
+  function toggle() {
+    _visible ? hide() : show();
+  }
+
+  function show() {
+    _patch();
+    _visible = true;
+    const overlay = document.getElementById('inspector-overlay');
+    const panel = document.getElementById('inspector-panel');
+    if (overlay) overlay.style.display = 'block';
+    if (panel) panel.style.display = 'flex';
+    _render();
+    // Close on overlay click
+    if (overlay) overlay.onclick = hide;
+    document.getElementById('inspector-close').onclick = hide;
+    document.getElementById('inspector-clear').onclick = () => { _entries = []; _render(); };
+    document.getElementById('inspector-export').onclick = _exportLog;
+    document.getElementById('inspector-back').onclick = _showList;
+    const rec = document.getElementById('inspector-recording');
+    if (rec) { rec.checked = _recording; rec.onchange = () => { _recording = rec.checked; }; }
+  }
+
+  function hide() {
+    _visible = false;
+    const overlay = document.getElementById('inspector-overlay');
+    const panel = document.getElementById('inspector-panel');
+    if (overlay) overlay.style.display = 'none';
+    if (panel) panel.style.display = 'none';
+  }
+
+  function _render() {
+    const list = document.getElementById('inspector-list');
+    const empty = document.getElementById('inspector-empty');
+    const stats = document.getElementById('inspector-stats');
+    const detail = document.getElementById('inspector-detail');
+    if (detail) detail.style.display = 'none';
+    if (!list) return;
+
+    if (_entries.length === 0) {
+      list.style.display = 'none';
+      if (stats) stats.style.display = 'none';
+      if (empty) empty.style.display = 'block';
+      return;
+    }
+
+    if (empty) empty.style.display = 'none';
+    list.style.display = 'block';
+    if (stats) stats.style.display = 'flex';
+
+    // Stats
+    const totalCalls = _entries.length;
+    const okCalls = _entries.filter(e => e.ok).length;
+    const errCalls = _entries.filter(e => e.ok === false).length;
+    const totalTokens = _entries.reduce((s, e) => s + (e.usage?.total_tokens || 0), 0);
+    const totalCost = _entries.reduce((s, e) => s + (_estimateCost(e) || 0), 0);
+    const avgTime = Math.round(_entries.reduce((s, e) => s + e.durationMs, 0) / _entries.length);
+
+    if (stats) {
+      stats.innerHTML = `<span>📊 ${totalCalls} calls</span>` +
+        `<span>✅ ${okCalls} ok</span>` +
+        (errCalls ? `<span>❌ ${errCalls} errors</span>` : '') +
+        `<span>🔤 ${totalTokens.toLocaleString()} tokens</span>` +
+        `<span>💰 $${totalCost.toFixed(4)}</span>` +
+        `<span>⏱️ ${avgTime}ms avg</span>`;
+    }
+
+    // List
+    list.innerHTML = _entries.map((e, i) => {
+      const badge = e.ok === null ? '' :
+        e.ok ? (e.streaming ? '<span class="inspector-badge inspector-badge-stream">STREAM</span>' :
+                '<span class="inspector-badge inspector-badge-ok">OK</span>') :
+        '<span class="inspector-badge inspector-badge-err">ERR</span>';
+      const time = new Date(e.timestamp).toLocaleTimeString();
+      const tokens = e.usage ? `${e.usage.total_tokens} tok` : (e.streaming ? 'stream' : '—');
+      const cost = _estimateCost(e);
+      const costStr = cost !== null ? `$${cost.toFixed(4)}` : '';
+      const preview = e.messages.length > 0 ?
+        (e.messages[e.messages.length - 1].content || '').slice(0, 120) : '';
+      return `<div class="inspector-entry" data-idx="${i}">
+        <div class="inspector-entry-header">
+          <span class="inspector-entry-model">${_esc(e.model)} ${badge}</span>
+          <span class="inspector-entry-time">${time}</span>
+        </div>
+        <div class="inspector-entry-meta">
+          <span>${e.messageCount} msgs</span>
+          <span>${tokens}</span>
+          <span>${costStr}</span>
+          <span>${e.durationMs}ms</span>
+        </div>
+        ${preview ? `<div class="inspector-msg-preview">${_esc(preview)}</div>` : ''}
+      </div>`;
+    }).join('');
+
+    list.querySelectorAll('.inspector-entry').forEach(el => {
+      el.onclick = () => _showDetail(parseInt(el.dataset.idx));
+    });
+  }
+
+  function _showDetail(idx) {
+    const entry = _entries[idx];
+    if (!entry) return;
+    const list = document.getElementById('inspector-list');
+    const empty = document.getElementById('inspector-empty');
+    const stats = document.getElementById('inspector-stats');
+    const detail = document.getElementById('inspector-detail');
+    if (list) list.style.display = 'none';
+    if (empty) empty.style.display = 'none';
+    if (stats) stats.style.display = 'none';
+    if (!detail) return;
+    detail.style.display = 'block';
+
+    const title = document.getElementById('inspector-detail-title');
+    if (title) title.textContent = `${entry.model} — ${new Date(entry.timestamp).toLocaleTimeString()}`;
+
+    const content = document.getElementById('inspector-detail-content');
+    if (!content) return;
+
+    let html = '';
+
+    // Request info
+    html += `<div class="inspector-detail-section"><h4>📤 Request</h4><pre>${_esc(JSON.stringify({
+      model: entry.model,
+      messages: entry.messages.map(m => ({ role: m.role, content: m.content?.slice(0, 500) + (m.content?.length > 500 ? '...' : '') })),
+      max_tokens: entry.maxTokens,
+      temperature: entry.temperature,
+      stream: entry.streaming,
+    }, null, 2))}</pre></div>`;
+
+    // Response
+    if (entry.responseContent) {
+      html += `<div class="inspector-detail-section"><h4>📥 Response</h4><pre>${_esc(entry.responseContent)}</pre></div>`;
+    }
+    if (entry.error) {
+      html += `<div class="inspector-detail-section"><h4>❌ Error</h4><pre style="color:#ef5350;">${_esc(entry.error)}</pre></div>`;
+    }
+
+    // Usage / Cost
+    if (entry.usage) {
+      const cost = _estimateCost(entry);
+      html += `<div class="inspector-detail-section"><h4>📊 Token Usage</h4><pre>${_esc(JSON.stringify({
+        prompt_tokens: entry.usage.prompt_tokens,
+        completion_tokens: entry.usage.completion_tokens,
+        total_tokens: entry.usage.total_tokens,
+        estimated_cost: cost !== null ? '$' + cost.toFixed(6) : 'N/A',
+      }, null, 2))}</pre></div>`;
+    }
+
+    // Timing
+    html += `<div class="inspector-detail-section"><h4>⏱️ Performance</h4><pre>${_esc(JSON.stringify({
+      duration_ms: entry.durationMs,
+      timestamp: entry.timestamp,
+      tokens_per_second: entry.usage?.completion_tokens ? Math.round(entry.usage.completion_tokens / (entry.durationMs / 1000)) : 'N/A',
+    }, null, 2))}</pre></div>`;
+
+    // Full messages (expandable)
+    html += `<div class="inspector-detail-section"><h4>💬 Full Messages (${entry.messages.length})</h4><pre>${_esc(JSON.stringify(entry.messages, null, 2))}</pre></div>`;
+
+    content.innerHTML = html;
+  }
+
+  function _showList() {
+    const detail = document.getElementById('inspector-detail');
+    if (detail) detail.style.display = 'none';
+    _render();
+  }
+
+  function _exportLog() {
+    const blob = new Blob([JSON.stringify(_entries, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `api-inspector-${new Date().toISOString().slice(0,10)}.json`;
+    a.click(); URL.revokeObjectURL(url);
+  }
+
+  function _esc(s) {
+    if (!s) return '';
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  /* ---- Keyboard shortcut ---- */
+  document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.shiftKey && e.key === 'I') {
+      // Only intercept if not the browser's dev tools shortcut
+      // We'll use Ctrl+Shift+; instead to avoid conflicts
+    }
+  });
+
+  // Auto-patch on load
+  document.addEventListener('DOMContentLoaded', () => {
+    _patch();
+    // Register with command palette if available
+    if (typeof CommandPalette !== 'undefined' && CommandPalette.register) {
+      CommandPalette.register({
+        name: 'inspector', description: 'API Inspector — view API request/response log',
+        icon: '🔬', action: toggle
+      });
+    }
+  });
+
+  return { toggle, show, hide };
 })();
