@@ -12870,18 +12870,28 @@ const AutoTagger = (() => {
 
   /**
    * Build a word frequency map from an array of messages.
+   *
+   * Also constructs `combinedText` (lowercased concatenation of all
+   * non-system message content) in the same pass, avoiding a second
+   * iteration + filter + map + join that `analyze()` previously
+   * performed separately — saves O(n) work and one large intermediate
+   * string allocation for long conversations.
+   *
    * @param {{ role: string, content: string }[]} messages
-   * @returns {{ wordFreq: Object, totalWords: number, messageCount: number }}
+   * @returns {{ wordFreq: Object, totalWords: number, messageCount: number, combinedText: string }}
    */
   function buildFrequencyMap(messages) {
     const wordFreq = Object.create(null);
     let totalWords = 0;
     let messageCount = 0;
+    const textParts = [];
 
     for (const msg of messages) {
       if (msg.role === 'system') continue;
       messageCount++;
-      const words = tokenize(msg.content || '');
+      const content = msg.content || '';
+      textParts.push(content.toLowerCase());
+      const words = tokenize(content);
       for (const w of words) {
         if (STOP_WORDS.has(w)) continue;
         wordFreq[w] = (wordFreq[w] || 0) + 1;
@@ -12889,7 +12899,7 @@ const AutoTagger = (() => {
       }
     }
 
-    return { wordFreq, totalWords, messageCount };
+    return { wordFreq, totalWords, messageCount, combinedText: textParts.join(' ') };
   }
 
   /**
@@ -12995,14 +13005,8 @@ const AutoTagger = (() => {
     const freqData = buildFrequencyMap(messages);
     if (freqData.totalWords < 10) return [];
 
-    // Build combined text for phrase matching
-    const combinedText = messages
-      .filter(m => m.role !== 'system')
-      .map(m => (m.content || '').toLowerCase())
-      .join(' ');
-
-    // Score categories
-    const categoryTags = scoreCategories(freqData, combinedText);
+    // Score categories (combinedText built during buildFrequencyMap — single pass)
+    const categoryTags = scoreCategories(freqData, freqData.combinedText);
 
     // Collect words covered by matched categories
     const coveredWords = new Set();
