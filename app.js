@@ -2364,21 +2364,36 @@ const SnippetLibrary = (() => {
   const el = DOMCache.get.bind(DOMCache);
   let _searchTimer = null;
 
-  /** Load snippets from localStorage. */
+  // ── In-memory cache ─────────────────────────────────────────
+  // Avoids redundant JSON.parse + sanitizeStorageObject on every
+  // getAll/getCount/search/add/remove call.  The cache is invalidated
+  // on save and when the raw localStorage length diverges (cross-tab).
+  let _cache = null;
+  let _cacheRawLen = -1;
+
+  /** Load snippets from localStorage (cached). */
   function load() {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
-      return _safeParse(raw, []);
-    } catch { return []; }
+      const rawLen = raw ? raw.length : 0;
+      if (_cache !== null && rawLen === _cacheRawLen) return _cache;
+      _cache = _safeParse(raw, []);
+      _cacheRawLen = rawLen;
+      return _cache;
+    } catch { _cache = []; _cacheRawLen = -1; return []; }
   }
 
   /** Save snippets to localStorage. Returns true on success, false on failure. */
   function save(snippets) {
+    _cache = snippets;
     try {
-      SafeStorage.setJSON(STORAGE_KEY, snippets);
+      const json = JSON.stringify(snippets);
+      _cacheRawLen = json.length;
+      SafeStorage.set(STORAGE_KEY, json);
       return true;
     } catch (e) {
       console.error('[SnippetLibrary] Failed to persist snippets:', e.message);
+      _cacheRawLen = -1;  // invalidate cache on failure
       return false;
     }
   }
