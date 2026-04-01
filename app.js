@@ -4415,16 +4415,29 @@ const SessionManager = (() => {
   }
 
   // ── Session Pinning ─────────────────────────────────────────
-  /** Get the set of pinned session IDs. */
+  // In-memory cache for pinned IDs avoids redundant JSON.parse + Set
+  // construction on every isPinned/getAll call (~3× per session during
+  // render, so up to 150 parses for 50 sessions → now 0).
+  let _pinnedCache = null;
+
+  /** Get the set of pinned session IDs (cached). */
   function _getPinnedIds() {
+    if (_pinnedCache !== null) return _pinnedCache;
     try {
       const raw = SafeStorage.get(PINNED_KEY);
-      return new Set(_safeParse(raw, []));
-    } catch { return new Set(); }
+      _pinnedCache = new Set(_safeParse(raw, []));
+    } catch { _pinnedCache = new Set(); }
+    return _pinnedCache;
+  }
+
+  /** Invalidate pinned cache (call on external storage changes). */
+  function _invalidatePinnedCache() {
+    _pinnedCache = null;
   }
 
   /** Save the set of pinned session IDs. */
   function _savePinnedIds(pinnedSet) {
+    _pinnedCache = pinnedSet;  // update cache in-place
     SafeStorage.trySetJSON(PINNED_KEY, [...pinnedSet]);
   }
 
@@ -5254,7 +5267,7 @@ const SessionManager = (() => {
     getActiveId: _getActiveId,
     _isOpen: function () { return isOpen; },
     /** Invalidate the in-memory cache, forcing a fresh parse on next read. */
-    invalidateCache() { _cacheDirty = true; _cache = null; },
+    invalidateCache() { _cacheDirty = true; _cache = null; _invalidatePinnedCache(); },
     // Exposed for testing
     _loadAll, _saveAll, _getActiveId, _setActiveId,
     _evictOldest, _enforceSessionLimit, _estimateQuotaUsage, _checkQuota
