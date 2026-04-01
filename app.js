@@ -8982,12 +8982,9 @@ const ConversationTimeline = (() => {
       totalLen += len;
     }
 
-    // Clear old segments
-    let children = stripEl.querySelectorAll('.tl-segment, .tl-marker');
-    for (var c = 0; c < children.length; c++) {
-      children[c].remove();
-    }
+    // Build new segments in a DocumentFragment to avoid per-element layout thrash
     segments = [];
+    const frag = document.createDocumentFragment();
 
     let stripHeight = stripEl.clientHeight;
     if (stripHeight <= 0) stripHeight = 400; // fallback
@@ -9007,7 +9004,7 @@ const ConversationTimeline = (() => {
       seg.style.height = segH + 'px';
       seg.dataset.msgIndex = nonSystem[k].index;
       seg.dataset.domIndex = k;
-      stripEl.appendChild(seg);
+      frag.appendChild(seg);
 
       segments.push({
         el: seg,
@@ -9019,11 +9016,14 @@ const ConversationTimeline = (() => {
         preview: getPreview(nonSystem[k].msg)
       });
 
-      // Markers
-      addMarkers(seg, nonSystem[k], yPos, segH);
+      // Markers (appended to fragment, repositioned after mount)
+      addMarkersToFrag(frag, nonSystem[k], yPos, segH);
 
       yPos += segH + gap;
     }
+
+    // Single DOM write: clear old content and append all new elements at once
+    stripEl.replaceChildren(frag);
 
     updateViewportIndicator();
   }
@@ -9035,7 +9035,7 @@ const ConversationTimeline = (() => {
     return firstLine;
   }
 
-  function addMarkers(segEl, entry, yPos, segH) {
+  function addMarkersToFrag(container, entry, yPos, segH) {
     let content = entry.msg.content || '';
 
     // Code block marker
@@ -9043,7 +9043,7 @@ const ConversationTimeline = (() => {
       let m = document.createElement('div');
       m.className = 'tl-marker tl-marker-code';
       m.style.top = (yPos + 2) + 'px';
-      stripEl.appendChild(m);
+      container.appendChild(m);
     }
 
     // Bookmark marker (check ChatBookmarks if available)
@@ -9052,7 +9052,7 @@ const ConversationTimeline = (() => {
       let bm = document.createElement('div');
       bm.className = 'tl-marker tl-marker-bookmark';
       bm.style.top = (yPos + segH - 8) + 'px';
-      stripEl.appendChild(bm);
+      container.appendChild(bm);
     }
 
     // Pin marker (check MessagePinning if available)
@@ -9061,7 +9061,7 @@ const ConversationTimeline = (() => {
       const pm = document.createElement('div');
       pm.className = 'tl-marker tl-marker-pin';
       pm.style.top = (yPos + Math.floor(segH / 2) - 3) + 'px';
-      stripEl.appendChild(pm);
+      container.appendChild(pm);
     }
   }
 
