@@ -36,9 +36,11 @@ server {
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+    add_header Permissions-Policy "camera=(), microphone=(self), geolocation=(), payment=()" always;
     add_header Cross-Origin-Opener-Policy "same-origin" always;
-    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
+    add_header Cross-Origin-Resource-Policy "same-origin" always;
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; connect-src https://api.openai.com; frame-src 'self'; img-src 'self' data:; object-src 'none'; worker-src 'self'; form-action 'self'; base-uri 'self'; frame-ancestors 'none'; upgrade-insecure-requests;" always;
 
     # Gzip compression
     gzip on;
@@ -46,9 +48,12 @@ server {
     gzip_min_length 256;
 
     # Cache static assets
+    # NOTE: add_header in a location block inherits parent headers only
+    # when no add_header is used here.  We use expires + Cache-Control
+    # via the expires directive which sets Cache-Control automatically,
+    # avoiding the add_header override that would drop security headers.
     location ~* \.(css|js|ico|png|jpg|svg|woff2?)$ {
         expires 7d;
-        add_header Cache-Control "public, immutable";
     }
 
     # SPA fallback
