@@ -1,7 +1,7 @@
 /* ============================================================
  * Agentic Chat - Application Logic
  *
- * Architecture (48 modules, all revealing-module-pattern IIFEs):
+ * Architecture (49 modules, all revealing-module-pattern IIFEs):
  *
  *   Core:
  *   SafeStorage          - safe localStorage wrapper for restricted-storage environments
@@ -92,6 +92,7 @@
  *   ConversationTimer    - per-session active time tracking with auto-pause and time log dashboard (Alt+T)
  *   ApiInspector         - debug panel logging all API requests with payloads, timing, tokens, cost (🔬 button)
  *   AmbientSoundPlayer   - procedural ambient soundscapes (rain, café, fire, wind, stream, white noise) via Web Audio API (Alt+A)
+ *   StickyNotesBoard     - visual draggable sticky notes canvas for brainstorming per session (Alt+N)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -30745,4 +30746,277 @@ const AmbientSoundPlayer = (() => {
   });
 
   return { toggle, show, hide };
+})();
+
+// ============================================================
+// Module: StickyNotesBoard
+// Visual draggable sticky notes canvas for brainstorming.
+// Notes are persisted per session in localStorage.
+// Toggle: Alt+N or click the sticky notes button.
+// ============================================================
+var StickyNotesBoard = (function () {
+  'use strict';
+
+  var STORAGE_PREFIX = 'agenticchat_stickynotes_';
+  var COLORS = ['#fff9c4','#f8bbd0','#c8e6c9','#bbdefb','#ffe0b2','#e1bee7','#b2dfdb','#d7ccc8'];
+  var _panel = null;
+  var _board = null;
+  var _notes = [];
+  var _nextId = 1;
+  var _visible = false;
+  var _dragState = null;
+
+  function _sessionKey() {
+    if (typeof SessionManager !== 'undefined' && SessionManager.currentId) return SessionManager.currentId();
+    return 'default';
+  }
+
+  function _storageKey() { return STORAGE_PREFIX + _sessionKey(); }
+
+  function _save() {
+    var data = _notes.map(function (n) {
+      return { id: n.id, x: n.x, y: n.y, w: n.w, h: n.h, color: n.color, text: n.text };
+    });
+    try { SafeStorage.set(_storageKey(), JSON.stringify(data)); } catch (_) {}
+  }
+
+  function _load() {
+    try {
+      var raw = SafeStorage.get(_storageKey());
+      if (raw) {
+        var parsed = JSON.parse(raw);
+        _notes = parsed;
+        _nextId = _notes.reduce(function (mx, n) { return Math.max(mx, n.id + 1); }, 1);
+      } else {
+        _notes = [];
+        _nextId = 1;
+      }
+    } catch (_) { _notes = []; _nextId = 1; }
+  }
+
+  function _createNoteEl(note) {
+    var el = document.createElement('div');
+    el.className = 'sticky-note';
+    el.dataset.noteId = note.id;
+    el.style.left = note.x + 'px';
+    el.style.top = note.y + 'px';
+    el.style.width = (note.w || 180) + 'px';
+    el.style.height = (note.h || 140) + 'px';
+    el.style.backgroundColor = note.color;
+    el.style.position = 'absolute';
+
+    var header = document.createElement('div');
+    header.className = 'sticky-note-header';
+    header.style.cssText = 'cursor:grab;padding:4px 6px;display:flex;justify-content:space-between;align-items:center;font-size:11px;opacity:0.7;user-select:none;';
+
+    var colorBtn = document.createElement('span');
+    colorBtn.textContent = '🎨';
+    colorBtn.title = 'Change color';
+    colorBtn.style.cursor = 'pointer';
+    colorBtn.addEventListener('click', function () {
+      var idx = COLORS.indexOf(note.color);
+      note.color = COLORS[(idx + 1) % COLORS.length];
+      el.style.backgroundColor = note.color;
+      _save();
+    });
+
+    var delBtn = document.createElement('span');
+    delBtn.textContent = '✕';
+    delBtn.title = 'Delete note';
+    delBtn.style.cursor = 'pointer';
+    delBtn.addEventListener('click', function () {
+      _notes = _notes.filter(function (n) { return n.id !== note.id; });
+      el.remove();
+      _save();
+    });
+
+    header.appendChild(colorBtn);
+    header.appendChild(delBtn);
+
+    // Dragging
+    header.addEventListener('mousedown', function (e) {
+      e.preventDefault();
+      _dragState = { note: note, el: el, offsetX: e.clientX - el.offsetLeft, offsetY: e.clientY - el.offsetTop };
+      header.style.cursor = 'grabbing';
+    });
+
+    var textarea = document.createElement('textarea');
+    textarea.className = 'sticky-note-text';
+    textarea.value = note.text || '';
+    textarea.placeholder = 'Type here...';
+    textarea.style.cssText = 'width:100%;height:calc(100% - 28px);border:none;background:transparent;resize:none;padding:6px;font-family:inherit;font-size:13px;outline:none;box-sizing:border-box;';
+    textarea.addEventListener('input', function () {
+      note.text = textarea.value;
+      _save();
+    });
+
+    el.appendChild(header);
+    el.appendChild(textarea);
+
+    // Resize handle
+    var resizeHandle = document.createElement('div');
+    resizeHandle.style.cssText = 'position:absolute;right:0;bottom:0;width:14px;height:14px;cursor:nwse-resize;opacity:0.4;font-size:10px;text-align:center;line-height:14px;';
+    resizeHandle.textContent = '⤡';
+    var _resizing = false;
+    resizeHandle.addEventListener('mousedown', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      _resizing = true;
+      var startX = e.clientX, startY = e.clientY;
+      var startW = el.offsetWidth, startH = el.offsetHeight;
+      function onMove(ev) {
+        var w = Math.max(120, startW + ev.clientX - startX);
+        var h = Math.max(80, startH + ev.clientY - startY);
+        el.style.width = w + 'px';
+        el.style.height = h + 'px';
+        note.w = w; note.h = h;
+      }
+      function onUp() {
+        _resizing = false;
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        _save();
+      }
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+    el.appendChild(resizeHandle);
+
+    return el;
+  }
+
+  function _render() {
+    if (!_board) return;
+    _board.innerHTML = '';
+    _notes.forEach(function (note) {
+      _board.appendChild(_createNoteEl(note));
+    });
+  }
+
+  function _addNote() {
+    var note = {
+      id: _nextId++,
+      x: 20 + Math.random() * 200,
+      y: 20 + Math.random() * 150,
+      w: 180, h: 140,
+      color: COLORS[Math.floor(Math.random() * COLORS.length)],
+      text: ''
+    };
+    _notes.push(note);
+    if (_board) _board.appendChild(_createNoteEl(note));
+    _save();
+  }
+
+  function _clearAll() {
+    if (!confirm('Delete all sticky notes?')) return;
+    _notes = [];
+    _nextId = 1;
+    _render();
+    _save();
+  }
+
+  function _buildPanel() {
+    _panel = document.createElement('div');
+    _panel.id = 'stickynotes-panel';
+    _panel.className = 'sticky-notes-panel';
+    _panel.style.cssText = 'display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:10000;';
+
+    var container = document.createElement('div');
+    container.style.cssText = 'position:absolute;top:5%;left:5%;width:90%;height:90%;background:var(--bg,#1e1e1e);border-radius:12px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.4);';
+
+    // Toolbar
+    var toolbar = document.createElement('div');
+    toolbar.style.cssText = 'padding:10px 16px;display:flex;gap:8px;align-items:center;border-bottom:1px solid rgba(255,255,255,0.1);';
+
+    var title = document.createElement('span');
+    title.textContent = '🗒️ Sticky Notes Board';
+    title.style.cssText = 'font-weight:bold;font-size:16px;flex:1;color:var(--fg,#eee);';
+
+    var addBtn = document.createElement('button');
+    addBtn.textContent = '+ Add Note';
+    addBtn.className = 'btn-secondary';
+    addBtn.addEventListener('click', _addNote);
+
+    var clearBtn = document.createElement('button');
+    clearBtn.textContent = 'Clear All';
+    clearBtn.className = 'btn-secondary';
+    clearBtn.addEventListener('click', _clearAll);
+
+    var closeBtn = document.createElement('button');
+    closeBtn.textContent = '✕ Close';
+    closeBtn.className = 'btn-secondary';
+    closeBtn.addEventListener('click', hide);
+
+    toolbar.appendChild(title);
+    toolbar.appendChild(addBtn);
+    toolbar.appendChild(clearBtn);
+    toolbar.appendChild(closeBtn);
+
+    // Board area
+    _board = document.createElement('div');
+    _board.style.cssText = 'flex:1;position:relative;overflow:auto;';
+
+    container.appendChild(toolbar);
+    container.appendChild(_board);
+    _panel.appendChild(container);
+
+    // Click backdrop to close
+    _panel.addEventListener('click', function (e) { if (e.target === _panel) hide(); });
+
+    // Global mouse move/up for dragging
+    document.addEventListener('mousemove', function (e) {
+      if (!_dragState) return;
+      var nx = e.clientX - _dragState.offsetX;
+      var ny = e.clientY - _dragState.offsetY;
+      _dragState.el.style.left = Math.max(0, nx) + 'px';
+      _dragState.el.style.top = Math.max(0, ny) + 'px';
+      _dragState.note.x = Math.max(0, nx);
+      _dragState.note.y = Math.max(0, ny);
+    });
+    document.addEventListener('mouseup', function () {
+      if (_dragState) {
+        _dragState.el.querySelector('.sticky-note-header').style.cursor = 'grab';
+        _save();
+        _dragState = null;
+      }
+    });
+
+    document.body.appendChild(_panel);
+  }
+
+  function show() {
+    if (!_panel) _buildPanel();
+    _load();
+    _render();
+    _panel.style.display = 'block';
+    _visible = true;
+  }
+
+  function hide() {
+    if (_panel) _panel.style.display = 'none';
+    _visible = false;
+  }
+
+  function toggle() { _visible ? hide() : show(); }
+
+  // Init
+  document.addEventListener('DOMContentLoaded', function () {
+    // Keyboard shortcut Alt+N
+    document.addEventListener('keydown', function (e) {
+      if (e.altKey && e.key.toLowerCase() === 'n' && !e.ctrlKey && !e.shiftKey) {
+        e.preventDefault();
+        toggle();
+      }
+    });
+
+    // Register with command palette
+    if (typeof CommandPalette !== 'undefined' && CommandPalette.register) {
+      CommandPalette.register({
+        name: 'sticky notes', description: 'Sticky Notes Board — visual brainstorming canvas',
+        icon: '🗒️', action: toggle
+      });
+    }
+  });
+
+  return { toggle: toggle, show: show, hide: hide };
 })();

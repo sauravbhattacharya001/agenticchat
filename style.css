@@ -4512,3 +4512,13 @@ body.light .pinboard-item-note { background: #eee; color: #555; }
   max-height: 300px; overflow-y: auto;
 }
 .inspector-msg-preview { max-height: 60px; overflow: hidden; text-overflow: ellipsis; font-size: 0.78rem; color: var(--text-secondary, #bbb); margin-top: 4px; }
+
+/* Sticky Notes Board */
+.sticky-note {
+  border-radius: 6px;
+  box-shadow: 2px 2px 8px rgba(0,0,0,0.25);
+  transition: box-shadow 0.15s;
+  z-index: 1;
+}
+.sticky-note:hover { box-shadow: 3px 3px 12px rgba(0,0,0,0.35); z-index: 2; }
+.sticky-note-header:hover { opacity: 1 !important; }
