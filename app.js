@@ -91,6 +91,7 @@
  *   MessageReply         - reply-to / quote a specific message with visual preview bar
  *   ConversationTimer    - per-session active time tracking with auto-pause and time log dashboard (Alt+T)
  *   ApiInspector         - debug panel logging all API requests with payloads, timing, tokens, cost (🔬 button)
+ *   AmbientSoundPlayer   - procedural ambient soundscapes (rain, café, fire, wind, stream, white noise) via Web Audio API (Alt+A)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -30244,6 +30245,478 @@ const ApiInspector = (() => {
       CommandPalette.register({
         name: 'inspector', description: 'API Inspector — view API request/response log',
         icon: '🔬', action: toggle
+      });
+    }
+  });
+
+  return { toggle, show, hide };
+})();
+
+
+/* ============================================================
+ *  AmbientSoundPlayer — procedural ambient soundscapes for focus
+ *
+ *  Generates rain, café, fireplace, wind, stream, and white noise
+ *  entirely via Web Audio API (no external audio files).
+ *  Panel with individual volume sliders and master volume.
+ *  Keyboard shortcut: Alt+A
+ * ============================================================ */
+const AmbientSoundPlayer = (() => {
+  'use strict';
+
+  const STORAGE_KEY = 'ac_ambient_sounds';
+  let _audioCtx = null;
+  let _masterGain = null;
+  let _visible = false;
+  let _panel = null;
+  let _playing = false;
+
+  /* Sound definitions — each creates its own nodes */
+  const SOUNDS = [
+    { id: 'rain',      label: '🌧️ Rain',      defaultVol: 0 },
+    { id: 'cafe',      label: '☕ Café',       defaultVol: 0 },
+    { id: 'fire',      label: '🔥 Fireplace',  defaultVol: 0 },
+    { id: 'wind',      label: '💨 Wind',       defaultVol: 0 },
+    { id: 'stream',    label: '🏞️ Stream',     defaultVol: 0 },
+    { id: 'whitenoise',label: '📻 White Noise', defaultVol: 0 },
+  ];
+
+  let _channels = {}; // id → { gain, nodes[], volume }
+  let _masterVol = 0.5;
+  let _state = null;
+
+  function _loadState() {
+    try {
+      const raw = SafeStorage.get(STORAGE_KEY);
+      if (raw) {
+        _state = JSON.parse(raw);
+        _masterVol = _state.masterVol ?? 0.5;
+      } else {
+        _state = { volumes: {}, masterVol: 0.5 };
+      }
+    } catch (_) {
+      _state = { volumes: {}, masterVol: 0.5 };
+    }
+  }
+
+  function _saveState() {
+    const volumes = {};
+    for (const s of SOUNDS) {
+      volumes[s.id] = _channels[s.id]?.volume ?? 0;
+    }
+    SafeStorage.set(STORAGE_KEY, JSON.stringify({ volumes, masterVol: _masterVol }));
+  }
+
+  function _ctx() {
+    if (!_audioCtx) {
+      try {
+        _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        _masterGain = _audioCtx.createGain();
+        _masterGain.gain.value = _masterVol;
+        _masterGain.connect(_audioCtx.destination);
+      } catch (_) { return null; }
+    }
+    if (_audioCtx.state === 'suspended') _audioCtx.resume();
+    return _audioCtx;
+  }
+
+  /* ---- Procedural sound generators ---- */
+
+  function _createNoise(ctx, type) {
+    // Brown/pink/white noise via AudioBufferSourceNode
+    const bufferSize = 2 * ctx.sampleRate;
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+
+    for (let i = 0; i < bufferSize; i++) {
+      const white = Math.random() * 2 - 1;
+      if (type === 'white') {
+        data[i] = white * 0.3;
+      } else if (type === 'brown') {
+        b0 = (b0 + (0.02 * white)) / 1.02;
+        data[i] = b0 * 3.5;
+      } else { // pink
+        b0 = 0.99886 * b0 + white * 0.0555179;
+        b1 = 0.99332 * b1 + white * 0.0750759;
+        b2 = 0.96900 * b2 + white * 0.1538520;
+        b3 = 0.86650 * b3 + white * 0.3104856;
+        b4 = 0.55000 * b4 + white * 0.5329522;
+        b5 = -0.7616 * b5 - white * 0.0168980;
+        data[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.11;
+        b6 = white * 0.115926;
+      }
+    }
+
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    src.loop = true;
+    return src;
+  }
+
+  function _startSound(id) {
+    const ctx = _ctx();
+    if (!ctx) return;
+    if (_channels[id]?.nodes?.length) return; // already playing
+
+    const gain = ctx.createGain();
+    const vol = _channels[id]?.volume ?? 0;
+    gain.gain.value = vol;
+    gain.connect(_masterGain);
+    const nodes = [];
+
+    switch (id) {
+      case 'rain': {
+        // Pink noise through bandpass for rain patter
+        const noise = _createNoise(ctx, 'pink');
+        const bp = ctx.createBiquadFilter();
+        bp.type = 'bandpass';
+        bp.frequency.value = 800;
+        bp.Q.value = 0.5;
+        noise.connect(bp);
+        bp.connect(gain);
+        noise.start();
+        nodes.push(noise);
+
+        // Add occasional "droplet" clicks via modulated higher noise
+        const noise2 = _createNoise(ctx, 'white');
+        const hp = ctx.createBiquadFilter();
+        hp.type = 'highpass';
+        hp.frequency.value = 4000;
+        const dropGain = ctx.createGain();
+        dropGain.gain.value = 0.15;
+        noise2.connect(hp);
+        hp.connect(dropGain);
+        dropGain.connect(gain);
+        noise2.start();
+        nodes.push(noise2);
+        break;
+      }
+
+      case 'cafe': {
+        // Brown noise (murmur) + pink noise (clatter)
+        const murmur = _createNoise(ctx, 'brown');
+        const lp = ctx.createBiquadFilter();
+        lp.type = 'lowpass';
+        lp.frequency.value = 500;
+        const murmurGain = ctx.createGain();
+        murmurGain.gain.value = 0.7;
+        murmur.connect(lp);
+        lp.connect(murmurGain);
+        murmurGain.connect(gain);
+        murmur.start();
+        nodes.push(murmur);
+
+        const clatter = _createNoise(ctx, 'pink');
+        const bp = ctx.createBiquadFilter();
+        bp.type = 'bandpass';
+        bp.frequency.value = 2000;
+        bp.Q.value = 0.3;
+        const clatGain = ctx.createGain();
+        clatGain.gain.value = 0.2;
+        clatter.connect(bp);
+        bp.connect(clatGain);
+        clatGain.connect(gain);
+        clatter.start();
+        nodes.push(clatter);
+        break;
+      }
+
+      case 'fire': {
+        // Brown noise with crackling (modulated)
+        const noise = _createNoise(ctx, 'brown');
+        const bp = ctx.createBiquadFilter();
+        bp.type = 'bandpass';
+        bp.frequency.value = 300;
+        bp.Q.value = 1.0;
+        noise.connect(bp);
+        bp.connect(gain);
+        noise.start();
+        nodes.push(noise);
+
+        // Crackle layer
+        const crackle = _createNoise(ctx, 'white');
+        const hp = ctx.createBiquadFilter();
+        hp.type = 'highpass';
+        hp.frequency.value = 3000;
+        const crackGain = ctx.createGain();
+        crackGain.gain.value = 0.08;
+        crackle.connect(hp);
+        hp.connect(crackGain);
+        crackGain.connect(gain);
+        crackle.start();
+        nodes.push(crackle);
+        break;
+      }
+
+      case 'wind': {
+        // Pink noise with slow LFO modulating a bandpass
+        const noise = _createNoise(ctx, 'pink');
+        const bp = ctx.createBiquadFilter();
+        bp.type = 'bandpass';
+        bp.frequency.value = 400;
+        bp.Q.value = 0.8;
+
+        const lfo = ctx.createOscillator();
+        const lfoGain = ctx.createGain();
+        lfo.type = 'sine';
+        lfo.frequency.value = 0.15; // slow sweep
+        lfoGain.gain.value = 300;
+        lfo.connect(lfoGain);
+        lfoGain.connect(bp.frequency);
+        lfo.start();
+
+        noise.connect(bp);
+        bp.connect(gain);
+        noise.start();
+        nodes.push(noise, lfo);
+        break;
+      }
+
+      case 'stream': {
+        // Pink noise through a high bandpass for babbling water
+        const noise = _createNoise(ctx, 'pink');
+        const bp = ctx.createBiquadFilter();
+        bp.type = 'bandpass';
+        bp.frequency.value = 1500;
+        bp.Q.value = 0.4;
+        noise.connect(bp);
+        bp.connect(gain);
+        noise.start();
+        nodes.push(noise);
+
+        // Gentle burble — brown noise with wobble
+        const burble = _createNoise(ctx, 'brown');
+        const lp = ctx.createBiquadFilter();
+        lp.type = 'lowpass';
+        lp.frequency.value = 800;
+        const bGain = ctx.createGain();
+        bGain.gain.value = 0.4;
+        burble.connect(lp);
+        lp.connect(bGain);
+        bGain.connect(gain);
+        burble.start();
+        nodes.push(burble);
+        break;
+      }
+
+      case 'whitenoise': {
+        const noise = _createNoise(ctx, 'white');
+        noise.connect(gain);
+        noise.start();
+        nodes.push(noise);
+        break;
+      }
+    }
+
+    _channels[id] = { ..._channels[id], gain, nodes, volume: vol };
+  }
+
+  function _stopSound(id) {
+    const ch = _channels[id];
+    if (!ch?.nodes?.length) return;
+    ch.nodes.forEach(n => { try { n.stop(); } catch (_) {} });
+    try { ch.gain.disconnect(); } catch (_) {}
+    _channels[id] = { volume: ch.volume, gain: null, nodes: [] };
+  }
+
+  function _setVolume(id, vol) {
+    if (!_channels[id]) _channels[id] = { volume: 0, gain: null, nodes: [] };
+    _channels[id].volume = vol;
+    if (_channels[id].gain) {
+      _channels[id].gain.gain.value = vol;
+    }
+    // Auto start/stop
+    if (_playing && vol > 0 && !_channels[id]?.nodes?.length) _startSound(id);
+    if (vol === 0 && _channels[id]?.nodes?.length) _stopSound(id);
+    _saveState();
+  }
+
+  function _setMasterVol(vol) {
+    _masterVol = vol;
+    if (_masterGain) _masterGain.gain.value = vol;
+    _saveState();
+  }
+
+  function _startAll() {
+    _playing = true;
+    for (const s of SOUNDS) {
+      const vol = _channels[s.id]?.volume ?? 0;
+      if (vol > 0) _startSound(s.id);
+    }
+    _updateBtn();
+  }
+
+  function _stopAll() {
+    _playing = false;
+    for (const s of SOUNDS) _stopSound(s.id);
+    _updateBtn();
+  }
+
+  function toggle() {
+    _visible ? hide() : show();
+  }
+
+  function show() {
+    _visible = true;
+    _ensurePanel();
+    _panel.style.display = 'block';
+  }
+
+  function hide() {
+    _visible = false;
+    if (_panel) _panel.style.display = 'none';
+  }
+
+  let _btn = null;
+
+  function _updateBtn() {
+    if (_btn) {
+      _btn.textContent = _playing ? '🎵' : '🎶';
+      _btn.title = _playing
+        ? 'Ambient sounds playing — click to open mixer (Alt+A)'
+        : 'Ambient Sound Player — click to open mixer (Alt+A)';
+    }
+  }
+
+  function _ensurePanel() {
+    if (_panel) return;
+
+    _panel = document.createElement('div');
+    _panel.id = 'ambient-sound-panel';
+    _panel.style.cssText = `
+      position: fixed; bottom: 60px; right: 16px; width: 280px;
+      background: var(--bg-secondary, #1e1e2e); color: var(--text-primary, #cdd6f4);
+      border: 1px solid var(--border-color, #45475a); border-radius: 12px;
+      padding: 16px; z-index: 10000; box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+      font-family: inherit; display: none;
+    `;
+
+    let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <span style="font-weight:600;font-size:14px">🎧 Ambient Sounds</span>
+      <div>
+        <button id="ambient-play-btn" class="btn-secondary" style="font-size:16px;padding:2px 8px;margin-right:4px" title="Play/Stop all">▶️</button>
+        <button id="ambient-close-btn" class="btn-secondary" style="font-size:14px;padding:2px 8px" title="Close">✕</button>
+      </div>
+    </div>`;
+
+    // Master volume
+    html += `<div style="margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--border-color,#45475a)">
+      <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+        <span>🔊 Master</span><span id="ambient-master-val">${Math.round(_masterVol * 100)}%</span>
+      </div>
+      <input type="range" id="ambient-master-slider" min="0" max="100" value="${Math.round(_masterVol * 100)}"
+        style="width:100%;accent-color:#89b4fa;height:6px">
+    </div>`;
+
+    // Presets
+    html += `<div style="display:flex;gap:4px;margin-bottom:10px;flex-wrap:wrap">
+      <button class="btn-secondary ambient-preset" data-preset="focus" style="font-size:11px;padding:2px 6px" title="Rain + Café">🧠 Focus</button>
+      <button class="btn-secondary ambient-preset" data-preset="cozy" style="font-size:11px;padding:2px 6px" title="Fire + Rain">🏠 Cozy</button>
+      <button class="btn-secondary ambient-preset" data-preset="nature" style="font-size:11px;padding:2px 6px" title="Stream + Wind">🌿 Nature</button>
+      <button class="btn-secondary ambient-preset" data-preset="reset" style="font-size:11px;padding:2px 6px" title="All off">🔇 Reset</button>
+    </div>`;
+
+    // Individual sounds
+    for (const s of SOUNDS) {
+      const vol = _channels[s.id]?.volume ?? 0;
+      html += `<div style="margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:2px">
+          <span>${s.label}</span><span id="ambient-${s.id}-val">${Math.round(vol * 100)}%</span>
+        </div>
+        <input type="range" class="ambient-slider" data-sound="${s.id}" min="0" max="100" value="${Math.round(vol * 100)}"
+          style="width:100%;accent-color:#a6e3a1;height:5px">
+      </div>`;
+    }
+
+    _panel.innerHTML = html;
+    document.body.appendChild(_panel);
+
+    // Events
+    _panel.querySelector('#ambient-close-btn').addEventListener('click', hide);
+    _panel.querySelector('#ambient-play-btn').addEventListener('click', () => {
+      _playing ? _stopAll() : _startAll();
+      _panel.querySelector('#ambient-play-btn').textContent = _playing ? '▶️' : '⏹️';
+    });
+
+    _panel.querySelector('#ambient-master-slider').addEventListener('input', (e) => {
+      const v = parseInt(e.target.value) / 100;
+      _setMasterVol(v);
+      _panel.querySelector('#ambient-master-val').textContent = `${e.target.value}%`;
+    });
+
+    _panel.querySelectorAll('.ambient-slider').forEach(slider => {
+      slider.addEventListener('input', (e) => {
+        const id = e.target.dataset.sound;
+        const v = parseInt(e.target.value) / 100;
+        _setVolume(id, v);
+        _panel.querySelector(`#ambient-${id}-val`).textContent = `${e.target.value}%`;
+        // Auto-start if not playing
+        if (v > 0 && !_playing) { _playing = true; _updateBtn(); }
+      });
+    });
+
+    // Presets
+    const PRESETS = {
+      focus:  { rain: 0.5, cafe: 0.3, fire: 0, wind: 0, stream: 0, whitenoise: 0 },
+      cozy:   { rain: 0.3, cafe: 0, fire: 0.6, wind: 0, stream: 0, whitenoise: 0 },
+      nature: { rain: 0, cafe: 0, fire: 0, wind: 0.3, stream: 0.5, whitenoise: 0 },
+      reset:  { rain: 0, cafe: 0, fire: 0, wind: 0, stream: 0, whitenoise: 0 },
+    };
+
+    _panel.querySelectorAll('.ambient-preset').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const preset = PRESETS[btn.dataset.preset];
+        if (!preset) return;
+        for (const [id, vol] of Object.entries(preset)) {
+          _setVolume(id, vol);
+          const slider = _panel.querySelector(`.ambient-slider[data-sound="${id}"]`);
+          if (slider) slider.value = Math.round(vol * 100);
+          const valEl = _panel.querySelector(`#ambient-${id}-val`);
+          if (valEl) valEl.textContent = `${Math.round(vol * 100)}%`;
+        }
+        if (btn.dataset.preset === 'reset') {
+          _stopAll();
+          _panel.querySelector('#ambient-play-btn').textContent = '▶️';
+        } else {
+          _startAll();
+          _panel.querySelector('#ambient-play-btn').textContent = '⏹️';
+        }
+      });
+    });
+  }
+
+  // Init
+  document.addEventListener('DOMContentLoaded', () => {
+    _loadState();
+    // Restore volumes
+    for (const s of SOUNDS) {
+      const vol = _state.volumes?.[s.id] ?? 0;
+      _channels[s.id] = { volume: vol, gain: null, nodes: [] };
+    }
+
+    // Toolbar button
+    _btn = document.createElement('button');
+    _btn.id = 'ambient-sound-btn';
+    _btn.className = 'btn-secondary';
+    _btn.addEventListener('click', toggle);
+    _updateBtn();
+    const toolbar = document.querySelector('.toolbar[role="form"][aria-label="Chat input"]');
+    if (toolbar) toolbar.appendChild(_btn);
+
+    // Keyboard shortcut Alt+A
+    document.addEventListener('keydown', (e) => {
+      if (e.altKey && e.key.toLowerCase() === 'a' && !e.ctrlKey && !e.shiftKey) {
+        e.preventDefault();
+        toggle();
+      }
+    });
+
+    // Register with command palette
+    if (typeof CommandPalette !== 'undefined' && CommandPalette.register) {
+      CommandPalette.register({
+        name: 'ambient', description: 'Ambient Sound Player — background soundscapes for focus',
+        icon: '🎧', action: toggle
       });
     }
   });
