@@ -229,6 +229,80 @@ const DOMCache = (() => {
 })();
 
 /**
+ * ToastManager — unified lightweight toast notification system.
+ *
+ * Consolidates 4+ near-identical toast implementations across modules
+ * (scheduler, smartpaste, context-menu, etc.) into a single reusable utility.
+ *
+ * Usage:
+ *   ToastManager.show('Saved!');
+ *   ToastManager.show('✨ Smart Paste: code detected', { durationMs: 2500, id: 'smartpaste-toast' });
+ *   ToastManager.dismiss('smartpaste-toast');
+ */
+const ToastManager = (() => {
+  const _active = new Map(); // id → { el, timer }
+
+  const _defaultStyle = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);' +
+    'background:#333;color:#fff;padding:6px 16px;border-radius:20px;' +
+    'font-size:13px;z-index:100000;pointer-events:none;opacity:0;' +
+    'transition:opacity 0.3s ease;white-space:nowrap;';
+
+  /**
+   * Show a toast notification.
+   * @param {string} msg        - text content or innerHTML (if html option set)
+   * @param {Object} [opts]
+   * @param {string} [opts.id]         - unique id (auto-generated if omitted)
+   * @param {string} [opts.className]  - CSS class for styled toasts
+   * @param {number} [opts.durationMs] - auto-dismiss after ms (default 3000, 0 = sticky)
+   * @param {boolean} [opts.html]      - if true, set innerHTML instead of textContent
+   * @param {string} [opts.style]      - override inline style
+   * @param {string} [opts.role]       - ARIA role (default 'status')
+   * @returns {string} toast id
+   */
+  function show(msg, opts) {
+    const o = opts || {};
+    const id = o.id || ('toast-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6));
+    dismiss(id); // remove existing with same id
+
+    const el = document.createElement('div');
+    el.id = id;
+    if (o.className) el.className = o.className;
+    if (o.role !== false) el.setAttribute('role', o.role || 'status');
+    if (o.html) { el.innerHTML = msg; } else { el.textContent = msg; }
+    el.setAttribute('style', o.style || _defaultStyle);
+    document.body.appendChild(el);
+
+    // Fade in
+    requestAnimationFrame(() => { el.style.opacity = '1'; });
+
+    const duration = o.durationMs !== undefined ? o.durationMs : 3000;
+    let timer = null;
+    if (duration > 0) {
+      timer = setTimeout(() => {
+        el.style.opacity = '0';
+        setTimeout(() => { el.remove(); _active.delete(id); }, 300);
+      }, duration);
+    }
+    _active.set(id, { el, timer });
+    return id;
+  }
+
+  /**
+   * Dismiss a toast by id.
+   * @param {string} id
+   */
+  function dismiss(id) {
+    const entry = _active.get(id);
+    if (!entry) return;
+    if (entry.timer) clearTimeout(entry.timer);
+    entry.el.remove();
+    _active.delete(id);
+  }
+
+  return { show, dismiss };
+})();
+
+/**
  * ChatOutputObserver — single shared MutationObserver for #chat-output.
  * Modules register callbacks instead of creating individual observers,
  * reducing microtask dispatch overhead by ~87% during streaming.
@@ -16720,18 +16794,7 @@ const MessageScheduler = (() => {
   }
 
   function _showToast(msg) {
-    const existing = document.querySelector('.scheduler-toast');
-    if (existing) existing.remove();
-
-    const toast = document.createElement('div');
-    toast.className = 'scheduler-toast';
-    toast.textContent = msg;
-    document.body.appendChild(toast);
-    setTimeout(() => { toast.classList.add('scheduler-toast-visible'); }, 10);
-    setTimeout(() => {
-      toast.classList.remove('scheduler-toast-visible');
-      setTimeout(() => toast.remove(), 300);
-    }, 3000);
+    ToastManager.show(msg, { id: 'scheduler-toast', className: 'scheduler-toast', durationMs: 3000 });
   }
 
   /* ── Toggle ──────────────────────────────────────────────── */
@@ -25013,23 +25076,7 @@ const SmartPaste = (() => {
   /* ---- toast ---- */
 
   function _showToast(typeLabel) {
-    var existing = DOMCache.get('smartpaste-toast');
-    if (existing) existing.remove();
-    var toast = document.createElement('div');
-    toast.id = 'smartpaste-toast';
-    toast.textContent = '\u2728 Smart Paste: ' + typeLabel + ' detected';
-    toast.setAttribute('style',
-      'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);' +
-      'background:#333;color:#fff;padding:6px 16px;border-radius:20px;' +
-      'font-size:13px;z-index:100000;pointer-events:none;opacity:0;' +
-      'transition:opacity 0.3s ease;white-space:nowrap;');
-    document.body.appendChild(toast);
-    requestAnimationFrame(function() { toast.style.opacity = '1'; });
-    if (_toastTimeout) clearTimeout(_toastTimeout);
-    _toastTimeout = setTimeout(function() {
-      toast.style.opacity = '0';
-      setTimeout(function() { toast.remove(); }, 300);
-    }, 2500);
+    ToastManager.show('\u2728 Smart Paste: ' + typeLabel + ' detected', { id: 'smartpaste-toast', durationMs: 2500 });
   }
 
   /* ---- paste handler ---- */
@@ -25371,15 +25418,7 @@ const MessageContextMenu = (() => {
 
   var _toastTimer = null;
   function _toast(msg) {
-    var existing = DOMCache.get('ctx-menu-toast');
-    if (existing) existing.remove();
-    var t = document.createElement('div');
-    t.id = 'ctx-menu-toast';
-    t.className = 'msg-context-toast';
-    t.textContent = msg;
-    document.body.appendChild(t);
-    clearTimeout(_toastTimer);
-    _toastTimer = setTimeout(function() { t.remove(); }, 2000);
+    ToastManager.show(msg, { id: 'ctx-menu-toast', className: 'msg-context-toast', durationMs: 2000 });
   }
 
   /* ---- keyboard nav ---- */
