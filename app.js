@@ -430,6 +430,37 @@ function formatRelativeTime(isoString) {
   return new Date(isoString).toLocaleDateString();
 }
 
+/**
+ * Copy text to the clipboard with optional button feedback.
+ * Centralises the copy-flash-reset pattern used across 13+ call-sites.
+ *
+ * @param {string} text - Text to copy.
+ * @param {Object} [opts] - Optional feedback configuration.
+ * @param {HTMLElement} [opts.button] - Button element to flash feedback on.
+ * @param {string} [opts.flashText='✅ Copied!'] - Text to show during flash.
+ * @param {string} [opts.originalText] - Text to restore after flash (defaults to button's current text).
+ * @param {number} [opts.flashMs=1500] - Duration of flash in milliseconds.
+ * @param {Function} [opts.onSuccess] - Callback on successful copy.
+ * @param {Function} [opts.onError] - Callback on failed copy.
+ * @returns {Promise<boolean>} Whether the copy succeeded.
+ */
+async function _copyToClipboard(text, opts) {
+  const o = opts || {};
+  try {
+    await navigator.clipboard.writeText(text);
+    if (o.button) {
+      const orig = o.originalText || o.button.textContent;
+      o.button.textContent = o.flashText || '✅ Copied!';
+      setTimeout(() => { o.button.textContent = orig; }, o.flashMs || 1500);
+    }
+    if (o.onSuccess) o.onSuccess();
+    return true;
+  } catch (_) {
+    if (o.onError) o.onError();
+    return false;
+  }
+}
+
 /** Trigger a browser file download from in-memory content. */
 function downloadBlob(filename, content, mimeType) {
   let blob = new Blob([content], { type: mimeType });
@@ -2531,13 +2562,7 @@ const SnippetLibrary = (() => {
   /** Copy current code to clipboard. */
   function copyCurrentCode() {
     if (!currentCode) return;
-    navigator.clipboard.writeText(currentCode).then(() => {
-      const btn = el('copy-code-btn');
-      if (btn) {
-        btn.textContent = '✅ Copied!';
-        setTimeout(() => { btn.textContent = '📋 Copy'; }, 1500);
-      }
-    }).catch(() => {});
+    _copyToClipboard(currentCode, { button: el('copy-code-btn'), originalText: '📋 Copy' });
   }
 
   /** Re-run current code in sandbox. */
@@ -2672,10 +2697,7 @@ const SnippetLibrary = (() => {
       copyBtn.textContent = '📋 Copy';
       copyBtn.title = 'Copy code to clipboard';
       copyBtn.addEventListener('click', () => {
-        navigator.clipboard.writeText(snippet.code).then(() => {
-          copyBtn.textContent = '✅';
-          setTimeout(() => { copyBtn.textContent = '📋 Copy'; }, 1000);
-        }).catch(() => {});
+        _copyToClipboard(snippet.code, { button: copyBtn, flashText: '✅', originalText: '📋 Copy', flashMs: 1000 });
       });
       actions.appendChild(copyBtn);
 
@@ -10045,11 +10067,7 @@ const ConversationSummarizer = (() => {
     copyBtn.textContent = '📋 Copy';
     copyBtn.title = 'Copy summary as Markdown';
     copyBtn.addEventListener('click', function() {
-      try {
-        navigator.clipboard.writeText(getSummaryText());
-        copyBtn.textContent = '✓ Copied';
-        setTimeout(function() { copyBtn.textContent = '📋 Copy'; }, 1500);
-      } catch (_) { /* ignore */ }
+      _copyToClipboard(getSummaryText(), { button: copyBtn, flashText: '✓ Copied', originalText: '📋 Copy' });
     });
     actions.appendChild(copyBtn);
 
@@ -11273,11 +11291,7 @@ const ConversationChapters = (() => {
     exportBtn.textContent = '\uD83D\uDCCB Export';
     exportBtn.title = 'Copy chapters as JSON';
     exportBtn.addEventListener('click', function() {
-      try {
-        navigator.clipboard.writeText(exportChapters());
-        exportBtn.textContent = '\u2713 Copied';
-        setTimeout(function() { exportBtn.textContent = '\uD83D\uDCCB Export'; }, 1500);
-      } catch (_) { /* ignore */ }
+      _copyToClipboard(exportChapters(), { button: exportBtn, flashText: '\u2713 Copied', originalText: '\uD83D\uDCCB Export' });
     });
     actions.appendChild(exportBtn);
 
@@ -15418,10 +15432,7 @@ const MessageTranslator = (() => {
     copyBtn.textContent = '\uD83D\uDCCB';
     copyBtn.title = 'Copy translation';
     copyBtn.addEventListener('click', function () {
-      navigator.clipboard.writeText(text).then(function () {
-        copyBtn.textContent = '\u2705';
-        setTimeout(function () { copyBtn.textContent = '\uD83D\uDCCB'; }, 1500);
-      });
+      _copyToClipboard(text, { button: copyBtn, flashText: '\u2705', originalText: '\uD83D\uDCCB' });
     });
 
     var closeBtn = document.createElement('button');
@@ -18216,11 +18227,7 @@ const ClipboardHistory = (() => {
 
       el.querySelector('.cbh-copy-btn').addEventListener('click', (e) => {
         e.stopPropagation();
-        navigator.clipboard.writeText(entry.text).then(() => {
-          const btn = e.target;
-          btn.textContent = '✓ Copied';
-          setTimeout(() => { btn.textContent = '📋 Copy'; }, 1500);
-        });
+        _copyToClipboard(entry.text, { button: e.target, flashText: '✓ Copied', originalText: '📋 Copy' });
       });
 
       el.querySelector('.cbh-insert-btn').addEventListener('click', (e) => {
@@ -26079,12 +26086,8 @@ const MessageReaderView = (() => {
     overlayEl.querySelector('.reader-copy-btn').addEventListener('click', () => {
       const content = overlayEl.querySelector('.reader-content');
       const text = content.innerText || content.textContent;
-      navigator.clipboard.writeText(text).then(() => {
-        const btn = overlayEl.querySelector('.reader-copy-btn');
-        const orig = btn.textContent;
-        btn.textContent = '✅ Copied!';
-        setTimeout(() => { btn.textContent = orig; }, 1500);
-      }).catch(() => {});
+      const btn = overlayEl.querySelector('.reader-copy-btn');
+      _copyToClipboard(text, { button: btn });
     });
     // Font size controls
     let fontSize = 1.1;
@@ -29326,10 +29329,7 @@ const ConversationShareLink = (() => {
     copyBtn.className = 'share-copy-btn';
     copyBtn.textContent = '📋 Copy Link';
     copyBtn.addEventListener('click', () => {
-      navigator.clipboard.writeText(urlInput.value).then(() => {
-        copyBtn.textContent = '✅ Copied!';
-        setTimeout(() => { copyBtn.textContent = '📋 Copy Link'; }, 2000);
-      });
+      _copyToClipboard(urlInput.value, { button: copyBtn, originalText: '📋 Copy Link', flashMs: 2000 });
     });
     footer.appendChild(copyBtn);
     _panel.appendChild(footer);
