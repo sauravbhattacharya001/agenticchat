@@ -6192,9 +6192,50 @@ const ChatStats = (() => {
 const CostDashboard = (() => {
   const STORAGE_KEY = 'agenticchat_cost_log';
   const BUDGET_KEY  = 'agenticchat_cost_budget';
+  const TOTALS_KEY  = 'agenticchat_cost_totals';
   const MAX_ENTRIES = 5000; // cap stored entries to avoid quota issues
 
   let isOpen = false;
+
+  // ── In-memory running totals cache ──────────────────────────────
+  // Avoids parsing and iterating the full cost log (up to 5000 entries)
+  // on every recordUsage() call just to check the budget.  The totals
+  // are maintained incrementally and persisted separately.  The full
+  // log is only loaded when the dashboard is rendered or exported.
+  let _totalsCache = null;
+
+  /** Load or initialise running totals from storage. */
+  function _loadTotals() {
+    if (_totalsCache) return _totalsCache;
+    try {
+      const raw = SafeStorage.get(TOTALS_KEY);
+      _totalsCache = _safeParse(raw, null);
+    } catch (_) { _totalsCache = null; }
+    if (!_totalsCache || typeof _totalsCache.totalCost !== 'number') {
+      // First run or corrupted — rebuild from full log
+      _totalsCache = _rebuildTotals();
+    }
+    return _totalsCache;
+  }
+
+  /** Rebuild running totals from the full log (one-time migration). */
+  function _rebuildTotals() {
+    const log = _load();
+    let totalCost = 0, totalPrompt = 0, totalCompletion = 0;
+    for (let i = 0; i < log.length; i++) {
+      totalCost += log[i].cost;
+      totalPrompt += log[i].pt;
+      totalCompletion += log[i].ct;
+    }
+    const totals = { totalCost, totalPrompt, totalCompletion, totalCalls: log.length };
+    SafeStorage.setJSON(TOTALS_KEY, totals);
+    return totals;
+  }
+
+  /** Persist current running totals. */
+  function _saveTotals() {
+    if (_totalsCache) SafeStorage.setJSON(TOTALS_KEY, _totalsCache);
+  }
 
   /* ── Persistence helpers ─────────────────────────────────────── */
 
@@ -6208,9 +6249,16 @@ const CostDashboard = (() => {
 
   /** Persist cost log array. */
   function _save(log) {
-    // Trim oldest entries if over cap
-    if (log.length > MAX_ENTRIES) log = log.slice(log.length - MAX_ENTRIES);
-    SafeStorage.setJSON(STORAGE_KEY, log);
+    // Trim oldest entries if over cap — rebuild totals when trimming
+    if (log.length > MAX_ENTRIES) {
+      log = log.slice(log.length - MAX_ENTRIES);
+      // Invalidate cache so totals are recomputed from trimmed log
+      _totalsCache = null;
+      SafeStorage.setJSON(STORAGE_KEY, log);
+      _rebuildTotals();
+    } else {
+      SafeStorage.setJSON(STORAGE_KEY, log);
+    }
   }
 
   /** Get budget limit (USD) or null if not set. */
@@ -6247,19 +6295,21 @@ const CostDashboard = (() => {
     const prompt = usage.prompt_tokens || 0;
     const completion = usage.completion_tokens || 0;
     const pricing = ChatConfig.MODEL_PRICING[m] || [2.50, 10.00];
-    const cost = (prompt * pricing[0] + completion * pricing[1]) / 1_000_000;
+    const cost = Math.round((prompt * pricing[0] + completion * pricing[1]) / 1_000_000 * 1_000_000) / 1_000_000;
 
     const log = _load();
-    log.push({
-      ts: Date.now(),
-      model: m,
-      pt: prompt,
-      ct: completion,
-      cost: Math.round(cost * 1_000_000) / 1_000_000 // 6 decimal places
-    });
+    log.push({ ts: Date.now(), model: m, pt: prompt, ct: completion, cost });
     _save(log);
 
-    // Check budget
+    // Incrementally update running totals (O(1) instead of O(n))
+    const totals = _loadTotals();
+    totals.totalCost += cost;
+    totals.totalPrompt += prompt;
+    totals.totalCompletion += completion;
+    totals.totalCalls += 1;
+    _saveTotals();
+
+    // Check budget using cached totals (no full log parse needed)
     _checkBudgetAlert();
   }
 
@@ -6268,7 +6318,7 @@ const CostDashboard = (() => {
   function _checkBudgetAlert() {
     const budget = getBudget();
     if (!budget) return;
-    const totals = _computeTotals(_load());
+    const totals = _loadTotals();
     if (totals.totalCost >= budget) {
       _showBudgetWarning(totals.totalCost, budget);
     }
@@ -6462,6 +6512,8 @@ const CostDashboard = (() => {
     panel.querySelector('.cost-reset-btn').addEventListener('click', () => {
       if (confirm('Reset all cost tracking data? This cannot be undone.')) {
         _save([]);
+        _totalsCache = { totalCost: 0, totalPrompt: 0, totalCompletion: 0, totalCalls: 0 };
+        _saveTotals();
         _showBudgetWarning._shown = false;
         render(); // re-render with empty data
       }
@@ -6527,7 +6579,7 @@ const CostDashboard = (() => {
   function getLog() { return _load(); }
 
   /** Clear all data (for testing). */
-  function reset() { _save([]); _showBudgetWarning._shown = false; }
+  function reset() { _save([]); _totalsCache = null; SafeStorage.remove(TOTALS_KEY); _showBudgetWarning._shown = false; }
 
   return {
     recordUsage, getBudget, setBudget, getTotals, getLog, reset,
@@ -13371,6 +13423,7 @@ const DataBackup = (() => {
     reactions:       'agenticchat_reactions',
     theme:           'agenticchat_theme',
     costLog:         'agenticchat_cost_log',
+    costTotals:      'agenticchat_cost_totals',
     persona:         'agenticchat_persona',
     focusMode:       'ac-focus-mode',
     inputHistory:    'ac-input-history',
