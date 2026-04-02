@@ -17270,8 +17270,21 @@ const UsageHeatmap = (() => {
     container.innerHTML = html;
 
     if (statsEl) {
-      const peak = getPeakHour();
-      const active = getActiveHours();
+      // Derive peak and active hours from the grid we already computed
+      // instead of calling getPeakHour()/getActiveHours() which each
+      // re-scan all sessions via _collectData() (perf: 2 fewer full scans).
+      let peakDay = 0, peakHourIdx = 0, peakCount = 0, active = 0;
+      for (let d = 0; d < 7; d++) {
+        for (let h = 0; h < 24; h++) {
+          if (grid[d][h] > 0) active++;
+          if (grid[d][h] > peakCount) {
+            peakCount = grid[d][h];
+            peakDay = d;
+            peakHourIdx = h;
+          }
+        }
+      }
+      const peak = peakCount > 0 ? { dayName: FULL_DAY_NAMES[peakDay], hour: peakHourIdx, count: peakCount } : null;
       let s = '<div class="heatmap-stat">';
       s += '<span class="heatmap-stat-value">' + total.toLocaleString() + '</span>';
       s += '<span class="heatmap-stat-label">messages</span></div>';
@@ -20091,10 +20104,20 @@ const ConversationHealthCheck = (() => {
    */
   function analyze() {
     const allMsgs = ConversationManager.getMessages();
-    const msgs = allMsgs.filter(m => m.role !== 'system');
-    const userMsgs = msgs.filter(m => m.role === 'user');
-    const assistantMsgs = msgs.filter(m => m.role === 'assistant');
-    const systemMsgs = allMsgs.filter(m => m.role === 'system');
+    // Single-pass partitioning instead of 4 separate filter() calls
+    const msgs = [];
+    const userMsgs = [];
+    const assistantMsgs = [];
+    const systemMsgs = [];
+    for (let i = 0; i < allMsgs.length; i++) {
+      const m = allMsgs[i];
+      if (m.role === 'system') { systemMsgs.push(m); }
+      else {
+        msgs.push(m);
+        if (m.role === 'user') userMsgs.push(m);
+        else if (m.role === 'assistant') assistantMsgs.push(m);
+      }
+    }
 
     if (msgs.length === 0) {
       return { score: -1, grade: 'N/A', checks: [] };
