@@ -10725,6 +10725,22 @@ const MessageAnnotations = (() => {
 
   // ── UI: Badge + Tooltip on messages ──
 
+  let _badgeRafId = 0;
+
+  /**
+   * Schedule a debounced badge render via requestAnimationFrame.
+   * Coalesces rapid DOM mutations (e.g. during streaming) into a
+   * single render pass per frame, avoiding O(N) DOM traversals on
+   * every mutation event.
+   */
+  function scheduleBadgeRender() {
+    if (_badgeRafId) return;
+    _badgeRafId = requestAnimationFrame(() => {
+      _badgeRafId = 0;
+      renderBadges();
+    });
+  }
+
   function renderBadges() {
     const output = DOMCache.get('chat-output');
     if (!output) return;
@@ -10732,6 +10748,14 @@ const MessageAnnotations = (() => {
 
     msgs.forEach((msgEl, domIdx) => {
       const msgIndex = domIdx + 1; // skip system prompt at [0]
+
+      // Skip already-processed messages that haven't changed annotation state.
+      // Each processed element stores its annotation version; we only rebuild
+      // when the annotation has been added, changed, or removed.
+      const ann = annotations[msgIndex];
+      const annVersion = ann ? (ann.text + '|' + (ann.label || '')) : '';
+      if (msgEl.dataset.annVersion === annVersion) return;
+      msgEl.dataset.annVersion = annVersion;
 
       // Ensure add button exists
       let addBtn = msgEl.querySelector('.ann-add-btn');
@@ -10754,7 +10778,6 @@ const MessageAnnotations = (() => {
       const existingTip = msgEl.querySelector('.ann-tooltip');
       if (existingTip) existingTip.remove();
 
-      const ann = annotations[msgIndex];
       if (!ann) return;
 
       const label = LABELS.find(l => l.id === ann.label) || LABELS[0];
@@ -11132,9 +11155,10 @@ const MessageAnnotations = (() => {
     load();
     renderBadges();
 
-    // Re-render badges when messages are added
+    // Re-render badges when messages are added (debounced via rAF
+    // to avoid redundant full-list traversals during streaming)
     ChatOutputObserver.register('messagePinningBadges', function () {
-        renderBadges();
+        scheduleBadgeRender();
       }, { subtree: false });
   }
 
