@@ -17302,12 +17302,34 @@ const UsageHeatmap = (() => {
     return { grid, total, sessionCount };
   }
 
+  // ── Cached data snapshot ───────────────────────────────────
+  // Multiple public helpers (getData, getTotalMessages, getPeakHour,
+  // getActiveHours) previously each called _collectData(), scanning
+  // every session's messages.  Now a single cached snapshot is shared
+  // across all callers within the same event-loop turn (invalidated
+  // via requestAnimationFrame so it's never stale across renders).
+  let _snapshot = null;
+  let _snapshotScheduledInvalidation = false;
+
+  function _getCachedData() {
+    if (_snapshot) return _snapshot;
+    _snapshot = _collectData();
+    if (!_snapshotScheduledInvalidation) {
+      _snapshotScheduledInvalidation = true;
+      requestAnimationFrame(() => {
+        _snapshot = null;
+        _snapshotScheduledInvalidation = false;
+      });
+    }
+    return _snapshot;
+  }
+
   function getData() {
-    return _collectData().grid;
+    return _getCachedData().grid;
   }
 
   function getTotalMessages() {
-    return _collectData().total;
+    return _getCachedData().total;
   }
 
   /**
@@ -17315,7 +17337,7 @@ const UsageHeatmap = (() => {
    * @returns {{day: number, dayName: string, hour: number, count: number}|null}
    */
   function getPeakHour() {
-    const { grid } = _collectData();
+    const { grid } = _getCachedData();
     let maxCount = 0;
     let peakDay = 0;
     let peakHour = 0;
@@ -17338,7 +17360,7 @@ const UsageHeatmap = (() => {
   }
 
   function getActiveHours() {
-    const { grid } = _collectData();
+    const { grid } = _getCachedData();
     let count = 0;
     for (let d = 0; d < 7; d++) {
       for (let h = 0; h < 24; h++) {
@@ -18649,16 +18671,31 @@ const MessageFilter = (() => {
 
   /* ── Filter counts ──────────────────────────────────────────── */
 
+  /**
+   * Compute filter counts in a single pass over messages instead of
+   * running N separate Array.filter() calls (one per filter type).
+   * Reduces complexity from O(messages × filterTypes) to O(messages).
+   */
   function getFilterCounts() {
     const messages = typeof ConversationManager !== 'undefined'
       ? ConversationManager.getHistory()
       : [];
-    const counts = {};
-    FILTER_TYPES.forEach(ft => {
-      counts[ft.id] = ft.id === 'all'
-        ? messages.length
-        : messages.filter(m => _matchesFilter(m, ft.id)).length;
-    });
+    const counts = { all: messages.length };
+    // Initialize non-'all' counts to 0
+    for (const ft of FILTER_TYPES) {
+      if (ft.id !== 'all') counts[ft.id] = 0;
+    }
+    // Single pass: classify each message once
+    for (const msg of messages) {
+      const text = msg.content || '';
+      if (msg.role === 'user') counts.user++;
+      if (msg.role === 'assistant') counts.assistant++;
+      if (_hasCode(text)) counts.code++;
+      if (_hasQuestion(text)) counts.question++;
+      if (_hasLink(text)) counts.link++;
+      if (_hasError(text)) counts.error++;
+      if (_hasList(text)) counts.list++;
+    }
     return counts;
   }
 
