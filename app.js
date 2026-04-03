@@ -8861,59 +8861,51 @@ const MessageDiff = (() => {
     const table = document.createElement('table');
     table.style.cssText = 'width:100%;border-collapse:collapse';
 
+    const DIFF_STYLES = {
+      same: { marker: '',   markerColor: null,      bg: 'transparent',             contentColor: null },
+      del:  { marker: '\u2212', markerColor: '#f85149', bg: 'rgba(248,81,73,0.1)',  contentColor: '#ffa198' },
+      add:  { marker: '+',  markerColor: '#3fb950', bg: 'rgba(63,185,80,0.1)',      contentColor: '#7ee787' }
+    };
+
+    const LINE_NUM_CSS =
+      'width:40px;text-align:right;padding:0 8px;color:#484f58;' +
+      'user-select:none;font-size:12px;border-right:1px solid #21262d;vertical-align:top';
+    const MARKER_CSS =
+      'width:20px;text-align:center;padding:0 4px;font-weight:700;' +
+      'user-select:none;vertical-align:top';
+    const CONTENT_CSS =
+      'padding:0 12px;white-space:pre-wrap;word-break:break-word;vertical-align:top';
+
     let lineNumA = 0;
     let lineNumB = 0;
 
     for (var i = 0; i < diff.length; i++) {
       let entry = diff[i];
+      const style = DIFF_STYLES[entry.type] || DIFF_STYLES.same;
+
+      if (entry.type === 'same' || entry.type === 'del') lineNumA++;
+      if (entry.type === 'same' || entry.type === 'add') lineNumB++;
+
       const tr = document.createElement('tr');
+      tr.style.background = style.bg;
 
       const tdNumA = document.createElement('td');
-      tdNumA.style.cssText =
-        'width:40px;text-align:right;padding:0 8px;color:#484f58;' +
-        'user-select:none;font-size:12px;border-right:1px solid #21262d;vertical-align:top';
+      tdNumA.style.cssText = LINE_NUM_CSS;
+      tdNumA.textContent = entry.type !== 'add' ? lineNumA : '';
 
       const tdNumB = document.createElement('td');
-      tdNumB.style.cssText =
-        'width:40px;text-align:right;padding:0 8px;color:#484f58;' +
-        'user-select:none;font-size:12px;border-right:1px solid #21262d;vertical-align:top';
+      tdNumB.style.cssText = LINE_NUM_CSS;
+      tdNumB.textContent = entry.type !== 'del' ? lineNumB : '';
 
       const tdMarker = document.createElement('td');
-      tdMarker.style.cssText =
-        'width:20px;text-align:center;padding:0 4px;font-weight:700;' +
-        'user-select:none;vertical-align:top';
+      tdMarker.style.cssText = MARKER_CSS;
+      tdMarker.textContent = style.marker;
+      if (style.markerColor) tdMarker.style.color = style.markerColor;
 
       const tdContent = document.createElement('td');
-      tdContent.style.cssText =
-        'padding:0 12px;white-space:pre-wrap;word-break:break-word;vertical-align:top';
-
-      if (entry.type === 'same') {
-        lineNumA++;
-        lineNumB++;
-        tdNumA.textContent = lineNumA;
-        tdNumB.textContent = lineNumB;
-        tdMarker.textContent = '';
-        tdContent.textContent = entry.text;
-        tr.style.background = 'transparent';
-      } else if (entry.type === 'del') {
-        lineNumA++;
-        tdNumA.textContent = lineNumA;
-        tdNumB.textContent = '';
-        tdMarker.textContent = '\u2212';
-        tdMarker.style.color = '#f85149';
-        tdContent.textContent = entry.text;
-        tr.style.background = 'rgba(248,81,73,0.1)';
-        tdContent.style.color = '#ffa198';
-      } else if (entry.type === 'add') {
-        lineNumB++;
-        tdNumA.textContent = '';
-        tdNumB.textContent = lineNumB;
-        tdMarker.textContent = '+';
-        tdMarker.style.color = '#3fb950';
-        tdContent.textContent = entry.text;
-        tr.style.background = 'rgba(63,185,80,0.1)';
-        tdContent.style.color = '#7ee787';
-      }
+      tdContent.style.cssText = CONTENT_CSS;
+      tdContent.textContent = entry.text;
+      if (style.contentColor) tdContent.style.color = style.contentColor;
 
       tr.appendChild(tdNumA);
       tr.appendChild(tdNumB);
