@@ -4711,3 +4711,63 @@ body.light .pinboard-item-note { background: #eee; color: #555; }
 body.light-theme .voice-chat-fab {
   box-shadow: 0 4px 16px rgba(102,126,234,0.3);
 }
+
+/* ── ConversationScreenshot ── */
+.screenshot-overlay {
+  position: fixed; inset: 0; z-index: 10000;
+  background: rgba(0,0,0,0.7); backdrop-filter: blur(4px);
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; pointer-events: none; transition: opacity 0.2s;
+}
+.screenshot-overlay.visible { opacity: 1; pointer-events: auto; }
+.screenshot-panel {
+  background: #1e1e2e; border-radius: 12px; padding: 24px;
+  width: 90vw; max-width: 800px; max-height: 90vh;
+  display: flex; flex-direction: column; gap: 16px;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.5);
+}
+.screenshot-header {
+  display: flex; justify-content: space-between; align-items: center;
+}
+.screenshot-header h3 { margin: 0; color: #e2e8f0; font-size: 1.1rem; }
+.screenshot-close {
+  background: none; border: none; color: #94a3b8; font-size: 24px;
+  cursor: pointer; padding: 4px 8px; border-radius: 4px;
+}
+.screenshot-close:hover { background: #334155; color: #e2e8f0; }
+.screenshot-options {
+  display: flex; gap: 16px; flex-wrap: wrap; align-items: center;
+  color: #94a3b8; font-size: 13px;
+}
+.screenshot-options label { display: flex; align-items: center; gap: 6px; }
+.screenshot-options select {
+  background: #0f172a; color: #e2e8f0; border: 1px solid #334155;
+  border-radius: 4px; padding: 4px 8px; font-size: 13px;
+}
+.screenshot-preview {
+  overflow: auto; max-height: 50vh; border-radius: 8px;
+  background: #0f0f23; padding: 8px; text-align: center;
+}
+.screenshot-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.screenshot-actions .btn-primary {
+  background: #3b82f6; color: #fff; border: none; padding: 8px 16px;
+  border-radius: 6px; cursor: pointer; font-size: 14px;
+}
+.screenshot-actions .btn-primary:hover { background: #2563eb; }
+.screenshot-actions .btn-secondary {
+  background: #334155; color: #e2e8f0; border: none; padding: 8px 16px;
+  border-radius: 6px; cursor: pointer; font-size: 14px;
+}
+.screenshot-actions .btn-secondary:hover { background: #475569; }
+body.light-theme .screenshot-panel { background: #fff; }
+body.light-theme .screenshot-header h3 { color: #1e293b; }
+body.light-theme .screenshot-close { color: #64748b; }
+body.light-theme .screenshot-close:hover { background: #e2e8f0; color: #1e293b; }
+body.light-theme .screenshot-options { color: #64748b; }
+body.light-theme .screenshot-options select {
+  background: #f1f5f9; color: #1e293b; border-color: #cbd5e1;
+}
+body.light-theme .screenshot-preview { background: #f1f5f9; }
+body.light-theme .screenshot-actions .btn-secondary {
+  background: #e2e8f0; color: #1e293b;
+}

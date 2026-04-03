@@ -78,6 +78,7 @@
  *   MessageReaderView    - full-width reader overlay for comfortable reading (Alt+R)
  *   ReadabilityAnalyzer  - Flesch-Kincaid readability scoring with per-role stats (Ctrl+Shift+R)
  *   ToneAdjuster         - rewrite assistant messages in different tones (formal, casual, concise, ELI5, etc.)
+ *   ConversationScreenshot - render conversation as shareable PNG image via Canvas API (Ctrl+Shift+I)
  *   VoiceChatMode        - hands-free conversational loop chaining voice input → send → TTS → listen (Alt+V)
  *   ConversationShareLink - generate shareable URL with encoded conversation data (Alt+S)
  *   SessionCalendar      - visual month calendar to browse sessions by date (Alt+C)
@@ -31922,4 +31923,346 @@ const VoiceChatMode = (() => {
     getPhase: function() { return phase; },
     isSupported: isSupported
   };
+})();
+
+/* ============================================================
+ *  ConversationScreenshot  (Ctrl+Shift+I / 📸 button)
+ *
+ *  Renders the current conversation (or selected messages) as a
+ *  beautiful PNG image using the Canvas API. Users can choose a
+ *  theme (dark/light/gradient), include/exclude system messages,
+ *  add a watermark, and download or copy the image to clipboard.
+ *
+ *  No external dependencies — pure Canvas 2D rendering.
+ * ============================================================ */
+const ConversationScreenshot = (() => {
+  'use strict';
+
+  let _overlay = null;
+  let _isOpen = false;
+
+  const THEMES = {
+    dark: {
+      bg: '#1a1a2e', msgUser: '#16213e', msgAssist: '#0f3460',
+      borderUser: '#38bdf8', borderAssist: '#4ade80',
+      text: '#e2e8f0', roleText: '#94a3b8', codeBlock: '#0d1117',
+      headerBg: '#0f0f23', headerText: '#e2e8f0'
+    },
+    light: {
+      bg: '#f8fafc', msgUser: '#eff6ff', msgAssist: '#f0fdf4',
+      borderUser: '#3b82f6', borderAssist: '#22c55e',
+      text: '#1e293b', roleText: '#64748b', codeBlock: '#f1f5f9',
+      headerBg: '#e2e8f0', headerText: '#1e293b'
+    },
+    gradient: {
+      bg: '#0f0c29', msgUser: '#1a1a4e', msgAssist: '#1e3a5f',
+      borderUser: '#a78bfa', borderAssist: '#34d399',
+      text: '#e2e8f0', roleText: '#a5b4fc', codeBlock: '#1e1b4b',
+      headerBg: '#1e1b4b', headerText: '#e2e8f0'
+    }
+  };
+
+  function _getMessages() {
+    if (typeof ConversationManager === 'undefined') return [];
+    return ConversationManager.getHistory().filter(m => m.role !== 'system');
+  }
+
+  function _wrapText(ctx, text, maxWidth) {
+    const words = text.split(' ');
+    const lines = [];
+    let line = '';
+    for (let i = 0; i < words.length; i++) {
+      const test = line ? line + ' ' + words[i] : words[i];
+      if (ctx.measureText(test).width > maxWidth && line) {
+        lines.push(line);
+        line = words[i];
+      } else {
+        line = test;
+      }
+    }
+    if (line) lines.push(line);
+    return lines;
+  }
+
+  function _renderToCanvas(opts) {
+    const messages = _getMessages();
+    if (messages.length === 0) return null;
+
+    const theme = THEMES[opts.theme] || THEMES.dark;
+    const padding = 24;
+    const msgPad = 16;
+    const lineHeight = 22;
+    const roleLineHeight = 18;
+    const msgGap = 14;
+    const borderWidth = 3;
+    const maxTextWidth = (opts.width || 720) - padding * 2 - msgPad * 2 - borderWidth;
+    const canvasWidth = opts.width || 720;
+
+    // Pre-measure all messages to compute canvas height
+    const offscreen = document.createElement('canvas');
+    const offCtx = offscreen.getContext('2d');
+    offCtx.font = '15px system-ui, -apple-system, sans-serif';
+
+    let totalHeight = padding; // top padding
+    // Header
+    totalHeight += 40 + 16; // header height + gap
+
+    const msgLayouts = [];
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+      const isUser = msg.role === 'user';
+      const roleLabel = isUser ? '👤 You' : '🤖 Assistant';
+
+      offCtx.font = '11px system-ui, sans-serif';
+      const roleHeight = roleLineHeight;
+
+      offCtx.font = '15px system-ui, sans-serif';
+      const contentLines = _wrapText(offCtx, msg.content, maxTextWidth);
+
+      const msgHeight = msgPad + roleHeight + 4 + (contentLines.length * lineHeight) + msgPad;
+      msgLayouts.push({ msg, isUser, roleLabel, contentLines, msgHeight });
+      totalHeight += msgHeight + msgGap;
+    }
+
+    // Watermark
+    if (opts.watermark) totalHeight += 30;
+    totalHeight += padding; // bottom padding
+
+    // Create final canvas
+    const canvas = document.createElement('canvas');
+    canvas.width = canvasWidth;
+    canvas.height = totalHeight;
+    const ctx = canvas.getContext('2d');
+
+    // Background
+    if (opts.theme === 'gradient') {
+      const grad = ctx.createLinearGradient(0, 0, canvasWidth, totalHeight);
+      grad.addColorStop(0, '#0f0c29');
+      grad.addColorStop(0.5, '#302b63');
+      grad.addColorStop(1, '#24243e');
+      ctx.fillStyle = grad;
+    } else {
+      ctx.fillStyle = theme.bg;
+    }
+    ctx.fillRect(0, 0, canvasWidth, totalHeight);
+
+    let y = padding;
+
+    // Header
+    ctx.fillStyle = theme.headerBg;
+    ctx.beginPath();
+    ctx.roundRect(padding, y, canvasWidth - padding * 2, 40, 8);
+    ctx.fill();
+    ctx.font = 'bold 16px system-ui, sans-serif';
+    ctx.fillStyle = theme.headerText;
+    ctx.fillText('Agentic Chat', padding + 16, y + 26);
+    ctx.font = '12px system-ui, sans-serif';
+    ctx.fillStyle = theme.roleText;
+    const dateStr = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+    const msgCount = messages.length + ' messages';
+    const headerRight = dateStr + '  •  ' + msgCount;
+    const hrWidth = ctx.measureText(headerRight).width;
+    ctx.fillText(headerRight, canvasWidth - padding - 16 - hrWidth, y + 26);
+    y += 40 + 16;
+
+    // Messages
+    for (let i = 0; i < msgLayouts.length; i++) {
+      const layout = msgLayouts[i];
+      const msgX = padding;
+      const msgW = canvasWidth - padding * 2;
+      const borderColor = layout.isUser ? theme.borderUser : theme.borderAssist;
+      const bgColor = layout.isUser ? theme.msgUser : theme.msgAssist;
+
+      // Message background
+      ctx.fillStyle = bgColor;
+      ctx.beginPath();
+      ctx.roundRect(msgX + borderWidth, y, msgW - borderWidth, layout.msgHeight, 6);
+      ctx.fill();
+
+      // Left border
+      ctx.fillStyle = borderColor;
+      ctx.beginPath();
+      ctx.roundRect(msgX, y, borderWidth, layout.msgHeight, [6, 0, 0, 6]);
+      ctx.fill();
+
+      // Role label
+      ctx.font = '11px system-ui, sans-serif';
+      ctx.fillStyle = theme.roleText;
+      ctx.fillText(layout.roleLabel, msgX + borderWidth + msgPad, y + msgPad + 11);
+
+      // Content
+      ctx.font = '15px system-ui, sans-serif';
+      ctx.fillStyle = theme.text;
+      let textY = y + msgPad + roleLineHeight + 4 + 15;
+      for (let j = 0; j < layout.contentLines.length; j++) {
+        ctx.fillText(layout.contentLines[j], msgX + borderWidth + msgPad, textY);
+        textY += lineHeight;
+      }
+
+      y += layout.msgHeight + msgGap;
+    }
+
+    // Watermark
+    if (opts.watermark) {
+      ctx.font = '12px system-ui, sans-serif';
+      ctx.fillStyle = theme.roleText;
+      ctx.globalAlpha = 0.5;
+      const wmText = 'Generated with Agentic Chat';
+      const wmWidth = ctx.measureText(wmText).width;
+      ctx.fillText(wmText, (canvasWidth - wmWidth) / 2, y + 10);
+      ctx.globalAlpha = 1;
+    }
+
+    return canvas;
+  }
+
+  function _buildUI() {
+    if (_overlay) return;
+
+    _overlay = document.createElement('div');
+    _overlay.id = 'screenshot-overlay';
+    _overlay.className = 'screenshot-overlay';
+    _overlay.innerHTML = `
+      <div class="screenshot-panel">
+        <div class="screenshot-header">
+          <h3>📸 Conversation Screenshot</h3>
+          <button class="screenshot-close" title="Close">&times;</button>
+        </div>
+        <div class="screenshot-options">
+          <label>Theme:
+            <select id="screenshot-theme">
+              <option value="dark">Dark</option>
+              <option value="light">Light</option>
+              <option value="gradient">Gradient</option>
+            </select>
+          </label>
+          <label>Width:
+            <select id="screenshot-width">
+              <option value="720">720px</option>
+              <option value="540">540px (Mobile)</option>
+              <option value="1080">1080px (Wide)</option>
+            </select>
+          </label>
+          <label><input type="checkbox" id="screenshot-watermark" checked> Watermark</label>
+        </div>
+        <div class="screenshot-preview" id="screenshot-preview"></div>
+        <div class="screenshot-actions">
+          <button id="screenshot-download" class="btn-primary">⬇️ Download PNG</button>
+          <button id="screenshot-copy" class="btn-secondary">📋 Copy to Clipboard</button>
+          <button id="screenshot-refresh" class="btn-secondary">🔄 Refresh</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(_overlay);
+
+    // Events
+    _overlay.querySelector('.screenshot-close').addEventListener('click', close);
+    _overlay.addEventListener('click', function (e) {
+      if (e.target === _overlay) close();
+    });
+
+    document.getElementById('screenshot-download').addEventListener('click', _download);
+    document.getElementById('screenshot-copy').addEventListener('click', _copyToClip);
+    document.getElementById('screenshot-refresh').addEventListener('click', _refresh);
+    document.getElementById('screenshot-theme').addEventListener('change', _refresh);
+    document.getElementById('screenshot-width').addEventListener('change', _refresh);
+    document.getElementById('screenshot-watermark').addEventListener('change', _refresh);
+  }
+
+  function _getOpts() {
+    return {
+      theme: document.getElementById('screenshot-theme').value,
+      width: parseInt(document.getElementById('screenshot-width').value, 10),
+      watermark: document.getElementById('screenshot-watermark').checked
+    };
+  }
+
+  function _refresh() {
+    const preview = document.getElementById('screenshot-preview');
+    if (!preview) return;
+    preview.innerHTML = '';
+    const canvas = _renderToCanvas(_getOpts());
+    if (canvas) {
+      canvas.style.maxWidth = '100%';
+      canvas.style.borderRadius = '8px';
+      preview.appendChild(canvas);
+    } else {
+      preview.innerHTML = '<p style="color:#aaa;text-align:center">No messages to render.</p>';
+    }
+  }
+
+  function _download() {
+    const canvas = _renderToCanvas(_getOpts());
+    if (!canvas) return;
+    const a = document.createElement('a');
+    a.download = 'agentic-chat-' + new Date().toISOString().slice(0, 10) + '.png';
+    a.href = canvas.toDataURL('image/png');
+    a.click();
+  }
+
+  async function _copyToClip() {
+    const canvas = _renderToCanvas(_getOpts());
+    if (!canvas) return;
+    try {
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      const btn = document.getElementById('screenshot-copy');
+      if (btn) {
+        const orig = btn.textContent;
+        btn.textContent = '✅ Copied!';
+        setTimeout(() => { btn.textContent = orig; }, 1500);
+      }
+    } catch (e) {
+      alert('Could not copy to clipboard. Try downloading instead.');
+    }
+  }
+
+  function open() {
+    _buildUI();
+    _overlay.classList.add('visible');
+    _isOpen = true;
+    _refresh();
+  }
+
+  function close() {
+    if (_overlay) _overlay.classList.remove('visible');
+    _isOpen = false;
+  }
+
+  function toggle() {
+    _isOpen ? close() : open();
+  }
+
+  // Keyboard shortcut: Ctrl+Shift+I (override devtools — many apps do this)
+  // Actually let's use Alt+Shift+S to avoid conflicts
+  document.addEventListener('keydown', function (e) {
+    if (e.altKey && e.shiftKey && e.key === 'S') {
+      e.preventDefault();
+      toggle();
+    }
+  });
+
+  // Register with KeyboardShortcuts if available
+  document.addEventListener('DOMContentLoaded', function () {
+    if (typeof KeyboardShortcuts !== 'undefined' && KeyboardShortcuts.register) {
+      KeyboardShortcuts.register('Alt+Shift+S', 'Conversation Screenshot', toggle);
+    }
+    if (typeof CommandPalette !== 'undefined' && CommandPalette.register) {
+      CommandPalette.register({
+        name: 'conversation screenshot',
+        description: 'Export conversation as shareable PNG image',
+        icon: '📸',
+        action: toggle
+      });
+    }
+    if (typeof SlashCommands !== 'undefined' && SlashCommands.register) {
+      SlashCommands.register('/screenshot', 'Export conversation as PNG image', toggle);
+    }
+    if (typeof PanelRegistry !== 'undefined' && PanelRegistry.register) {
+      PanelRegistry.register('screenshot', close);
+    }
+  });
+
+  return { toggle: toggle, open: open, close: close };
 })();
