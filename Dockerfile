@@ -6,7 +6,7 @@
 #
 # Usage:
 #   docker build -t agenticchat .
-#   docker run -p 8080:80 agenticchat
+#   docker run -p 8080:8080 agenticchat
 # ============================================================
 
 # --- Stage 1: Test ---
@@ -21,13 +21,22 @@ RUN npm test
 # --- Stage 2: Production ---
 FROM nginx:1.29-alpine AS production
 
+# Run as non-root for container security (defense in depth)
+RUN addgroup -g 1001 -S appgroup && \
+    adduser -u 1001 -S appuser -G appgroup && \
+    # Adjust nginx to run as non-root on port 8080
+    sed -i 's/listen\s*80;/listen 8080;/' /etc/nginx/conf.d/default.conf 2>/dev/null || true && \
+    chown -R appuser:appgroup /var/cache/nginx /var/log/nginx /etc/nginx/conf.d && \
+    # nginx master needs pid file writable
+    touch /var/run/nginx.pid && chown appuser:appgroup /var/run/nginx.pid
+
 # Remove default nginx config
-RUN rm /etc/nginx/conf.d/default.conf
+RUN rm -f /etc/nginx/conf.d/default.conf
 
 # Custom nginx config with security headers
 COPY <<'EOF' /etc/nginx/conf.d/agenticchat.conf
 server {
-    listen 80;
+    listen 8080;
     server_name _;
     root /usr/share/nginx/html;
     index index.html;
@@ -76,7 +85,9 @@ COPY app.js /usr/share/nginx/html/
 COPY sw.js /usr/share/nginx/html/
 COPY manifest.json /usr/share/nginx/html/
 
-EXPOSE 80
+EXPOSE 8080
+
+USER appuser
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD wget -qO- http://localhost:80/ || exit 1
+    CMD wget -qO- http://localhost:8080/ || exit 1
