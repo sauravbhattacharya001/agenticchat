@@ -25580,7 +25580,7 @@ const MessageContextMenu = (() => {
 
   function init() {
     var stored = SafeStorage.get(STORAGE_KEY);
-    if (stored !== null) _enabled = JSON.parse(stored);
+    if (stored !== null) _enabled = _safeParse(stored, _enabled);
 
     _createMenu();
     document.addEventListener('contextmenu', _onContextMenu);
@@ -27913,7 +27913,7 @@ const PinBoard = (() => {
   let isOpen = false;
 
   function _load() {
-    try { return JSON.parse(SafeStorage.get(STORAGE_KEY) || '[]'); } catch { return []; }
+    return _safeParse(SafeStorage.get(STORAGE_KEY), []);
   }
 
   function _save(pins) {
@@ -28149,7 +28149,7 @@ const EmojiPicker = (() => {
   const MAX_RECENT = 24;
 
   function _loadRecent() {
-    try { return JSON.parse(SafeStorage.get(RECENT_KEY) || '[]'); } catch { return []; }
+    try { return _safeParse(SafeStorage.get(RECENT_KEY), []); } catch { return []; }
   }
   function _saveRecent(arr) { SafeStorage.trySetJSON(RECENT_KEY, arr.slice(0, MAX_RECENT)); }
   function _addRecent(emoji) {
@@ -28843,9 +28843,7 @@ const MessageHighlighter = (() => {
   // ── Persistence ──
 
   function _loadHighlights() {
-    try {
-      return JSON.parse(SafeStorage.get(STORAGE_KEY) || '{}');
-    } catch (_) { return {}; }
+    return _safeParse(SafeStorage.get(STORAGE_KEY), {});
   }
 
   function _saveHighlights(data) {
@@ -30466,7 +30464,7 @@ const AmbientSoundPlayer = (() => {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
       if (raw) {
-        _state = JSON.parse(raw);
+        _state = _safeParse(raw, {});
         _masterVol = _state.masterVol ?? 0.5;
       } else {
         _state = { volumes: {}, masterVol: 0.5 };
@@ -30937,7 +30935,7 @@ var StickyNotesBoard = (function () {
     try {
       var raw = SafeStorage.get(_storageKey());
       if (raw) {
-        var parsed = JSON.parse(raw);
+        var parsed = _safeParse(raw, []);
         _notes = parsed;
         _nextId = _notes.reduce(function (mx, n) { return Math.max(mx, n.id + 1); }, 1);
       } else {
@@ -31190,10 +31188,7 @@ const ConversationStash = (() => {
   /* ---- Storage ---- */
 
   function _load() {
-    try {
-      const raw = SafeStorage.get(STORAGE_KEY);
-      return raw ? JSON.parse(raw) : [];
-    } catch { return []; }
+    return _safeParse(SafeStorage.get(STORAGE_KEY), []);
   }
 
   function _save(stack) {
