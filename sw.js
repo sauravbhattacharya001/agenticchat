@@ -12,7 +12,7 @@
 'use strict';
 
 /** @const {string} Current cache version key. Bump to bust stale caches. */
-const CACHE_NAME = 'agenticchat-v1';
+const CACHE_NAME = 'agenticchat-cf172949b4';
 
 /** @const {string[]} URLs pre-cached during the install phase. */
 const APP_SHELL = [

@@ -114,13 +114,30 @@ const SafeStorage = (() => {
     available = true;
   } catch (_) { /* storage unavailable */ }
 
+  // Incognito support: when enabled, writes go to an in-memory map
+  // instead of localStorage, preventing data leaks from all modules.
+  let _incognito = false;
+  const _memStore = new Map();
+
   return {
+    /** Enable incognito mode — all writes go to volatile memory only. */
+    enableIncognito() { _incognito = true; },
+    /** Disable incognito mode — writes resume to localStorage. */
+    disableIncognito() {
+      _incognito = false;
+      _memStore.clear();
+    },
+    /** Whether incognito storage mode is active. */
+    isIncognito() { return _incognito; },
+
     /** Retrieve a value by key, returning null when storage is unavailable. */
     get(key) {
+      if (_incognito && _memStore.has(key)) return _memStore.get(key);
       try { return available ? localStorage.getItem(key) : null; } catch (_) { return null; }
     },
     /** Persist a key/value pair. Throws on quota exceeded; swallows SecurityError. */
     set(key, value) {
+      if (_incognito) { _memStore.set(key, value); return; }
       if (!available) return;
       try {
         localStorage.setItem(key, value);
@@ -133,6 +150,7 @@ const SafeStorage = (() => {
     },
     /** Remove a key from storage (no-op when unavailable). */
     remove(key) {
+      if (_incognito) { _memStore.delete(key); return; }
       try { if (available) localStorage.removeItem(key); } catch (_) { /* ignore */ }
     },
     /** Number of entries currently stored (0 when unavailable). */
@@ -29577,6 +29595,10 @@ const IncognitoMode = (() => {
       }
       return false;
     };
+    // Redirect ALL SafeStorage writes to volatile memory so that no
+    // module (DraftRecovery, ClipboardHistory, Bookmarks, Reactions,
+    // Annotations, etc.) can leak data to localStorage.
+    SafeStorage.enableIncognito();
     _showBanner();
     _updateButton(true);
   }
@@ -29590,6 +29612,7 @@ const IncognitoMode = (() => {
       _originalAutoSave = null;
       _originalSave = null;
     }
+    SafeStorage.disableIncognito();
     _hideBanner();
     _updateButton(false);
   }
