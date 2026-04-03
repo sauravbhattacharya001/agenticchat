@@ -78,6 +78,7 @@
  *   MessageReaderView    - full-width reader overlay for comfortable reading (Alt+R)
  *   ReadabilityAnalyzer  - Flesch-Kincaid readability scoring with per-role stats (Ctrl+Shift+R)
  *   ToneAdjuster         - rewrite assistant messages in different tones (formal, casual, concise, ELI5, etc.)
+ *   VoiceChatMode        - hands-free conversational loop chaining voice input → send → TTS → listen (Alt+V)
  *   ConversationShareLink - generate shareable URL with encoded conversation data (Alt+S)
  *   SessionCalendar      - visual month calendar to browse sessions by date (Alt+C)
  *   ResponseLengthPresets - pre-send verbosity control with 4 length modes (Alt+L)
@@ -31583,4 +31584,377 @@ const ConversationStash = (() => {
   });
 
   return { toggle: toggle, show: show, hide: hide, stash: stash, pop: pop, drop: drop, apply: apply, clearAll: clearAll };
+})();
+
+/* ---------- VoiceChatMode ---------- */
+/**
+ * Voice Chat Mode — hands-free conversational loop.
+ *
+ * Activates a phone-call-like overlay that chains:
+ *   1. VoiceInput (listen) → auto-fill chat input
+ *   2. Auto-send message via ChatController.send()
+ *   3. Wait for response to finish
+ *   4. ReadAloud speaks the assistant reply
+ *   5. When speech ends, auto-listen again (loop)
+ *
+ * Toggle with Alt+V or the floating mic button.
+ * Users can pause/resume the loop, or exit entirely.
+ *
+ * @namespace VoiceChatMode
+ */
+const VoiceChatMode = (() => {
+  let active = false;
+  let phase = 'idle'; // 'listening' | 'sending' | 'speaking' | 'idle'
+  let overlayEl = null;
+  let fabEl = null;
+  let pollTimer = null;
+  let speechEndHandler = null;
+  let lastMsgCount = 0;
+
+  const STORAGE_KEY = 'agenticchat_voicechat';
+
+  /** Check if both VoiceInput and ReadAloud are available. */
+  function isSupported() {
+    return typeof VoiceInput !== 'undefined' && VoiceInput.isSupported() &&
+           typeof ReadAloud !== 'undefined' && ReadAloud.isSupported();
+  }
+
+  /** Build the overlay UI. */
+  function _buildOverlay() {
+    if (overlayEl) return;
+
+    overlayEl = document.createElement('div');
+    overlayEl.id = 'voice-chat-overlay';
+    overlayEl.className = 'voice-chat-overlay';
+    overlayEl.setAttribute('role', 'dialog');
+    overlayEl.setAttribute('aria-label', 'Voice Chat Mode');
+    overlayEl.innerHTML =
+      '<div class="voice-chat-container">' +
+        '<div class="voice-chat-header">' +
+          '<h3>🎙️ Voice Chat</h3>' +
+          '<button id="voice-chat-close" class="voice-chat-btn-close" title="Exit voice chat (Esc)">✕</button>' +
+        '</div>' +
+        '<div class="voice-chat-visualizer" id="voice-chat-viz">' +
+          '<div class="voice-chat-ring voice-chat-ring-1"></div>' +
+          '<div class="voice-chat-ring voice-chat-ring-2"></div>' +
+          '<div class="voice-chat-ring voice-chat-ring-3"></div>' +
+          '<div class="voice-chat-mic-icon" id="voice-chat-mic-icon">🎤</div>' +
+        '</div>' +
+        '<div class="voice-chat-status" id="voice-chat-status">Ready</div>' +
+        '<div class="voice-chat-transcript" id="voice-chat-transcript"></div>' +
+        '<div class="voice-chat-controls">' +
+          '<button id="voice-chat-skip" class="voice-chat-btn" title="Skip current speech">⏭ Skip</button>' +
+          '<button id="voice-chat-mute" class="voice-chat-btn" title="Mute mic (pause listening)">🔇 Mute</button>' +
+        '</div>' +
+        '<div class="voice-chat-hint">Press <kbd>Esc</kbd> or <kbd>Alt+V</kbd> to exit</div>' +
+      '</div>';
+
+    document.body.appendChild(overlayEl);
+
+    document.getElementById('voice-chat-close').addEventListener('click', deactivate);
+    document.getElementById('voice-chat-skip').addEventListener('click', _skip);
+    document.getElementById('voice-chat-mute').addEventListener('click', _toggleMute);
+
+    overlayEl.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { e.preventDefault(); deactivate(); }
+    });
+  }
+
+  /** Build the floating action button. */
+  function _buildFAB() {
+    if (fabEl) return;
+    fabEl = document.createElement('button');
+    fabEl.id = 'voice-chat-fab';
+    fabEl.className = 'voice-chat-fab';
+    fabEl.title = 'Voice Chat Mode (Alt+V)';
+    fabEl.textContent = '🎙️';
+    fabEl.addEventListener('click', toggle);
+    document.body.appendChild(fabEl);
+  }
+
+  /** Update the status display. */
+  function _setStatus(text) {
+    const el = document.getElementById('voice-chat-status');
+    if (el) el.textContent = text;
+  }
+
+  /** Update the transcript display. */
+  function _setTranscript(text) {
+    const el = document.getElementById('voice-chat-transcript');
+    if (el) el.textContent = text || '';
+  }
+
+  /** Set the visual phase (changes animation). */
+  function _setPhase(p) {
+    phase = p;
+    if (!overlayEl) return;
+    overlayEl.setAttribute('data-phase', p);
+    const icon = document.getElementById('voice-chat-mic-icon');
+    if (icon) {
+      if (p === 'listening') icon.textContent = '🎤';
+      else if (p === 'sending') icon.textContent = '⏳';
+      else if (p === 'speaking') icon.textContent = '🔊';
+      else icon.textContent = '🎤';
+    }
+  }
+
+  /** Start the voice chat loop. */
+  function activate() {
+    if (active) return;
+    if (!isSupported()) {
+      alert('Voice Chat requires speech recognition and speech synthesis support in your browser.');
+      return;
+    }
+
+    active = true;
+    _buildOverlay();
+    overlayEl.style.display = 'flex';
+    overlayEl.classList.add('voice-chat-active');
+    if (fabEl) fabEl.classList.add('voice-chat-fab-active');
+
+    // Record current message count to detect new responses
+    lastMsgCount = ConversationManager.getHistory().length;
+
+    _startListening();
+  }
+
+  /** Stop the voice chat loop entirely. */
+  function deactivate() {
+    if (!active) return;
+    active = false;
+
+    // Stop everything
+    VoiceInput.stop();
+    ReadAloud.stop();
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+
+    _setPhase('idle');
+    _setStatus('Ended');
+    if (overlayEl) {
+      overlayEl.classList.remove('voice-chat-active');
+      overlayEl.style.display = 'none';
+    }
+    if (fabEl) fabEl.classList.remove('voice-chat-fab-active');
+  }
+
+  /** Toggle voice chat on/off. */
+  function toggle() {
+    if (active) deactivate();
+    else activate();
+  }
+
+  /** Phase 1: Start listening for voice input. */
+  function _startListening() {
+    if (!active) return;
+    _setPhase('listening');
+    _setStatus('Listening...');
+    _setTranscript('');
+
+    // Set up voice input callbacks
+    VoiceInput.onResult(function(final, interim) {
+      _setTranscript(final + (interim ? ' ' + interim : ''));
+    });
+
+    VoiceInput.start();
+
+    // Auto-send after 2 seconds of silence (final transcript stable)
+    let lastFinal = '';
+    let silenceTimer = null;
+
+    const checkSilence = setInterval(function() {
+      if (!active || phase !== 'listening') {
+        clearInterval(checkSilence);
+        return;
+      }
+      const current = VoiceInput.getFinalTranscript().trim();
+      if (current && current === lastFinal) {
+        // Same text for this check — start silence countdown
+        if (!silenceTimer) {
+          silenceTimer = setTimeout(function() {
+            clearInterval(checkSilence);
+            if (active && phase === 'listening' && current) {
+              _sendVoiceMessage(current);
+            }
+          }, 2000);
+        }
+      } else {
+        // Text changed — reset silence timer
+        lastFinal = current;
+        if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer = null; }
+      }
+    }, 500);
+  }
+
+  /** Phase 2: Send the voice transcript as a message. */
+  function _sendVoiceMessage(text) {
+    if (!active) return;
+    VoiceInput.stop();
+    VoiceInput.onResult(null); // Clear callback
+
+    _setPhase('sending');
+    _setStatus('Sending...');
+    _setTranscript(text);
+
+    // Put text into input and send
+    const input = DOMCache.get('chat-input');
+    if (input) input.value = text;
+    UIController.updateCharCount(text.length);
+
+    // Record message count before sending
+    lastMsgCount = ConversationManager.getHistory().length;
+
+    ChatController.send();
+
+    // Phase 3: Poll for response completion
+    _waitForResponse();
+  }
+
+  /** Phase 3: Wait for the AI response to arrive. */
+  function _waitForResponse() {
+    if (!active) return;
+    _setStatus('Thinking...');
+
+    pollTimer = setInterval(function() {
+      if (!active) { clearInterval(pollTimer); pollTimer = null; return; }
+
+      const history = ConversationManager.getHistory();
+      // Check if a new assistant message appeared
+      if (history.length > lastMsgCount) {
+        const lastMsg = history[history.length - 1];
+        if (lastMsg.role === 'assistant') {
+          clearInterval(pollTimer);
+          pollTimer = null;
+          _speakResponse(lastMsg.content);
+        }
+      }
+    }, 300);
+  }
+
+  /** Phase 4: Speak the response, then loop back to listening. */
+  function _speakResponse(text) {
+    if (!active) return;
+    _setPhase('speaking');
+    _setStatus('Speaking...');
+
+    // Truncate transcript to show response snippet
+    const snippet = text.length > 120 ? text.substring(0, 120) + '...' : text;
+    _setTranscript(snippet);
+
+    // Use a custom utterance to detect speech end
+    const cleaned = ReadAloud.cleanTextForSpeech(text);
+    if (!cleaned) {
+      // Nothing speakable — go back to listening
+      _startListening();
+      return;
+    }
+
+    const utterance = new SpeechSynthesisUtterance(cleaned);
+    const prefs = ReadAloud.getPrefs();
+    const voices = window.speechSynthesis.getVoices();
+
+    // Try to use the user's preferred voice
+    if (prefs.voiceURI) {
+      for (let i = 0; i < voices.length; i++) {
+        if (voices[i].voiceURI === prefs.voiceURI) {
+          utterance.voice = voices[i];
+          break;
+        }
+      }
+    }
+    if (!utterance.voice) {
+      for (let i = 0; i < voices.length; i++) {
+        if (voices[i].lang.indexOf('en') === 0) { utterance.voice = voices[i]; break; }
+      }
+    }
+
+    utterance.rate = prefs.rate;
+    utterance.pitch = prefs.pitch;
+
+    utterance.onend = function() {
+      if (active) {
+        // Loop: go back to listening
+        _startListening();
+      }
+    };
+
+    utterance.onerror = function(e) {
+      if (e.error !== 'canceled' && active) {
+        _startListening();
+      }
+    };
+
+    window.speechSynthesis.speak(utterance);
+  }
+
+  /** Skip current speech and go to next phase. */
+  function _skip() {
+    if (phase === 'speaking') {
+      window.speechSynthesis.cancel();
+      if (active) _startListening();
+    } else if (phase === 'listening') {
+      // Force-send whatever we have
+      const text = VoiceInput.getFinalTranscript().trim();
+      if (text) {
+        _sendVoiceMessage(text);
+      }
+    }
+  }
+
+  let muted = false;
+  /** Toggle mute (pause/resume listening). */
+  function _toggleMute() {
+    const btn = document.getElementById('voice-chat-mute');
+    if (phase === 'listening') {
+      if (!muted) {
+        VoiceInput.stop();
+        muted = true;
+        _setStatus('Muted');
+        if (btn) btn.textContent = '🔈 Unmute';
+      } else {
+        muted = false;
+        VoiceInput.start();
+        _setStatus('Listening...');
+        if (btn) btn.textContent = '🔇 Mute';
+      }
+    }
+  }
+
+  /** Initialize: build FAB, register shortcuts. */
+  function init() {
+    if (!isSupported()) return;
+
+    _buildFAB();
+
+    // Register keyboard shortcut
+    if (typeof KeyboardShortcuts !== 'undefined' && KeyboardShortcuts.register) {
+      KeyboardShortcuts.register('Alt+V', 'Toggle Voice Chat Mode', toggle);
+    }
+
+    // Register command palette
+    if (typeof CommandPalette !== 'undefined' && CommandPalette.register) {
+      CommandPalette.register({
+        name: 'voice chat',
+        description: 'Toggle hands-free Voice Chat Mode',
+        icon: '🎙️',
+        action: toggle
+      });
+    }
+
+    // Register slash command
+    if (typeof SlashCommands !== 'undefined' && SlashCommands.register) {
+      SlashCommands.register('/voicechat', 'Toggle Voice Chat Mode', toggle);
+    }
+  }
+
+  // Auto-init on DOMContentLoaded
+  document.addEventListener('DOMContentLoaded', init);
+
+  return {
+    toggle: toggle,
+    activate: activate,
+    deactivate: deactivate,
+    isActive: function() { return active; },
+    getPhase: function() { return phase; },
+    isSupported: isSupported
+  };
 })();
