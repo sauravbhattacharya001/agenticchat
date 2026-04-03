@@ -335,7 +335,8 @@ function loadApp() {
     'PromptChainRunner',
     'CustomThemeCreator',
     'CrossTabSync',
-    'ConversationTimer'
+    'ConversationTimer',
+    'COMMON_STOP_WORDS'
   ];
 
   for (const mod of modules) {

@@ -631,6 +631,66 @@ function _escapeHtml(str) {
   return String(str).replace(_HTML_ESCAPE_RE, ch => _HTML_ESCAPE_MAP[ch]);
 }
 
+/* ---------- Shared Stop Words ---------- */
+/**
+ * Common English stop words shared across modules that perform text analysis
+ * (topic extraction, word clouds, auto-tagging, mind maps, etc.).
+ *
+ * Individual modules can extend this set with domain-specific words:
+ *   const localStops = new Set([...COMMON_STOP_WORDS, 'code', 'data']);
+ *
+ * Previously, each module defined its own stop-word list (6 separate copies
+ * totaling ~400 duplicated lines).  This shared constant eliminates the
+ * duplication and ensures consistent filtering across the application.
+ */
+const COMMON_STOP_WORDS = new Set([
+  // Articles & determiners
+  'the', 'a', 'an', 'this', 'that', 'these', 'those',
+  // Pronouns
+  'i', 'me', 'my', 'mine', 'we', 'us', 'our', 'ours',
+  'you', 'your', 'yours', 'he', 'him', 'his', 'she', 'her', 'hers',
+  'it', 'its', 'they', 'them', 'their', 'theirs',
+  // Be/have/do verbs
+  'is', 'are', 'was', 'were', 'be', 'been', 'being', 'am',
+  'have', 'has', 'had', 'do', 'does', 'did', 'doing', 'done',
+  // Modal verbs
+  'will', 'would', 'could', 'should', 'may', 'might', 'shall', 'can', 'must', 'need', 'ought',
+  // Prepositions
+  'to', 'of', 'in', 'for', 'on', 'with', 'at', 'by', 'from', 'as', 'into', 'through',
+  'about', 'above', 'after', 'against', 'before', 'below', 'between', 'down',
+  'during', 'off', 'out', 'over', 'under', 'until', 'up',
+  // Conjunctions
+  'and', 'but', 'or', 'nor', 'so', 'yet', 'if', 'then', 'than', 'because',
+  // Adverbs & common fillers
+  'not', 'no', 'very', 'just', 'also', 'too', 'still', 'even', 'really', 'actually',
+  'basically', 'now', 'here', 'there', 'again', 'further', 'once',
+  // Quantifiers
+  'all', 'each', 'every', 'both', 'few', 'more', 'most', 'some', 'any', 'much', 'many',
+  'only', 'own', 'same', 'such', 'other',
+  // Common verbs (too generic for topic extraction)
+  'get', 'got', 'getting', 'go', 'going', 'went', 'come', 'make', 'made',
+  'like', 'know', 'think', 'want', 'use', 'used', 'using', 'say', 'said',
+  'see', 'look', 'take', 'give', 'tell', 'find', 'put', 'try', 'ask',
+  'work', 'call', 'keep', 'let', 'begin', 'seem', 'help', 'show',
+  // Question words
+  'what', 'which', 'who', 'whom', 'where', 'when', 'why', 'how',
+  // Contractions (without apostrophes)
+  'don', 'doesn', 'didn', 'won', 'wouldn', 'couldn', 'shouldn',
+  'isn', 'aren', 'wasn', 'weren', 'hasn', 'haven', 'hadn',
+  've', 're', 'll',
+  // Conversational
+  'yes', 'yeah', 'okay', 'ok', 'sure', 'right', 'well',
+  'oh', 'um', 'uh', 'ah', 'hi', 'hello', 'hey',
+  'please', 'thanks', 'thank',
+  // Numbers
+  'one', 'two', 'three', 'first', 'second', 'last',
+  // Generic nouns
+  'thing', 'things', 'way', 'time', 'day', 'people',
+  'something', 'anything', 'everything', 'nothing',
+  'back', 'new', 'good', 'great', 'long', 'big', 'old',
+  'able', 'example',
+]);
+
 /* ---------- Conversation Manager ---------- */
 /**
  * Manages the conversation message history sent to the OpenAI API.
@@ -6031,17 +6091,10 @@ const ChatStats = (() => {
     const questionCount = userMsgs.filter(m => m.content.trim().endsWith('?')).length;
 
     // Top words (excluding common stop words, from user messages)
-    const stopWords = new Set(['the','a','an','is','are','was','were','be','been','being',
-      'have','has','had','do','does','did','will','would','could','should','may','might',
-      'shall','can','to','of','in','for','on','with','at','by','from','as','into','through',
-      'and','but','or','not','no','nor','so','yet','both','either','neither','i','me','my',
-      'you','your','he','she','it','we','they','them','this','that','these','those','what',
-      'which','who','how','if','then','than','when','where','there','here','all','each',
-      'every','any','some','just','about','up','out','get','like','also','very','really']);
     const wordFreq = {};
     userMsgs.forEach(m => {
       m.content.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).forEach(w => {
-        if (w.length > 2 && !stopWords.has(w)) {
+        if (w.length > 2 && !COMMON_STOP_WORDS.has(w)) {
           wordFreq[w] = (wordFreq[w] || 0) + 1;
         }
       });
@@ -9728,27 +9781,6 @@ const ConversationSummarizer = (() => {
   let styleInjected = false;
   let lastSummary = null;
 
-  // ── Stop words for topic extraction ──
-
-  const STOP_WORDS = new Set([
-    'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
-    'of', 'with', 'by', 'from', 'is', 'it', 'its', 'this', 'that', 'was',
-    'are', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does',
-    'did', 'will', 'would', 'could', 'should', 'may', 'might', 'can', 'shall',
-    'not', 'no', 'nor', 'as', 'if', 'then', 'than', 'so', 'up', 'out',
-    'about', 'into', 'through', 'during', 'before', 'after', 'above', 'below',
-    'between', 'under', 'again', 'further', 'once', 'here', 'there', 'when',
-    'where', 'why', 'how', 'all', 'each', 'every', 'both', 'few', 'more',
-    'most', 'other', 'some', 'such', 'only', 'own', 'same', 'too', 'very',
-    'just', 'because', 'also', 'any', 'much', 'what', 'which', 'who', 'whom',
-    'these', 'those', 'am', 'we', 'they', 'you', 'he', 'she', 'me', 'him',
-    'her', 'us', 'them', 'my', 'your', 'his', 'our', 'their', 'i', 'don',
-    'doesn', 'didn', 'won', 'wouldn', 'couldn', 'shouldn', 'isn', 'aren',
-    'wasn', 'weren', 'hasn', 'haven', 'hadn', 'let', 'get', 'got', 'like',
-    'make', 'made', 'know', 'think', 'want', 'need', 'use', 'using', 'used',
-    'one', 'two', 'new', 'way', 'well', 'still', 'even', 'back', 'over',
-  ]);
-
   // ── Decision indicator patterns ──
 
   const DECISION_PATTERNS = [
@@ -9876,7 +9908,7 @@ const ConversationSummarizer = (() => {
     var freq = {};
     for (var i = 0; i < words.length; i++) {
       var w = words[i];
-      if (w.length < 3 || STOP_WORDS.has(w)) continue;
+      if (w.length < 3 || COMMON_STOP_WORDS.has(w)) continue;
       freq[w] = (freq[w] || 0) + 1;
     }
     return Object.keys(freq)
@@ -12991,32 +13023,11 @@ const AutoTagger = (() => {
     }
   };
 
-  /* ── Stop words ──────────────────────────────────────────── */
-  const STOP_WORDS = new Set([
-    'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
-    'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
-    'should', 'may', 'might', 'shall', 'can', 'need', 'must', 'ought',
-    'i', 'me', 'my', 'mine', 'we', 'us', 'our', 'ours', 'you', 'your',
-    'yours', 'he', 'him', 'his', 'she', 'her', 'hers', 'it', 'its',
-    'they', 'them', 'their', 'theirs', 'this', 'that', 'these', 'those',
-    'what', 'which', 'who', 'whom', 'where', 'when', 'why', 'how',
-    'all', 'each', 'every', 'both', 'few', 'more', 'most', 'some',
-    'any', 'no', 'not', 'only', 'same', 'so', 'than', 'too', 'very',
-    'just', 'also', 'now', 'then', 'here', 'there', 'if', 'or', 'and',
-    'but', 'nor', 'for', 'yet', 'about', 'above', 'after', 'again',
-    'against', 'at', 'before', 'below', 'between', 'by', 'down',
-    'during', 'from', 'in', 'into', 'of', 'off', 'on', 'out', 'over',
-    'through', 'to', 'under', 'until', 'up', 'with', 'as', 'like',
-    'want', 'know', 'think', 'make', 'get', 'go', 'see', 'say', 'tell',
-    'give', 'take', 'come', 'look', 'use', 'find', 'put', 'try', 'ask',
-    'work', 'call', 'keep', 'let', 'begin', 'seem', 'help', 'show',
+  /* ── Stop words — extends shared COMMON_STOP_WORDS with domain terms ── */
+  const STOP_WORDS = new Set([...COMMON_STOP_WORDS,
     'hear', 'play', 'run', 'move', 'live', 'believe', 'happen', 'provide',
-    'include', 'turn', 'follow', 'start', 'point', 'read', 'right',
-    'thing', 'much', 'well', 'way', 'even', 'new', 'because', 'good',
-    'long', 'great', 'still', 'own', 'old', 'big', 'something',
-    'please', 'thanks', 'thank', 'sure', 'okay', 'yes', 'yeah', 'hi',
-    'hello', 'hey', 'one', 'two', 'three', 'first', 'second', 'last',
-    'able', 'using', 'used', 'example', 'really', 'actually', 'basically'
+    'include', 'turn', 'follow', 'start', 'point', 'read',
+    'mine', 'yours', 'hers', 'theirs', 'against',
   ]);
 
   /* ── Pre-compiled phrase patterns (avoids re-creating RegExp per call) ── */
@@ -19347,23 +19358,10 @@ const WordCloud = (() => {
   let panelEl = null;
   let isVisible = false;
 
-  /* ---- stop-words (common English words to filter out) ---- */
-  const STOP_WORDS = new Set([
-    'the','be','to','of','and','a','in','that','have','i','it','for','not','on',
-    'with','he','as','you','do','at','this','but','his','by','from','they','we',
-    'say','her','she','or','an','will','my','one','all','would','there','their',
-    'what','so','up','out','if','about','who','get','which','go','me','when',
-    'make','can','like','time','no','just','him','know','take','people','into',
-    'year','your','good','some','could','them','see','other','than','then','now',
-    'look','only','come','its','over','think','also','back','after','use','two',
-    'how','our','work','first','well','way','even','new','want','because','any',
-    'these','give','day','most','us','is','are','was','were','been','being','am',
-    'has','had','does','did','doing','done','got','getting','made','said','went',
-    'going','let','here','more','very','much','too','still','own','such','should',
-    'may','might','must','shall','need','dare','used','using','thing','things',
-    've','re','ll','don','doesn','didn','won','wouldn','couldn','shouldn','isn',
-    'aren','wasn','weren','hasn','haven','hadn','can','cannot','yes','yeah',
-    'okay','sure','right','oh','um','uh','ah','ok','well','code','data','function'
+  /* ---- stop-words — extends shared COMMON_STOP_WORDS with domain terms ---- */
+  const STOP_WORDS = new Set([...COMMON_STOP_WORDS,
+    'code', 'data', 'function', 'year', 'cannot', 'dare',
+    'doing', 'done', 'getting', 'said', 'went', 'going',
   ]);
 
   const MIN_WORD_LENGTH = 3;
@@ -21326,25 +21324,11 @@ const ConversationMindMap = (() => {
   let _panY = 0;
   let _lastPan = null;
 
-  const STOP_WORDS = new Set([
-    'the','be','to','of','and','a','in','that','have','i','it','for','not','on',
-    'with','he','as','you','do','at','this','but','his','by','from','they','we',
-    'say','her','she','or','an','will','my','one','all','would','there','their',
-    'what','so','up','out','if','about','who','get','which','go','me','when',
-    'make','can','like','time','no','just','him','know','take','people','into',
-    'year','your','good','some','could','them','see','other','than','then','now',
-    'look','only','come','its','over','think','also','back','after','use','two',
-    'how','our','work','first','well','way','even','new','want','because','any',
-    'these','give','day','most','us','is','are','was','were','been','being','am',
-    'has','had','does','did','doing','done','got','getting','made','said','went',
-    'going','let','here','more','very','much','too','still','own','such','should',
-    'may','might','must','shall','need','dare','used','using','thing','things',
-    've','re','ll','don','doesn','didn','won','wouldn','couldn','shouldn','isn',
-    'aren','wasn','weren','hasn','haven','hadn','can','cannot','yes','yeah',
-    'okay','sure','right','oh','um','uh','ah','ok','well','code','data','function',
-    'really','keep','tell','help','try','call','put','show','ask','seem','feel',
-    'kind','actually','pretty','quite','maybe','something','anything','everything',
-    'nothing','someone','anyone','everyone','already','always','never','often'
+  const STOP_WORDS = new Set([...COMMON_STOP_WORDS,
+    'code', 'data', 'function', 'year', 'cannot', 'dare',
+    'doing', 'done', 'getting', 'said', 'went', 'going',
+    'feel', 'kind', 'pretty', 'quite', 'maybe',
+    'someone', 'anyone', 'everyone', 'already', 'always', 'never', 'often',
   ]);
 
   const MIN_WORD_LEN = 3;
@@ -23990,33 +23974,24 @@ document.addEventListener('DOMContentLoaded', PreferencesPanel.init);
  *   SmartTitle.init()               → wire up suggest button
  */
 const SmartTitle = (() => {
-  /* ── Stop words to filter out ─────────────────────────────── */
-  const STOP_WORDS = new Set([
-    'a','an','the','is','are','was','were','be','been','being','have','has','had',
-    'do','does','did','will','would','shall','should','may','might','must','can',
-    'could','i','me','my','mine','we','us','our','ours','you','your','yours',
-    'he','him','his','she','her','hers','it','its','they','them','their','theirs',
-    'this','that','these','those','what','which','who','whom','whose','where',
-    'when','why','how','not','no','nor','but','or','and','so','if','then','else',
-    'than','too','very','just','about','above','after','again','all','also','am',
-    'any','as','at','back','because','before','below','between','both','by','came',
-    'come','could','each','even','every','for','from','get','got','go','goes',
-    'going','gone','good','great','had','here','her','him','how','in','into','it',
-    'its','know','like','look','make','many','more','most','much','need','new',
-    'now','of','off','on','one','only','or','other','out','over','own','part',
-    'people','place','point','right','said','same','see','some','still','such',
-    'take','tell','thing','think','to','try','up','use','want','way','well',
-    'what','with','work','write','yeah','yes','ok','okay','sure','thanks',
-    'thank','please','help','hi','hello','hey','um','uh','like','really',
-    'actually','basically','something','anything','everything','nothing',
-    'able','let','using','used','dont','doesnt','cant','wont','im','ive',
-    'id','youre','youve','youd','hes','shes','theyre','theyve','theyd',
-    'were','weve','wed','thats','whats','hows','whys','wheres','whos',
-    'there','here','then','when','while','where','code','function','example',
-    'question','problem','issue','error','message','result','output','input',
-    'data','file','line','number','string','value','type','name','list',
-    'array','object','class','method','variable','return','true','false',
-    'null','undefined','const','let','var','def','import','from','print'
+  /* ── Stop words — extends shared COMMON_STOP_WORDS with code/chat terms ── */
+  const STOP_WORDS = new Set([...COMMON_STOP_WORDS,
+    'code', 'data', 'function', 'year', 'cannot',
+    'doing', 'done', 'getting', 'said', 'went', 'going',
+    'feel', 'kind', 'pretty', 'quite', 'maybe',
+    'someone', 'anyone', 'everyone', 'already', 'always', 'never', 'often',
+    'came', 'goes', 'gone', 'part', 'place', 'point', 'write',
+    'dont', 'doesnt', 'cant', 'wont', 'im', 'ive', 'id',
+    'youre', 'youve', 'youd', 'hes', 'shes',
+    'theyre', 'theyve', 'theyd', 'weve', 'wed',
+    'thats', 'whats', 'hows', 'whys', 'wheres', 'whos',
+    'while', 'whose', 'else',
+    // Programming-specific stop words
+    'question', 'problem', 'issue', 'error', 'message', 'result',
+    'output', 'input', 'file', 'line', 'number', 'string', 'value',
+    'type', 'name', 'list', 'array', 'object', 'class', 'method',
+    'variable', 'return', 'true', 'false', 'null', 'undefined',
+    'const', 'let', 'var', 'def', 'import', 'print',
   ]);
 
   /* ── Programming language detection ───────────────────────── */
@@ -27715,22 +27690,12 @@ const SessionCalendar = (() => {
  * ============================================================ */
 const WordCloudGenerator = (() => {
   let isOpen = false;
-  const STOP_WORDS = new Set([
-    'the','be','to','of','and','a','in','that','have','i','it','for','not','on','with',
-    'he','as','you','do','at','this','but','his','by','from','they','we','her','she',
-    'or','an','will','my','one','all','would','there','their','what','so','up','out',
-    'if','about','who','get','which','go','me','when','make','can','like','time','no',
-    'just','him','know','take','people','into','year','your','good','some','could',
-    'them','see','other','than','then','now','look','only','come','its','over','think',
-    'also','back','after','use','two','how','our','work','first','well','way','even',
-    'new','want','because','any','these','give','day','most','us','is','are','was',
-    'were','been','has','had','did','does','am','been','being','here','very','much',
-    'more','may','should','each','said','such','still','own','may','might','shall',
-    'else','let','say','too','where','why','how','same','got','did','had','sure',
-    'yes','no','ok','okay','yeah','oh','ah','um','uh','well','right','dont','im',
-    'youre','hes','shes','its','were','theyre','wont','cant','isnt','arent','wasnt',
-    'werent','hasnt','havent','hadnt','doesnt','didnt','thats','whats','whos',
-    'wheres','whens','hows','been','would','could','should','must'
+  const STOP_WORDS = new Set([...COMMON_STOP_WORDS,
+    'year', 'else', 'dont', 'im', 'youre', 'hes', 'shes',
+    'theyre', 'wont', 'cant', 'isnt', 'arent', 'wasnt',
+    'werent', 'hasnt', 'havent', 'hadnt', 'doesnt', 'didnt',
+    'thats', 'whats', 'whos', 'wheres', 'whens', 'hows',
+    'doing', 'done', 'said', 'went', 'going', 'got', 'getting',
   ]);
 
   function _extractWords(source) {
