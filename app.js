@@ -93,6 +93,7 @@
  *   ApiInspector         - debug panel logging all API requests with payloads, timing, tokens, cost (🔬 button)
  *   AmbientSoundPlayer   - procedural ambient soundscapes (rain, café, fire, wind, stream, white noise) via Web Audio API (Alt+A)
  *   StickyNotesBoard     - visual draggable sticky notes canvas for brainstorming per session (Alt+N)
+ *   ConversationStash    - git-stash-style save/restore of conversation state with stash stack (Ctrl+Shift+Z)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -31171,4 +31172,420 @@ var StickyNotesBoard = (function () {
   });
 
   return { toggle: toggle, show: show, hide: hide };
+})();
+
+/* ============================================================
+ *  ConversationStash — git-stash-style save/restore (Ctrl+Shift+Z)
+ *
+ *  Stash the current conversation to a LIFO stack, clear the chat,
+ *  and start fresh. Pop the stash to restore the previous state.
+ *  Supports multiple stash entries with descriptions and timestamps.
+ * ============================================================ */
+const ConversationStash = (() => {
+  const STORAGE_KEY = 'agenticchat_stash';
+  const MAX_STASH = 20;
+  let _panel = null;
+  let _visible = false;
+
+  /* ---- Storage ---- */
+
+  function _load() {
+    try {
+      const raw = SafeStorage.get(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : [];
+    } catch { return []; }
+  }
+
+  function _save(stack) {
+    try { SafeStorage.set(STORAGE_KEY, JSON.stringify(stack)); } catch {}
+  }
+
+  function _updateBadge() {
+    const el = document.getElementById('stash-count');
+    if (!el) return;
+    const count = _load().length;
+    if (count > 0) {
+      el.textContent = count;
+      el.style.display = 'inline';
+    } else {
+      el.style.display = 'none';
+    }
+  }
+
+  /* ---- Core actions ---- */
+
+  /** Stash the current conversation and clear it. */
+  function stash(description) {
+    const messages = ConversationManager.getUserMessages();
+    if (messages.length === 0) {
+      alert('Nothing to stash — conversation is empty.');
+      return false;
+    }
+
+    // Auto-save current session first
+    if (typeof SessionManager !== 'undefined') SessionManager.autoSaveIfEnabled();
+
+    const stack = _load();
+    const firstUser = messages.find(function(m) { return m.role === 'user'; });
+    const desc = description || (firstUser ? firstUser.content.substring(0, 80) : 'Stashed conversation');
+
+    stack.unshift({
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      description: desc,
+      messages: messages.map(function(m) { return { role: m.role, content: m.content }; }),
+      messageCount: messages.length,
+      stashedAt: new Date().toISOString(),
+      model: typeof ChatConfig !== 'undefined' ? ChatConfig.MODEL : 'unknown'
+    });
+
+    // Enforce limit
+    while (stack.length > MAX_STASH) stack.pop();
+
+    _save(stack);
+
+    // Clear conversation
+    ConversationManager.clear();
+    if (typeof UIController !== 'undefined') {
+      UIController.setChatOutput('');
+      UIController.setConsoleOutput('(stashed — start fresh!)');
+      UIController.setLastPrompt('');
+    }
+    if (typeof HistoryPanel !== 'undefined') HistoryPanel.refresh();
+    if (typeof QuickReplies !== 'undefined') QuickReplies.hide();
+
+    _updateBadge();
+    if (_visible) _render();
+
+    // Toast notification
+    _toast('📦 Conversation stashed! (' + stack.length + ' in stash)');
+    return true;
+  }
+
+  /** Pop the most recent stash and restore it. */
+  function pop(index) {
+    const stack = _load();
+    var idx = typeof index === 'number' ? index : 0;
+    if (idx < 0 || idx >= stack.length) {
+      alert('Stash is empty — nothing to pop.');
+      return false;
+    }
+
+    const entry = stack[idx];
+
+    // Save current conversation first if it has content
+    const current = ConversationManager.getUserMessages();
+    if (current.length > 0) {
+      if (!confirm('Current conversation has ' + current.length + ' messages. Pop will replace it. Continue?')) {
+        return false;
+      }
+    }
+
+    // Remove from stack
+    stack.splice(idx, 1);
+    _save(stack);
+
+    // Restore messages
+    ConversationManager.clear();
+    entry.messages.forEach(function(m) {
+      ConversationManager.addMessage(m.role, m.content);
+    });
+
+    // Update UI
+    if (typeof UIController !== 'undefined') {
+      var last = entry.messages.filter(function(m) { return m.role === 'assistant'; }).pop();
+      UIController.setChatOutput(last ? last.content : '');
+      UIController.setConsoleOutput('(restored from stash)');
+      UIController.setLastPrompt('Restored: ' + entry.description);
+    }
+    if (typeof HistoryPanel !== 'undefined') HistoryPanel.refresh();
+    if (typeof SessionManager !== 'undefined') SessionManager.autoSaveIfEnabled();
+
+    _updateBadge();
+    if (_visible) _render();
+
+    _toast('📦 Stash popped! ' + stack.length + ' remaining.');
+    return true;
+  }
+
+  /** Drop a stash entry without restoring. */
+  function drop(index) {
+    const stack = _load();
+    if (index < 0 || index >= stack.length) return;
+    const entry = stack.splice(index, 1)[0];
+    _save(stack);
+    _updateBadge();
+    if (_visible) _render();
+    _toast('🗑️ Dropped: ' + entry.description);
+  }
+
+  /** Clear all stash entries. */
+  function clearAll() {
+    if (_load().length === 0) return;
+    if (!confirm('Clear all stashed conversations?')) return;
+    _save([]);
+    _updateBadge();
+    if (_visible) _render();
+    _toast('🗑️ Stash cleared.');
+  }
+
+  /* ---- Toast ---- */
+  let _toastTimeout = null;
+  function _toast(msg) {
+    if (typeof ToastManager !== 'undefined' && ToastManager.show) {
+      ToastManager.show(msg);
+      return;
+    }
+    // Fallback toast
+    var existing = document.getElementById('stash-toast');
+    if (existing) existing.remove();
+    var toast = document.createElement('div');
+    toast.id = 'stash-toast';
+    toast.textContent = msg;
+    toast.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);' +
+      'background:#333;color:#fff;padding:10px 20px;border-radius:8px;font-size:14px;' +
+      'z-index:100001;transition:opacity 0.3s;box-shadow:0 4px 12px rgba(0,0,0,0.3)';
+    document.body.appendChild(toast);
+    if (_toastTimeout) clearTimeout(_toastTimeout);
+    _toastTimeout = setTimeout(function() {
+      toast.style.opacity = '0';
+      setTimeout(function() { toast.remove(); }, 300);
+    }, 2500);
+  }
+
+  /* ---- Panel UI ---- */
+
+  function _formatTime(iso) {
+    var d = new Date(iso);
+    var now = Date.now();
+    var diff = now - d.getTime();
+    if (diff < 60000) return 'just now';
+    if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
+    if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
+    return Math.floor(diff / 86400000) + 'd ago';
+  }
+
+  function _createPanel() {
+    var panel = document.createElement('div');
+    panel.id = 'stash-panel';
+    panel.style.cssText = 'position:fixed;top:0;right:0;width:380px;height:100vh;' +
+      'background:#1a1a2e;border-left:2px solid #38bdf8;z-index:10000;' +
+      'display:flex;flex-direction:column;box-shadow:-4px 0 20px rgba(0,0,0,0.4);' +
+      'font-family:system-ui,-apple-system,sans-serif;color:#eee';
+
+    // Header
+    var header = document.createElement('div');
+    header.style.cssText = 'padding:16px;border-bottom:1px solid #333;display:flex;' +
+      'align-items:center;justify-content:space-between;flex-shrink:0';
+    header.innerHTML = '<div style="font-size:18px;font-weight:600">📦 Conversation Stash</div>';
+
+    var headerBtns = document.createElement('div');
+    headerBtns.style.cssText = 'display:flex;gap:8px';
+
+    var stashBtn = document.createElement('button');
+    stashBtn.textContent = '+ Stash Current';
+    stashBtn.title = 'Stash the current conversation';
+    stashBtn.style.cssText = 'background:#38bdf8;color:#000;border:none;padding:6px 12px;' +
+      'border-radius:6px;cursor:pointer;font-size:13px;font-weight:500';
+    stashBtn.onclick = function() { stash(); };
+
+    var clearBtn = document.createElement('button');
+    clearBtn.textContent = '🗑️';
+    clearBtn.title = 'Clear all stashes';
+    clearBtn.style.cssText = 'background:transparent;border:1px solid #555;color:#aaa;' +
+      'padding:6px 10px;border-radius:6px;cursor:pointer;font-size:13px';
+    clearBtn.onclick = clearAll;
+
+    var closeBtn = document.createElement('button');
+    closeBtn.textContent = '✕';
+    closeBtn.title = 'Close panel';
+    closeBtn.style.cssText = 'background:transparent;border:none;color:#aaa;' +
+      'padding:6px 10px;cursor:pointer;font-size:18px';
+    closeBtn.onclick = hide;
+
+    headerBtns.appendChild(stashBtn);
+    headerBtns.appendChild(clearBtn);
+    headerBtns.appendChild(closeBtn);
+    header.appendChild(headerBtns);
+    panel.appendChild(header);
+
+    // Body (scrollable)
+    var body = document.createElement('div');
+    body.id = 'stash-body';
+    body.style.cssText = 'flex:1;overflow-y:auto;padding:12px';
+    panel.appendChild(body);
+
+    document.body.appendChild(panel);
+    return panel;
+  }
+
+  function _render() {
+    var body = document.getElementById('stash-body');
+    if (!body) return;
+
+    var stack = _load();
+
+    if (stack.length === 0) {
+      body.innerHTML = '<div style="text-align:center;color:#666;padding:40px 20px;line-height:1.6">' +
+        '<div style="font-size:48px;margin-bottom:12px">📦</div>' +
+        '<div style="font-size:15px;font-weight:500">Stash is empty</div>' +
+        '<div style="font-size:13px;margin-top:8px;color:#555">Use <kbd style="background:#333;padding:2px 6px;' +
+        'border-radius:4px;font-size:12px">Ctrl+Shift+Z</kbd> to stash<br>your current conversation and start fresh.</div>' +
+        '</div>';
+      return;
+    }
+
+    var fragment = document.createDocumentFragment();
+
+    for (var i = 0; i < stack.length; i++) {
+      (function(idx) {
+        var entry = stack[idx];
+        var card = document.createElement('div');
+        card.style.cssText = 'background:#16213e;border:1px solid #333;border-radius:8px;' +
+          'padding:12px;margin-bottom:10px;transition:border-color 0.15s';
+        card.onmouseenter = function() { card.style.borderColor = '#38bdf8'; };
+        card.onmouseleave = function() { card.style.borderColor = '#333'; };
+
+        // Title row
+        var title = document.createElement('div');
+        title.style.cssText = 'font-size:14px;font-weight:500;margin-bottom:4px;' +
+          'overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+        title.textContent = entry.description;
+
+        // Meta row
+        var meta = document.createElement('div');
+        meta.style.cssText = 'font-size:12px;color:#888;margin-bottom:8px';
+        meta.textContent = entry.messageCount + ' messages · ' + entry.model + ' · ' + _formatTime(entry.stashedAt);
+
+        // Preview (first user message snippet)
+        var preview = document.createElement('div');
+        preview.style.cssText = 'font-size:12px;color:#666;margin-bottom:10px;' +
+          'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-style:italic';
+        var firstUser = entry.messages.find(function(m) { return m.role === 'user'; });
+        preview.textContent = firstUser ? '> ' + firstUser.content.substring(0, 100) : '';
+
+        // Action buttons
+        var actions = document.createElement('div');
+        actions.style.cssText = 'display:flex;gap:8px';
+
+        var popBtn = document.createElement('button');
+        popBtn.textContent = '⬆️ Pop';
+        popBtn.title = 'Restore this conversation';
+        popBtn.style.cssText = 'background:#4ade80;color:#000;border:none;padding:5px 12px;' +
+          'border-radius:5px;cursor:pointer;font-size:12px;font-weight:500;flex:1';
+        popBtn.onclick = function() { pop(idx); };
+
+        var applyBtn = document.createElement('button');
+        applyBtn.textContent = '📋 Apply';
+        applyBtn.title = 'Restore without removing from stash';
+        applyBtn.style.cssText = 'background:#333;color:#eee;border:1px solid #555;padding:5px 12px;' +
+          'border-radius:5px;cursor:pointer;font-size:12px;flex:1';
+        applyBtn.onclick = function() { apply(idx); };
+
+        var dropBtn = document.createElement('button');
+        dropBtn.textContent = '🗑️';
+        dropBtn.title = 'Drop this stash entry';
+        dropBtn.style.cssText = 'background:transparent;border:1px solid #555;color:#aaa;' +
+          'padding:5px 10px;border-radius:5px;cursor:pointer;font-size:12px';
+        dropBtn.onclick = function() { drop(idx); };
+
+        actions.appendChild(popBtn);
+        actions.appendChild(applyBtn);
+        actions.appendChild(dropBtn);
+
+        card.appendChild(title);
+        card.appendChild(meta);
+        card.appendChild(preview);
+        card.appendChild(actions);
+        fragment.appendChild(card);
+      })(i);
+    }
+
+    body.textContent = '';
+    body.appendChild(fragment);
+  }
+
+  /** Apply (restore) without removing from stash. */
+  function apply(index) {
+    var stack = _load();
+    if (index < 0 || index >= stack.length) return false;
+
+    var entry = stack[index];
+    var current = ConversationManager.getUserMessages();
+    if (current.length > 0) {
+      if (!confirm('Replace current conversation? (Stash entry will remain.)')) return false;
+    }
+
+    ConversationManager.clear();
+    entry.messages.forEach(function(m) { ConversationManager.addMessage(m.role, m.content); });
+
+    if (typeof UIController !== 'undefined') {
+      var last = entry.messages.filter(function(m) { return m.role === 'assistant'; }).pop();
+      UIController.setChatOutput(last ? last.content : '');
+      UIController.setConsoleOutput('(applied from stash)');
+    }
+    if (typeof HistoryPanel !== 'undefined') HistoryPanel.refresh();
+    if (typeof SessionManager !== 'undefined') SessionManager.autoSaveIfEnabled();
+
+    _toast('📋 Applied: ' + entry.description);
+    return true;
+  }
+
+  /* ---- Show/hide ---- */
+
+  function show() {
+    if (!_panel) _panel = _createPanel();
+    _panel.style.display = 'flex';
+    _visible = true;
+    _render();
+  }
+
+  function hide() {
+    if (_panel) _panel.style.display = 'none';
+    _visible = false;
+  }
+
+  function toggle() { _visible ? hide() : show(); }
+
+  /* ---- Init ---- */
+  document.addEventListener('DOMContentLoaded', function() {
+    _updateBadge();
+
+    // Keyboard shortcut: Ctrl+Shift+Z
+    document.addEventListener('keydown', function(e) {
+      if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        toggle();
+      }
+    });
+
+    // Register with command palette
+    if (typeof CommandPalette !== 'undefined' && CommandPalette.register) {
+      CommandPalette.register({
+        name: 'stash conversation',
+        description: 'Stash current conversation and start fresh',
+        icon: '📦', action: function() { stash(); }
+      });
+      CommandPalette.register({
+        name: 'pop stash',
+        description: 'Restore the most recent stashed conversation',
+        icon: '⬆️', action: function() { pop(); }
+      });
+      CommandPalette.register({
+        name: 'stash panel',
+        description: 'Open the conversation stash panel',
+        icon: '📦', action: toggle
+      });
+    }
+
+    // Register slash commands
+    if (typeof SlashCommands !== 'undefined' && SlashCommands.register) {
+      SlashCommands.register('/stash', 'Stash current conversation', function(args) {
+        stash(args || undefined);
+      });
+      SlashCommands.register('/stash-pop', 'Pop the most recent stash', function() { pop(); });
+      SlashCommands.register('/stash-list', 'Show stash panel', toggle);
+    }
+  });
+
+  return { toggle: toggle, show: show, hide: hide, stash: stash, pop: pop, drop: drop, apply: apply, clearAll: clearAll };
 })();
