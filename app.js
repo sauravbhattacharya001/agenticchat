@@ -582,14 +582,56 @@ const DANGEROUS_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 
 function sanitizeStorageObject(obj) {
   if (obj === null || typeof obj !== 'object') return obj;
-  if (Array.isArray(obj)) return obj.map(sanitizeStorageObject);
-  const clean = Object.create(null);
-  for (const key of Object.keys(obj)) {
-    if (DANGEROUS_KEYS.has(key)) continue;
-    const val = obj[key];
-    clean[key] = (val !== null && typeof val === 'object')
-      ? sanitizeStorageObject(val)
-      : val;
+  if (Array.isArray(obj)) {
+    // Only allocate a new array when a child object needed sanitization;
+    // pass-through the original reference when nothing changed.
+    let changed = false;
+    const out = [];
+    for (let i = 0; i < obj.length; i++) {
+      const v = obj[i];
+      const s = (v !== null && typeof v === 'object') ? sanitizeStorageObject(v) : v;
+      if (s !== v) changed = true;
+      out.push(s);
+    }
+    return changed ? out : obj;
+  }
+  // Fast path: check whether any key is dangerous BEFORE copying.
+  // Most parsed objects contain no prototype-pollution keys, so we
+  // can skip the allocation entirely and just recurse children.
+  const keys = Object.keys(obj);
+  let hasDangerous = false;
+  for (let i = 0; i < keys.length; i++) {
+    if (DANGEROUS_KEYS.has(keys[i])) { hasDangerous = true; break; }
+  }
+  // Also check if any nested value needs sanitization
+  let hasNestedObj = false;
+  if (!hasDangerous) {
+    for (let i = 0; i < keys.length; i++) {
+      const v = obj[keys[i]];
+      if (v !== null && typeof v === 'object') { hasNestedObj = true; break; }
+    }
+  }
+  if (!hasDangerous && !hasNestedObj) return obj;  // zero-copy fast path
+  // Need to either strip keys or recurse children (or both)
+  const clean = hasDangerous ? Object.create(null) : obj;
+  if (hasDangerous) {
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
+      if (DANGEROUS_KEYS.has(key)) continue;
+      const val = obj[key];
+      clean[key] = (val !== null && typeof val === 'object')
+        ? sanitizeStorageObject(val)
+        : val;
+    }
+  } else {
+    // No dangerous keys — mutate-in-place since we own the freshly-parsed tree
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
+      const val = obj[key];
+      if (val !== null && typeof val === 'object') {
+        obj[key] = sanitizeStorageObject(val);
+      }
+    }
   }
   return clean;
 }
