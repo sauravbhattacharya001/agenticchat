@@ -6337,6 +6337,14 @@ const CostDashboard = (() => {
 
   let isOpen = false;
 
+  // ── In-memory cost log cache ────────────────────────────────────
+  // Avoids redundant JSON.parse + sanitizeStorageObject on the cost
+  // log (up to 5000 entries) on every _load() call.  The cache is
+  // maintained incrementally on writes and only re-parsed when the
+  // raw localStorage length diverges (cross-tab write).
+  let _logCache = null;
+  let _logCacheRawLen = -1;
+
   // ── In-memory running totals cache ──────────────────────────────
   // Avoids parsing and iterating the full cost log (up to 5000 entries)
   // on every recordUsage() call just to check the budget.  The totals
@@ -6379,26 +6387,31 @@ const CostDashboard = (() => {
 
   /* ── Persistence helpers ─────────────────────────────────────── */
 
-  /** Load cost log array from storage. */
+  /** Load cost log array from storage (cached). */
   function _load() {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
-      return _safeParse(raw, []);
-    } catch (_) { return []; }
+      const rawLen = raw ? raw.length : 0;
+      if (_logCache !== null && rawLen === _logCacheRawLen) return _logCache;
+      _logCache = _safeParse(raw, []);
+      _logCacheRawLen = rawLen;
+      return _logCache;
+    } catch (_) { _logCache = []; _logCacheRawLen = -1; return []; }
   }
 
-  /** Persist cost log array. */
+  /** Persist cost log array and update cache. */
   function _save(log) {
     // Trim oldest entries if over cap — rebuild totals when trimming
     if (log.length > MAX_ENTRIES) {
       log = log.slice(log.length - MAX_ENTRIES);
       // Invalidate cache so totals are recomputed from trimmed log
       _totalsCache = null;
-      SafeStorage.setJSON(STORAGE_KEY, log);
-      _rebuildTotals();
-    } else {
-      SafeStorage.setJSON(STORAGE_KEY, log);
     }
+    _logCache = log;
+    const json = JSON.stringify(log);
+    _logCacheRawLen = json.length;
+    SafeStorage.set(STORAGE_KEY, json);
+    if (log.length > MAX_ENTRIES) _rebuildTotals();
   }
 
   /** Get budget limit (USD) or null if not set. */
@@ -6719,7 +6732,7 @@ const CostDashboard = (() => {
   function getLog() { return _load(); }
 
   /** Clear all data (for testing). */
-  function reset() { _save([]); _totalsCache = null; SafeStorage.remove(TOTALS_KEY); _showBudgetWarning._shown = false; }
+  function reset() { _save([]); _totalsCache = null; _logCache = null; _logCacheRawLen = -1; SafeStorage.remove(TOTALS_KEY); _showBudgetWarning._shown = false; }
 
   return {
     recordUsage, getBudget, setBudget, getTotals, getLog, reset,
