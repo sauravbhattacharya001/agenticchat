@@ -8,21 +8,27 @@ Agentic Chat is a lightweight browser-based chat interface that turns natural la
 
 The app uses a modular IIFE (Immediately Invoked Function Expression) pattern in a single `app.js` file:
 
+See `ARCHITECTURE.md` for the full module map (110+ modules organized by layer).
+
+Key modules for the core chat flow:
+- **SafeStorage** — localStorage wrapper with try/catch and JSON helpers
+- **DOMCache** — Cached DOM element lookups to avoid repeated `getElementById`
 - **ChatConfig** — Frozen constants (model name, token limits, timeouts)
 - **ConversationManager** — Message history management (add, trim, clear, token estimation)
 - **SandboxRunner** — Creates sandboxed iframes to execute AI-generated JavaScript safely
 - **ApiKeyManager** — Handles OpenAI API key and per-service key storage/substitution
+- **OpenAIClient** — Streaming fetch wrapper for the OpenAI chat completions API
 - **UIController** — All DOM manipulation (button states, modals, output display)
 - **ChatController** — Orchestrates the send flow: user input → OpenAI API → code extraction → sandbox execution
-- **PromptTemplates** — Browseable template library with categories (Data & Charts, Web & APIs, Utilities, Fun & Creative), search filtering, and debounced rendering
-- **HistoryPanel** — Slide-out conversation history viewer; renders code blocks in assistant messages; supports Markdown and JSON export via file download
-- **SnippetLibrary** — Persistent code snippet manager (localStorage-backed); supports save with name/tags, search, inline rename, re-run, copy, and delete; renders snippet cards with code preview
+- **SessionManager** — Multi-session CRUD, auto-save, rename, delete (the largest module at ~1k lines)
+- **CrossTabSync** — BroadcastChannel-based cross-tab session conflict detection
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `app.js` | All application logic (9 modular IIFEs) |
+| `app.js` | All application logic (110+ IIFE modules, ~32k lines) |
+| `ARCHITECTURE.md` | Full module map and data flow documentation |
 | `index.html` | Single-page UI with CSP headers |
 | `style.css` | Responsive dark-theme styling |
 | `tests/app.test.js` | Jest tests — 90+ covering all modules (jsdom environment) |
