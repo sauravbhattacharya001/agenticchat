@@ -5522,16 +5522,37 @@ const SessionNotes = (() => {
   const STORAGE_KEY = 'agenticchat_session_notes';
   const MAX_NOTE_LENGTH = 500;
 
-  /** Load all notes from storage. */
+  // In-memory cache to avoid re-parsing JSON from localStorage on every
+  // get() call.  Writes go through _saveAll() which updates the cache.
+  let _cache = null;
+  let _cacheRawLen = -1;
+
+  /** Load all notes from storage (cached). */
   function _loadAll() {
+    // Fast path: if cache exists and raw length matches, skip re-parse
+    if (_cache !== null) {
+      try {
+        const raw = SafeStorage.get(STORAGE_KEY);
+        const len = raw ? raw.length : 0;
+        if (len === _cacheRawLen) return _cache;
+        _cache = _safeParse(raw, {});
+        _cacheRawLen = len;
+        return _cache;
+      } catch { /* fall through */ }
+    }
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
-      return _safeParse(raw, {});
-    } catch { return {}; }
+      _cacheRawLen = raw ? raw.length : 0;
+      _cache = _safeParse(raw, {});
+    } catch { _cache = {}; _cacheRawLen = -1; }
+    return _cache;
   }
 
   /** Save all notes to storage. */
   function _saveAll(notes) {
+    _cache = notes;
+    const json = JSON.stringify(notes);
+    _cacheRawLen = json.length;
     SafeStorage.trySetJSON(STORAGE_KEY, notes);
   }
 
@@ -5563,6 +5584,8 @@ const SessionNotes = (() => {
 
   /** Clear all notes (used in data reset). */
   function clearAll() {
+    _cache = null;
+    _cacheRawLen = -1;
     try { SafeStorage.remove(STORAGE_KEY); } catch {}
   }
 
