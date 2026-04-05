@@ -28140,9 +28140,20 @@ const PinBoard = (() => {
     });
   }
 
+  // Debounced pin-button injection to avoid per-mutation querySelectorAll
+  // during streaming responses (previously fired hundreds of times/sec).
+  let _pinInjectTimer = null;
+  function _scheduleInjectPinButtons() {
+    if (_pinInjectTimer) return;
+    _pinInjectTimer = requestAnimationFrame(() => {
+      _pinInjectTimer = null;
+      _injectPinButtons();
+    });
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     init();
-    ChatOutputObserver.register('messagePinning', function () { _injectPinButtons(); }, { subtree: true });
+    ChatOutputObserver.register('messagePinning', function () { _scheduleInjectPinButtons(); }, { subtree: true });
   });
 
   return { open, close, toggle, init, pinMessage, unpinMessage, updateNote, addTag, removeTag, promptNote, promptTag, copyPin, exportPins, clearAll };
@@ -31135,15 +31146,24 @@ var StickyNotesBoard = (function () {
     // Click backdrop to close
     _panel.addEventListener('click', function (e) { if (e.target === _panel) hide(); });
 
-    // Global mouse move/up for dragging
+    // Global mouse move/up for dragging — throttled via rAF to avoid
+    // layout thrashing (mousemove fires at display refresh rate or higher).
+    var _dragRAF = null;
     document.addEventListener('mousemove', function (e) {
       if (!_dragState) return;
-      var nx = e.clientX - _dragState.offsetX;
-      var ny = e.clientY - _dragState.offsetY;
-      _dragState.el.style.left = Math.max(0, nx) + 'px';
-      _dragState.el.style.top = Math.max(0, ny) + 'px';
-      _dragState.note.x = Math.max(0, nx);
-      _dragState.note.y = Math.max(0, ny);
+      var ds = _dragState;
+      var cx = e.clientX, cy = e.clientY;
+      if (_dragRAF) return;
+      _dragRAF = requestAnimationFrame(function () {
+        _dragRAF = null;
+        if (!ds) return;
+        var nx = cx - ds.offsetX;
+        var ny = cy - ds.offsetY;
+        ds.el.style.left = Math.max(0, nx) + 'px';
+        ds.el.style.top = Math.max(0, ny) + 'px';
+        ds.note.x = Math.max(0, nx);
+        ds.note.y = Math.max(0, ny);
+      });
     });
     document.addEventListener('mouseup', function () {
       if (_dragState) {
