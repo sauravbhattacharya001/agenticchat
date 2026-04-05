@@ -24072,6 +24072,11 @@ document.addEventListener('DOMContentLoaded', PreferencesPanel.init);
  *   SmartTitle.init()               → wire up suggest button
  */
 const SmartTitle = (() => {
+  /* ── Title cache — avoid re-running 36 regexes on every auto-save ── */
+  let _cachedTitle = null;
+  let _cachedMsgCount = -1;
+  let _cachedLastContent = '';
+
   /* ── Stop words — extends shared COMMON_STOP_WORDS with code/chat terms ── */
   const STOP_WORDS = new Set([...COMMON_STOP_WORDS,
     'code', 'data', 'function', 'year', 'cannot',
@@ -24173,6 +24178,13 @@ const SmartTitle = (() => {
     const msgs = messages || ConversationManager.getUserMessages();
     if (!msgs || msgs.length === 0) return 'Empty Conversation';
 
+    // Cache: skip expensive regex analysis if messages haven't changed.
+    // Check message count + last message content as a cheap fingerprint.
+    const lastContent = msgs.length > 0 ? (msgs[msgs.length - 1].content || '') : '';
+    if (_cachedTitle && msgs.length === _cachedMsgCount && lastContent === _cachedLastContent) {
+      return _cachedTitle;
+    }
+
     // Combine all text
     const allText = msgs.map(m => m.content || '').join(' ');
     if (allText.trim().length === 0) return 'Empty Conversation';
@@ -24231,7 +24243,11 @@ const SmartTitle = (() => {
     }
 
     const title = parts.join(' ');
-    return title.length > 60 ? title.substring(0, 57) + '…' : title;
+    const result = title.length > 60 ? title.substring(0, 57) + '…' : title;
+    _cachedTitle = result;
+    _cachedMsgCount = msgs.length;
+    _cachedLastContent = lastContent;
+    return result;
   }
 
   /**
