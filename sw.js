@@ -25,30 +25,28 @@ const APP_SHELL = [
 /* Install: pre-cache app shell */
 self.addEventListener('install', event => {
   event.waitUntil(
-    caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(APP_SHELL))
-      .then(() => self.skipWaiting())
+    (async () => {
+      const cache = await caches.open(CACHE_NAME);
+      await cache.addAll(APP_SHELL);
+      await self.skipWaiting();
+    })()
   );
 });
 
 /* Activate: clean up old caches and notify clients of the update */
 self.addEventListener('activate', event => {
   event.waitUntil(
-    caches.keys()
-      .then(keys => {
-        const stale = keys.filter(k => k !== CACHE_NAME);
-        return Promise.all(stale.map(k => caches.delete(k)))
-          .then(() => stale.length); // pass count of evicted caches
-      })
-      .then(evicted => {
-        if (evicted > 0) {
-          // A new version replaced an old one — tell every open tab.
-          self.clients.matchAll({ type: 'window' }).then(clients => {
-            clients.forEach(c => c.postMessage({ type: 'SW_UPDATED' }));
-          });
-        }
-        return self.clients.claim();
-      })
+    (async () => {
+      const keys = await caches.keys();
+      const stale = keys.filter(k => k !== CACHE_NAME);
+      await Promise.all(stale.map(k => caches.delete(k)));
+      if (stale.length > 0) {
+        // A new version replaced an old one — tell every open tab.
+        const clients = await self.clients.matchAll({ type: 'window' });
+        clients.forEach(c => c.postMessage({ type: 'SW_UPDATED' }));
+      }
+      await self.clients.claim();
+    })()
   );
 });
 
@@ -80,37 +78,36 @@ self.addEventListener('fetch', event => {
 
   /* Cache-first for app shell assets */
   event.respondWith(
-    caches.match(event.request)
-      .then(cached => {
-        if (cached) {
-          /* Throttled background revalidation: only refetch if enough
-             time has elapsed since the last revalidation for this URL.
-             This avoids re-downloading app.js (1 MB) on every request
-             while still picking up updates within a few minutes. */
-          const path = url.pathname;
-          const now = Date.now();
-          const last = _lastRevalidated.get(path) || 0;
-          if (now - last > REVALIDATE_INTERVAL_MS) {
-            _lastRevalidated.set(path, now);
-            fetch(event.request)
-              .then(response => {
-                if (response.ok) {
-                  const clone = response.clone();
-                  caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
-                }
-              })
-              .catch(() => { /* revalidation failed — stale cache is fine */ });
-          }
-          return cached;
+    (async () => {
+      const cached = await caches.match(event.request);
+      if (cached) {
+        /* Throttled background revalidation: only refetch if enough
+           time has elapsed since the last revalidation for this URL.
+           This avoids re-downloading app.js (1 MB) on every request
+           while still picking up updates within a few minutes. */
+        const path = url.pathname;
+        const now = Date.now();
+        const last = _lastRevalidated.get(path) || 0;
+        if (now - last > REVALIDATE_INTERVAL_MS) {
+          _lastRevalidated.set(path, now);
+          fetch(event.request)
+            .then(async response => {
+              if (response.ok) {
+                const cache = await caches.open(CACHE_NAME);
+                await cache.put(event.request, response);
+              }
+            })
+            .catch(() => { /* revalidation failed — stale cache is fine */ });
         }
-        /* Not cached — try network, cache the result */
-        return fetch(event.request).then(response => {
-          if (response.ok) {
-            const clone = response.clone();
-            caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
-          }
-          return response;
-        });
-      })
+        return cached;
+      }
+      /* Not cached — try network, cache the result */
+      const response = await fetch(event.request);
+      if (response.ok) {
+        const cache = await caches.open(CACHE_NAME);
+        await cache.put(event.request, response.clone());
+      }
+      return response;
+    })()
   );
 });
