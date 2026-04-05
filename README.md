@@ -88,6 +88,7 @@ A lightweight, zero-dependency chat interface that sends your prompts to GPT-4o,
 - **Conversation Replay** — Message-by-message playback with transport controls (play/pause/speed)
 - **Prompt Library** — User-created prompt snippets with folders, search, usage tracking, import/export
 - **Usage Heatmap** — GitHub-style 7x24 activity heatmap across all sessions
+- **Word Cloud Generator** — interactive word frequency cloud from conversation with 5 color schemes, PNG download (`Alt+W`)
 
 ## 🚀 Getting Started
 
