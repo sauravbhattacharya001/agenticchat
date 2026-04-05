@@ -4771,3 +4771,71 @@ body.light-theme .screenshot-preview { background: #f1f5f9; }
 body.light-theme .screenshot-actions .btn-secondary {
   background: #e2e8f0; color: #1e293b;
 }
+
+/* ---------- Prompt Enhancer ---------- */
+.enhance-panel {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  z-index: 10100; width: min(560px, 92vw); max-height: 80vh;
+  background: #1e293b; border: 1px solid #334155; border-radius: 12px;
+  padding: 20px; box-shadow: 0 20px 60px rgba(0,0,0,.5);
+  display: flex; flex-direction: column; gap: 12px;
+}
+.enhance-panel h3 { margin: 0; font-size: 1.1rem; color: #e2e8f0; }
+.enhance-panel .enhance-original {
+  background: #0f172a; border: 1px solid #334155; border-radius: 8px;
+  padding: 10px 12px; color: #94a3b8; font-size: .85rem;
+  max-height: 80px; overflow-y: auto; white-space: pre-wrap;
+}
+.enhance-panel .enhance-original::before {
+  content: 'Original'; display: block; font-size: .7rem;
+  text-transform: uppercase; letter-spacing: .05em; color: #64748b;
+  margin-bottom: 4px;
+}
+.enhance-panel .enhance-modes {
+  display: flex; gap: 6px; flex-wrap: wrap;
+}
+.enhance-panel .enhance-modes button {
+  padding: 5px 12px; border-radius: 16px; border: 1px solid #475569;
+  background: transparent; color: #cbd5e1; font-size: .8rem; cursor: pointer;
+  transition: all .15s;
+}
+.enhance-panel .enhance-modes button:hover,
+.enhance-panel .enhance-modes button.active {
+  background: #3b82f6; border-color: #3b82f6; color: #fff;
+}
+.enhance-panel .enhance-result {
+  background: #0f172a; border: 1px solid #334155; border-radius: 8px;
+  padding: 12px; color: #e2e8f0; font-size: .9rem;
+  min-height: 60px; max-height: 200px; overflow-y: auto;
+  white-space: pre-wrap; line-height: 1.5;
+}
+.enhance-panel .enhance-result.loading {
+  color: #64748b; font-style: italic;
+}
+.enhance-panel .enhance-diff {
+  font-size: .75rem; color: #64748b; margin-top: -4px;
+}
+.enhance-panel .enhance-diff ins { color: #4ade80; text-decoration: none; background: rgba(74,222,128,.12); }
+.enhance-panel .enhance-diff del { color: #f87171; text-decoration: line-through; background: rgba(248,113,113,.12); }
+.enhance-panel .enhance-actions {
+  display: flex; gap: 8px; justify-content: flex-end;
+}
+.enhance-panel .enhance-actions button {
+  padding: 7px 18px; border-radius: 6px; border: none;
+  font-size: .85rem; cursor: pointer; font-weight: 500;
+}
+.enhance-panel .enhance-actions .btn-use {
+  background: #3b82f6; color: #fff;
+}
+.enhance-panel .enhance-actions .btn-use:hover { background: #2563eb; }
+.enhance-panel .enhance-actions .btn-cancel {
+  background: #334155; color: #cbd5e1;
+}
+.enhance-panel .enhance-actions .btn-cancel:hover { background: #475569; }
+body.light-theme .enhance-panel { background: #fff; border-color: #e2e8f0; box-shadow: 0 20px 60px rgba(0,0,0,.15); }
+body.light-theme .enhance-panel h3 { color: #1e293b; }
+body.light-theme .enhance-panel .enhance-original { background: #f8fafc; border-color: #e2e8f0; color: #64748b; }
+body.light-theme .enhance-panel .enhance-result { background: #f8fafc; border-color: #e2e8f0; color: #1e293b; }
+body.light-theme .enhance-panel .enhance-modes button { border-color: #cbd5e1; color: #475569; }
+body.light-theme .enhance-panel .enhance-modes button:hover,
+body.light-theme .enhance-panel .enhance-modes button.active { background: #3b82f6; color: #fff; border-color: #3b82f6; }

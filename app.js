@@ -96,6 +96,7 @@
  *   AmbientSoundPlayer   - procedural ambient soundscapes (rain, café, fire, wind, stream, white noise) via Web Audio API (Alt+A)
  *   StickyNotesBoard     - visual draggable sticky notes canvas for brainstorming per session (Alt+N)
  *   ConversationStash    - git-stash-style save/restore of conversation state with stash stack (Ctrl+Shift+Z)
+ *   PromptEnhancer       - AI-powered prompt improvement with 5 enhancement modes (Alt+E)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -32570,4 +32571,195 @@ const WordCloudGenerator = (function () {
   });
 
   return { toggle: toggle, open: open, close: close };
+})();
+
+/* ---------- Prompt Enhancer ---------- */
+/**
+ * PromptEnhancer - AI-powered prompt improvement before sending.
+ *
+ * When a user types a prompt and presses Alt+E (or clicks the sparkle button),
+ * the enhancer sends the draft to the AI with instructions to improve it,
+ * showing the result in a panel with multiple enhancement modes:
+ *   - Clarity: make it clearer and more specific
+ *   - Detail: add specificity and context
+ *   - Concise: make it shorter without losing meaning
+ *   - Expert: rewrite as a domain expert would ask
+ *   - Creative: make it more creative and open-ended
+ *
+ * The user can preview the enhanced version, see a diff, and choose
+ * to use it (replaces input) or discard it.
+ *
+ * @namespace PromptEnhancer
+ */
+const PromptEnhancer = (() => {
+  let _panel = null;
+  let _overlay = null;
+  let _currentMode = 'clarity';
+  let _enhanced = '';
+  let _original = '';
+  let _abortCtrl = null;
+
+  const MODES = {
+    clarity:  { label: '🎯 Clarity',  instruction: 'Rewrite this prompt to be clearer and more specific. Remove ambiguity. Keep the same intent.' },
+    detail:   { label: '📋 Detail',   instruction: 'Add specificity, context, and constraints to this prompt. Include format expectations and edge cases to consider. Keep the core intent.' },
+    concise:  { label: '✂️ Concise',  instruction: 'Make this prompt shorter and more direct without losing meaning. Remove filler words and redundancy.' },
+    expert:   { label: '🧑‍🔬 Expert',  instruction: 'Rewrite this prompt as a domain expert would phrase it. Use precise terminology and ask for deeper analysis.' },
+    creative: { label: '🎨 Creative', instruction: 'Make this prompt more creative, open-ended, and thought-provoking. Encourage unexpected angles and novel approaches.' },
+  };
+
+  function _getInput() {
+    var inp = document.getElementById('chat-input');
+    return inp ? inp.value.trim() : '';
+  }
+
+  function _setInput(text) {
+    var inp = document.getElementById('chat-input');
+    if (inp) { inp.value = text; inp.focus(); }
+  }
+
+  function _close() {
+    if (_abortCtrl) { _abortCtrl.abort(); _abortCtrl = null; }
+    if (_overlay) { _overlay.remove(); _overlay = null; }
+    if (_panel) { _panel.remove(); _panel = null; }
+  }
+
+  function _escHtml(str) {
+    var d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+  }
+
+  function _simpleDiff(a, b) {
+    var wa = a.split(/\s+/), wb = b.split(/\s+/);
+    var set = new Set(wa);
+    return wb.map(function(w) { return set.has(w) ? w : '<ins>' + w + '</ins>'; }).join(' ');
+  }
+
+  async function _runEnhance(mode) {
+    _currentMode = mode;
+    var resultEl = _panel.querySelector('.enhance-result');
+    var diffEl = _panel.querySelector('.enhance-diff');
+    var useBtn = _panel.querySelector('.btn-use');
+
+    _panel.querySelectorAll('.enhance-modes button').forEach(function(b) {
+      b.classList.toggle('active', b.dataset.mode === mode);
+    });
+
+    resultEl.textContent = 'Enhancing prompt\u2026';
+    resultEl.classList.add('loading');
+    diffEl.innerHTML = '';
+    useBtn.disabled = true;
+
+    if (_abortCtrl) _abortCtrl.abort();
+    _abortCtrl = new AbortController();
+
+    var modeInfo = MODES[mode];
+    var messages = [
+      { role: 'system', content: 'You are a prompt engineering expert. ' + modeInfo.instruction + ' Return ONLY the improved prompt text, nothing else. No explanations, no quotes, no markdown formatting.' },
+      { role: 'user', content: _original }
+    ];
+
+    try {
+      var result = await OpenAIClient.complete({
+        messages: messages,
+        maxTokens: 500,
+        temperature: 0.7,
+        signal: _abortCtrl.signal,
+      });
+
+      if (!result.ok) {
+        resultEl.textContent = 'Error: ' + (result.error || 'Unknown error');
+        resultEl.classList.remove('loading');
+        return;
+      }
+
+      _enhanced = (result.content || '').trim();
+      resultEl.textContent = _enhanced;
+      resultEl.classList.remove('loading');
+      diffEl.innerHTML = _simpleDiff(_original, _enhanced);
+      useBtn.disabled = false;
+
+      if (result.usage && typeof CostDashboard !== 'undefined') {
+        CostDashboard.recordUsage(result.usage);
+      }
+    } catch (err) {
+      if (err.name === 'AbortError') return;
+      resultEl.textContent = 'Error: ' + err.message;
+      resultEl.classList.remove('loading');
+    }
+  }
+
+  function enhance() {
+    var text = _getInput();
+    if (!text) return;
+
+    _original = text;
+    _close();
+
+    _overlay = document.createElement('div');
+    _overlay.className = 'modal-overlay';
+    _overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10099;';
+    _overlay.addEventListener('click', _close);
+    document.body.appendChild(_overlay);
+
+    _panel = document.createElement('div');
+    _panel.className = 'enhance-panel';
+    _panel.setAttribute('role', 'dialog');
+    _panel.setAttribute('aria-label', 'Prompt Enhancer');
+
+    var modesHtml = Object.entries(MODES).map(function(entry) {
+      var key = entry[0], m = entry[1];
+      return '<button data-mode="' + key + '" class="' + (key === 'clarity' ? 'active' : '') + '">' + m.label + '</button>';
+    }).join('');
+
+    _panel.innerHTML =
+      '<h3>✨ Prompt Enhancer</h3>' +
+      '<div class="enhance-original">' + _escHtml(_original) + '</div>' +
+      '<div class="enhance-modes">' + modesHtml + '</div>' +
+      '<div class="enhance-result loading">Enhancing prompt\u2026</div>' +
+      '<div class="enhance-diff"></div>' +
+      '<div class="enhance-actions">' +
+        '<button class="btn-cancel">Cancel</button>' +
+        '<button class="btn-use" disabled>Use Enhanced</button>' +
+      '</div>';
+
+    document.body.appendChild(_panel);
+
+    _panel.querySelectorAll('.enhance-modes button').forEach(function(btn) {
+      btn.addEventListener('click', function() { _runEnhance(btn.dataset.mode); });
+    });
+
+    _panel.querySelector('.btn-cancel').addEventListener('click', _close);
+    _panel.querySelector('.btn-use').addEventListener('click', function() {
+      if (_enhanced) _setInput(_enhanced);
+      _close();
+    });
+
+    var esc = function(e) { if (e.key === 'Escape') { _close(); document.removeEventListener('keydown', esc); } };
+    document.addEventListener('keydown', esc);
+
+    _runEnhance('clarity');
+  }
+
+  // Alt+E keyboard shortcut
+  document.addEventListener('keydown', function (e) {
+    if (e.altKey && !e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'e') {
+      e.preventDefault();
+      enhance();
+    }
+  });
+
+  document.addEventListener('DOMContentLoaded', function () {
+    if (typeof KeyboardShortcuts !== 'undefined' && KeyboardShortcuts.register) {
+      KeyboardShortcuts.register('Alt+E', 'Prompt Enhancer', enhance);
+    }
+    if (typeof CommandPalette !== 'undefined' && CommandPalette.register) {
+      CommandPalette.register({ name: 'enhance prompt', description: 'AI-powered prompt improvement before sending', icon: '✨', action: enhance });
+    }
+    if (typeof SlashCommands !== 'undefined' && SlashCommands.register) {
+      SlashCommands.register('/enhance', 'Enhance current prompt with AI', enhance);
+    }
+  });
+
+  return { enhance: enhance };
 })();
