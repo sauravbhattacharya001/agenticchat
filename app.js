@@ -16563,8 +16563,8 @@ const MessageScheduler = (() => {
   'use strict';
 
   const STORE_KEY = 'agentichat_scheduled_msgs';
-  const CHECK_INTERVAL = 15000; // check every 15 seconds
-  let _checkTimer = null;
+  let _nextTimer = null;   // setTimeout id for next pending item
+  let _pendingCache = null; // in-memory cache; null = not yet loaded
   let _panelEl = null;
   let _onSendCallback = null;
 
@@ -16607,7 +16607,9 @@ const MessageScheduler = (() => {
     const items = _load();
     items.push(item);
     _save(items);
+    _pendingCache = null; // invalidate
     _renderPanel();
+    _scheduleNextCheck(items); // recalculate next wake-up
     return item;
   }
 
@@ -16617,6 +16619,8 @@ const MessageScheduler = (() => {
     if (idx === -1) return false;
     items[idx].status = 'cancelled';
     _save(items);
+    _pendingCache = null; // invalidate
+    _scheduleNextCheck(items); // recalculate (cancelled item may have been next)
     _renderPanel();
     return true;
   }
@@ -16646,24 +16650,57 @@ const MessageScheduler = (() => {
 
   /* ── Timer loop ──────────────────────────────────────────── */
 
+  /**
+   * Fire any pending messages whose time has come, then schedule the
+   * next wake-up with a precision setTimeout instead of polling.
+   */
   function _checkScheduled() {
     const items = _load();
     const now = Date.now();
     let changed = false;
+    const toDispatch = [];
 
     for (let i = 0; i < items.length; i++) {
       if (items[i].status === 'pending' && items[i].scheduledAt <= now) {
         items[i].status = 'sent';
         items[i].sentAt = now;
         changed = true;
-        _dispatch(items[i]);
+        toDispatch.push(items[i]);
       }
     }
 
     if (changed) {
       _save(items);
+      _pendingCache = null; // invalidate cache
       _renderPanel();
+      // Dispatch after save so panel state is consistent
+      for (const item of toDispatch) _dispatch(item);
     }
+
+    _scheduleNextCheck(items);
+  }
+
+  /**
+   * Schedule a single setTimeout for the earliest pending item.
+   * Replaces the old 15-second polling interval — this approach is O(1)
+   * between scheduled events and wakes up exactly when needed.
+   */
+  function _scheduleNextCheck(items) {
+    if (_nextTimer) { clearTimeout(_nextTimer); _nextTimer = null; }
+    if (!items) items = _load();
+
+    let earliest = Infinity;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].status === 'pending' && items[i].scheduledAt < earliest) {
+        earliest = items[i].scheduledAt;
+      }
+    }
+
+    if (earliest === Infinity) return; // nothing pending
+
+    // Clamp to at least 500ms to avoid tight loops on clock skew
+    const delay = Math.max(earliest - Date.now(), 500);
+    _nextTimer = setTimeout(_checkScheduled, delay);
   }
 
   function _dispatch(item) {
@@ -16921,8 +16958,9 @@ const MessageScheduler = (() => {
 
   function init() {
     // Start the check loop
-    if (_checkTimer) clearInterval(_checkTimer);
-    _checkTimer = setInterval(_checkScheduled, CHECK_INTERVAL);
+    // Initial check fires any overdue items, then schedules
+    // a precision timeout for the next pending message.
+    _checkScheduled();
 
     // Add toolbar button
     const toolbar = document.querySelector('.toolbar, .chat-toolbar, .sidebar');
