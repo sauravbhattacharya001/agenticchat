@@ -32629,3 +32629,182 @@ const PromptEnhancer = (() => {
 
   return { enhance: enhance };
 })();
+
+/* ===== Conversation Autopilot ===== */
+var ConversationAutopilot = (function () {
+  'use strict';
+  var _visible = false;
+  var _state = { running: false, step: 0, maxSteps: 5, mode: 'depth', goal: '', trail: [], topics: [] };
+
+  function _esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+  function _getConversation() {
+    var msgs = [];
+    document.querySelectorAll('#chat .message').forEach(function (el) {
+      var role = el.classList.contains('user') ? 'user' : 'assistant';
+      var text = el.textContent.substring(0, 500);
+      msgs.push({ role: role, text: text });
+    });
+    return msgs;
+  }
+
+  function _buildFollowUpPrompt() {
+    var conv = _getConversation();
+    var last5 = conv.slice(-5).map(function (m) { return m.role + ': ' + m.text.substring(0, 200); }).join('\n');
+    var trailSummary = _state.trail.map(function (t, i) { return (i + 1) + '. ' + t; }).join('\n');
+    var modeInstructions = {
+      'breadth': 'Explore a DIFFERENT subtopic or angle not yet covered. Maximize breadth of coverage.',
+      'depth': 'Go DEEPER into the most promising thread from the last response. Ask follow-up questions that drill down.',
+      'creative': 'Take an unexpected creative tangent inspired by something in the conversation. Make surprising connections.'
+    };
+    return 'You are an autonomous research autopilot. The user set this exploration goal:\n\n' +
+      'GOAL: ' + _state.goal + '\n\n' +
+      'Exploration mode: ' + _state.mode + ' - ' + (modeInstructions[_state.mode] || modeInstructions['depth']) + '\n\n' +
+      'Topics already explored:\n' + (trailSummary || '(none yet)') + '\n\n' +
+      'Recent conversation:\n' + last5 + '\n\n' +
+      'Generate the NEXT follow-up prompt to continue exploring the goal. ' +
+      'Return ONLY the prompt text, nothing else. Make it specific, insightful, and advancing toward the goal. ' +
+      'Step ' + (_state.step + 1) + ' of ' + (_state.maxSteps || 'unlimited') + '.';
+  }
+
+  function _generateNextPrompt(callback) {
+    var apiKey = document.getElementById('api-key') ? document.getElementById('api-key').value : '';
+    if (!apiKey) { callback('(Set your API key to enable autopilot prompt generation. Alternatively, type your own follow-up below.)'); return; }
+    var metaPrompt = _buildFollowUpPrompt();
+    fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey },
+      body: JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: metaPrompt }], max_tokens: 300, temperature: _state.mode === 'creative' ? 1.0 : 0.7 })
+    }).then(function (r) { return r.json(); })
+      .then(function (data) {
+        var text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || 'Could not generate prompt.';
+        callback(text.trim());
+      })
+      .catch(function (err) { callback('Error generating prompt: ' + err.message); });
+  }
+
+  function _updateUI() {
+    var stepLabel = document.getElementById('autopilot-step-label');
+    var progressFill = document.getElementById('autopilot-progress-fill');
+    var statusText = document.getElementById('autopilot-status-text');
+    var trail = document.getElementById('autopilot-trail');
+    if (stepLabel) stepLabel.textContent = 'Step ' + _state.step + '/' + (_state.maxSteps || '\u221e');
+    if (progressFill) {
+      var pct = _state.maxSteps ? Math.round((_state.step / _state.maxSteps) * 100) : Math.min(_state.step * 10, 90);
+      progressFill.style.width = pct + '%';
+    }
+    if (statusText) statusText.textContent = _state.running ? 'Generating next prompt\u2026' : 'Paused';
+    if (trail) {
+      var html = '<strong>Exploration trail:</strong>';
+      _state.trail.forEach(function (t, i) {
+        html += '<div class="autopilot-trail-item">' + (i + 1) + '. ' + _esc(t.length > 120 ? t.substring(0, 120) + '\u2026' : t) + '</div>';
+      });
+      trail.innerHTML = html;
+    }
+  }
+
+  function _sendPrompt(text) {
+    var input = document.getElementById('chat-input');
+    var sendBtn = document.getElementById('send-btn');
+    if (input && sendBtn) {
+      input.value = text;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      sendBtn.click();
+    }
+    _state.trail.push(text);
+    _state.step++;
+    _updateUI();
+    if (_state.maxSteps > 0 && _state.step >= _state.maxSteps) { _showComplete(); return; }
+    setTimeout(function () { _proposeNext(); }, 3000);
+  }
+
+  function _proposeNext() {
+    if (!_state.running) return;
+    var statusText = document.getElementById('autopilot-status-text');
+    var nextBox = document.getElementById('autopilot-next-prompt');
+    if (statusText) statusText.textContent = 'Generating next prompt\u2026';
+    if (nextBox) nextBox.textContent = 'Thinking\u2026';
+    _generateNextPrompt(function (prompt) {
+      if (!_state.running) return;
+      if (nextBox) nextBox.textContent = prompt;
+      if (statusText) statusText.textContent = 'Awaiting your decision';
+    });
+  }
+
+  function _showComplete() {
+    _state.running = false;
+    document.getElementById('autopilot-running').style.display = 'none';
+    document.getElementById('autopilot-complete').style.display = 'block';
+    var summary = document.getElementById('autopilot-summary');
+    if (summary) {
+      var html = '<p>Explored <strong>' + _state.trail.length + ' prompts</strong> toward your goal.</p><ol>';
+      _state.trail.forEach(function (t) { html += '<li>' + _esc(t.length > 100 ? t.substring(0, 100) + '\u2026' : t) + '</li>'; });
+      html += '</ol>';
+      summary.innerHTML = html;
+    }
+  }
+
+  function _start() {
+    var goalEl = document.getElementById('autopilot-goal');
+    var depthEl = document.getElementById('autopilot-depth');
+    var modeEl = document.getElementById('autopilot-mode');
+    if (!goalEl || !goalEl.value.trim()) { alert('Please enter an exploration goal.'); return; }
+    _state = { running: true, step: 0, maxSteps: parseInt(depthEl.value) || 0, mode: modeEl.value, goal: goalEl.value.trim(), trail: [], topics: [] };
+    document.getElementById('autopilot-setup').style.display = 'none';
+    document.getElementById('autopilot-running').style.display = 'block';
+    document.getElementById('autopilot-complete').style.display = 'none';
+    _updateUI();
+    _proposeNext();
+  }
+
+  function _bindEvents() {
+    document.getElementById('autopilot-close').addEventListener('click', toggle);
+    document.getElementById('autopilot-overlay').addEventListener('click', toggle);
+    document.getElementById('autopilot-start').addEventListener('click', _start);
+    document.getElementById('autopilot-approve').addEventListener('click', function () {
+      var nextBox = document.getElementById('autopilot-next-prompt');
+      if (nextBox && nextBox.textContent && nextBox.textContent !== 'Thinking\u2026') { _sendPrompt(nextBox.textContent); }
+    });
+    document.getElementById('autopilot-skip').addEventListener('click', function () { if (_state.running) _proposeNext(); });
+    document.getElementById('autopilot-edit').addEventListener('click', function () {
+      var nextBox = document.getElementById('autopilot-next-prompt');
+      if (nextBox) nextBox.contentEditable = nextBox.contentEditable === 'true' ? 'false' : 'true';
+      if (nextBox && nextBox.contentEditable === 'true') nextBox.focus();
+    });
+    document.getElementById('autopilot-stop').addEventListener('click', function () { _state.running = false; _showComplete(); });
+    document.getElementById('autopilot-restart').addEventListener('click', function () {
+      document.getElementById('autopilot-setup').style.display = 'block';
+      document.getElementById('autopilot-running').style.display = 'none';
+      document.getElementById('autopilot-complete').style.display = 'none';
+    });
+    document.getElementById('autopilot-export').addEventListener('click', function () {
+      var data = { goal: _state.goal, mode: _state.mode, steps: _state.trail.length, trail: _state.trail, timestamp: new Date().toISOString() };
+      var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'autopilot-trail-' + Date.now() + '.json'; a.click();
+    });
+  }
+
+  function toggle() {
+    _visible = !_visible;
+    document.getElementById('autopilot-panel').style.display = _visible ? 'block' : 'none';
+    document.getElementById('autopilot-overlay').style.display = _visible ? 'block' : 'none';
+    if (_visible && !_state.running) {
+      document.getElementById('autopilot-setup').style.display = 'block';
+      document.getElementById('autopilot-running').style.display = 'none';
+      document.getElementById('autopilot-complete').style.display = 'none';
+    }
+  }
+
+  document.addEventListener('keydown', function (e) {
+    if (e.altKey && !e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'a') { e.preventDefault(); toggle(); }
+  });
+
+  document.addEventListener('DOMContentLoaded', function () {
+    _bindEvents();
+    if (typeof KeyboardShortcuts !== 'undefined' && KeyboardShortcuts.register) { KeyboardShortcuts.register('Alt+A', 'Conversation Autopilot', toggle); }
+    if (typeof CommandPalette !== 'undefined' && CommandPalette.register) { CommandPalette.register({ name: 'autopilot', description: 'Goal-directed autonomous conversation exploration', icon: '\ud83d\ude80', action: toggle }); }
+    if (typeof SlashCommands !== 'undefined' && SlashCommands.register) { SlashCommands.register('/autopilot', 'Launch Conversation Autopilot', toggle); }
+  });
+
+  return { toggle: toggle };
+})();

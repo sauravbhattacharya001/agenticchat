@@ -78,6 +78,7 @@
     <button id="reader-btn" class="btn-secondary" title="Reader View — expand messages for comfortable reading (Alt+R)" onclick="MessageReaderView.toggle()">📖</button>
     <button id="pomodoro-btn" class="btn-secondary" title="Pomodoro Timer — focus sessions with breaks (Ctrl+Shift+T)" onclick="PomodoroTimer.toggle()">🍅</button>
     <button id="ab-tester-btn" class="btn-secondary" title="A/B Tester — compare two model responses side by side (Ctrl+Shift+B)" onclick="PromptABTester.toggle()">⚖️</button>
+    <button id="autopilot-btn" class="btn-secondary" title="Conversation Autopilot — goal-directed autonomous exploration (Alt+A)" onclick="ConversationAutopilot.toggle()">🚀</button>
     <button id="enhance-btn" class="btn-secondary" title="Prompt Enhancer — AI-powered prompt improvement (Alt+E)" onclick="PromptEnhancer.enhance()">✨</button>
     <button id="screenshot-btn" class="btn-secondary" title="Conversation Screenshot — export chat as shareable PNG (Ctrl+Shift+I)" onclick="ConversationScreenshot.toggle()">📸</button>
     <button id="stash-btn" class="btn-secondary" title="Conversation Stash — save current chat and start fresh, pop to restore (Ctrl+Shift+Z)" onclick="ConversationStash.toggle()">📦 <span id="stash-count" style="display:none"></span></button>
@@ -576,6 +577,49 @@
     <div id="pinboard-list" class="pinboard-list"></div>
     <div id="pinboard-empty" style="display:none;padding:2rem;text-align:center;color:var(--text-secondary);">No pinned messages yet. Right-click a message or use the 📌 pin action to pin important messages!</div>
   </div>
+  <!-- Conversation Autopilot Panel -->
+  <div id="autopilot-overlay" class="modal-overlay" style="display:none"></div>
+  <div id="autopilot-panel" class="autopilot-panel" style="display:none;" role="dialog" aria-label="Conversation Autopilot" aria-modal="true">
+    <div class="autopilot-header">
+      <span class="autopilot-title">🚀 Conversation Autopilot</span>
+      <div class="autopilot-controls">
+        <button id="autopilot-close" class="btn-sm" title="Close">✕</button>
+      </div>
+    </div>
+    <div class="autopilot-body">
+      <div id="autopilot-setup">
+        <label for="autopilot-goal">Set your exploration goal:</label>
+        <textarea id="autopilot-goal" rows="3" placeholder="e.g. Research quantum computing applications in drug discovery, explore all major approaches and recent breakthroughs…"></textarea>
+        <div class="autopilot-options">
+          <label>Depth: <select id="autopilot-depth"><option value="3">Quick (3 steps)</option><option value="5" selected>Standard (5 steps)</option><option value="10">Deep (10 steps)</option><option value="0">Until I stop</option></select></label>
+          <label>Mode: <select id="autopilot-mode"><option value="breadth">Breadth-first</option><option value="depth" selected>Depth-first</option><option value="creative">Creative tangents</option></select></label>
+        </div>
+        <button id="autopilot-start" class="btn-primary">🚀 Launch Autopilot</button>
+      </div>
+      <div id="autopilot-running" style="display:none;">
+        <div class="autopilot-status">
+          <span id="autopilot-step-label">Step 0/5</span>
+          <div class="autopilot-progress-bar"><div id="autopilot-progress-fill" class="autopilot-progress-fill"></div></div>
+          <span id="autopilot-status-text">Analyzing…</span>
+        </div>
+        <div id="autopilot-next-prompt" class="autopilot-next-prompt"></div>
+        <div class="autopilot-actions">
+          <button id="autopilot-approve" class="btn-primary" title="Send this prompt">✅ Send</button>
+          <button id="autopilot-skip" class="btn-secondary" title="Generate a different follow-up">⏭️ Skip</button>
+          <button id="autopilot-edit" class="btn-secondary" title="Edit before sending">✏️ Edit</button>
+          <button id="autopilot-stop" class="btn-danger" title="Stop autopilot">⏹️ Stop</button>
+        </div>
+        <div id="autopilot-trail" class="autopilot-trail"><strong>Exploration trail:</strong></div>
+      </div>
+      <div id="autopilot-complete" style="display:none;">
+        <div class="autopilot-summary-header">✅ Exploration Complete</div>
+        <div id="autopilot-summary"></div>
+        <button id="autopilot-restart" class="btn-secondary">🔄 New Exploration</button>
+        <button id="autopilot-export" class="btn-secondary">📥 Export Trail</button>
+      </div>
+    </div>
+  </div>
+
 </body>
 </html>
 
