@@ -1,7 +1,7 @@
 /* ============================================================
  * Agentic Chat - Application Logic
  *
- * Architecture (49 modules, all revealing-module-pattern IIFEs):
+ * Architecture (50 modules, all revealing-module-pattern IIFEs):
  *
  *   Core:
  *   SafeStorage          - safe localStorage wrapper for restricted-storage environments
@@ -77,7 +77,8 @@
  *   TextExpander         - shorthand triggers that auto-expand inline (Ctrl+Shift+E)
  *   MessageReaderView    - full-width reader overlay for comfortable reading (Alt+R)
  *   ReadabilityAnalyzer  - Flesch-Kincaid readability scoring with per-role stats (Ctrl+Shift+R)
- *   ToneAdjuster         - rewrite assistant messages in different tones (formal, casual, concise, ELI5, etc.)
+ *   ToneAdjuster         - rewrite assistant messages in different tones (formal, casual, concise, ELI5, e
+ *   SessionLinker         - TF-IDF cosine similarity linker discovers related sessions (Alt+L)tc.)
  *   ConversationScreenshot - render conversation as shareable PNG image via Canvas API (Ctrl+Shift+I)
  *   VoiceChatMode        - hands-free conversational loop chaining voice input → send → TTS → listen (Alt+V)
  *   ConversationShareLink - generate shareable URL with encoded conversation data (Alt+S)
@@ -32807,4 +32808,224 @@ var ConversationAutopilot = (function () {
   });
 
   return { toggle: toggle };
+})();
+
+/* ---------- Smart Session Linker ---------- */
+/**
+ * Discovers related sessions by computing TF-IDF cosine similarity
+ * across all saved conversations.  Shows a floating "Related Sessions"
+ * panel (Alt+L) with ranked links and shared-topic badges.  Agentic:
+ * proactively surfaces connections the user might miss.
+ *
+ * @namespace SessionLinker
+ */
+const SessionLinker = (() => {
+  const CACHE_KEY = 'agenticchat_session_linker_cache';
+  const MAX_RESULTS = 8;
+  const MIN_SIMILARITY = 0.08;
+  const STOPWORDS = new Set([
+    'the','a','an','is','are','was','were','be','been','being','have','has','had',
+    'do','does','did','will','would','shall','should','may','might','must','can','could',
+    'i','me','my','we','our','you','your','he','him','his','she','her','it','its',
+    'they','them','their','this','that','these','those','am','of','in','to','for',
+    'with','on','at','by','from','as','into','about','between','through','after',
+    'above','below','up','down','out','off','over','under','then','than','but','and',
+    'or','not','no','nor','so','if','when','what','which','who','whom','how','all',
+    'each','every','both','few','more','most','other','some','such','only','own',
+    'same','just','also','very','really','much','here','there','where','why',
+    'hello','hi','hey','thanks','thank','please','yes','yeah','ok','okay','sure',
+    'well','like','just','get','got','know','think','want','need','make','go',
+    'see','say','said','tell','told','let','try','use','used','new','way',
+    'could','should','would','something','anything','everything','nothing'
+  ]);
+
+  let _visible = false;
+  let _cachedVectors = null;
+
+  /** Tokenise text into lowercase words, strip punctuation. */
+  function _tokenize(text) {
+    if (!text) return [];
+    return text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 2 && !STOPWORDS.has(w));
+  }
+
+  /** Extract all user+assistant text from a session's messages. */
+  function _extractText(session) {
+    if (!session || !Array.isArray(session.messages)) return '';
+    return session.messages
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .map(m => typeof m.content === 'string' ? m.content : '')
+      .join(' ');
+  }
+
+  /** Build term-frequency vector for a token list. */
+  function _termFreq(tokens) {
+    const tf = {};
+    for (const t of tokens) { tf[t] = (tf[t] || 0) + 1; }
+    const max = Math.max(...Object.values(tf), 1);
+    for (const t in tf) tf[t] /= max;  // normalise
+    return tf;
+  }
+
+  /** Compute IDF across all session TF vectors. */
+  function _computeIdf(allTfs) {
+    const N = allTfs.length;
+    const idf = {};
+    for (const tf of allTfs) {
+      for (const t in tf) {
+        idf[t] = (idf[t] || 0) + 1;
+      }
+    }
+    for (const t in idf) idf[t] = Math.log(N / idf[t]) + 1;
+    return idf;
+  }
+
+  /** Cosine similarity between two TF-IDF vectors. */
+  function _cosine(a, b, idf) {
+    let dot = 0, magA = 0, magB = 0;
+    const allTerms = new Set([...Object.keys(a), ...Object.keys(b)]);
+    for (const t of allTerms) {
+      const w = idf[t] || 1;
+      const va = (a[t] || 0) * w;
+      const vb = (b[t] || 0) * w;
+      dot += va * vb;
+      magA += va * va;
+      magB += vb * vb;
+    }
+    if (magA === 0 || magB === 0) return 0;
+    return dot / (Math.sqrt(magA) * Math.sqrt(magB));
+  }
+
+  /** Find top shared terms between two TF vectors (for badges). */
+  function _sharedTopics(tfA, tfB, idf, max) {
+    const shared = [];
+    for (const t in tfA) {
+      if (tfB[t]) {
+        shared.push({ term: t, score: (tfA[t] + tfB[t]) * (idf[t] || 1) });
+      }
+    }
+    shared.sort((a, b) => b.score - a.score);
+    return shared.slice(0, max || 3).map(s => s.term);
+  }
+
+  /** Build vectors for all sessions. */
+  function _buildIndex() {
+    if (typeof SessionManager === 'undefined') return [];
+    const sessions = SessionManager.getAll();
+    if (!sessions || sessions.length === 0) return [];
+    const indexed = [];
+    for (const s of sessions) {
+      const tokens = _tokenize(_extractText(s));
+      if (tokens.length < 5) continue;  // skip near-empty sessions
+      indexed.push({ id: s.id, name: s.name || 'Untitled', tf: _termFreq(tokens), msgCount: (s.messages || []).length });
+    }
+    return indexed;
+  }
+
+  /** Find sessions related to the current active session. */
+  function findRelated() {
+    if (typeof SessionManager === 'undefined') return [];
+    const activeId = SessionManager.getActiveId ? SessionManager.getActiveId() : (SessionManager._getActiveId ? SessionManager._getActiveId() : null);
+    if (!activeId) return [];
+
+    const indexed = _buildIndex();
+    const current = indexed.find(s => s.id === activeId);
+    if (!current) return [];
+
+    const allTfs = indexed.map(s => s.tf);
+    const idf = _computeIdf(allTfs);
+
+    const results = [];
+    for (const s of indexed) {
+      if (s.id === activeId) continue;
+      const sim = _cosine(current.tf, s.tf, idf);
+      if (sim >= MIN_SIMILARITY) {
+        const topics = _sharedTopics(current.tf, s.tf, idf, 3);
+        results.push({ id: s.id, name: s.name, similarity: sim, topics: topics, msgCount: s.msgCount });
+      }
+    }
+    results.sort((a, b) => b.similarity - a.similarity);
+    return results.slice(0, MAX_RESULTS);
+  }
+
+  /** Render the panel. */
+  function _render() {
+    let panel = document.getElementById('session-linker-panel');
+    if (!panel) {
+      panel = document.createElement('div');
+      panel.id = 'session-linker-panel';
+      panel.className = 'session-linker-panel';
+      document.body.appendChild(panel);
+    }
+
+    const related = findRelated();
+    let html = '<div class="sl-header"><span>🔗 Related Sessions</span><button class="sl-close" title="Close">&times;</button></div>';
+
+    if (related.length === 0) {
+      html += '<div class="sl-empty">No related sessions found.<br><small>Chat more to build connections!</small></div>';
+    } else {
+      html += '<div class="sl-list">';
+      for (const r of related) {
+        const pct = Math.round(r.similarity * 100);
+        const bar = Math.min(pct, 100);
+        const topicBadges = r.topics.map(t => '<span class="sl-topic">' + _escHtml(t) + '</span>').join('');
+        html += '<div class="sl-item" data-session-id="' + _escHtml(r.id) + '">' +
+          '<div class="sl-item-header">' +
+            '<span class="sl-name" title="' + _escHtml(r.name) + '">' + _escHtml(r.name) + '</span>' +
+            '<span class="sl-score">' + pct + '%</span>' +
+          '</div>' +
+          '<div class="sl-bar-bg"><div class="sl-bar-fill" style="width:' + bar + '%"></div></div>' +
+          '<div class="sl-meta">' + topicBadges + '<span class="sl-msg-count">' + r.msgCount + ' msgs</span></div>' +
+          '</div>';
+      }
+      html += '</div>';
+    }
+    panel.innerHTML = html;
+    panel.style.display = 'block';
+
+    // Bind events
+    panel.querySelector('.sl-close').addEventListener('click', hide);
+    panel.querySelectorAll('.sl-item').forEach(el => {
+      el.addEventListener('click', () => {
+        const sid = el.getAttribute('data-session-id');
+        if (sid && typeof SessionManager !== 'undefined' && SessionManager.load) {
+          SessionManager.load(sid);
+          hide();
+        }
+      });
+    });
+  }
+
+  function _escHtml(s) {
+    if (typeof escapeHtml === 'function') return escapeHtml(s);
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  function show() { _visible = true; _render(); }
+  function hide() {
+    _visible = false;
+    const panel = document.getElementById('session-linker-panel');
+    if (panel) panel.style.display = 'none';
+  }
+  function toggle() { _visible ? hide() : show(); }
+
+  // Keyboard shortcut Alt+L
+  document.addEventListener('keydown', function (e) {
+    if (e.altKey && !e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'l') { e.preventDefault(); toggle(); }
+  });
+
+  document.addEventListener('DOMContentLoaded', function () {
+    if (typeof KeyboardShortcuts !== 'undefined' && KeyboardShortcuts.register) {
+      KeyboardShortcuts.register('Alt+L', 'Related Sessions (Smart Linker)', toggle);
+    }
+    if (typeof CommandPalette !== 'undefined' && CommandPalette.register) {
+      CommandPalette.register({ name: 'related sessions', description: 'Find sessions similar to current conversation', icon: '🔗', action: toggle });
+    }
+    if (typeof SlashCommands !== 'undefined' && SlashCommands.register) {
+      SlashCommands.register('/related', 'Show related sessions', toggle);
+    }
+  });
+
+  return { toggle: toggle, show: show, hide: hide, findRelated: findRelated };
 })();

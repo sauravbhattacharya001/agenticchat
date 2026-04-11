@@ -4864,3 +4864,21 @@ body.light-theme .enhance-panel .enhance-modes button.active { background: #3b82
 .autopilot-trail-item{margin:4px 0;padding:4px 8px;border-left:3px solid #2196F3;font-size:.8rem}
 .autopilot-summary-header{font-size:1.1rem;font-weight:700;margin-bottom:10px;color:#00e676}
 #autopilot-summary{font-size:.9rem;margin-bottom:12px;line-height:1.5}
+
+/* ── Smart Session Linker ─────────────────────────────────── */
+.session-linker-panel{position:fixed;top:60px;right:20px;width:320px;max-height:70vh;background:var(--bg-secondary,#1e1e1e);border:1px solid var(--border,#333);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.4);z-index:10001;display:none;overflow:hidden;font-family:inherit}
+.sl-header{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid var(--border,#333);font-weight:700;font-size:1rem}
+.sl-close{background:none;border:none;color:var(--text-secondary,#aaa);font-size:1.3rem;cursor:pointer;padding:0 4px}
+.sl-close:hover{color:var(--text-primary,#fff)}
+.sl-empty{padding:32px 16px;text-align:center;color:var(--text-secondary,#aaa);font-size:.9rem}
+.sl-list{padding:8px 0;max-height:calc(70vh - 60px);overflow-y:auto}
+.sl-item{padding:10px 16px;cursor:pointer;transition:background .15s}
+.sl-item:hover{background:var(--bg-hover,rgba(255,255,255,.06))}
+.sl-item-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.sl-name{font-size:.88rem;font-weight:600;color:var(--text-primary,#e0e0e0);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px}
+.sl-score{font-size:.78rem;font-weight:700;color:#64b5f6;min-width:36px;text-align:right}
+.sl-bar-bg{height:3px;background:var(--border,#333);border-radius:2px;margin-bottom:6px}
+.sl-bar-fill{height:100%;background:linear-gradient(90deg,#42a5f5,#66bb6a);border-radius:2px;transition:width .3s}
+.sl-meta{display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.sl-topic{background:rgba(100,181,246,.15);color:#90caf9;padding:1px 7px;border-radius:8px;font-size:.72rem;font-weight:500}
+.sl-msg-count{font-size:.72rem;color:var(--text-secondary,#888);margin-left:auto}
