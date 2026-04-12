@@ -98,6 +98,7 @@
  *   StickyNotesBoard     - visual draggable sticky notes canvas for brainstorming per session (Alt+N)
  *   ConversationStash    - git-stash-style save/restore of conversation state with stash stack (Ctrl+Shift+Z)
  *   PromptEnhancer       - AI-powered prompt improvement with 5 enhancement modes (Alt+E)
+ *   ConversationMoodRing - real-time sentiment monitor with mood shifts, alerts, suggestions (Alt+M)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -33028,4 +33029,267 @@ const SessionLinker = (() => {
   });
 
   return { toggle: toggle, show: show, hide: hide, findRelated: findRelated };
+})();
+
+/* ============================================================
+ *  ConversationMoodRing — real-time sentiment & energy monitor
+ *  Tracks emotional tone per message, detects mood shifts,
+ *  proactively surfaces warnings when frustration/negativity rises.
+ *  Shortcut: Alt+M
+ * ============================================================ */
+var ConversationMoodRing = (function () {
+  'use strict';
+  var _visible = false;
+
+  // Sentiment lexicon (word -> score from -3 to +3)
+  var _positive = {
+    'great':3,'excellent':3,'amazing':3,'awesome':3,'fantastic':3,'perfect':3,'wonderful':3,'love':3,'brilliant':3,
+    'good':2,'nice':2,'helpful':2,'thanks':2,'thank':2,'pleased':2,'happy':2,'glad':2,'cool':2,'impressive':2,
+    'works':1,'fine':1,'okay':1,'interesting':1,'useful':1,'clear':1,'neat':1,'solid':1,'yes':1,'right':1,'like':1
+  };
+  var _negative = {
+    'terrible':-3,'awful':-3,'horrible':-3,'hate':-3,'worst':-3,'useless':-3,'garbage':-3,'broken':-3,
+    'bad':-2,'wrong':-2,'error':-2,'fail':-2,'failed':-2,'frustrated':-2,'annoying':-2,'confusing':-2,'stuck':-2,'bug':-2,'slow':-2,'ugly':-2,
+    'not':-1,'no':-1,'issue':-1,'problem':-1,'difficult':-1,'unclear':-1,'miss':-1,'missing':-1,'unfortunately':-1,'but':-0.5
+  };
+
+  // Analyze a single message text, return {score, energy, wordCount}
+  function analyzeMessage(text) {
+    if (!text) return { score: 0, energy: 0, wordCount: 0 };
+    var words = text.toLowerCase().replace(/[^a-z0-9\s']/g, ' ').split(/\s+/).filter(Boolean);
+    var total = 0;
+    var count = 0;
+    for (var i = 0; i < words.length; i++) {
+      var w = words[i];
+      if (_positive[w] !== undefined) { total += _positive[w]; count++; }
+      if (_negative[w] !== undefined) { total += _negative[w]; count++; }
+    }
+    var score = count > 0 ? total / count : 0; // -3 to +3 normalized
+    // Energy = message length relative to average (short = low energy, long = high)
+    var energy = Math.min(words.length / 20, 2); // 0 to 2 scale
+    return { score: Math.max(-3, Math.min(3, score)), energy: energy, wordCount: words.length };
+  }
+
+  // Get mood label and color from score
+  function moodFromScore(score) {
+    if (score >= 2) return { label: 'Ecstatic', color: '#00e676', emoji: '🤩' };
+    if (score >= 1) return { label: 'Positive', color: '#66bb6a', emoji: '😊' };
+    if (score >= 0.3) return { label: 'Pleasant', color: '#aed581', emoji: '🙂' };
+    if (score >= -0.3) return { label: 'Neutral', color: '#90a4ae', emoji: '😐' };
+    if (score >= -1) return { label: 'Uneasy', color: '#ffa726', emoji: '😕' };
+    if (score >= -2) return { label: 'Frustrated', color: '#ef5350', emoji: '😤' };
+    return { label: 'Distressed', color: '#c62828', emoji: '😡' };
+  }
+
+  // Analyze all messages in the current conversation
+  function analyzeConversation() {
+    var messages = [];
+    var chatOutput = document.getElementById('chat-output');
+    if (!chatOutput) return { messages: [], overall: { score: 0, energy: 0 }, shifts: [], alerts: [] };
+    var els = chatOutput.querySelectorAll('.msg');
+    els.forEach(function (el) {
+      var role = el.classList.contains('user-msg') ? 'user' : 'assistant';
+      var text = el.textContent || '';
+      var analysis = analyzeMessage(text);
+      analysis.role = role;
+      analysis.preview = text.substring(0, 60);
+      messages.push(analysis);
+    });
+
+    // Overall conversation mood
+    var totalScore = 0;
+    var totalEnergy = 0;
+    for (var i = 0; i < messages.length; i++) {
+      totalScore += messages[i].score;
+      totalEnergy += messages[i].energy;
+    }
+    var overall = {
+      score: messages.length > 0 ? totalScore / messages.length : 0,
+      energy: messages.length > 0 ? totalEnergy / messages.length : 0
+    };
+
+    // Detect mood shifts (significant changes between consecutive user messages)
+    var shifts = [];
+    var userMsgs = messages.filter(function (m) { return m.role === 'user'; });
+    for (var j = 1; j < userMsgs.length; j++) {
+      var delta = userMsgs[j].score - userMsgs[j - 1].score;
+      if (Math.abs(delta) >= 1.5) {
+        shifts.push({
+          index: j,
+          from: moodFromScore(userMsgs[j - 1].score),
+          to: moodFromScore(userMsgs[j].score),
+          delta: delta
+        });
+      }
+    }
+
+    // Proactive alerts
+    var alerts = [];
+    // Frustration trend: last 3 user messages all negative
+    if (userMsgs.length >= 3) {
+      var last3 = userMsgs.slice(-3);
+      var allNeg = last3.every(function (m) { return m.score < -0.5; });
+      if (allNeg) {
+        alerts.push({ type: 'frustration', icon: '🚨', message: 'Frustration detected — last 3 messages show negative sentiment. Consider rephrasing your approach or taking a break.' });
+      }
+    }
+    // Declining trend
+    if (userMsgs.length >= 4) {
+      var last4 = userMsgs.slice(-4);
+      var declining = true;
+      for (var k = 1; k < last4.length; k++) {
+        if (last4[k].score >= last4[k - 1].score) { declining = false; break; }
+      }
+      if (declining) {
+        alerts.push({ type: 'declining', icon: '📉', message: 'Mood is steadily declining. Maybe rephrase the question or try a different approach?' });
+      }
+    }
+    // Low energy (very short messages)
+    if (userMsgs.length >= 3) {
+      var last3e = userMsgs.slice(-3);
+      var lowE = last3e.every(function (m) { return m.wordCount <= 3; });
+      if (lowE) {
+        alerts.push({ type: 'low-energy', icon: '🔋', message: 'Low energy detected — very short messages. Adding more detail could improve responses.' });
+      }
+    }
+
+    return { messages: messages, overall: overall, shifts: shifts, alerts: alerts };
+  }
+
+  function _esc(s) {
+    var d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  function _render() {
+    var panel = document.getElementById('mood-ring-panel');
+    if (!panel) {
+      panel = document.createElement('div');
+      panel.id = 'mood-ring-panel';
+      panel.className = 'mood-ring-panel';
+      document.body.appendChild(panel);
+    }
+
+    var data = analyzeConversation();
+    var mood = moodFromScore(data.overall.score);
+    var energyPct = Math.round(Math.min(data.overall.energy / 2, 1) * 100);
+
+    var html = '<div class="mr-header">' +
+      '<span>💍 Conversation Mood Ring</span>' +
+      '<button class="mr-close" title="Close">&times;</button>' +
+    '</div>';
+
+    // Overall mood ring visualization
+    html += '<div class="mr-ring-container">' +
+      '<div class="mr-ring" style="background:conic-gradient(' + mood.color + ' 0%, ' + mood.color + '40 100%); box-shadow: 0 0 20px ' + mood.color + '80;">' +
+        '<span class="mr-ring-emoji">' + mood.emoji + '</span>' +
+      '</div>' +
+      '<div class="mr-ring-label">' + mood.label + '</div>' +
+      '<div class="mr-ring-score">Score: ' + data.overall.score.toFixed(2) + ' / 3.00</div>' +
+    '</div>';
+
+    // Energy meter
+    html += '<div class="mr-section"><strong>⚡ Energy Level</strong>' +
+      '<div class="mr-energy-bar"><div class="mr-energy-fill" style="width:' + energyPct + '%;background:' + (energyPct > 60 ? '#66bb6a' : energyPct > 30 ? '#ffa726' : '#ef5350') + '"></div></div>' +
+      '<div class="mr-energy-label">' + energyPct + '% — ' + (energyPct > 60 ? 'High engagement' : energyPct > 30 ? 'Moderate' : 'Low engagement') + '</div>' +
+    '</div>';
+
+    // Proactive alerts
+    if (data.alerts.length > 0) {
+      html += '<div class="mr-section mr-alerts"><strong>🔔 Proactive Insights</strong>';
+      for (var a = 0; a < data.alerts.length; a++) {
+        html += '<div class="mr-alert mr-alert-' + data.alerts[a].type + '">' + data.alerts[a].icon + ' ' + _esc(data.alerts[a].message) + '</div>';
+      }
+      html += '</div>';
+    }
+
+    // Mood shifts
+    if (data.shifts.length > 0) {
+      html += '<div class="mr-section"><strong>🔄 Mood Shifts</strong>';
+      for (var s = 0; s < data.shifts.length; s++) {
+        var sh = data.shifts[s];
+        var dir = sh.delta > 0 ? '↗️' : '↘️';
+        html += '<div class="mr-shift">' + dir + ' Message #' + (sh.index + 1) + ': ' +
+          '<span style="color:' + sh.from.color + '">' + sh.from.emoji + ' ' + sh.from.label + '</span>' +
+          ' → <span style="color:' + sh.to.color + '">' + sh.to.emoji + ' ' + sh.to.label + '</span></div>';
+      }
+      html += '</div>';
+    }
+
+    // Mood timeline (sparkline-style)
+    if (data.messages.length > 1) {
+      html += '<div class="mr-section"><strong>📊 Mood Timeline</strong><div class="mr-timeline">';
+      var userOnly = data.messages.filter(function (m) { return m.role === 'user'; });
+      for (var t = 0; t < userOnly.length; t++) {
+        var m = userOnly[t];
+        var mInfo = moodFromScore(m.score);
+        // Map score (-3 to 3) to height (10% to 90%)
+        var height = Math.round(((m.score + 3) / 6) * 80 + 10);
+        html += '<div class="mr-bar" title="Message ' + (t + 1) + ': ' + mInfo.label + ' (' + m.score.toFixed(1) + ')" style="height:' + height + '%;background:' + mInfo.color + '"></div>';
+      }
+      html += '</div><div class="mr-timeline-labels"><span>😡 Negative</span><span>😐 Neutral</span><span>🤩 Positive</span></div></div>';
+    }
+
+    // Suggestions based on mood
+    html += '<div class="mr-section"><strong>💡 Suggestion</strong><div class="mr-suggestion">';
+    if (data.overall.score < -1) {
+      html += 'Try rephrasing your question with more context, or ask the AI to explain its reasoning step by step.';
+    } else if (data.overall.score < 0) {
+      html += 'The conversation could be more productive. Consider breaking complex questions into smaller parts.';
+    } else if (data.messages.length === 0) {
+      html += 'Start chatting to see your conversation\'s mood evolve in real time!';
+    } else {
+      html += 'Conversation is going well! ' + mood.emoji + ' Keep up the positive momentum.';
+    }
+    html += '</div></div>';
+
+    // Message count
+    html += '<div class="mr-footer">' + data.messages.length + ' messages analyzed · ' +
+      data.messages.filter(function (m) { return m.role === 'user'; }).length + ' from you</div>';
+
+    panel.innerHTML = html;
+    panel.style.display = 'block';
+
+    panel.querySelector('.mr-close').addEventListener('click', hide);
+  }
+
+  function show() { _visible = true; _render(); }
+  function hide() {
+    _visible = false;
+    var panel = document.getElementById('mood-ring-panel');
+    if (panel) panel.style.display = 'none';
+  }
+  function toggle() { _visible ? hide() : show(); }
+
+  // Auto-refresh when panel is visible and new messages arrive
+  var _observer = null;
+  function _startObserving() {
+    if (_observer) return;
+    var chatOutput = document.getElementById('chat-output');
+    if (!chatOutput) return;
+    _observer = new MutationObserver(function () {
+      if (_visible) _render();
+    });
+    _observer.observe(chatOutput, { childList: true, subtree: true });
+  }
+
+  document.addEventListener('keydown', function (e) {
+    if (e.altKey && !e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === 'm') { e.preventDefault(); toggle(); }
+  });
+
+  document.addEventListener('DOMContentLoaded', function () {
+    _startObserving();
+    if (typeof KeyboardShortcuts !== 'undefined' && KeyboardShortcuts.register) {
+      KeyboardShortcuts.register('Alt+M', 'Conversation Mood Ring', toggle);
+    }
+    if (typeof CommandPalette !== 'undefined' && CommandPalette.register) {
+      CommandPalette.register({ name: 'mood ring', description: 'Real-time conversation sentiment monitor', icon: '💍', action: toggle });
+    }
+    if (typeof SlashCommands !== 'undefined' && SlashCommands.register) {
+      SlashCommands.register('/mood', 'Show conversation mood ring', toggle);
+    }
+  });
+
+  return { toggle: toggle, show: show, hide: hide, analyzeMessage: analyzeMessage, analyzeConversation: analyzeConversation };
 })();
