@@ -1729,6 +1729,7 @@ const ChatController = (() => {
   // of MAX_SENDS_PER_WINDOW requests within RATE_WINDOW_MS, then
   // blocks until the oldest send falls outside the window.
   const _sendTimestamps = [];
+  let _sendStart = 0;              // circular-buffer index into _sendTimestamps
   const RATE_WINDOW_MS = 60_000;   // 1 minute
   const MAX_SENDS_PER_WINDOW = 20; // 20 requests/min — generous for human use
 
@@ -1739,13 +1740,20 @@ const ChatController = (() => {
       return;
     }
 
-    // Rate limiting: prune expired timestamps, then check
+    // Rate limiting: advance start index past expired timestamps (O(1) amortized
+    // instead of O(n) Array.shift), then check active count.
     const now = Date.now();
-    while (_sendTimestamps.length > 0 && now - _sendTimestamps[0] > RATE_WINDOW_MS) {
-      _sendTimestamps.shift();
+    while (_sendStart < _sendTimestamps.length && now - _sendTimestamps[_sendStart] > RATE_WINDOW_MS) {
+      _sendStart++;
     }
-    if (_sendTimestamps.length >= MAX_SENDS_PER_WINDOW) {
-      const waitSec = Math.ceil((RATE_WINDOW_MS - (now - _sendTimestamps[0])) / 1000);
+    // Compact only when waste exceeds a threshold to bound memory
+    if (_sendStart > 100) {
+      _sendTimestamps.splice(0, _sendStart);
+      _sendStart = 0;
+    }
+    const _activeCount = _sendTimestamps.length - _sendStart;
+    if (_activeCount >= MAX_SENDS_PER_WINDOW) {
+      const waitSec = Math.ceil((RATE_WINDOW_MS - (now - _sendTimestamps[_sendStart])) / 1000);
       alert(
         `Rate limit reached (${MAX_SENDS_PER_WINDOW} messages/min). ` +
         `Please wait ${waitSec}s before sending again.`
