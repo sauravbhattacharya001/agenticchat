@@ -4909,3 +4909,36 @@ body.light-theme .enhance-panel .enhance-modes button.active { background: #3b82
 .mr-timeline-labels{display:flex;justify-content:space-between;font-size:.65rem;color:var(--text-secondary,#888);margin-top:2px}
 .mr-suggestion{font-size:.78rem;color:var(--text-secondary,#ccc);line-height:1.4;padding:4px 0}
 .mr-footer{padding:8px 16px;border-top:1px solid var(--border,#333);font-size:.7rem;color:var(--text-secondary,#666);text-align:center}
+
+/* ---------- Conversation Drift Detector ---------- */
+.drift-detector-panel {
+  display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: 420px; max-height: 80vh; overflow-y: auto; z-index: 10002;
+  background: var(--bg, #1e1e2e); color: var(--fg, #cdd6f4);
+  border: 1px solid var(--border, #45475a); border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4); padding: 0; font-size: 14px;
+}
+.dd-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 14px 16px 10px; border-bottom: 1px solid var(--border, #45475a);
+}
+.dd-title { font-weight: 700; font-size: 16px; }
+.dd-close { background: none; border: none; color: var(--fg, #cdd6f4); cursor: pointer; font-size: 18px; padding: 0 4px; }
+.dd-close:hover { color: #f44336; }
+.dd-gauge { padding: 12px 16px 8px; }
+.dd-gauge-label { font-weight: 600; margin-bottom: 6px; }
+.dd-gauge-bar { height: 10px; background: var(--border, #45475a); border-radius: 5px; overflow: hidden; }
+.dd-gauge-fill { height: 100%; border-radius: 5px; transition: width 0.4s ease; }
+.dd-section { padding: 8px 16px; }
+.dd-section strong { display: block; margin-bottom: 6px; font-size: 13px; opacity: 0.8; }
+.dd-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+.dd-tag { padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: 500; }
+.dd-tag-anchor { background: rgba(76,175,80,0.2); color: #66bb6a; }
+.dd-tag-current { background: rgba(33,150,243,0.2); color: #42a5f5; }
+.dd-tag-new { background: rgba(255,152,0,0.2); color: #ffa726; }
+.dd-chart { display: flex; align-items: flex-end; gap: 3px; height: 60px; padding: 4px 0; }
+.dd-chart-bar { flex: 1; min-width: 8px; border-radius: 3px 3px 0 0; transition: height 0.3s; }
+.dd-suggestion { background: var(--border, #45475a); border-radius: 8px; padding: 10px 12px; font-size: 13px; line-height: 1.5; }
+.dd-settings { display: flex; flex-direction: column; gap: 6px; font-size: 12px; opacity: 0.8; }
+.dd-settings label { display: flex; align-items: center; gap: 6px; }
+.dd-footer { padding: 8px 16px 12px; font-size: 11px; opacity: 0.5; text-align: center; }

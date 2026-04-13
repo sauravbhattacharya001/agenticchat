@@ -33293,3 +33293,300 @@ var ConversationMoodRing = (function () {
 
   return { toggle: toggle, show: show, hide: hide, analyzeMessage: analyzeMessage, analyzeConversation: analyzeConversation };
 })();
+
+/* ---------- Conversation Drift Detector ---------- */
+/**
+ * Monitors topic coherence throughout a conversation and proactively alerts
+ * when the discussion drifts away from the original topic. Uses TF-IDF
+ * cosine similarity between the opening messages and the recent window to
+ * measure drift. Provides refocus suggestions.
+ *
+ * Toggle: Alt+Shift+D · Slash: /drift · Command Palette: "drift detector"
+ */
+const ConversationDriftDetector = (() => {
+  var _visible = false;
+  var _alertThreshold = 0.35; // cosine sim below this = drifted
+  var _windowSize = 6; // recent messages to compare against anchor
+  var _anchorSize = 4; // first N messages form the anchor topic
+  var _dismissed = {}; // sessionId -> last dismissed drift score
+  var _autoAlertEnabled = true;
+
+  var STOPWORDS = new Set([
+    'the','a','an','is','are','was','were','be','been','being','have','has','had',
+    'do','does','did','will','would','shall','should','may','might','must','can','could',
+    'i','me','my','we','our','you','your','he','him','his','she','her','it','its',
+    'they','them','their','this','that','these','those','am','of','in','to','for',
+    'with','on','at','by','from','as','into','about','between','through','after',
+    'above','below','up','down','out','off','over','under','then','than','but','and',
+    'or','not','no','nor','so','if','when','what','which','who','whom','how','all',
+    'each','every','both','few','more','most','other','some','such','only','own',
+    'same','just','also','very','really','much','here','there','where','why',
+    'hello','hi','hey','thanks','thank','please','yes','yeah','ok','okay','sure',
+    'well','like','just','get','got','know','think','want','need','make','go',
+    'see','say','said','tell','told','let','try','use','used','new','way',
+    'could','should','would','something','anything','everything','nothing'
+  ]);
+
+  function _esc(s) { return typeof _escapeHtml === 'function' ? _escapeHtml(String(s)) : String(s).replace(/[&<>"]/g, function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+
+  function _tokenize(text) {
+    return String(text).toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(function(w) {
+      return w.length > 2 && !STOPWORDS.has(w);
+    });
+  }
+
+  function _termFreq(tokens) {
+    var tf = {};
+    for (var i = 0; i < tokens.length; i++) {
+      tf[tokens[i]] = (tf[tokens[i]] || 0) + 1;
+    }
+    var max = 0;
+    for (var k in tf) { if (tf[k] > max) max = tf[k]; }
+    if (max > 0) { for (var k2 in tf) { tf[k2] /= max; } }
+    return tf;
+  }
+
+  function _cosineSim(tfA, tfB) {
+    var keys = {};
+    var k;
+    for (k in tfA) { keys[k] = true; }
+    for (k in tfB) { keys[k] = true; }
+    var dot = 0, magA = 0, magB = 0;
+    for (k in keys) {
+      var a = tfA[k] || 0;
+      var b = tfB[k] || 0;
+      dot += a * b;
+      magA += a * a;
+      magB += b * b;
+    }
+    if (magA === 0 || magB === 0) return 0;
+    return dot / (Math.sqrt(magA) * Math.sqrt(magB));
+  }
+
+  function _getMessages() {
+    if (typeof ConversationManager !== 'undefined' && ConversationManager.getAll) {
+      return ConversationManager.getAll();
+    }
+    return [];
+  }
+
+  function _extractTopics(messages) {
+    var allTokens = [];
+    for (var i = 0; i < messages.length; i++) {
+      var tokens = _tokenize(messages[i].content || '');
+      allTokens = allTokens.concat(tokens);
+    }
+    var freq = {};
+    for (var j = 0; j < allTokens.length; j++) {
+      freq[allTokens[j]] = (freq[allTokens[j]] || 0) + 1;
+    }
+    var sorted = Object.keys(freq).sort(function(a, b) { return freq[b] - freq[a]; });
+    return sorted.slice(0, 8);
+  }
+
+  function analyze() {
+    var msgs = _getMessages();
+    if (msgs.length < _anchorSize + 2) {
+      return { status: 'insufficient', similarity: 1, anchorTopics: [], recentTopics: [], messages: msgs.length, driftPoints: [] };
+    }
+
+    // Anchor = first N messages
+    var anchorMsgs = msgs.slice(0, _anchorSize);
+    var anchorText = anchorMsgs.map(function(m) { return m.content || ''; }).join(' ');
+    var anchorTf = _termFreq(_tokenize(anchorText));
+    var anchorTopics = _extractTopics(anchorMsgs);
+
+    // Recent window
+    var recentMsgs = msgs.slice(-_windowSize);
+    var recentText = recentMsgs.map(function(m) { return m.content || ''; }).join(' ');
+    var recentTf = _termFreq(_tokenize(recentText));
+    var recentTopics = _extractTopics(recentMsgs);
+
+    var similarity = _cosineSim(anchorTf, recentTf);
+
+    // Calculate drift trajectory (sliding window similarity over time)
+    var driftPoints = [];
+    var step = Math.max(2, Math.floor(_windowSize / 2));
+    for (var i = _anchorSize; i <= msgs.length; i += step) {
+      var windowEnd = Math.min(i + step, msgs.length);
+      var windowMsgs = msgs.slice(Math.max(0, i - step), windowEnd);
+      var windowText = windowMsgs.map(function(m) { return m.content || ''; }).join(' ');
+      var windowTf = _termFreq(_tokenize(windowText));
+      var sim = _cosineSim(anchorTf, windowTf);
+      driftPoints.push({ index: i, similarity: sim });
+    }
+
+    var drifted = similarity < _alertThreshold;
+    var status = drifted ? 'drifted' : similarity < 0.55 ? 'drifting' : 'on-track';
+
+    // Find new topics not in anchor
+    var newTopics = recentTopics.filter(function(t) { return anchorTopics.indexOf(t) === -1; });
+
+    return {
+      status: status,
+      similarity: similarity,
+      anchorTopics: anchorTopics,
+      recentTopics: recentTopics,
+      newTopics: newTopics,
+      messages: msgs.length,
+      driftPoints: driftPoints
+    };
+  }
+
+  function _getRefocusSuggestion(data) {
+    if (data.status === 'on-track') return 'Conversation is coherent. No action needed.';
+    if (data.status === 'insufficient') return 'Keep chatting — drift detection activates after a few messages.';
+    var original = data.anchorTopics.slice(0, 4).join(', ');
+    var novel = data.newTopics.slice(0, 3).join(', ');
+    if (data.status === 'drifted') {
+      return 'You\'ve moved significantly from the original topic (' + original + '). ' +
+        (novel ? 'New topics: ' + novel + '. ' : '') +
+        'Consider asking "Let\'s get back to ' + (data.anchorTopics[0] || 'the original topic') + '" or start a new session for the new direction.';
+    }
+    return 'The conversation is starting to wander from ' + original + '. ' +
+      (novel ? 'Emerging topics: ' + novel + '. ' : '') +
+      'You might want to steer back or split into a new session.';
+  }
+
+  function _render() {
+    var panel = document.getElementById('drift-detector-panel');
+    if (!panel) {
+      panel = document.createElement('div');
+      panel.id = 'drift-detector-panel';
+      panel.className = 'drift-detector-panel';
+      document.body.appendChild(panel);
+    }
+
+    var data = analyze();
+    var pct = Math.round(data.similarity * 100);
+    var statusEmoji = data.status === 'on-track' ? '🎯' : data.status === 'drifting' ? '🌊' : data.status === 'drifted' ? '🌀' : '⏳';
+    var statusLabel = data.status === 'on-track' ? 'On Track' : data.status === 'drifting' ? 'Drifting' : data.status === 'drifted' ? 'Off Topic' : 'Waiting';
+    var barColor = data.status === 'on-track' ? '#4caf50' : data.status === 'drifting' ? '#ff9800' : data.status === 'drifted' ? '#f44336' : '#9e9e9e';
+
+    var html = '<div class="dd-header">';
+    html += '<span class="dd-title">🧭 Drift Detector</span>';
+    html += '<button class="dd-close" title="Close">✕</button>';
+    html += '</div>';
+
+    // Coherence gauge
+    html += '<div class="dd-gauge">';
+    html += '<div class="dd-gauge-label">' + statusEmoji + ' ' + statusLabel + ' — ' + pct + '% coherence</div>';
+    html += '<div class="dd-gauge-bar"><div class="dd-gauge-fill" style="width:' + pct + '%;background:' + barColor + '"></div></div>';
+    html += '</div>';
+
+    // Topic comparison
+    if (data.anchorTopics.length > 0) {
+      html += '<div class="dd-section"><strong>📌 Original Topics</strong><div class="dd-tags">';
+      for (var i = 0; i < data.anchorTopics.length; i++) {
+        html += '<span class="dd-tag dd-tag-anchor">' + _esc(data.anchorTopics[i]) + '</span>';
+      }
+      html += '</div></div>';
+    }
+
+    if (data.recentTopics.length > 0) {
+      html += '<div class="dd-section"><strong>💬 Current Topics</strong><div class="dd-tags">';
+      for (var j = 0; j < data.recentTopics.length; j++) {
+        var isNew = data.newTopics && data.newTopics.indexOf(data.recentTopics[j]) !== -1;
+        html += '<span class="dd-tag ' + (isNew ? 'dd-tag-new' : 'dd-tag-current') + '">' + _esc(data.recentTopics[j]) + (isNew ? ' ✨' : '') + '</span>';
+      }
+      html += '</div></div>';
+    }
+
+    // Drift trajectory chart
+    if (data.driftPoints.length > 1) {
+      html += '<div class="dd-section"><strong>📈 Coherence Over Time</strong><div class="dd-chart">';
+      for (var p = 0; p < data.driftPoints.length; p++) {
+        var pt = data.driftPoints[p];
+        var h = Math.round(pt.similarity * 100);
+        var c = pt.similarity >= 0.55 ? '#4caf50' : pt.similarity >= _alertThreshold ? '#ff9800' : '#f44336';
+        html += '<div class="dd-chart-bar" title="Messages ~' + pt.index + ': ' + Math.round(pt.similarity * 100) + '%" style="height:' + h + '%;background:' + c + '"></div>';
+      }
+      html += '</div></div>';
+    }
+
+    // Suggestion
+    var suggestion = _getRefocusSuggestion(data);
+    html += '<div class="dd-section"><strong>💡 Suggestion</strong><div class="dd-suggestion">' + _esc(suggestion) + '</div></div>';
+
+    // Settings
+    html += '<div class="dd-section dd-settings">';
+    html += '<label><input type="checkbox" id="dd-auto-alert" ' + (_autoAlertEnabled ? 'checked' : '') + '> Auto-alert on drift</label>';
+    html += '<label>Threshold: <input type="range" id="dd-threshold" min="10" max="80" value="' + Math.round(_alertThreshold * 100) + '" style="width:80px"> <span id="dd-threshold-val">' + Math.round(_alertThreshold * 100) + '%</span></label>';
+    html += '</div>';
+
+    html += '<div class="dd-footer">' + data.messages + ' messages analyzed</div>';
+
+    panel.innerHTML = html;
+    panel.style.display = 'block';
+
+    panel.querySelector('.dd-close').addEventListener('click', hide);
+    var alertCb = panel.querySelector('#dd-auto-alert');
+    if (alertCb) alertCb.addEventListener('change', function() { _autoAlertEnabled = this.checked; });
+    var slider = panel.querySelector('#dd-threshold');
+    var sliderVal = panel.querySelector('#dd-threshold-val');
+    if (slider) slider.addEventListener('input', function() {
+      _alertThreshold = parseInt(this.value, 10) / 100;
+      if (sliderVal) sliderVal.textContent = this.value + '%';
+    });
+  }
+
+  function show() { _visible = true; _render(); }
+  function hide() {
+    _visible = false;
+    var panel = document.getElementById('drift-detector-panel');
+    if (panel) panel.style.display = 'none';
+  }
+  function toggle() { _visible ? hide() : show(); }
+
+  // Proactive auto-alert via toast when drift is detected
+  function _checkAutoAlert() {
+    if (!_autoAlertEnabled) return;
+    var data = analyze();
+    if (data.status !== 'drifted') return;
+    var sessId = '';
+    if (typeof SessionManager !== 'undefined' && SessionManager.currentId) {
+      sessId = SessionManager.currentId();
+    }
+    // Don't re-alert same drift level
+    if (_dismissed[sessId] && Math.abs(_dismissed[sessId] - data.similarity) < 0.05) return;
+    _dismissed[sessId] = data.similarity;
+    if (typeof ToastManager !== 'undefined' && ToastManager.show) {
+      ToastManager.show('🌀 Conversation has drifted off topic (' + Math.round(data.similarity * 100) + '% coherence). Press Alt+Shift+D to review.', 'warning');
+    }
+  }
+
+  // Observe chat for new messages
+  var _observer = null;
+  function _startObserving() {
+    if (_observer) return;
+    var chatOutput = document.getElementById('chat-output');
+    if (!chatOutput) return;
+    _observer = new MutationObserver(function() {
+      if (_visible) _render();
+      _checkAutoAlert();
+    });
+    _observer.observe(chatOutput, { childList: true, subtree: true });
+  }
+
+  document.addEventListener('keydown', function(e) {
+    if (e.altKey && e.shiftKey && !e.ctrlKey && e.key.toLowerCase() === 'd') {
+      e.preventDefault();
+      toggle();
+    }
+  });
+
+  document.addEventListener('DOMContentLoaded', function() {
+    _startObserving();
+    if (typeof KeyboardShortcuts !== 'undefined' && KeyboardShortcuts.register) {
+      KeyboardShortcuts.register('Alt+Shift+D', 'Conversation Drift Detector', toggle);
+    }
+    if (typeof CommandPalette !== 'undefined' && CommandPalette.register) {
+      CommandPalette.register({ name: 'drift detector', description: 'Monitor topic coherence & drift alerts', icon: '🧭', action: toggle });
+    }
+    if (typeof SlashCommands !== 'undefined' && SlashCommands.register) {
+      SlashCommands.register('/drift', 'Show conversation drift detector', toggle);
+    }
+  });
+
+  return { toggle: toggle, show: show, hide: hide, analyze: analyze };
+})();
