@@ -5,6 +5,7 @@
  *
  *   Core:
  *   SafeStorage          - safe localStorage wrapper for restricted-storage environments
+ *   TextAnalytics        - shared NLP utilities (stopwords, tokenise, TF-IDF, cosine sim)
  *   ChatConfig           - constants, model list, pricing, and runtime configuration
  *   ConversationManager  - history management (add, trim, clear, token estimation)
  *   SandboxRunner        - iframe sandbox for executing LLM-generated code
@@ -32811,19 +32812,15 @@ var ConversationAutopilot = (function () {
   return { toggle: toggle };
 })();
 
-/* ---------- Smart Session Linker ---------- */
+/* ---------- Shared Text Analytics ---------- */
 /**
- * Discovers related sessions by computing TF-IDF cosine similarity
- * across all saved conversations.  Shows a floating "Related Sessions"
- * panel (Alt+L) with ranked links and shared-topic badges.  Agentic:
- * proactively surfaces connections the user might miss.
+ * Common NLP utilities (stopwords, tokenisation, TF-IDF, cosine
+ * similarity) shared across SessionLinker, ConversationDriftDetector,
+ * and any future modules that need lightweight text analysis.
  *
- * @namespace SessionLinker
+ * @namespace TextAnalytics
  */
-const SessionLinker = (() => {
-  const CACHE_KEY = 'agenticchat_session_linker_cache';
-  const MAX_RESULTS = 8;
-  const MIN_SIMILARITY = 0.08;
+const TextAnalytics = (() => {
   const STOPWORDS = new Set([
     'the','a','an','is','are','was','were','be','been','being','have','has','had',
     'do','does','did','will','would','shall','should','may','might','must','can','could',
@@ -32840,14 +32837,106 @@ const SessionLinker = (() => {
     'could','should','would','something','anything','everything','nothing'
   ]);
 
+  /** Tokenise text: lowercase, strip punctuation, remove stopwords & short words. */
+  function tokenize(text) {
+    if (!text) return [];
+    return String(text).toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(function(w) {
+      return w.length > 2 && !STOPWORDS.has(w);
+    });
+  }
+
+  /** Build max-normalised term-frequency vector from a token array. */
+  function termFreq(tokens) {
+    var tf = {};
+    for (var i = 0; i < tokens.length; i++) { tf[tokens[i]] = (tf[tokens[i]] || 0) + 1; }
+    var max = 0;
+    for (var k in tf) { if (tf[k] > max) max = tf[k]; }
+    if (max > 0) { for (var k2 in tf) { tf[k2] /= max; } }
+    return tf;
+  }
+
+  /**
+   * Cosine similarity between two TF vectors.
+   * If an IDF map is supplied, weights are applied (TF-IDF); otherwise
+   * raw TF vectors are compared (suitable for DriftDetector-style use).
+   */
+  function cosineSim(tfA, tfB, idf) {
+    var dot = 0, magA = 0, magB = 0;
+    var keys = {};
+    var k;
+    for (k in tfA) { keys[k] = true; }
+    for (k in tfB) { keys[k] = true; }
+    for (k in keys) {
+      var w = (idf && idf[k]) || 1;
+      var a = (tfA[k] || 0) * w;
+      var b = (tfB[k] || 0) * w;
+      dot += a * b;
+      magA += a * a;
+      magB += b * b;
+    }
+    if (magA === 0 || magB === 0) return 0;
+    return dot / (Math.sqrt(magA) * Math.sqrt(magB));
+  }
+
+  /** Compute IDF weights across an array of TF maps. */
+  function computeIdf(allTfs) {
+    var N = allTfs.length;
+    var idf = {};
+    for (var i = 0; i < allTfs.length; i++) {
+      for (var t in allTfs[i]) { idf[t] = (idf[t] || 0) + 1; }
+    }
+    for (var t2 in idf) idf[t2] = Math.log(N / idf[t2]) + 1;
+    return idf;
+  }
+
+  /** Extract the top-N most frequent terms from a token list. */
+  function topTerms(tokens, n) {
+    var freq = {};
+    for (var i = 0; i < tokens.length; i++) { freq[tokens[i]] = (freq[tokens[i]] || 0) + 1; }
+    return Object.keys(freq).sort(function(a, b) { return freq[b] - freq[a]; }).slice(0, n || 8);
+  }
+
+  /** Find top shared terms between two TF vectors (for badges). */
+  function sharedTopics(tfA, tfB, idf, max) {
+    var shared = [];
+    for (var t in tfA) {
+      if (tfB[t]) {
+        shared.push({ term: t, score: (tfA[t] + tfB[t]) * ((idf && idf[t]) || 1) });
+      }
+    }
+    shared.sort(function(a, b) { return b.score - a.score; });
+    return shared.slice(0, max || 3).map(function(s) { return s.term; });
+  }
+
+  return {
+    STOPWORDS: STOPWORDS,
+    tokenize: tokenize,
+    termFreq: termFreq,
+    cosineSim: cosineSim,
+    computeIdf: computeIdf,
+    topTerms: topTerms,
+    sharedTopics: sharedTopics
+  };
+})();
+
+/* ---------- Smart Session Linker ---------- */
+/**
+ * Discovers related sessions by computing TF-IDF cosine similarity
+ * across all saved conversations.  Shows a floating "Related Sessions"
+ * panel (Alt+L) with ranked links and shared-topic badges.  Agentic:
+ * proactively surfaces connections the user might miss.
+ *
+ * Uses shared TextAnalytics for tokenisation, TF-IDF, and cosine similarity.
+ *
+ * @namespace SessionLinker
+ */
+const SessionLinker = (() => {
+  const CACHE_KEY = 'agenticchat_session_linker_cache';
+  const MAX_RESULTS = 8;
+  const MIN_SIMILARITY = 0.08;
+
   let _visible = false;
   let _cachedVectors = null;
-
-  /** Tokenise text into lowercase words, strip punctuation. */
-  function _tokenize(text) {
-    if (!text) return [];
-    return text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 2 && !STOPWORDS.has(w));
-  }
 
   /** Extract all user+assistant text from a session's messages. */
   function _extractText(session) {
@@ -32858,56 +32947,6 @@ const SessionLinker = (() => {
       .join(' ');
   }
 
-  /** Build term-frequency vector for a token list. */
-  function _termFreq(tokens) {
-    const tf = {};
-    for (const t of tokens) { tf[t] = (tf[t] || 0) + 1; }
-    const max = Math.max(...Object.values(tf), 1);
-    for (const t in tf) tf[t] /= max;  // normalise
-    return tf;
-  }
-
-  /** Compute IDF across all session TF vectors. */
-  function _computeIdf(allTfs) {
-    const N = allTfs.length;
-    const idf = {};
-    for (const tf of allTfs) {
-      for (const t in tf) {
-        idf[t] = (idf[t] || 0) + 1;
-      }
-    }
-    for (const t in idf) idf[t] = Math.log(N / idf[t]) + 1;
-    return idf;
-  }
-
-  /** Cosine similarity between two TF-IDF vectors. */
-  function _cosine(a, b, idf) {
-    let dot = 0, magA = 0, magB = 0;
-    const allTerms = new Set([...Object.keys(a), ...Object.keys(b)]);
-    for (const t of allTerms) {
-      const w = idf[t] || 1;
-      const va = (a[t] || 0) * w;
-      const vb = (b[t] || 0) * w;
-      dot += va * vb;
-      magA += va * va;
-      magB += vb * vb;
-    }
-    if (magA === 0 || magB === 0) return 0;
-    return dot / (Math.sqrt(magA) * Math.sqrt(magB));
-  }
-
-  /** Find top shared terms between two TF vectors (for badges). */
-  function _sharedTopics(tfA, tfB, idf, max) {
-    const shared = [];
-    for (const t in tfA) {
-      if (tfB[t]) {
-        shared.push({ term: t, score: (tfA[t] + tfB[t]) * (idf[t] || 1) });
-      }
-    }
-    shared.sort((a, b) => b.score - a.score);
-    return shared.slice(0, max || 3).map(s => s.term);
-  }
-
   /** Build vectors for all sessions. */
   function _buildIndex() {
     if (typeof SessionManager === 'undefined') return [];
@@ -32915,9 +32954,9 @@ const SessionLinker = (() => {
     if (!sessions || sessions.length === 0) return [];
     const indexed = [];
     for (const s of sessions) {
-      const tokens = _tokenize(_extractText(s));
+      const tokens = TextAnalytics.tokenize(_extractText(s));
       if (tokens.length < 5) continue;  // skip near-empty sessions
-      indexed.push({ id: s.id, name: s.name || 'Untitled', tf: _termFreq(tokens), msgCount: (s.messages || []).length });
+      indexed.push({ id: s.id, name: s.name || 'Untitled', tf: TextAnalytics.termFreq(tokens), msgCount: (s.messages || []).length });
     }
     return indexed;
   }
@@ -32933,14 +32972,14 @@ const SessionLinker = (() => {
     if (!current) return [];
 
     const allTfs = indexed.map(s => s.tf);
-    const idf = _computeIdf(allTfs);
+    const idf = TextAnalytics.computeIdf(allTfs);
 
     const results = [];
     for (const s of indexed) {
       if (s.id === activeId) continue;
-      const sim = _cosine(current.tf, s.tf, idf);
+      const sim = TextAnalytics.cosineSim(current.tf, s.tf, idf);
       if (sim >= MIN_SIMILARITY) {
-        const topics = _sharedTopics(current.tf, s.tf, idf, 3);
+        const topics = TextAnalytics.sharedTopics(current.tf, s.tf, idf, 3);
         results.push({ id: s.id, name: s.name, similarity: sim, topics: topics, msgCount: s.msgCount });
       }
     }
@@ -33311,57 +33350,12 @@ const ConversationDriftDetector = (() => {
   var _dismissed = {}; // sessionId -> last dismissed drift score
   var _autoAlertEnabled = true;
 
-  var STOPWORDS = new Set([
-    'the','a','an','is','are','was','were','be','been','being','have','has','had',
-    'do','does','did','will','would','shall','should','may','might','must','can','could',
-    'i','me','my','we','our','you','your','he','him','his','she','her','it','its',
-    'they','them','their','this','that','these','those','am','of','in','to','for',
-    'with','on','at','by','from','as','into','about','between','through','after',
-    'above','below','up','down','out','off','over','under','then','than','but','and',
-    'or','not','no','nor','so','if','when','what','which','who','whom','how','all',
-    'each','every','both','few','more','most','other','some','such','only','own',
-    'same','just','also','very','really','much','here','there','where','why',
-    'hello','hi','hey','thanks','thank','please','yes','yeah','ok','okay','sure',
-    'well','like','just','get','got','know','think','want','need','make','go',
-    'see','say','said','tell','told','let','try','use','used','new','way',
-    'could','should','would','something','anything','everything','nothing'
-  ]);
+  // Delegate NLP utilities to shared TextAnalytics module
+  var _tokenize = TextAnalytics.tokenize;
+  var _termFreq = TextAnalytics.termFreq;
+  var _cosineSim = TextAnalytics.cosineSim;
 
   function _esc(s) { return typeof _escapeHtml === 'function' ? _escapeHtml(String(s)) : String(s).replace(/[&<>"]/g, function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
-
-  function _tokenize(text) {
-    return String(text).toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(function(w) {
-      return w.length > 2 && !STOPWORDS.has(w);
-    });
-  }
-
-  function _termFreq(tokens) {
-    var tf = {};
-    for (var i = 0; i < tokens.length; i++) {
-      tf[tokens[i]] = (tf[tokens[i]] || 0) + 1;
-    }
-    var max = 0;
-    for (var k in tf) { if (tf[k] > max) max = tf[k]; }
-    if (max > 0) { for (var k2 in tf) { tf[k2] /= max; } }
-    return tf;
-  }
-
-  function _cosineSim(tfA, tfB) {
-    var keys = {};
-    var k;
-    for (k in tfA) { keys[k] = true; }
-    for (k in tfB) { keys[k] = true; }
-    var dot = 0, magA = 0, magB = 0;
-    for (k in keys) {
-      var a = tfA[k] || 0;
-      var b = tfB[k] || 0;
-      dot += a * b;
-      magA += a * a;
-      magB += b * b;
-    }
-    if (magA === 0 || magB === 0) return 0;
-    return dot / (Math.sqrt(magA) * Math.sqrt(magB));
-  }
 
   function _getMessages() {
     if (typeof ConversationManager !== 'undefined' && ConversationManager.getAll) {
@@ -33376,12 +33370,7 @@ const ConversationDriftDetector = (() => {
       var tokens = _tokenize(messages[i].content || '');
       allTokens = allTokens.concat(tokens);
     }
-    var freq = {};
-    for (var j = 0; j < allTokens.length; j++) {
-      freq[allTokens[j]] = (freq[allTokens[j]] || 0) + 1;
-    }
-    var sorted = Object.keys(freq).sort(function(a, b) { return freq[b] - freq[a]; });
-    return sorted.slice(0, 8);
+    return TextAnalytics.topTerms(allTokens, 8);
   }
 
   function analyze() {
