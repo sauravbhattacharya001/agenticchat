@@ -46,6 +46,11 @@ updates:
     commit-message:
       prefix: "ci"
       include: "scope"
+    groups:
+      actions-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
 
   # Docker
   - package-ecosystem: "docker"
@@ -62,3 +67,8 @@ updates:
     commit-message:
       prefix: "docker"
       include: "scope"
+    # Only allow minor/patch Docker base image updates to avoid breaking changes
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
