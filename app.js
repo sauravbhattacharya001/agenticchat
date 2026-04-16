@@ -32638,6 +32638,9 @@ var ConversationAutopilot = (function () {
   'use strict';
   var _visible = false;
   var _state = { running: false, step: 0, maxSteps: 5, mode: 'depth', goal: '', trail: [], topics: [] };
+  var MAX_UNLIMITED_STEPS = 50; // hard cap to prevent runaway API spend
+  var MIN_STEP_INTERVAL_MS = 5000; // minimum 5s between API calls
+  var _lastApiCallTime = 0;
 
   function _esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
@@ -32671,8 +32674,22 @@ var ConversationAutopilot = (function () {
   }
 
   function _generateNextPrompt(callback) {
-    var apiKey = document.getElementById('api-key') ? document.getElementById('api-key').value : '';
+    // Use ApiKeyManager instead of reading raw DOM value — respects
+    // key validation, incognito mode, and avoids exposing the key
+    // in the DOM where browser extensions could scrape it.
+    var apiKey = (typeof ApiKeyManager !== 'undefined' && ApiKeyManager.getOpenAIKey)
+      ? ApiKeyManager.getOpenAIKey() : null;
     if (!apiKey) { callback('(Set your API key to enable autopilot prompt generation. Alternatively, type your own follow-up below.)'); return; }
+
+    // Rate-limit API calls to prevent accidental spend
+    var now = Date.now();
+    var elapsed = now - _lastApiCallTime;
+    if (elapsed < MIN_STEP_INTERVAL_MS) {
+      var waitMs = MIN_STEP_INTERVAL_MS - elapsed;
+      setTimeout(function() { _generateNextPrompt(callback); }, waitMs);
+      return;
+    }
+    _lastApiCallTime = now;
     var metaPrompt = _buildFollowUpPrompt();
     fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -32752,7 +32769,11 @@ var ConversationAutopilot = (function () {
     var depthEl = document.getElementById('autopilot-depth');
     var modeEl = document.getElementById('autopilot-mode');
     if (!goalEl || !goalEl.value.trim()) { alert('Please enter an exploration goal.'); return; }
-    _state = { running: true, step: 0, maxSteps: parseInt(depthEl.value) || 0, mode: modeEl.value, goal: goalEl.value.trim(), trail: [], topics: [] };
+    var parsedMax = parseInt(depthEl.value) || 0;
+    // Enforce hard cap: 0 (unlimited) is capped to MAX_UNLIMITED_STEPS
+    // to prevent unbounded API spend if a user walks away.
+    if (parsedMax <= 0 || parsedMax > MAX_UNLIMITED_STEPS) parsedMax = MAX_UNLIMITED_STEPS;
+    _state = { running: true, step: 0, maxSteps: parsedMax, mode: modeEl.value, goal: goalEl.value.trim(), trail: [], topics: [] };
     document.getElementById('autopilot-setup').style.display = 'none';
     document.getElementById('autopilot-running').style.display = 'block';
     document.getElementById('autopilot-complete').style.display = 'none';
