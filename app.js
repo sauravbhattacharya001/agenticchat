@@ -29469,12 +29469,44 @@ const ConversationShareLink = (() => {
   }
 
   /* ── Render the read-only shared view (called on page load) */
+
+  // Defence-in-depth limits for untrusted share-link payloads.
+  // An attacker can craft a URL with arbitrarily large base64 data;
+  // without these caps the browser would freeze trying to render
+  // thousands of huge messages (client-side DoS).
+  const SHARE_MAX_MESSAGES = 200;
+  const SHARE_MAX_CONTENT_PER_MSG = 50000;  // 50 KB per message
+  const SHARE_MAX_TITLE_LENGTH = 200;
+  const SHARE_MAX_TOTAL_PAYLOAD = 5 * 1024 * 1024; // 5 MB decoded JSON
+  const SHARE_ALLOWED_ROLES = new Set(['u', 'a']);
+
   function _renderSharedView(data) {
     // Validate untrusted share-link payload shape
-    const title = typeof data.t === 'string' ? data.t : 'Shared Conversation';
-    const dateStr = typeof data.d === 'string' ? data.d : new Date().toISOString();
-    // Filter messages to only those with expected string properties
-    data.m = data.m.filter(msg => msg && typeof msg.c === 'string' && typeof msg.r === 'string');
+    const rawTitle = typeof data.t === 'string' ? data.t : 'Shared Conversation';
+    const title = rawTitle.substring(0, SHARE_MAX_TITLE_LENGTH);
+    const rawDate = typeof data.d === 'string' ? data.d : '';
+    // Validate date string: must parse to a valid date within a sane range
+    const parsedDate = new Date(rawDate);
+    const dateStr = (!isNaN(parsedDate.getTime()) &&
+                     parsedDate.getFullYear() >= 2000 &&
+                     parsedDate.getFullYear() <= 2100)
+      ? rawDate
+      : new Date().toISOString();
+    // Filter messages: require valid string properties AND allowed role values.
+    // Enforce count and per-message size caps to prevent DoS from
+    // crafted URLs with massive payloads.
+    data.m = data.m
+      .filter(msg => msg &&
+        typeof msg.c === 'string' &&
+        typeof msg.r === 'string' &&
+        SHARE_ALLOWED_ROLES.has(msg.r))
+      .slice(0, SHARE_MAX_MESSAGES)
+      .map(msg => ({
+        r: msg.r,
+        c: msg.c.length > SHARE_MAX_CONTENT_PER_MSG
+          ? msg.c.substring(0, SHARE_MAX_CONTENT_PER_MSG) + '\n[content truncated]'
+          : msg.c
+      }));
     document.title = title + ' (Shared)';
     const container = document.createElement('div');
     container.style.cssText = 'max-width:720px;margin:0 auto;padding:24px 16px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:#e0e0e0;background:#1a1a2e;min-height:100vh;';
@@ -29698,7 +29730,16 @@ const ConversationShareLink = (() => {
     if (window.location.hash.startsWith('#share=')) {
       try {
         const encoded = window.location.hash.slice(7);
+        // Guard against oversized payloads before decoding.
+        // Base64 expands ~33%, so a 5 MB limit on decoded JSON
+        // means we reject encoded strings over ~7 MB.
+        if (encoded.length > SHARE_MAX_TOTAL_PAYLOAD * 1.4) {
+          throw new Error('Share link payload too large');
+        }
         const json = _decompress(encoded);
+        if (json.length > SHARE_MAX_TOTAL_PAYLOAD) {
+          throw new Error('Decoded share payload exceeds size limit');
+        }
         const data = sanitizeStorageObject(JSON.parse(json));
         if (data && data.m && Array.isArray(data.m)) {
           _renderSharedView(data);
