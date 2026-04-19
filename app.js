@@ -17568,7 +17568,7 @@ const UsageHeatmap = (() => {
     const statsEl = DOMCache.get('heatmap-stats');
     if (!container) return;
 
-    const { grid, total, sessionCount } = _collectData();
+    const { grid, total, sessionCount } = _getCachedData();
 
     let maxCount = 0;
     for (let d = 0; d < 7; d++) {
@@ -17670,7 +17670,7 @@ const UsageHeatmap = (() => {
   /* -- CSV export ------------------------------------------------------ */
 
   function exportCSV() {
-    const { grid } = _collectData();
+    const { grid } = _getCachedData();
     let csv = 'Day,' +
       Array.from({ length: 24 }, (_, h) => _fmtHour(h)).join(',') + '\n';
     for (let d = 0; d < 7; d++) {
@@ -19152,7 +19152,6 @@ const ConversationSentiment = (() => {
     if (words.length === 0) return 0;
 
     let score = 0;
-    let prevWord = '';
 
     for (let i = 0; i < words.length; i++) {
       const word = words[i];
@@ -19172,7 +19171,6 @@ const ConversationSentiment = (() => {
         }
         score += wordScore;
       }
-      prevWord = word;
     }
 
     // Normalize to -1..+1 range
