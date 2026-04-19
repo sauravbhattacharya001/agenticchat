@@ -1615,6 +1615,26 @@ const ChatController = (() => {
     const chunks = [];
     let buffer = '';
 
+    /**
+     * Parse a single SSE line, extracting the delta content token.
+     * Shared by the main read loop and the post-flush step to avoid
+     * duplicating the data-line parsing logic.
+     */
+    function _consumeSSELine(line) {
+      const trimmed = line.trim();
+      if (!trimmed || !trimmed.startsWith('data: ')) return;
+      const payload = trimmed.slice(6);
+      if (payload === '[DONE]') return;
+      try {
+        const parsed = JSON.parse(payload);
+        const delta = parsed.choices?.[0]?.delta?.content;
+        if (delta) {
+          chunks.push(delta);
+          onToken(delta);
+        }
+      } catch (_) { /* skip malformed chunks */ }
+    }
+
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -1624,19 +1644,7 @@ const ChatController = (() => {
       buffer = lines.pop(); // keep incomplete line in buffer
 
       for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || !trimmed.startsWith('data: ')) continue;
-        const payload = trimmed.slice(6);
-        if (payload === '[DONE]') continue;
-
-        try {
-          const parsed = JSON.parse(payload);
-          const delta = parsed.choices?.[0]?.delta?.content;
-          if (delta) {
-            chunks.push(delta);
-            onToken(delta);
-          }
-        } catch (_) { /* skip malformed chunks */ }
+        _consumeSSELine(line);
       }
     }
 
@@ -1644,20 +1652,7 @@ const ChatController = (() => {
     // and process any remaining data left in buffer.
     buffer += decoder.decode();
     if (buffer.trim()) {
-      const trimmed = buffer.trim();
-      if (trimmed.startsWith('data: ')) {
-        const payload = trimmed.slice(6);
-        if (payload !== '[DONE]') {
-          try {
-            const parsed = JSON.parse(payload);
-            const delta = parsed.choices?.[0]?.delta?.content;
-            if (delta) {
-              chunks.push(delta);
-              onToken(delta);
-            }
-          } catch (_) { /* skip malformed */ }
-        }
-      }
+      _consumeSSELine(buffer);
     }
 
     const fullText = chunks.join('');
@@ -1835,52 +1830,51 @@ const ChatController = (() => {
       ConversationManager.addMessage('user', _finalPrompt);
       InputHistory.push(prompt);
 
-      let reply;
-      let usage;
-      const sendStartTime = performance.now();
-
-      if (ChatConfig.STREAMING_ENABLED) {
-        // Streaming path - show tokens as they arrive, with automatic retry
+      /**
+       * Unified API call helper: handles streaming and non-streaming paths
+       * with shared retry, typing-indicator, and error handling logic.
+       * Returns { reply, usage } or null on error (after showing the error).
+       */
+      async function _callAPIWithRetry() {
         UIController.setChatOutput('');
         TypingIndicatorBubble.show();
-        let _firstToken = true;
-        const result = await SmartRetry.withRetry(() => {
-          UIController.setChatOutput(''); // Reset output on each retry attempt
-          TypingIndicatorBubble.show();
-          _firstToken = true;
-          return callOpenAIStreaming(
-            ApiKeyManager.getOpenAIKey(),
-            ConversationManager.getMessages(),
-            (token) => {
+
+        const apiKey = ApiKeyManager.getOpenAIKey();
+        const messages = ConversationManager.getMessages();
+
+        if (ChatConfig.STREAMING_ENABLED) {
+          let _firstToken = true;
+          const result = await SmartRetry.withRetry(() => {
+            UIController.setChatOutput('');
+            TypingIndicatorBubble.show();
+            _firstToken = true;
+            return callOpenAIStreaming(apiKey, messages, (token) => {
               if (_firstToken) { TypingIndicatorBubble.hide(); _firstToken = false; }
               UIController.appendChatOutput(token);
-            }
-          );
-        });
-
-        if (!result.ok) { TypingIndicatorBubble.hide(); _handleApiError(result); return; }
-
-        reply = result.text || 'No response';
-        usage = result.usage;
-      } else {
-        // Non-streaming path - original behavior, with automatic retry
-        UIController.setChatOutput('');
-        TypingIndicatorBubble.show();
-        const result = await SmartRetry.withRetry(() => {
-          UIController.setChatOutput('');
-          TypingIndicatorBubble.show();
-          return callOpenAI(
-            ApiKeyManager.getOpenAIKey(),
-            ConversationManager.getMessages()
-          );
-        });
-
-        TypingIndicatorBubble.hide();
-        if (!result.ok) { _handleApiError(result); return; }
-
-        reply = result.data.choices?.[0]?.message?.content || 'No response';
-        usage = result.data.usage;
+            });
+          });
+          if (!result.ok) { TypingIndicatorBubble.hide(); _handleApiError(result); return null; }
+          return { reply: result.text || 'No response', usage: result.usage };
+        } else {
+          const result = await SmartRetry.withRetry(() => {
+            UIController.setChatOutput('');
+            TypingIndicatorBubble.show();
+            return callOpenAI(apiKey, messages);
+          });
+          TypingIndicatorBubble.hide();
+          if (!result.ok) { _handleApiError(result); return null; }
+          return {
+            reply: result.data.choices?.[0]?.message?.content || 'No response',
+            usage: result.data.usage,
+          };
+        }
       }
+
+      const sendStartTime = performance.now();
+      const apiResult = await _callAPIWithRetry();
+      if (!apiResult) return;
+
+      const { reply, usage } = apiResult;
 
       const responseTimeMs = Math.round(performance.now() - sendStartTime);
       ConversationManager.addMessage('assistant', reply, { responseTimeMs, timestamp: Date.now() });
@@ -1947,9 +1941,10 @@ const ChatController = (() => {
     UIController.setLastPrompt('(history cleared)');
     SnippetLibrary.setCurrentCode(null);
     ChatBookmarks.clearAll();
-    try { if (MessageAnnotations && MessageAnnotations.clearAll) MessageAnnotations.clearAll(); } catch (_) {}
-    try { if (MessagePinning && MessagePinning.clearAll) MessagePinning.clearAll(); } catch (_) {}
-    try { if (ConversationChapters && ConversationChapters.clearAll) ConversationChapters.clearAll(); } catch (_) {}
+    // Clear optional modules that may not be loaded yet
+    for (const mod of [MessageAnnotations, MessagePinning, ConversationChapters]) {
+      try { if (mod?.clearAll) mod.clearAll(); } catch (_) {}
+    }
     HistoryPanel.refresh();
     QuickReplies.hide();
   }
