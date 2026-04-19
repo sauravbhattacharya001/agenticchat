@@ -32996,32 +32996,61 @@ const SessionLinker = (() => {
   const CACHE_KEY = 'agenticchat_session_linker_cache';
   const MAX_RESULTS = 8;
   const MIN_SIMILARITY = 0.08;
+  const INDEX_TTL_MS = 30000; // Cache TF-IDF index for 30s
 
   let _visible = false;
-  let _cachedVectors = null;
+  // Cached index: { indexed: [...], idf: {...}, sessionCount: N, builtAt: timestamp }
+  let _cachedIndex = null;
 
   /** Extract all user+assistant text from a session's messages. */
   function _extractText(session) {
     if (!session || !Array.isArray(session.messages)) return '';
-    return session.messages
-      .filter(m => m.role === 'user' || m.role === 'assistant')
-      .map(m => typeof m.content === 'string' ? m.content : '')
-      .join(' ');
+    // Pre-size array to avoid repeated push+filter allocations
+    const parts = [];
+    const msgs = session.messages;
+    for (let i = 0; i < msgs.length; i++) {
+      const m = msgs[i];
+      if ((m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string') {
+        parts.push(m.content);
+      }
+    }
+    return parts.join(' ');
   }
 
-  /** Build vectors for all sessions. */
-  function _buildIndex() {
-    if (typeof SessionManager === 'undefined') return [];
+  /**
+   * Build or return cached TF-IDF index.
+   * The index is expensive to compute (tokenize + TF for every session),
+   * so we cache it for INDEX_TTL_MS. The cache is invalidated when the
+   * session count changes (new session saved/deleted) or the TTL expires.
+   */
+  function _getIndex() {
+    if (typeof SessionManager === 'undefined') return { indexed: [], idf: {} };
     const sessions = SessionManager.getAll();
-    if (!sessions || sessions.length === 0) return [];
+    if (!sessions || sessions.length === 0) return { indexed: [], idf: {} };
+
+    const now = Date.now();
+    if (_cachedIndex &&
+        _cachedIndex.sessionCount === sessions.length &&
+        (now - _cachedIndex.builtAt) < INDEX_TTL_MS) {
+      return _cachedIndex;
+    }
+
     const indexed = [];
     for (const s of sessions) {
       const tokens = TextAnalytics.tokenize(_extractText(s));
-      if (tokens.length < 5) continue;  // skip near-empty sessions
+      if (tokens.length < 5) continue;
       indexed.push({ id: s.id, name: s.name || 'Untitled', tf: TextAnalytics.termFreq(tokens), msgCount: (s.messages || []).length });
     }
-    return indexed;
+
+    const allTfs = indexed.map(s => s.tf);
+    const idf = TextAnalytics.computeIdf(allTfs);
+
+    _cachedIndex = { indexed, idf, sessionCount: sessions.length, builtAt: now };
+    return _cachedIndex;
   }
+
+  /** Invalidate the cached index (call after session save/delete/import). */
+  function invalidateCache() { _cachedIndex = null; }
 
   /** Find sessions related to the current active session. */
   function findRelated() {
@@ -33029,12 +33058,9 @@ const SessionLinker = (() => {
     const activeId = SessionManager.getActiveId ? SessionManager.getActiveId() : (SessionManager._getActiveId ? SessionManager._getActiveId() : null);
     if (!activeId) return [];
 
-    const indexed = _buildIndex();
+    const { indexed, idf } = _getIndex();
     const current = indexed.find(s => s.id === activeId);
     if (!current) return [];
-
-    const allTfs = indexed.map(s => s.tf);
-    const idf = TextAnalytics.computeIdf(allTfs);
 
     const results = [];
     for (const s of indexed) {
@@ -33097,11 +33123,9 @@ const SessionLinker = (() => {
     });
   }
 
+  // Use the shared _escapeHtml instead of creating a DOM element per call
   function _escHtml(s) {
-    if (typeof escapeHtml === 'function') return escapeHtml(s);
-    const d = document.createElement('div');
-    d.textContent = s;
-    return d.innerHTML;
+    return _escapeHtml(s);
   }
 
   function show() { _visible = true; _render(); }
@@ -33129,7 +33153,7 @@ const SessionLinker = (() => {
     }
   });
 
-  return { toggle: toggle, show: show, hide: hide, findRelated: findRelated };
+  return { toggle: toggle, show: show, hide: hide, findRelated: findRelated, invalidateCache: invalidateCache };
 })();
 
 /* ============================================================
