@@ -231,19 +231,41 @@ const SafeStorage = (() => {
  *         DOMCache.clear()             // flush after dynamic DOM rebuild
  */
 const DOMCache = (() => {
-  /** @type {Map<string, Element|null>} */
+  /**
+   * DOM element cache using WeakRef to avoid serving stale references.
+   *
+   * Previous implementation cached Element|null directly, which caused
+   * two classes of bugs:
+   *  1. Cached null for elements that didn't exist yet (lazy-created
+   *     elements like retry indicators, modals, toasts) — once cached
+   *     as null, `get()` would never re-query the DOM.
+   *  2. Cached references to elements that were later removed and
+   *     re-created (e.g. `smart-retry-indicator` is removed/appended
+   *     per retry cycle) — the cache would return the detached node.
+   *
+   * Now uses WeakRef so that removed elements are automatically GC'd,
+   * and never caches null so missing elements are re-queried each call.
+   * @type {Map<string, WeakRef<Element>>}
+   */
   const cache = new Map();
   return {
     /**
      * Return the element for `id`, caching on first access.
-     * Returns null (and caches null) when the element does not exist.
+     * Returns null (without caching) when the element does not exist.
+     * Validates cached entries are still connected to the document.
      * @param {string} id
      * @returns {Element|null}
      */
     get(id) {
-      if (cache.has(id)) return cache.get(id);
+      const ref = cache.get(id);
+      if (ref) {
+        const el = ref.deref();
+        // Verify the element is still in the DOM (not a detached node)
+        if (el && el.isConnected) return el;
+        cache.delete(id);
+      }
       const el = document.getElementById(id);
-      cache.set(id, el);
+      if (el) cache.set(id, new WeakRef(el));
       return el;
     },
     /** Flush the entire cache (call after large DOM mutations). */
