@@ -22521,12 +22521,23 @@ const SplitView = (() => {
       return;
     }
 
-    const leftWords = leftMsgs.reduce((sum, m) => sum + ((m.content || '').split(/\s+/).filter(Boolean).length), 0);
-    const rightWords = rightMsgs.reduce((sum, m) => sum + ((m.content || '').split(/\s+/).filter(Boolean).length), 0);
-    const leftUser = leftMsgs.filter(m => m.role === 'user').length;
-    const rightUser = rightMsgs.filter(m => m.role === 'user').length;
-    const leftAI = leftMsgs.filter(m => m.role === 'assistant').length;
-    const rightAI = rightMsgs.filter(m => m.role === 'assistant').length;
+    // Single-pass aggregation instead of 3 separate filter/reduce passes per side
+    let leftWords = 0, leftUser = 0, leftAI = 0;
+    for (let i = 0; i < leftMsgs.length; i++) {
+      const m = leftMsgs[i];
+      const c = m.content || '';
+      if (c) { let j = 0, len = c.length, inWord = false; for (; j < len; j++) { const ch = c.charCodeAt(j); if (ch <= 32 || ch === 9 || ch === 10 || ch === 13) { inWord = false; } else if (!inWord) { inWord = true; leftWords++; } } }
+      if (m.role === 'user') leftUser++;
+      else if (m.role === 'assistant') leftAI++;
+    }
+    let rightWords = 0, rightUser = 0, rightAI = 0;
+    for (let i = 0; i < rightMsgs.length; i++) {
+      const m = rightMsgs[i];
+      const c = m.content || '';
+      if (c) { let j = 0, len = c.length, inWord = false; for (; j < len; j++) { const ch = c.charCodeAt(j); if (ch <= 32 || ch === 9 || ch === 10 || ch === 13) { inWord = false; } else if (!inWord) { inWord = true; rightWords++; } } }
+      if (m.role === 'user') rightUser++;
+      else if (m.role === 'assistant') rightAI++;
+    }
 
     el.innerHTML = `
       <div class="splitview-stat-group">
@@ -30548,12 +30559,18 @@ const ApiInspector = (() => {
     if (stats) stats.style.display = 'flex';
 
     // Stats
+    // Single-pass aggregation instead of 5 separate filter/reduce passes
     const totalCalls = _entries.length;
-    const okCalls = _entries.filter(e => e.ok).length;
-    const errCalls = _entries.filter(e => e.ok === false).length;
-    const totalTokens = _entries.reduce((s, e) => s + (e.usage?.total_tokens || 0), 0);
-    const totalCost = _entries.reduce((s, e) => s + (_estimateCost(e) || 0), 0);
-    const avgTime = Math.round(_entries.reduce((s, e) => s + e.durationMs, 0) / _entries.length);
+    let okCalls = 0, errCalls = 0, totalTokens = 0, totalCost = 0, totalTime = 0;
+    for (let i = 0; i < totalCalls; i++) {
+      const e = _entries[i];
+      if (e.ok) okCalls++;
+      else if (e.ok === false) errCalls++;
+      totalTokens += e.usage?.total_tokens || 0;
+      totalCost += _estimateCost(e) || 0;
+      totalTime += e.durationMs;
+    }
+    const avgTime = Math.round(totalTime / totalCalls);
 
     if (stats) {
       stats.innerHTML = `<span>📊 ${totalCalls} calls</span>` +
