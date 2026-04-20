@@ -100,6 +100,7 @@
  *   ConversationStash    - git-stash-style save/restore of conversation state with stash stack (Ctrl+Shift+Z)
  *   PromptEnhancer       - AI-powered prompt improvement with 5 enhancement modes (Alt+E)
  *   ConversationMoodRing - real-time sentiment monitor with mood shifts, alerts, suggestions (Alt+M)
+ *   SmartModelAdvisor   - proactive model recommendation based on task analysis with one-click switching (Alt+Shift+A)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -34008,4 +34009,453 @@ var SmartContextCompressor = (function () {
   });
 
   return { toggle: toggle, show: show, hide: hide, compress: compress, analyze: analyze, _toggleAuto: _toggleAuto, _reset: _reset };
+})();
+
+/* ============================================================
+ * SmartModelAdvisor  –  Proactive Model Recommendation Engine
+ *
+ * Analyzes conversation content in real-time and recommends the
+ * optimal model based on task type detection.  Shows a non-intrusive
+ * banner when a better model is detected, with one-click switching.
+ *
+ * Task categories:
+ *   - coding      → gpt-4.1 (best for code generation)
+ *   - reasoning   → o4-mini (reasoning-optimized)
+ *   - creative    → gpt-4o (creative/multimodal)
+ *   - quick       → gpt-4.1-nano (simple queries, cost-efficient)
+ *   - general     → gpt-4.1-mini (balanced)
+ *
+ * Shortcut: Alt+Shift+A
+ * @namespace SmartModelAdvisor
+ * ============================================================ */
+const SmartModelAdvisor = (function () {
+  'use strict';
+
+  const STORAGE_KEY = 'ac-model-advisor-state';
+  const ANALYSIS_DEBOUNCE = 2000;
+
+  var TASK_PROFILES = {
+    coding: {
+      label: 'Coding',
+      icon: '\u{1F4BB}',
+      model: 'gpt-4.1',
+      description: 'Code generation, debugging, and technical implementation',
+      patterns: [
+        /\b(function|class|const|let|var|import|export|return|async|await)\b/i,
+        /\b(debug|compile|refactor|implement|algorithm|api|endpoint|bug|error|exception)\b/i,
+        /```[\s\S]*```/,
+        /\b(python|javascript|typescript|java|c\+\+|rust|go|sql|html|css)\b/i,
+        /\b(npm|pip|cargo|maven|docker|git|webpack|vite)\b/i,
+        /[{}\[\]();].*[{}\[\]();]/,
+        /\b(array|string|object|boolean|integer|float|null|undefined)\b/i,
+        /\b(regex|parse|serialize|deserialize|encode|decode)\b/i
+      ],
+      weight: 1.0
+    },
+    reasoning: {
+      label: 'Reasoning',
+      icon: '\u{1F9E0}',
+      model: 'o4-mini',
+      description: 'Complex analysis, math, logic, and multi-step reasoning',
+      patterns: [
+        /\b(analyze|reason|think|consider|evaluate|compare|contrast)\b/i,
+        /\b(proof|theorem|hypothesis|derive|deduce|infer|conclude)\b/i,
+        /\b(math|equation|formula|calculate|compute|solve)\b/i,
+        /\b(strategy|tradeoff|trade-off|pros?\s+and\s+cons?|advantages?|disadvantages?)\b/i,
+        /\b(why|how\s+does|explain\s+why|what\s+if|suppose)\b/i,
+        /\b(logic|paradox|fallacy|argument|premise|conclusion)\b/i,
+        /\b(optimize|minimize|maximize|constraint|variable)\b/i,
+        /\b(step[\s-]by[\s-]step|chain[\s-]of[\s-]thought|reasoning)\b/i
+      ],
+      weight: 1.2
+    },
+    creative: {
+      label: 'Creative',
+      icon: '\u{1F3A8}',
+      model: 'gpt-4o',
+      description: 'Creative writing, brainstorming, and content generation',
+      patterns: [
+        /\b(write|story|poem|essay|creative|imagine|brainstorm)\b/i,
+        /\b(narrative|character|plot|dialogue|scene|setting)\b/i,
+        /\b(metaphor|analogy|tone|style|voice|mood)\b/i,
+        /\b(marketing|slogan|tagline|brand|pitch|copy)\b/i,
+        /\b(song|lyrics|haiku|sonnet|limerick)\b/i,
+        /\b(design|aesthetic|visual|artistic|inspiration)\b/i,
+        /\b(roleplay|role[\s-]play|persona|character)\b/i,
+        /\b(rewrite|rephrase|paraphrase|elaborate|expand)\b/i
+      ],
+      weight: 0.9
+    },
+    quick: {
+      label: 'Quick Task',
+      icon: '\u26A1',
+      model: 'gpt-4.1-nano',
+      description: 'Simple questions, lookups, and brief responses',
+      patterns: [
+        /^(what|who|when|where|how much|how many|is|are|was|were|did|does|do|can|will)\b.{0,80}$/i,
+        /\b(define|meaning|translate|convert|lookup|quick)\b/i,
+        /\b(yes or no|true or false|tldr|tl;dr|brief|short)\b/i,
+        /\b(list|enumerate|name\s+\d+|give\s+me\s+\d+)\b/i
+      ],
+      weight: 0.7
+    },
+    general: {
+      label: 'General',
+      icon: '\u{1F4AC}',
+      model: 'gpt-4.1-mini',
+      description: 'Balanced tasks, summaries, and general assistance',
+      patterns: [
+        /\b(summarize|summary|overview|explain|describe|help)\b/i,
+        /\b(email|letter|message|response|reply|draft)\b/i,
+        /\b(plan|outline|organize|schedule|todo)\b/i
+      ],
+      weight: 0.6
+    }
+  };
+
+  var _panel = null;
+  var _banner = null;
+  var _visible = false;
+  var _enabled = true;
+  var _debounceTimer = null;
+  var _lastAdvice = null;
+  var _history = [];
+  var _dismissed = {};
+
+  function _loadState() {
+    try {
+      var raw = SafeStorage.get(STORAGE_KEY);
+      if (raw) {
+        var s = JSON.parse(raw);
+        _enabled = s.enabled !== false;
+        _history = Array.isArray(s.history) ? s.history.slice(-50) : [];
+        _dismissed = s.dismissed || {};
+      }
+    } catch (_) {}
+  }
+
+  function _saveState() {
+    SafeStorage.trySet(STORAGE_KEY, JSON.stringify({
+      enabled: _enabled,
+      history: _history.slice(-50),
+      dismissed: _dismissed
+    }));
+  }
+
+  function _analyzeContent(text) {
+    if (!text || text.length < 10) return null;
+
+    var scores = {};
+    var maxScore = 0;
+    var bestTask = 'general';
+
+    for (var task in TASK_PROFILES) {
+      if (!TASK_PROFILES.hasOwnProperty(task)) continue;
+      var profile = TASK_PROFILES[task];
+      var score = 0;
+      for (var i = 0; i < profile.patterns.length; i++) {
+        var matches = text.match(new RegExp(profile.patterns[i].source, 'gi'));
+        if (matches) score += matches.length;
+      }
+      score *= profile.weight;
+      scores[task] = Math.round(score * 100) / 100;
+      if (score > maxScore) {
+        maxScore = score;
+        bestTask = task;
+      }
+    }
+
+    if (maxScore < 2) return null;
+
+    var prof = TASK_PROFILES[bestTask];
+    var confidence = Math.min(100, Math.round((maxScore / (maxScore + 5)) * 100));
+    var modelObj = null;
+    for (var m = 0; m < ChatConfig.AVAILABLE_MODELS.length; m++) {
+      if (ChatConfig.AVAILABLE_MODELS[m].id === prof.model) { modelObj = ChatConfig.AVAILABLE_MODELS[m]; break; }
+    }
+
+    return {
+      task: bestTask,
+      label: prof.label,
+      icon: prof.icon,
+      model: prof.model,
+      modelLabel: modelObj ? modelObj.label : prof.model,
+      description: prof.description,
+      confidence: confidence,
+      scores: scores,
+      timestamp: Date.now()
+    };
+  }
+
+  function analyzeConversation() {
+    if (!_enabled) return null;
+    var msgs = (typeof ConversationManager !== 'undefined') ? ConversationManager.getHistory() : [];
+    if (msgs.length === 0) return null;
+    var recent = msgs.slice(-5);
+    var text = recent.map(function(m) { return m.content || ''; }).join('\n');
+    var advice = _analyzeContent(text);
+    if (!advice) return null;
+    _lastAdvice = advice;
+    return advice;
+  }
+
+  function _createBanner() {
+    if (_banner) return;
+    _banner = document.createElement('div');
+    _banner.id = 'model-advisor-banner';
+    _banner.style.cssText =
+      'position:fixed;bottom:80px;right:20px;z-index:10050;' +
+      'background:var(--bg-secondary,#1e1e2e);border:1px solid var(--accent,#7c3aed);' +
+      'border-radius:12px;padding:12px 16px;max-width:340px;' +
+      'box-shadow:0 8px 32px rgba(0,0,0,0.3);font-family:inherit;' +
+      'transform:translateX(400px);transition:transform 0.3s ease;display:none;';
+    document.body.appendChild(_banner);
+  }
+
+  function _showBanner(advice) {
+    if (!advice || !_banner) return;
+    var currentModel = ChatConfig.MODEL;
+    if (advice.model === currentModel) return;
+    var key = advice.task + '-' + currentModel;
+    if (_dismissed[key] && Date.now() - _dismissed[key] < 300000) return;
+
+    _banner.innerHTML =
+      '<div style="display:flex;align-items:flex-start;gap:10px;">' +
+        '<span style="font-size:24px;line-height:1">' + advice.icon + '</span>' +
+        '<div style="flex:1;min-width:0;">' +
+          '<div style="font-weight:600;font-size:13px;color:var(--text-primary,#e0e0e0);margin-bottom:4px;">' +
+            advice.label + ' detected \u00B7 ' + advice.confidence + '% confidence' +
+          '</div>' +
+          '<div style="font-size:12px;color:var(--text-secondary,#a0a0a0);margin-bottom:8px;">' +
+            'Consider <strong style="color:var(--accent,#7c3aed)">' + advice.modelLabel + '</strong> for ' + advice.description.toLowerCase() +
+          '</div>' +
+          '<div style="display:flex;gap:6px;">' +
+            '<button id="advisor-switch-btn" style="padding:4px 12px;border-radius:6px;border:none;background:var(--accent,#7c3aed);color:#fff;font-size:12px;cursor:pointer;font-weight:500;">Switch to ' + advice.modelLabel + '</button>' +
+            '<button id="advisor-dismiss-btn" style="padding:4px 10px;border-radius:6px;border:1px solid var(--border,#333);background:transparent;color:var(--text-secondary,#a0a0a0);font-size:12px;cursor:pointer;">Dismiss</button>' +
+          '</div>' +
+        '</div>' +
+        '<button id="advisor-close-btn" style="background:none;border:none;color:var(--text-secondary,#a0a0a0);cursor:pointer;font-size:16px;padding:0;line-height:1;">\u00D7</button>' +
+      '</div>';
+
+    _banner.style.display = 'block';
+    requestAnimationFrame(function() { _banner.style.transform = 'translateX(0)'; });
+
+    document.getElementById('advisor-switch-btn').onclick = function () {
+      ChatConfig.MODEL = advice.model;
+      if (typeof ModelSelector !== 'undefined' && ModelSelector.refresh) ModelSelector.refresh();
+      var sel = document.getElementById('model-select');
+      if (sel) sel.value = advice.model;
+      _history.push({ from: currentModel, to: advice.model, task: advice.task, confidence: advice.confidence, ts: Date.now(), accepted: true });
+      _saveState();
+      _hideBanner();
+    };
+
+    document.getElementById('advisor-dismiss-btn').onclick = function () {
+      _dismissed[key] = Date.now();
+      _history.push({ from: currentModel, to: advice.model, task: advice.task, confidence: advice.confidence, ts: Date.now(), accepted: false });
+      _saveState();
+      _hideBanner();
+    };
+
+    document.getElementById('advisor-close-btn').onclick = _hideBanner;
+  }
+
+  function _hideBanner() {
+    if (!_banner) return;
+    _banner.style.transform = 'translateX(400px)';
+    setTimeout(function() { if (_banner) _banner.style.display = 'none'; }, 300);
+  }
+
+  function _createPanel() {
+    if (_panel) return;
+    _panel = document.createElement('div');
+    _panel.id = 'model-advisor-panel';
+    _panel.style.cssText =
+      'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);' +
+      'z-index:10100;width:520px;max-height:80vh;overflow-y:auto;' +
+      'background:var(--bg-primary,#121220);border:1px solid var(--border,#333);' +
+      'border-radius:16px;box-shadow:0 24px 64px rgba(0,0,0,0.5);' +
+      'font-family:inherit;display:none;padding:24px;';
+    document.body.appendChild(_panel);
+  }
+
+  function _renderPanel() {
+    var advice = _lastAdvice || analyzeConversation();
+    var currentModel = ChatConfig.MODEL;
+    var currentLabel = currentModel;
+    for (var i = 0; i < ChatConfig.AVAILABLE_MODELS.length; i++) {
+      if (ChatConfig.AVAILABLE_MODELS[i].id === currentModel) { currentLabel = ChatConfig.AVAILABLE_MODELS[i].label; break; }
+    }
+
+    var scoresHTML = '';
+    if (advice && advice.scores) {
+      var maxS = 1;
+      for (var tk in advice.scores) { if (advice.scores[tk] > maxS) maxS = advice.scores[tk]; }
+      for (var task in advice.scores) {
+        if (!TASK_PROFILES[task]) continue;
+        var p = TASK_PROFILES[task];
+        var pct = Math.round((advice.scores[task] / maxS) * 100);
+        var active = advice.task === task;
+        scoresHTML +=
+          '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">' +
+            '<span style="width:20px;text-align:center">' + p.icon + '</span>' +
+            '<span style="width:70px;font-size:12px;color:' + (active ? 'var(--accent,#7c3aed)' : 'var(--text-secondary,#a0a0a0)') + ';font-weight:' + (active ? '600' : '400') + '">' + p.label + '</span>' +
+            '<div style="flex:1;height:8px;background:var(--bg-secondary,#1e1e2e);border-radius:4px;overflow:hidden;">' +
+              '<div style="height:100%;width:' + pct + '%;background:' + (active ? 'var(--accent,#7c3aed)' : '#444') + ';border-radius:4px;transition:width 0.3s;"></div>' +
+            '</div>' +
+            '<span style="font-size:11px;color:var(--text-secondary,#a0a0a0);width:35px;text-align:right">' + advice.scores[task] + '</span>' +
+          '</div>';
+      }
+    }
+
+    var historyHTML = '';
+    var recent = _history.slice(-10).reverse();
+    if (recent.length > 0) {
+      historyHTML = '<div style="margin-top:16px;"><div style="font-weight:600;font-size:13px;color:var(--text-primary,#e0e0e0);margin-bottom:8px;">\u{1F4CA} Switch History</div><div style="font-size:12px;">';
+      for (var hi = 0; hi < recent.length; hi++) {
+        var h = recent[hi];
+        var t = new Date(h.ts);
+        var time = t.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+        var icon = h.accepted ? '\u2705' : '\u274C';
+        var taskP = TASK_PROFILES[h.task] || { icon: '\u{1F4AC}' };
+        historyHTML +=
+          '<div style="display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid var(--border,#222);">' +
+            '<span>' + icon + '</span>' +
+            '<span style="color:var(--text-secondary,#a0a0a0)">' + time + '</span>' +
+            '<span>' + taskP.icon + ' ' + h.task + '</span>' +
+            '<span style="color:var(--text-secondary,#a0a0a0)">\u2192</span>' +
+            '<span style="color:var(--accent,#7c3aed)">' + h.to + '</span>' +
+            '<span style="color:var(--text-secondary,#666);font-size:11px">' + h.confidence + '%</span>' +
+          '</div>';
+      }
+      historyHTML += '</div></div>';
+    }
+
+    var accepted = 0;
+    for (var ai = 0; ai < _history.length; ai++) { if (_history[ai].accepted) accepted++; }
+    var total = _history.length;
+    var rate = total > 0 ? Math.round((accepted / total) * 100) : 0;
+
+    var guideHTML = '';
+    for (var gk in TASK_PROFILES) {
+      if (!TASK_PROFILES.hasOwnProperty(gk)) continue;
+      var gp = TASK_PROFILES[gk];
+      var gml = gp.model;
+      for (var gi = 0; gi < ChatConfig.AVAILABLE_MODELS.length; gi++) {
+        if (ChatConfig.AVAILABLE_MODELS[gi].id === gp.model) { gml = ChatConfig.AVAILABLE_MODELS[gi].label; break; }
+      }
+      guideHTML +=
+        '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border,#222);">' +
+          '<span style="font-size:16px">' + gp.icon + '</span>' +
+          '<div style="flex:1"><div style="font-size:12px;font-weight:600;color:var(--text-primary,#e0e0e0);">' + gp.label + '</div>' +
+          '<div style="font-size:11px;color:var(--text-secondary,#a0a0a0);">' + gp.description + '</div></div>' +
+          '<span style="font-size:11px;color:var(--accent,#7c3aed);font-weight:500;">' + gml + '</span>' +
+        '</div>';
+    }
+
+    var recHTML = '';
+    if (advice && advice.model !== currentModel) {
+      recHTML =
+        '<div style="margin-top:10px;padding:8px 12px;background:rgba(124,58,237,0.15);border-radius:8px;border:1px solid rgba(124,58,237,0.3);">' +
+          '<div style="font-size:12px;color:var(--accent,#7c3aed);font-weight:600;">' + advice.icon + ' Recommendation: Switch to ' + advice.modelLabel + '</div>' +
+          '<div style="font-size:11px;color:var(--text-secondary,#a0a0a0);margin-top:2px;">' + advice.description + ' \u00B7 ' + advice.confidence + '% confidence</div>' +
+        '</div>';
+    } else {
+      recHTML = '<div style="margin-top:6px;font-size:12px;color:#4ade80;">\u2713 Optimal model for current conversation</div>';
+    }
+
+    _panel.innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">' +
+        '<div style="font-size:18px;font-weight:700;color:var(--text-primary,#e0e0e0);">\u{1F916} Smart Model Advisor</div>' +
+        '<div style="display:flex;gap:8px;align-items:center;">' +
+          '<label style="font-size:12px;color:var(--text-secondary,#a0a0a0);cursor:pointer;display:flex;align-items:center;gap:4px;">' +
+            '<input type="checkbox" id="advisor-enabled-chk" ' + (_enabled ? 'checked' : '') + ' style="accent-color:var(--accent,#7c3aed);">Auto-advise</label>' +
+          '<button id="advisor-panel-close" style="background:none;border:none;color:var(--text-secondary,#a0a0a0);cursor:pointer;font-size:20px;">\u00D7</button>' +
+        '</div>' +
+      '</div>' +
+      '<div style="background:var(--bg-secondary,#1e1e2e);border-radius:10px;padding:14px;margin-bottom:16px;">' +
+        '<div style="font-size:12px;color:var(--text-secondary,#a0a0a0);margin-bottom:4px;">Current Model</div>' +
+        '<div style="font-size:16px;font-weight:600;color:var(--text-primary,#e0e0e0);">' + currentLabel + '</div>' +
+        recHTML +
+      '</div>' +
+      '<div style="margin-bottom:16px;">' +
+        '<div style="font-weight:600;font-size:13px;color:var(--text-primary,#e0e0e0);margin-bottom:10px;">Task Analysis</div>' +
+        (scoresHTML || '<div style="font-size:12px;color:var(--text-secondary,#a0a0a0);">Send some messages to see task analysis</div>') +
+      '</div>' +
+      '<div style="display:flex;gap:12px;margin-bottom:16px;">' +
+        '<div style="flex:1;background:var(--bg-secondary,#1e1e2e);border-radius:8px;padding:10px;text-align:center;">' +
+          '<div style="font-size:20px;font-weight:700;color:var(--accent,#7c3aed);">' + total + '</div>' +
+          '<div style="font-size:11px;color:var(--text-secondary,#a0a0a0);">Suggestions</div></div>' +
+        '<div style="flex:1;background:var(--bg-secondary,#1e1e2e);border-radius:8px;padding:10px;text-align:center;">' +
+          '<div style="font-size:20px;font-weight:700;color:#4ade80;">' + accepted + '</div>' +
+          '<div style="font-size:11px;color:var(--text-secondary,#a0a0a0);">Accepted</div></div>' +
+        '<div style="flex:1;background:var(--bg-secondary,#1e1e2e);border-radius:8px;padding:10px;text-align:center;">' +
+          '<div style="font-size:20px;font-weight:700;color:' + (rate >= 50 ? '#4ade80' : '#f59e0b') + ';">' + rate + '%</div>' +
+          '<div style="font-size:11px;color:var(--text-secondary,#a0a0a0);">Accept Rate</div></div>' +
+      '</div>' +
+      '<div style="margin-bottom:12px;">' +
+        '<div style="font-weight:600;font-size:13px;color:var(--text-primary,#e0e0e0);margin-bottom:8px;">\u{1F5FA}\uFE0F Model Guide</div>' +
+        guideHTML +
+      '</div>' +
+      historyHTML;
+
+    document.getElementById('advisor-panel-close').onclick = hide;
+    document.getElementById('advisor-enabled-chk').onchange = function () {
+      _enabled = this.checked;
+      _saveState();
+    };
+  }
+
+  function show() {
+    _createPanel();
+    _renderPanel();
+    _panel.style.display = 'block';
+    _visible = true;
+  }
+
+  function hide() {
+    if (_panel) _panel.style.display = 'none';
+    _visible = false;
+  }
+
+  function toggle() { _visible ? hide() : show(); }
+
+  function onNewMessage() {
+    if (!_enabled) return;
+    clearTimeout(_debounceTimer);
+    _debounceTimer = setTimeout(function () {
+      var advice = analyzeConversation();
+      if (advice && advice.model !== ChatConfig.MODEL) {
+        _createBanner();
+        _showBanner(advice);
+      }
+    }, ANALYSIS_DEBOUNCE);
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    _loadState();
+    _createBanner();
+
+    if (typeof KeyboardShortcuts !== 'undefined' && KeyboardShortcuts.register) {
+      KeyboardShortcuts.register('Alt+Shift+A', 'Smart Model Advisor', toggle);
+    }
+    if (typeof CommandPalette !== 'undefined' && CommandPalette.register) {
+      CommandPalette.register({ name: 'model advisor', description: 'Smart model recommendations for your task', icon: '\u{1F916}', action: toggle });
+    }
+    if (typeof SlashCommands !== 'undefined' && SlashCommands.register) {
+      SlashCommands.register('/advisor', 'Open Smart Model Advisor', toggle);
+    }
+
+    var observer = new MutationObserver(function (mutations) {
+      for (var i = 0; i < mutations.length; i++) {
+        if (mutations[i].addedNodes.length > 0) { onNewMessage(); break; }
+      }
+    });
+    setTimeout(function () {
+      var chatArea = document.getElementById('chat-messages') || document.querySelector('.chat-messages');
+      if (chatArea) observer.observe(chatArea, { childList: true });
+    }, 1000);
+  });
+
+  return { toggle: toggle, show: show, hide: hide, analyze: analyzeConversation, onNewMessage: onNewMessage };
 })();
