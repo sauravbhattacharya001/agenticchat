@@ -849,8 +849,13 @@ const ConversationManager = (() => {
         history.length = 0;
         history.push({ role: 'system', content: ChatConfig.SYSTEM_PROMPT }, ...trimmed);
         charCountDirty = true;
-        // Prune response times to match remaining assistant messages
-        const assistantCount = trimmed.filter(m => m.role === 'assistant').length;
+        // Prune response times to match remaining assistant messages.
+        // Count without allocating a filtered array — trim() runs after
+        // every send, so avoiding the throwaway array reduces GC pressure.
+        let assistantCount = 0;
+        for (let i = 0; i < trimmed.length; i++) {
+          if (trimmed[i].role === 'assistant') assistantCount++;
+        }
         if (responseTimes.length > assistantCount) {
           responseTimes.splice(0, responseTimes.length - assistantCount);
         }
@@ -897,8 +902,13 @@ const ConversationManager = (() => {
       if (historyIndex >= history.length) return;
       history.splice(historyIndex);
       charCountDirty = true;
-      // Prune response times that reference removed messages
-      const assistantCount = history.filter(m => m.role === 'assistant').length;
+      // Prune response times that reference removed messages.
+      // Count in-place to avoid allocating a filtered copy of the
+      // (potentially large) history array just to derive .length.
+      let assistantCount = 0;
+      for (let i = 0; i < history.length; i++) {
+        if (history[i].role === 'assistant') assistantCount++;
+      }
       responseTimes.length = Math.min(responseTimes.length, assistantCount);
     }
   };
@@ -32939,16 +32949,26 @@ const TextAnalytics = (() => {
    */
   function cosineSim(tfA, tfB, idf) {
     var dot = 0, magA = 0, magB = 0;
-    var keys = {};
-    var k;
-    for (k in tfA) { keys[k] = true; }
-    for (k in tfB) { keys[k] = true; }
-    for (k in keys) {
-      var w = (idf && idf[k]) || 1;
-      var a = (tfA[k] || 0) * w;
-      var b = (tfB[k] || 0) * w;
+    var k, w, a, b;
+    // Iterate tfA keys: accumulate dot product, magA, and partial magB
+    // for terms present in A. Then iterate tfB for terms NOT in A
+    // (B-only terms contribute to magB only). This avoids creating a
+    // temporary merged-key object — saves one object allocation + two
+    // full key iterations per call, significant when SessionLinker
+    // computes pairwise similarity across all sessions.
+    for (k in tfA) {
+      w = (idf ? (idf[k] || 1) : 1);
+      a = tfA[k] * w;
+      b = (tfB[k] || 0) * w;
       dot += a * b;
       magA += a * a;
+      magB += b * b;
+    }
+    // B-only terms (not in A): only affect magB
+    for (k in tfB) {
+      if (k in tfA) continue;
+      w = (idf ? (idf[k] || 1) : 1);
+      b = tfB[k] * w;
       magB += b * b;
     }
     if (magA === 0 || magB === 0) return 0;
