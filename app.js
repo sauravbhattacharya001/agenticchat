@@ -6152,64 +6152,107 @@ const ChatStats = (() => {
    * Compute statistics from current conversation messages.
    * Returns an object with computed stats.
    */
+  /**
+   * Count words in a string without allocating a temporary array.
+   * The previous `text.split(/\s+/).length` created a throwaway array
+   * of every word just to read `.length`, generating O(words) garbage
+   * per message.  This regex-match approach is allocation-free.
+   * @param {string} text
+   * @returns {number}
+   */
+  const _WS_RE = /\S+/g;
+  function _countWords(text) {
+    _WS_RE.lastIndex = 0;
+    let count = 0;
+    while (_WS_RE.exec(text)) count++;
+    return count;
+  }
+
+  /**
+   * Count occurrences of a substring without allocating an array.
+   * Replaces `(content.match(/```/g) || []).length` which created a
+   * temporary array on every call.
+   */
+  function _countSubstr(haystack, needle) {
+    let count = 0, pos = 0;
+    while ((pos = haystack.indexOf(needle, pos)) !== -1) { count++; pos += needle.length; }
+    return count;
+  }
+
   function compute() {
     const messages = ConversationManager.getUserMessages();
-    const userMsgs = messages.filter(m => m.role === 'user');
-    const assistantMsgs = messages.filter(m => m.role === 'assistant');
 
-    // Word counts
-    const wordCount = (text) => text.trim() ? text.trim().split(/\s+/).length : 0;
-    const totalUserWords = userMsgs.reduce((sum, m) => sum + wordCount(m.content), 0);
-    const totalAssistantWords = assistantMsgs.reduce((sum, m) => sum + wordCount(m.content), 0);
-
-    // Average message length (chars)
-    const avgUserLen = userMsgs.length ? Math.round(userMsgs.reduce((s, m) => s + m.content.length, 0) / userMsgs.length) : 0;
-    const avgAssistantLen = assistantMsgs.length ? Math.round(assistantMsgs.reduce((s, m) => s + m.content.length, 0) / assistantMsgs.length) : 0;
-
-    // Code blocks (triple backtick)
-    const codeBlockCount = messages.reduce((sum, m) => {
-      const matches = m.content.match(/```/g);
-      return sum + (matches ? Math.floor(matches.length / 2) : 0);
-    }, 0);
-
-    // Longest message
+    // Single-pass computation: collect all stats in one iteration
+    // instead of 6+ separate .filter/.reduce/.forEach passes.
+    // Previous implementation made 8 passes over the messages array:
+    //   2× filter (user/assistant), 2× reduce (word counts),
+    //   2× reduce (char lengths), 1× reduce (code blocks),
+    //   1× forEach (longest), 1× filter (questions), 1× forEach (word freq)
+    // This single loop replaces all of them.
+    let userCount = 0, assistantCount = 0;
+    let totalUserWords = 0, totalAssistantWords = 0;
+    let totalUserChars = 0, totalAssistantChars = 0;
+    let codeBlockCount = 0, questionCount = 0;
     let longestMsg = { role: 'none', length: 0, preview: '' };
-    messages.forEach(m => {
-      if (m.content.length > longestMsg.length) {
+    const wordFreq = {};
+
+    for (let i = 0; i < messages.length; i++) {
+      const m = messages[i];
+      const content = m.content;
+      const len = content.length;
+      const words = _countWords(content);
+
+      // Code blocks: count ``` occurrences
+      codeBlockCount += Math.floor(_countSubstr(content, '```') / 2);
+
+      // Longest message
+      if (len > longestMsg.length) {
         longestMsg = {
           role: m.role,
-          length: m.content.length,
-          preview: m.content.substring(0, 80) + (m.content.length > 80 ? '…' : '')
+          length: len,
+          preview: len > 80 ? content.substring(0, 80) + '…' : content
         };
       }
-    });
 
-    // Question count (messages ending with ?)
-    const questionCount = userMsgs.filter(m => m.content.trim().endsWith('?')).length;
-
-    // Top words (excluding common stop words, from user messages)
-    const wordFreq = {};
-    userMsgs.forEach(m => {
-      m.content.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).forEach(w => {
-        if (w.length > 2 && !COMMON_STOP_WORDS.has(w)) {
-          wordFreq[w] = (wordFreq[w] || 0) + 1;
+      if (m.role === 'user') {
+        userCount++;
+        totalUserWords += words;
+        totalUserChars += len;
+        // Question detection
+        if (content.trimEnd().endsWith('?')) questionCount++;
+        // Word frequency for top words (user messages only)
+        const lower = content.toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
+        _WS_RE.lastIndex = 0;
+        let match;
+        while ((match = _WS_RE.exec(lower)) !== null) {
+          const w = match[0];
+          if (w.length > 2 && !COMMON_STOP_WORDS.has(w)) {
+            wordFreq[w] = (wordFreq[w] || 0) + 1;
+          }
         }
-      });
-    });
+      } else if (m.role === 'assistant') {
+        assistantCount++;
+        totalAssistantWords += words;
+        totalAssistantChars += len;
+      }
+    }
+
+    const avgUserLen = userCount ? Math.round(totalUserChars / userCount) : 0;
+    const avgAssistantLen = assistantCount ? Math.round(totalAssistantChars / assistantCount) : 0;
+
     const topWords = Object.entries(wordFreq)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 10)
       .map(([word, count]) => ({ word, count }));
 
-    // Conversation ratio
-    const ratio = userMsgs.length && assistantMsgs.length
+    const ratio = userCount && assistantCount
       ? (totalAssistantWords / totalUserWords).toFixed(1)
       : '0';
 
     return {
       totalMessages: messages.length,
-      userMessages: userMsgs.length,
-      assistantMessages: assistantMsgs.length,
+      userMessages: userCount,
+      assistantMessages: assistantCount,
       totalUserWords,
       totalAssistantWords,
       avgUserLen,
@@ -10140,6 +10183,19 @@ const ConversationSummarizer = (() => {
    * @param {Array} messages  Conversation messages.
    * @returns {object}
    */
+  /**
+   * Count words without allocating a temporary array.
+   * Replaces `content.split(/\s+/).filter(w => w.length > 0).length`
+   * which created two throwaway arrays per message.
+   */
+  var _SUM_WS_RE = /\S+/g;
+  function _sumCountWords(text) {
+    _SUM_WS_RE.lastIndex = 0;
+    var count = 0;
+    while (_SUM_WS_RE.exec(text)) count++;
+    return count;
+  }
+
   function computeStats(messages) {
     var totalWords = 0;
     var userWords = 0;
@@ -10151,7 +10207,7 @@ const ConversationSummarizer = (() => {
 
     for (var i = 0; i < messages.length; i++) {
       var content = messages[i].content || '';
-      var words = content.split(/\s+/).filter(function(w) { return w.length > 0; }).length;
+      var words = _sumCountWords(content);
       totalWords += words;
       if (words > longestMsg) longestMsg = words;
 
@@ -10163,8 +10219,10 @@ const ConversationSummarizer = (() => {
         assistantMsgCount++;
       }
 
-      var codeMatches = content.match(/```/g);
-      if (codeMatches) codeBlockCount += Math.floor(codeMatches.length / 2);
+      // Count ``` occurrences without allocating a match array
+      var pos = 0, ticks = 0;
+      while ((pos = content.indexOf('```', pos)) !== -1) { ticks++; pos += 3; }
+      codeBlockCount += Math.floor(ticks / 2);
     }
 
     return {
