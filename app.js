@@ -1757,9 +1757,16 @@ const ChatController = (() => {
   // automated scripts, or malfunctioning retry loops).  Allows a burst
   // of MAX_SENDS_PER_WINDOW requests within RATE_WINDOW_MS, then
   // blocks until the oldest send falls outside the window.
-  const _sendTimestamps = [];
+  //
+  // Fix #147: Uses a fixed-size circular buffer instead of an array
+  // with shift().  shift() is O(n) because it re-indexes every element;
+  // a circular buffer with a head pointer is O(1) for both insert and
+  // expiry.  The buffer is pre-allocated to MAX_SENDS_PER_WINDOW size.
   const RATE_WINDOW_MS = 60_000;   // 1 minute
   const MAX_SENDS_PER_WINDOW = 20; // 20 requests/min — generous for human use
+  const _sendTimestamps = new Array(MAX_SENDS_PER_WINDOW).fill(0);
+  let _rlHead = 0;   // next write position in circular buffer
+  let _rlCount = 0;  // number of active (non-expired) timestamps
 
   async function send() {
     if (isSending) return;
@@ -1768,20 +1775,32 @@ const ChatController = (() => {
       return;
     }
 
-    // Rate limiting: prune expired timestamps, then check
+    // Rate limiting: count non-expired timestamps in the circular buffer
+    // All operations are O(1) amortised — no array shifting.  See #147.
     const now = Date.now();
-    while (_sendTimestamps.length > 0 && now - _sendTimestamps[0] > RATE_WINDOW_MS) {
-      _sendTimestamps.shift();
+    // Expire old entries by advancing _rlCount downward.  The oldest
+    // entry is at (_rlHead - _rlCount + BUF) % BUF.  We only need to
+    // check from the tail (oldest) toward the head.
+    while (_rlCount > 0) {
+      const tailIdx = (_rlHead - _rlCount + MAX_SENDS_PER_WINDOW) % MAX_SENDS_PER_WINDOW;
+      if (now - _sendTimestamps[tailIdx] > RATE_WINDOW_MS) {
+        _rlCount--;
+      } else {
+        break;
+      }
     }
-    if (_sendTimestamps.length >= MAX_SENDS_PER_WINDOW) {
-      const waitSec = Math.ceil((RATE_WINDOW_MS - (now - _sendTimestamps[0])) / 1000);
+    if (_rlCount >= MAX_SENDS_PER_WINDOW) {
+      const tailIdx = (_rlHead - _rlCount + MAX_SENDS_PER_WINDOW) % MAX_SENDS_PER_WINDOW;
+      const waitSec = Math.ceil((RATE_WINDOW_MS - (now - _sendTimestamps[tailIdx])) / 1000);
       alert(
         `Rate limit reached (${MAX_SENDS_PER_WINDOW} messages/min). ` +
         `Please wait ${waitSec}s before sending again.`
       );
       return;
     }
-    _sendTimestamps.push(now);
+    _sendTimestamps[_rlHead] = now;
+    _rlHead = (_rlHead + 1) % MAX_SENDS_PER_WINDOW;
+    _rlCount++;
 
     const prompt = UIController.getChatInput();
 
