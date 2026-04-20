@@ -33700,3 +33700,254 @@ const ConversationDriftDetector = (() => {
 
   return { toggle: toggle, show: show, hide: hide, analyze: analyze };
 })();
+
+/* ============================================================
+ * SmartContextCompressor (Alt+Shift+C)
+ * Proactive context window management with auto-summarization,
+ * token gauge, threshold warnings, and compression history.
+ * ============================================================ */
+var SmartContextCompressor = (function () {
+  'use strict';
+
+  var _visible = false;
+  var _autoCompress = false;
+  var _preserveRecent = 10;
+  var _history = [];
+  var _thresholds = [0.70, 0.85, 0.95];
+  var _alerted = {};
+  var _maxTokens = 128000;
+  var _indicatorEl = null;
+  var _panelEl = null;
+  var _observer = null;
+  var _styleInjected = false;
+
+  // Token estimation: ~4 chars per token
+  function estimateTokens(text) {
+    if (!text) return 0;
+    return Math.ceil(text.length / 4);
+  }
+
+  function getMaxTokens() {
+    if (typeof ChatConfig !== 'undefined' && ChatConfig.getMaxTokens) return ChatConfig.getMaxTokens();
+    if (typeof ChatConfig !== 'undefined' && ChatConfig.models) {
+      var sel = document.getElementById('model-select');
+      if (sel && ChatConfig.models[sel.value] && ChatConfig.models[sel.value].contextWindow) {
+        return ChatConfig.models[sel.value].contextWindow;
+      }
+    }
+    return _maxTokens;
+  }
+
+  function getMessages() {
+    var chatOutput = document.getElementById('chat-output');
+    if (!chatOutput) return [];
+    var msgs = chatOutput.querySelectorAll('.msg');
+    var result = [];
+    for (var i = 0; i < msgs.length; i++) {
+      var el = msgs[i];
+      var role = el.classList.contains('user') ? 'user' : 'assistant';
+      var text = el.textContent || '';
+      result.push({ el: el, role: role, text: text, tokens: estimateTokens(text), index: i });
+    }
+    return result;
+  }
+
+  function analyze() {
+    var msgs = getMessages();
+    var totalTokens = 0;
+    for (var i = 0; i < msgs.length; i++) totalTokens += msgs[i].tokens;
+    var max = getMaxTokens();
+    var usage = totalTokens / max;
+    return { messages: msgs, totalTokens: totalTokens, maxTokens: max, usage: usage, count: msgs.length };
+  }
+
+  function compress() {
+    var data = analyze();
+    if (data.count <= _preserveRecent) return { compressed: 0, saved: 0 };
+    var compressible = data.messages.slice(0, data.count - _preserveRecent);
+    var saved = 0;
+    var compressed = 0;
+    for (var i = 0; i < compressible.length; i++) {
+      var msg = compressible[i];
+      if (msg.text.indexOf('[Compressed]') === 0) continue;
+      // Extract key info: first sentence + code blocks
+      var codeBlocks = [];
+      var codeRegex = /`[\s\S]*?`|[^]+/g;
+      var match;
+      while ((match = codeRegex.exec(msg.text)) !== null) codeBlocks.push(match[0]);
+      var firstSentence = msg.text.replace(/`[\s\S]*?`/g, '').split(/[.!?\n]/).filter(Boolean)[0] || '';
+      firstSentence = firstSentence.trim().substring(0, 120);
+      var summary = '[Compressed] ' + firstSentence + (codeBlocks.length ? ' [' + codeBlocks.length + ' code block(s) preserved]' : '');
+      var origTokens = msg.tokens;
+      // Update DOM
+      var contentEl = msg.el.querySelector('.msg-content') || msg.el;
+      contentEl.textContent = summary;
+      contentEl.style.opacity = '0.7';
+      contentEl.style.fontStyle = 'italic';
+      saved += origTokens - estimateTokens(summary);
+      compressed++;
+    }
+    _history.push({ timestamp: new Date().toISOString(), compressed: compressed, tokensSaved: saved });
+    _saveState();
+    if (_visible) _render();
+    _updateIndicator();
+    if (typeof ToastManager !== 'undefined' && ToastManager.show) {
+      ToastManager.show('🗜️ Compressed ' + compressed + ' messages, saved ~' + saved + ' tokens', 'success');
+    }
+    return { compressed: compressed, saved: saved };
+  }
+
+  function _checkThresholds() {
+    var data = analyze();
+    for (var i = 0; i < _thresholds.length; i++) {
+      var t = _thresholds[i];
+      var pct = Math.round(t * 100);
+      if (data.usage >= t && !_alerted[pct]) {
+        _alerted[pct] = true;
+        var level = t >= 0.95 ? 'error' : t >= 0.85 ? 'warning' : 'info';
+        if (typeof ToastManager !== 'undefined' && ToastManager.show) {
+          ToastManager.show('🗜️ Context usage at ' + Math.round(data.usage * 100) + '% (' + data.totalTokens + '/' + data.maxTokens + ' tokens). ' + (t >= 0.85 ? 'Consider compressing!' : ''), level);
+        }
+        if (_autoCompress && t >= 0.85) compress();
+      }
+    }
+    // Reset alerts if usage drops
+    if (data.usage < 0.70) _alerted = {};
+  }
+
+  function _updateIndicator() {
+    if (!_indicatorEl) _createIndicator();
+    var data = analyze();
+    if (data.usage < 0.5) { _indicatorEl.style.display = 'none'; return; }
+    _indicatorEl.style.display = 'flex';
+    var pct = Math.round(data.usage * 100);
+    var color = data.usage >= 0.95 ? '#c62828' : data.usage >= 0.85 ? '#f57c00' : data.usage >= 0.70 ? '#fbc02d' : '#66bb6a';
+    _indicatorEl.innerHTML = '<span style="font-size:11px;color:' + color + ';font-weight:bold;">' + pct + '%</span>';
+    _indicatorEl.title = data.totalTokens + '/' + data.maxTokens + ' tokens';
+  }
+
+  function _createIndicator() {
+    _indicatorEl = document.createElement('div');
+    _indicatorEl.id = 'ctx-compressor-indicator';
+    _indicatorEl.style.cssText = 'position:fixed;bottom:12px;right:12px;z-index:9998;background:var(--bg,#1e1e1e);border:1px solid var(--border,#333);border-radius:8px;padding:4px 8px;cursor:pointer;display:none;align-items:center;gap:4px;box-shadow:0 2px 8px rgba(0,0,0,0.3);';
+    _indicatorEl.addEventListener('click', toggle);
+    document.body.appendChild(_indicatorEl);
+  }
+
+  function _injectStyles() {
+    if (_styleInjected) return;
+    _styleInjected = true;
+    var s = document.createElement('style');
+    s.textContent = '#ctx-compressor-panel{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:10001;width:480px;max-height:80vh;background:var(--bg,#1e1e1e);border:1px solid var(--border,#333);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,0.5);overflow:hidden;display:flex;flex-direction:column;color:var(--text,#eee);font-family:system-ui,sans-serif;font-size:13px;}#ctx-compressor-panel .ccp-header{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border,#333);}#ctx-compressor-panel .ccp-body{padding:16px;overflow-y:auto;flex:1;}#ctx-compressor-panel .ccp-gauge{height:20px;background:var(--border,#333);border-radius:10px;overflow:hidden;margin:8px 0;}#ctx-compressor-panel .ccp-gauge-fill{height:100%;transition:width 0.3s;border-radius:10px;}#ctx-compressor-panel .ccp-stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin:12px 0;}#ctx-compressor-panel .ccp-stat{text-align:center;padding:8px;background:var(--border,#333);border-radius:8px;}#ctx-compressor-panel .ccp-stat-val{font-size:18px;font-weight:bold;}#ctx-compressor-panel .ccp-stat-label{font-size:10px;opacity:0.7;margin-top:2px;}#ctx-compressor-panel .ccp-actions{display:flex;gap:8px;margin:12px 0;}#ctx-compressor-panel .ccp-btn{padding:8px 14px;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:500;}#ctx-compressor-panel .ccp-btn-primary{background:var(--accent,#6366f1);color:#fff;}#ctx-compressor-panel .ccp-btn-secondary{background:var(--border,#444);color:var(--text,#eee);}#ctx-compressor-panel .ccp-history{margin-top:12px;max-height:150px;overflow-y:auto;}#ctx-compressor-panel .ccp-history-item{padding:6px 8px;border-bottom:1px solid var(--border,#333);font-size:11px;opacity:0.8;}';
+    document.head.appendChild(s);
+  }
+
+  function _render() {
+    if (!_panelEl) {
+      _injectStyles();
+      _panelEl = document.createElement('div');
+      _panelEl.id = 'ctx-compressor-panel';
+      document.body.appendChild(_panelEl);
+    }
+    var data = analyze();
+    var pct = Math.round(data.usage * 100);
+    var color = data.usage >= 0.95 ? '#c62828' : data.usage >= 0.85 ? '#f57c00' : data.usage >= 0.70 ? '#fbc02d' : '#66bb6a';
+    var totalSaved = 0;
+    for (var i = 0; i < _history.length; i++) totalSaved += _history[i].tokensSaved;
+    var historyHtml = '';
+    for (var j = _history.length - 1; j >= Math.max(0, _history.length - 10); j--) {
+      var h = _history[j];
+      var t = new Date(h.timestamp);
+      historyHtml += '<div class="ccp-history-item">' + t.toLocaleTimeString() + ' — ' + h.compressed + ' msgs, ' + h.tokensSaved + ' tokens saved</div>';
+    }
+    _panelEl.innerHTML = '<div class="ccp-header"><span>🗜️ Context Compressor</span><button onclick="SmartContextCompressor.hide()" style="background:none;border:none;color:var(--text,#eee);font-size:18px;cursor:pointer;">✕</button></div>' +
+      '<div class="ccp-body">' +
+      '<div class="ccp-gauge"><div class="ccp-gauge-fill" style="width:' + Math.min(pct, 100) + '%;background:' + color + ';"></div></div>' +
+      '<div class="ccp-stats">' +
+      '<div class="ccp-stat"><div class="ccp-stat-val">' + data.totalTokens.toLocaleString() + '</div><div class="ccp-stat-label">Tokens Used</div></div>' +
+      '<div class="ccp-stat"><div class="ccp-stat-val">' + (data.maxTokens - data.totalTokens).toLocaleString() + '</div><div class="ccp-stat-label">Available</div></div>' +
+      '<div class="ccp-stat"><div class="ccp-stat-val">' + totalSaved.toLocaleString() + '</div><div class="ccp-stat-label">Total Saved</div></div>' +
+      '</div>' +
+      '<div class="ccp-actions">' +
+      '<button class="ccp-btn ccp-btn-primary" onclick="SmartContextCompressor.compress()">🗜️ Compress Now</button>' +
+      '<button class="ccp-btn ccp-btn-secondary" onclick="SmartContextCompressor._toggleAuto()">' + (_autoCompress ? '🟢 Auto: ON' : '⚪ Auto: OFF') + '</button>' +
+      '<button class="ccp-btn ccp-btn-secondary" onclick="SmartContextCompressor._reset()">↺ Reset</button>' +
+      '</div>' +
+      '<div style="margin-top:8px;font-size:11px;opacity:0.7;">Preserving last ' + _preserveRecent + ' messages • Model limit: ' + data.maxTokens.toLocaleString() + ' tokens</div>' +
+      (_history.length ? '<div class="ccp-history"><strong style="font-size:11px;">Compression History</strong>' + historyHtml + '</div>' : '') +
+      '</div>';
+    _panelEl.style.display = 'flex';
+  }
+
+  function show() { _visible = true; _render(); }
+  function hide() { _visible = false; if (_panelEl) _panelEl.style.display = 'none'; }
+  function toggle() { _visible ? hide() : show(); }
+
+  function _toggleAuto() {
+    _autoCompress = !_autoCompress;
+    _saveState();
+    if (_visible) _render();
+    if (typeof ToastManager !== 'undefined' && ToastManager.show) {
+      ToastManager.show('🗜️ Auto-compress ' + (_autoCompress ? 'enabled' : 'disabled'), 'info');
+    }
+  }
+
+  function _reset() {
+    _history = [];
+    _alerted = {};
+    _saveState();
+    if (_visible) _render();
+    _updateIndicator();
+  }
+
+  function _saveState() {
+    if (typeof SafeStorage !== 'undefined') {
+      SafeStorage.set('ctx_compressor_auto', _autoCompress ? '1' : '0');
+      SafeStorage.set('ctx_compressor_history', JSON.stringify(_history.slice(-50)));
+    }
+  }
+
+  function _loadState() {
+    if (typeof SafeStorage !== 'undefined') {
+      _autoCompress = SafeStorage.get('ctx_compressor_auto') === '1';
+      try { _history = JSON.parse(SafeStorage.get('ctx_compressor_history') || '[]'); } catch(e) { _history = []; }
+    }
+  }
+
+  function _startObserving() {
+    if (_observer) return;
+    var chatOutput = document.getElementById('chat-output');
+    if (!chatOutput) return;
+    _observer = new MutationObserver(function() {
+      _updateIndicator();
+      _checkThresholds();
+      if (_visible) _render();
+    });
+    _observer.observe(chatOutput, { childList: true, subtree: true });
+  }
+
+  document.addEventListener('keydown', function(e) {
+    if (e.altKey && e.shiftKey && !e.ctrlKey && e.key.toLowerCase() === 'c') {
+      e.preventDefault();
+      toggle();
+    }
+  });
+
+  document.addEventListener('DOMContentLoaded', function() {
+    _loadState();
+    _createIndicator();
+    _startObserving();
+    _updateIndicator();
+    if (typeof KeyboardShortcuts !== 'undefined' && KeyboardShortcuts.register) {
+      KeyboardShortcuts.register('Alt+Shift+C', 'Smart Context Compressor', toggle);
+    }
+    if (typeof CommandPalette !== 'undefined' && CommandPalette.register) {
+      CommandPalette.register({ name: 'context compressor', description: 'Manage context window usage & compression', icon: '🗜️', action: toggle });
+    }
+    if (typeof SlashCommands !== 'undefined' && SlashCommands.register) {
+      SlashCommands.register('/compress', 'Compress conversation context', compress);
+    }
+  });
+
+  return { toggle: toggle, show: show, hide: hide, compress: compress, analyze: analyze, _toggleAuto: _toggleAuto, _reset: _reset };
+})();
