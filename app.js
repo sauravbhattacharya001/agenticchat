@@ -19201,24 +19201,38 @@ const ConversationSentiment = (() => {
 
   /* ── Core analysis ───────────────────────────────────────── */
 
-  /** Tokenize text into lowercase words. */
+  /** Tokenize text into lowercase words (public API — used by tests/external callers). */
   function tokenize(text) {
     return String(text).toLowerCase().replace(/[^a-z'-]/g, ' ').split(/\s+/).filter(w => w.length > 1);
   }
 
   /**
+   * Regex for allocation-free word iteration.
+   * Matches sequences of letters/apostrophes (length ≥ 2) without
+   * creating an intermediate array via split()+filter().
+   */
+  const _SENT_WORD_RE = /[a-z']{2,}/g;
+
+  /**
    * Score a single message's sentiment.
+   * Optimised: uses regex exec loop with a 1-word lookback variable
+   * instead of allocating a full words array via tokenize().
+   * Eliminates the temporary array + filter allocation per call.
    * @param {string} text
    * @returns {number} Score from -1 to +1
    */
   function scoreMessage(text) {
-    const words = tokenize(text);
-    if (words.length === 0) return 0;
+    const lower = String(text).toLowerCase();
+    _SENT_WORD_RE.lastIndex = 0;
 
     let score = 0;
+    let wordCount = 0;
+    let prevWord = '';
+    let m;
 
-    for (let i = 0; i < words.length; i++) {
-      const word = words[i];
+    while ((m = _SENT_WORD_RE.exec(lower)) !== null) {
+      const word = m[0];
+      wordCount++;
       let wordScore = 0;
 
       if (POSITIVE_WORDS.has(word)) wordScore = 1;
@@ -19226,19 +19240,22 @@ const ConversationSentiment = (() => {
 
       if (wordScore !== 0) {
         // Check for negation (flip sentiment)
-        if (i > 0 && NEGATORS.has(words[i - 1])) {
-          wordScore *= -0.5; // Negation partially flips
+        if (prevWord && NEGATORS.has(prevWord)) {
+          wordScore *= -0.5;
         }
         // Check for intensifier
-        if (i > 0 && INTENSIFIERS.has(words[i - 1])) {
+        if (prevWord && INTENSIFIERS.has(prevWord)) {
           wordScore *= 1.5;
         }
         score += wordScore;
       }
+      prevWord = word;
     }
 
+    if (wordCount === 0) return 0;
+
     // Normalize to -1..+1 range
-    const maxPossible = Math.max(1, words.length * 0.3); // assume max 30% sentiment words
+    const maxPossible = Math.max(1, wordCount * 0.3);
     return Math.max(-1, Math.min(1, score / maxPossible));
   }
 
@@ -33260,33 +33277,42 @@ var ConversationMoodRing = (function () {
   'use strict';
   var _visible = false;
 
-  // Sentiment lexicon (word -> score from -3 to +3)
-  var _positive = {
+  // Unified sentiment lexicon (word -> score from -3 to +3).
+  // Merged positive + negative into a single object for O(1) single-lookup
+  // per word instead of two separate property lookups.
+  var _lexicon = {
     'great':3,'excellent':3,'amazing':3,'awesome':3,'fantastic':3,'perfect':3,'wonderful':3,'love':3,'brilliant':3,
     'good':2,'nice':2,'helpful':2,'thanks':2,'thank':2,'pleased':2,'happy':2,'glad':2,'cool':2,'impressive':2,
-    'works':1,'fine':1,'okay':1,'interesting':1,'useful':1,'clear':1,'neat':1,'solid':1,'yes':1,'right':1,'like':1
-  };
-  var _negative = {
+    'works':1,'fine':1,'okay':1,'interesting':1,'useful':1,'clear':1,'neat':1,'solid':1,'yes':1,'right':1,'like':1,
     'terrible':-3,'awful':-3,'horrible':-3,'hate':-3,'worst':-3,'useless':-3,'garbage':-3,'broken':-3,
     'bad':-2,'wrong':-2,'error':-2,'fail':-2,'failed':-2,'frustrated':-2,'annoying':-2,'confusing':-2,'stuck':-2,'bug':-2,'slow':-2,'ugly':-2,
     'not':-1,'no':-1,'issue':-1,'problem':-1,'difficult':-1,'unclear':-1,'miss':-1,'missing':-1,'unfortunately':-1,'but':-0.5
   };
 
+  // Regex for allocation-free word iteration (avoids split+filter array creation)
+  var _WORD_RE = /[a-z0-9']+/g;
+
   // Analyze a single message text, return {score, energy, wordCount}
+  // Optimized: uses regex exec loop instead of split()+filter() to avoid
+  // allocating a temporary words array on every call. Uses single merged
+  // lexicon lookup instead of two separate positive/negative lookups.
   function analyzeMessage(text) {
     if (!text) return { score: 0, energy: 0, wordCount: 0 };
-    var words = text.toLowerCase().replace(/[^a-z0-9\s']/g, ' ').split(/\s+/).filter(Boolean);
+    var lower = text.toLowerCase();
+    _WORD_RE.lastIndex = 0;
     var total = 0;
     var count = 0;
-    for (var i = 0; i < words.length; i++) {
-      var w = words[i];
-      if (_positive[w] !== undefined) { total += _positive[w]; count++; }
-      if (_negative[w] !== undefined) { total += _negative[w]; count++; }
+    var wordCount = 0;
+    var m;
+    while ((m = _WORD_RE.exec(lower)) !== null) {
+      wordCount++;
+      var val = _lexicon[m[0]];
+      if (val !== undefined) { total += val; count++; }
     }
     var score = count > 0 ? total / count : 0; // -3 to +3 normalized
     // Energy = message length relative to average (short = low energy, long = high)
-    var energy = Math.min(words.length / 20, 2); // 0 to 2 scale
-    return { score: Math.max(-3, Math.min(3, score)), energy: energy, wordCount: words.length };
+    var energy = Math.min(wordCount / 20, 2); // 0 to 2 scale
+    return { score: Math.max(-3, Math.min(3, score)), energy: energy, wordCount: wordCount };
   }
 
   // Get mood label and color from score
