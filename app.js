@@ -34459,3 +34459,242 @@ const SmartModelAdvisor = (function () {
 
   return { toggle: toggle, show: show, hide: hide, analyze: analyzeConversation, onNewMessage: onNewMessage };
 })();
+
+// ============================================================
+// Smart Context Sidebar — proactive intelligence panel
+// ============================================================
+const SmartContextSidebar = (() => {
+  'use strict';
+  const STORAGE_KEY = 'smart_context_sidebar_state';
+  let _panel = null;
+  let _visible = false;
+  let _observer = null;
+
+  const TOPIC_FOLLOWUPS = {
+    'api': ['How do I authenticate?', 'What are the rate limits?', 'Can you show error handling?'],
+    'database': ['How do I handle migrations?', 'What about indexing?', 'Show me a query example'],
+    'css': ['How do I make it responsive?', 'Can you add animations?', 'What about dark mode?'],
+    'javascript': ['How do I handle errors?', 'Can you optimize this?', 'What about TypeScript?'],
+    'python': ['How do I add type hints?', 'What about testing?', 'Can you make it async?'],
+    'react': ['How do I manage state?', 'What about performance?', 'Can you add tests?'],
+    'security': ['What are the vulnerabilities?', 'How do I sanitize input?', 'What about CORS?'],
+    'performance': ['Where are the bottlenecks?', 'Can you add caching?', 'What about lazy loading?'],
+    'testing': ['How do I mock dependencies?', 'What about edge cases?', 'Can you add integration tests?'],
+    'deployment': ['How do I set up CI/CD?', 'What about rollback?', 'Can you containerize it?'],
+    'default': ['Can you explain that in more detail?', 'What are the alternatives?', 'Can you give me an example?']
+  };
+
+  function _extractEntities(text) {
+    const entities = { urls: [], codeLangs: [], numbers: [], filePaths: [], terms: [] };
+    // URLs
+    const urlRe = /https?:\/\/[^\s<>"']+/g;
+    let m;
+    while ((m = urlRe.exec(text)) !== null) entities.urls.push(m[0]);
+    // Code languages from fences
+    const fenceRe = /`(\w+)/g;
+    while ((m = fenceRe.exec(text)) !== null) entities.codeLangs.push(m[1]);
+    // File paths
+    const pathRe = /(?:[A-Z]:\\|\.?\.?\/)[\w\-./\\]+\.\w+/g;
+    while ((m = pathRe.exec(text)) !== null) entities.filePaths.push(m[0]);
+    // Numbers/stats
+    const numRe = /\b\d{2,}(?:\.\d+)?%?|\b\d+(?:,\d{3})+/g;
+    while ((m = numRe.exec(text)) !== null) entities.numbers.push(m[0]);
+    // Key terms (capitalized multi-word or technical terms)
+    const termRe = /\b[A-Z][a-z]+(?:\s[A-Z][a-z]+)+\b/g;
+    while ((m = termRe.exec(text)) !== null) entities.terms.push(m[0]);
+    // Deduplicate
+    Object.keys(entities).forEach(k => { entities[k] = [...new Set(entities[k])].slice(0, 8); });
+    return entities;
+  }
+
+  function _getMessages() {
+    const chatOutput = document.getElementById('chat-output');
+    if (!chatOutput) return [];
+    const msgs = chatOutput.querySelectorAll('.message, .chat-message, [class*="message"]');
+    const results = [];
+    msgs.forEach((el, i) => {
+      const text = el.textContent || '';
+      if (text.trim().length > 5) results.push({ el: el, text: text, index: i });
+    });
+    return results;
+  }
+
+  function _tokenize(text) {
+    return text.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(w => w.length > 3);
+  }
+
+  function _findRelatedMessages(messages) {
+    if (messages.length < 3) return [];
+    const recent = messages.slice(-2);
+    const recentTokens = new Set(_tokenize(recent.map(m => m.text).join(' ')));
+    const scored = [];
+    const older = messages.slice(0, -2);
+    older.forEach(msg => {
+      const tokens = _tokenize(msg.text);
+      let overlap = 0;
+      tokens.forEach(t => { if (recentTokens.has(t)) overlap++; });
+      const score = tokens.length > 0 ? overlap / Math.sqrt(tokens.length) : 0;
+      if (score > 0.5) scored.push({ msg: msg, score: score });
+    });
+    scored.sort((a, b) => b.score - a.score);
+    return scored.slice(0, 5);
+  }
+
+  function _detectTopics(text) {
+    const lower = text.toLowerCase();
+    const found = [];
+    Object.keys(TOPIC_FOLLOWUPS).forEach(topic => {
+      if (topic !== 'default' && lower.includes(topic)) found.push(topic);
+    });
+    return found.length > 0 ? found : ['default'];
+  }
+
+  function _getFollowups(messages) {
+    if (messages.length === 0) return TOPIC_FOLLOWUPS['default'];
+    const lastMsg = messages[messages.length - 1].text;
+    const topics = _detectTopics(lastMsg);
+    const suggestions = [];
+    topics.forEach(t => {
+      (TOPIC_FOLLOWUPS[t] || []).forEach(q => {
+        if (!suggestions.includes(q)) suggestions.push(q);
+      });
+    });
+    return suggestions.slice(0, 4);
+  }
+
+  function _getStats(messages) {
+    const totalMsgs = messages.length;
+    let codeBlocks = 0;
+    let totalLen = 0;
+    messages.forEach(m => {
+      const cbs = (m.text.match(/`/g) || []).length;
+      codeBlocks += Math.floor(cbs / 2);
+      totalLen += m.text.length;
+    });
+    const avgLen = totalMsgs > 0 ? Math.round(totalLen / totalMsgs) : 0;
+    return { totalMsgs: totalMsgs, codeBlocks: codeBlocks, avgLen: avgLen };
+  }
+
+  function _escapeH(s) {
+    return typeof _escapeHtml === 'function' ? _escapeHtml(s) : s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function _render() {
+    if (!_panel) return;
+    const messages = _getMessages();
+    const allText = messages.map(m => m.text).join('\n');
+    const entities = _extractEntities(allText);
+    const related = _findRelatedMessages(messages);
+    const followups = _getFollowups(messages);
+    const stats = _getStats(messages);
+
+    let html = '<div class="context-sidebar-header"><h3>\ud83e\udde9 Smart Context</h3><button class="context-close-btn" onclick="SmartContextSidebar.hide()">\u2715</button></div>';
+
+    // Stats
+    html += '<div class="context-section"><div class="context-section-title" onclick="this.parentElement.classList.toggle(\'collapsed\')">\u25bc Quick Stats</div><div class="context-section-body">';
+    html += '<div class="context-stats-grid">';
+    html += '<span>\ud83d\udcac ' + stats.totalMsgs + ' msgs</span>';
+    html += '<span>\ud83d\udcbb ' + stats.codeBlocks + ' code blocks</span>';
+    html += '<span>\ud83d\udccf ~' + stats.avgLen + ' chars/msg</span>';
+    html += '</div></div></div>';
+
+    // Entities
+    html += '<div class="context-section"><div class="context-section-title" onclick="this.parentElement.classList.toggle(\'collapsed\')">\u25bc Detected Entities</div><div class="context-section-body">';
+    if (entities.urls.length) html += '<div class="context-entity-group"><small>URLs</small><div>' + entities.urls.map(u => '<a class="context-entity-tag url" href="' + _escapeH(u) + '" target="_blank" rel="noopener">' + _escapeH(u.slice(0,40)) + '</a>').join('') + '</div></div>';
+    if (entities.codeLangs.length) html += '<div class="context-entity-group"><small>Languages</small><div>' + entities.codeLangs.map(l => '<span class="context-entity-tag lang">' + _escapeH(l) + '</span>').join('') + '</div></div>';
+    if (entities.filePaths.length) html += '<div class="context-entity-group"><small>Files</small><div>' + entities.filePaths.map(p => '<span class="context-entity-tag file">' + _escapeH(p) + '</span>').join('') + '</div></div>';
+    if (entities.numbers.length) html += '<div class="context-entity-group"><small>Numbers</small><div>' + entities.numbers.map(n => '<span class="context-entity-tag num">' + _escapeH(n) + '</span>').join('') + '</div></div>';
+    if (entities.terms.length) html += '<div class="context-entity-group"><small>Key Terms</small><div>' + entities.terms.map(t => '<span class="context-entity-tag term">' + _escapeH(t) + '</span>').join('') + '</div></div>';
+    if (!entities.urls.length && !entities.codeLangs.length && !entities.filePaths.length && !entities.numbers.length && !entities.terms.length) html += '<p class="context-empty">No entities detected yet</p>';
+    html += '</div></div>';
+
+    // Related messages
+    html += '<div class="context-section"><div class="context-section-title" onclick="this.parentElement.classList.toggle(\'collapsed\')">\u25bc Related Messages</div><div class="context-section-body">';
+    if (related.length) {
+      related.forEach((r, i) => {
+        const preview = r.msg.text.slice(0, 80).replace(/\n/g, ' ');
+        html += '<div class="context-related-msg" data-idx="' + r.msg.index + '" onclick="SmartContextSidebar.scrollTo(' + r.msg.index + ')">' + _escapeH(preview) + '\u2026</div>';
+      });
+    } else {
+      html += '<p class="context-empty">Not enough messages for analysis</p>';
+    }
+    html += '</div></div>';
+
+    // Follow-ups
+    html += '<div class="context-section"><div class="context-section-title" onclick="this.parentElement.classList.toggle(\'collapsed\')">\u25bc Suggested Follow-ups</div><div class="context-section-body">';
+    followups.forEach(q => {
+      html += '<button class="context-followup-btn" onclick="SmartContextSidebar.insertFollowup(this.textContent)">' + _escapeH(q) + '</button>';
+    });
+    html += '</div></div>';
+
+    _panel.querySelector('.context-sidebar-content').innerHTML = html;
+  }
+
+  function _createPanel() {
+    if (_panel) return;
+    _panel = document.createElement('div');
+    _panel.className = 'smart-context-sidebar';
+    _panel.innerHTML = '<div class="context-sidebar-content"></div>';
+    document.body.appendChild(_panel);
+  }
+
+  function show() {
+    _createPanel();
+    _visible = true;
+    _panel.classList.add('open');
+    _render();
+    _startObserver();
+  }
+
+  function hide() {
+    if (_panel) _panel.classList.remove('open');
+    _visible = false;
+    _stopObserver();
+  }
+
+  function toggle() { _visible ? hide() : show(); }
+
+  function scrollTo(idx) {
+    const messages = _getMessages();
+    const target = messages.find(m => m.index === idx);
+    if (target && target.el) {
+      target.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      target.el.style.outline = '2px solid var(--accent-color, #2196F3)';
+      setTimeout(() => { target.el.style.outline = ''; }, 2000);
+    }
+  }
+
+  function insertFollowup(text) {
+    const input = document.getElementById('chat-input');
+    if (input) { input.value = text; input.focus(); }
+  }
+
+  function _startObserver() {
+    if (_observer) return;
+    const chatOutput = document.getElementById('chat-output');
+    if (!chatOutput) return;
+    _observer = new MutationObserver(() => { if (_visible) setTimeout(_render, 300); });
+    _observer.observe(chatOutput, { childList: true, subtree: true });
+  }
+
+  function _stopObserver() {
+    if (_observer) { _observer.disconnect(); _observer = null; }
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    document.addEventListener('keydown', function (e) {
+      if (e.altKey && e.shiftKey && e.key === 'I') { e.preventDefault(); toggle(); }
+    });
+    if (typeof KeyboardShortcuts !== 'undefined' && KeyboardShortcuts.register) {
+      KeyboardShortcuts.register('Alt+Shift+I', 'Smart Context Sidebar', toggle);
+    }
+    if (typeof CommandPalette !== 'undefined' && CommandPalette.register) {
+      CommandPalette.register({ name: 'smart context', description: 'Proactive context intelligence sidebar', icon: '\ud83e\udde9', action: toggle });
+    }
+    if (typeof SlashCommands !== 'undefined' && SlashCommands.register) {
+      SlashCommands.register('/context', 'Open Smart Context Sidebar', toggle);
+    }
+  });
+
+  return { toggle: toggle, show: show, hide: hide, scrollTo: scrollTo, insertFollowup: insertFollowup };
+})();
