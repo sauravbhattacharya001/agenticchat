@@ -34817,3 +34817,282 @@ const SmartContextSidebar = (() => {
 
   return { toggle: toggle, show: show, hide: hide, scrollTo: scrollTo, insertFollowup: insertFollowup };
 })();
+
+/* ===== Conversation Momentum Tracker ===== */
+const ConversationMomentum = (() => {
+  let _visible = false;
+  let _score = 50;
+  let _history = []; // {time, score}
+  let _lastMsgTime = null;
+  let _decayTimer = null;
+  let _observer = null;
+  let _flowStart = null;
+  let _inFlow = false;
+  let _flowCount = 0;
+  let _peakScore = 50;
+  let _alertedLow = false;
+  let _alertedFlow = false;
+  let _totalMessages = 0;
+  let _sessionStart = Date.now();
+  let _activeTime = 0;
+  let _lastActivity = Date.now();
+
+  function _load() {
+    try {
+      const d = SafeStorage.getJSON('momentum-state', null);
+      if (d) {
+        _history = Array.isArray(d.history) ? d.history.slice(-200) : [];
+        _flowCount = d.flowCount || 0;
+        _peakScore = d.peakScore || 50;
+        _totalMessages = d.totalMessages || 0;
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  function _save() {
+    try {
+      SafeStorage.setJSON('momentum-state', {
+        history: _history.slice(-200),
+        flowCount: _flowCount,
+        peakScore: _peakScore,
+        totalMessages: _totalMessages
+      });
+    } catch (e) { /* ignore */ }
+  }
+
+  function _recordScore() {
+    _history.push({ time: Date.now(), score: Math.round(_score) });
+    if (_history.length > 200) _history.shift();
+    if (_score > _peakScore) _peakScore = Math.round(_score);
+  }
+
+  function _onMessage(role) {
+    const now = Date.now();
+    _totalMessages++;
+    if (_lastMsgTime) {
+      const gap = (now - _lastMsgTime) / 1000; // seconds
+      // shorter gap = bigger boost; max boost ~25 for <3s, min ~2 for >60s
+      const boost = role === 'user'
+        ? Math.max(2, 25 - gap * 0.4)
+        : Math.max(1, 15 - gap * 0.3);
+      _score = Math.min(100, _score + boost);
+    }
+    _lastMsgTime = now;
+    _lastActivity = now;
+    _recordScore();
+    _checkFlow();
+    _checkAlerts();
+    _save();
+    if (_visible) _render();
+  }
+
+  function _decay() {
+    if (_score > 0) {
+      _score = Math.max(0, _score - 2);
+      _recordScore();
+      _checkFlow();
+      _checkAlerts();
+      if (_visible) _render();
+    }
+    // Track active time (consider idle after 2 min)
+    const now = Date.now();
+    if (now - _lastActivity < 120000) {
+      _activeTime += 5000;
+    }
+  }
+
+  function _checkFlow() {
+    if (_score > 80) {
+      if (!_flowStart) _flowStart = Date.now();
+      if (!_inFlow && Date.now() - _flowStart > 30000) {
+        _inFlow = true;
+        _flowCount++;
+        if (!_alertedFlow) {
+          _alertedFlow = true;
+          if (typeof ToastManager !== 'undefined') {
+            ToastManager.show('\ud83d\udd25 Flow state detected! Keep the momentum going!');
+          }
+        }
+      }
+    } else {
+      if (_inFlow) { _inFlow = false; _alertedFlow = false; }
+      _flowStart = null;
+    }
+  }
+
+  function _checkAlerts() {
+    if (_score < 30 && !_alertedLow) {
+      _alertedLow = true;
+      if (typeof ToastManager !== 'undefined') {
+        const nudges = [
+          'Momentum dropping \u2014 try asking a follow-up?',
+          'Getting quiet... want to explore a new angle?',
+          'Pace slowing down. Take a break or dive back in!'
+        ];
+        ToastManager.show('\ud83c\udfc3 ' + nudges[Math.floor(Math.random() * nudges.length)]);
+      }
+    }
+    if (_score > 50) _alertedLow = false;
+  }
+
+  function _drawGauge(canvas) {
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width, h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+    const cx = w / 2, cy = h - 10, r = 80;
+    const startAngle = Math.PI, endAngle = 2 * Math.PI;
+    // Background arc
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, startAngle, endAngle);
+    ctx.strokeStyle = 'rgba(128,128,128,0.3)';
+    ctx.lineWidth = 14;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+    // Score arc
+    const pct = Math.max(0, Math.min(100, _score)) / 100;
+    const scoreAngle = startAngle + pct * Math.PI;
+    const grad = ctx.createLinearGradient(cx - r, cy, cx + r, cy);
+    grad.addColorStop(0, '#f44336');
+    grad.addColorStop(0.5, '#ff9800');
+    grad.addColorStop(1, '#4caf50');
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, startAngle, scoreAngle);
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = 14;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+    // Score text
+    ctx.fillStyle = _inFlow ? '#ff9800' : (document.body.classList.contains('light-theme') ? '#333' : '#eee');
+    ctx.font = 'bold 28px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(Math.round(_score), cx, cy - 20);
+    ctx.font = '12px system-ui, sans-serif';
+    ctx.fillStyle = 'rgba(128,128,128,0.8)';
+    ctx.fillText(_inFlow ? '\ud83d\udd25 FLOW STATE' : 'momentum', cx, cy - 2);
+  }
+
+  function _drawSparkline(canvas) {
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width, h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+    const pts = _history.slice(-60);
+    if (pts.length < 2) return;
+    const step = w / (pts.length - 1);
+    // Fill
+    ctx.beginPath();
+    ctx.moveTo(0, h);
+    pts.forEach((p, i) => ctx.lineTo(i * step, h - (p.score / 100) * (h - 4)));
+    ctx.lineTo((pts.length - 1) * step, h);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(33,150,243,0.15)';
+    ctx.fill();
+    // Line
+    ctx.beginPath();
+    pts.forEach((p, i) => {
+      const x = i * step, y = h - (p.score / 100) * (h - 4);
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.strokeStyle = '#2196F3';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
+  function _render() {
+    _drawGauge(document.getElementById('momentum-gauge'));
+    _drawSparkline(document.getElementById('momentum-sparkline'));
+    // Metrics
+    const metricsEl = document.getElementById('momentum-metrics');
+    if (metricsEl) {
+      const elapsed = Date.now() - _sessionStart;
+      const mins = Math.max(1, elapsed / 60000);
+      const mpm = (_totalMessages / mins).toFixed(1);
+      const activeMin = Math.round(_activeTime / 60000);
+      metricsEl.innerHTML = '<div class="momentum-metric-row">'
+        + '<span class="momentum-metric"><strong>' + _escapeHtml(mpm) + '</strong><br><small>msgs/min</small></span>'
+        + '<span class="momentum-metric"><strong>' + _escapeHtml(String(_totalMessages)) + '</strong><br><small>messages</small></span>'
+        + '<span class="momentum-metric"><strong>' + _escapeHtml(String(activeMin)) + 'm</strong><br><small>active</small></span>'
+        + '</div>';
+    }
+    // Alerts
+    const alertsEl = document.getElementById('momentum-alerts');
+    if (alertsEl) {
+      let html = '';
+      if (_inFlow) html += '<div class="momentum-alert flow">\ud83d\udd25 You\'re in a flow state! Keep going!</div>';
+      else if (_score < 30) html += '<div class="momentum-alert low">\ud83c\udfc3 Momentum is low \u2014 try a follow-up question</div>';
+      else if (_score > 70) html += '<div class="momentum-alert high">\u26a1 Great pace! Productive conversation.</div>';
+      alertsEl.innerHTML = html;
+    }
+    // Summary
+    const sumEl = document.getElementById('momentum-summary');
+    if (sumEl) {
+      sumEl.innerHTML = '<div class="momentum-summary-grid">'
+        + '<span>Peak: <strong>' + _escapeHtml(String(_peakScore)) + '</strong></span>'
+        + '<span>Flow states: <strong>' + _escapeHtml(String(_flowCount)) + '</strong></span>'
+        + '</div>';
+    }
+  }
+
+  function _startObserver() {
+    if (_observer) return;
+    const chatOutput = document.getElementById('chat-output');
+    if (!chatOutput) return;
+    let lastCount = chatOutput.children.length;
+    _observer = new MutationObserver(() => {
+      const newCount = chatOutput.children.length;
+      if (newCount > lastCount) {
+        // Detect role from last added element
+        const last = chatOutput.children[newCount - 1];
+        const text = last ? last.textContent || '' : '';
+        const role = text.startsWith('You:') ? 'user' : 'assistant';
+        _onMessage(role);
+        lastCount = newCount;
+      }
+    });
+    _observer.observe(chatOutput, { childList: true });
+  }
+
+  function show() {
+    _load();
+    const overlay = document.getElementById('momentum-overlay');
+    const panel = document.getElementById('momentum-panel');
+    if (overlay) overlay.style.display = 'block';
+    if (panel) panel.style.display = 'flex';
+    _visible = true;
+    _startObserver();
+    if (!_decayTimer) _decayTimer = setInterval(_decay, 5000);
+    _render();
+  }
+
+  function hide() {
+    const overlay = document.getElementById('momentum-overlay');
+    const panel = document.getElementById('momentum-panel');
+    if (overlay) overlay.style.display = 'none';
+    if (panel) panel.style.display = 'none';
+    _visible = false;
+  }
+
+  function toggle() { _visible ? hide() : show(); }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    // Always observe messages even when panel hidden
+    _startObserver();
+    if (!_decayTimer) _decayTimer = setInterval(_decay, 5000);
+    _load();
+    document.addEventListener('keydown', function (e) {
+      if (e.altKey && e.shiftKey && e.key === 'M') { e.preventDefault(); toggle(); }
+    });
+    if (typeof KeyboardShortcuts !== 'undefined' && KeyboardShortcuts.register) {
+      KeyboardShortcuts.register('Alt+Shift+M', 'Momentum Tracker', toggle);
+    }
+    if (typeof CommandPalette !== 'undefined' && CommandPalette.register) {
+      CommandPalette.register({ name: 'momentum', description: 'Conversation momentum tracker', icon: '\ud83c\udfce\ufe0f', action: toggle });
+    }
+    if (typeof SlashCommands !== 'undefined' && SlashCommands.register) {
+      SlashCommands.register('/momentum', 'Open Momentum Tracker', toggle);
+    }
+  });
+
+  return { toggle: toggle, show: show, hide: hide };
+})();

@@ -4986,3 +4986,20 @@ body.light-theme .enhance-panel .enhance-modes button.active { background: #3b82
 .context-followup-btn { display: block; width: 100%; text-align: left; font-size: 0.8rem; padding: 8px 12px; margin-bottom: 6px; background: var(--bg-tertiary, #252525); border: 1px solid var(--border-color, #333); border-radius: 6px; color: var(--text-primary, #ddd); cursor: pointer; transition: all 0.2s; }
 .context-followup-btn:hover { background: var(--accent-color, #2196F3); color: #fff; border-color: var(--accent-color, #2196F3); }
 .context-empty { color: var(--text-secondary, #666); font-size: 0.8rem; font-style: italic; margin: 4px 0; }
+
+/* Momentum Tracker */
+.momentum-panel { display: none; flex-direction: column; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 340px; max-height: 80vh; background: var(--bg-secondary, #1e1e1e); border: 1px solid var(--border-color, #333); border-radius: 12px; z-index: 10001; box-shadow: 0 8px 32px rgba(0,0,0,0.5); overflow: hidden; }
+.momentum-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--border-color, #333); }
+.momentum-header h3 { margin: 0; font-size: 1rem; color: var(--text-primary, #eee); }
+.momentum-body { padding: 16px; overflow-y: auto; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.momentum-body canvas { display: block; }
+.momentum-metric-row { display: flex; gap: 16px; justify-content: center; }
+.momentum-metric { text-align: center; font-size: 0.85rem; color: var(--text-primary, #ddd); }
+.momentum-metric strong { font-size: 1.2rem; color: var(--accent-color, #2196F3); }
+.momentum-metric small { color: var(--text-secondary, #888); }
+.momentum-alert { padding: 8px 12px; border-radius: 8px; font-size: 0.8rem; width: 100%; box-sizing: border-box; }
+.momentum-alert.flow { background: rgba(255,152,0,0.15); color: #ff9800; border: 1px solid rgba(255,152,0,0.3); }
+.momentum-alert.low { background: rgba(244,67,54,0.12); color: #f44336; border: 1px solid rgba(244,67,54,0.25); }
+.momentum-alert.high { background: rgba(76,175,80,0.12); color: #4caf50; border: 1px solid rgba(76,175,80,0.25); }
+.momentum-summary-grid { display: flex; gap: 20px; font-size: 0.8rem; color: var(--text-secondary, #aaa); }
+.momentum-summary-grid strong { color: var(--text-primary, #ddd); }

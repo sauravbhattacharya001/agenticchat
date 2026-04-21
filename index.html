@@ -78,6 +78,7 @@
     <button id="reader-btn" class="btn-secondary" title="Reader View — expand messages for comfortable reading (Alt+R)" onclick="MessageReaderView.toggle()">📖</button>
     <button id="pomodoro-btn" class="btn-secondary" title="Pomodoro Timer — focus sessions with breaks (Ctrl+Shift+T)" onclick="PomodoroTimer.toggle()">🍅</button>
     <button id="ab-tester-btn" class="btn-secondary" title="A/B Tester — compare two model responses side by side (Ctrl+Shift+B)" onclick="PromptABTester.toggle()">⚖️</button>
+    <button id="momentum-btn" class="btn-secondary" title="Momentum Tracker — monitor conversation pace (Alt+Shift+M)" onclick="ConversationMomentum.toggle()">🏎️</button>
     <button id="context-sidebar-btn" class="btn-secondary" title="Smart Context Sidebar — proactive intelligence (Alt+Shift+I)" onclick="SmartContextSidebar.toggle()">🧩</button>
     <button id="drift-btn" class="btn-secondary" title="Drift Detector — monitor topic coherence & get refocus alerts (Alt+Shift+D)" onclick="ConversationDriftDetector.toggle()">🧭</button>
     <button id="mood-ring-btn" class="btn-secondary" title="Mood Ring — real-time conversation sentiment monitor (Alt+M)" onclick="ConversationMoodRing.toggle()">💍</button>
@@ -620,6 +621,22 @@
         <button id="autopilot-restart" class="btn-secondary">🔄 New Exploration</button>
         <button id="autopilot-export" class="btn-secondary">📥 Export Trail</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Momentum Tracker -->
+  <div id="momentum-overlay" class="modal-overlay" style="display:none" onclick="ConversationMomentum.hide()"></div>
+  <div id="momentum-panel" class="momentum-panel" style="display:none">
+    <div class="momentum-header">
+      <h3>🏎️ Conversation Momentum</h3>
+      <button onclick="ConversationMomentum.hide()" class="btn-sm" title="Close">✕</button>
+    </div>
+    <div class="momentum-body">
+      <canvas id="momentum-gauge" width="200" height="120"></canvas>
+      <div id="momentum-metrics"></div>
+      <canvas id="momentum-sparkline" width="280" height="60"></canvas>
+      <div id="momentum-alerts"></div>
+      <div id="momentum-summary"></div>
     </div>
   </div>
 
