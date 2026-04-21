@@ -26665,12 +26665,20 @@ const ReadabilityAnalyzer = (() => {
 
     const sentences = prose.split(/[.!?]+/).filter(s => s.trim().length > 0);
     const words = prose.split(/\s+/).filter(w => /[a-zA-Z]/.test(w));
-    const wordSet = new Set(words.map(w => w.toLowerCase().replace(/[^a-z]/g, '')));
 
     const numSentences = Math.max(sentences.length, 1);
     const numWords = Math.max(words.length, 1);
-    const totalSyllables = words.reduce((sum, w) => sum + countSyllables(w), 0);
-    const totalChars = words.reduce((sum, w) => sum + w.replace(/[^a-zA-Z]/g, '').length, 0);
+    // Single pass over words: compute syllables, alpha-char count, and unique
+    // lowercase forms in one iteration instead of three separate reduce/map calls.
+    let totalSyllables = 0;
+    let totalChars = 0;
+    const wordSet = new Set();
+    for (let i = 0; i < words.length; i++) {
+      const w = words[i];
+      totalSyllables += countSyllables(w);
+      totalChars += w.replace(/[^a-zA-Z]/g, '').length;
+      wordSet.add(w.toLowerCase().replace(/[^a-z]/g, ''));
+    }
 
     const avgSentLen = numWords / numSentences;
     const avgSyllPerWord = totalSyllables / numWords;
@@ -34573,19 +34581,41 @@ const SmartContextSidebar = (() => {
     return text.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(w => w.length > 3);
   }
 
+  // Cache tokenized forms per message text to avoid re-tokenizing the entire
+  // older-message list on every _render() call.  The sidebar re-renders on
+  // scroll, mutation-observer, and panel toggle — tokenizing every message
+  // each time was O(M*L) where M = messages and L = avg message length.
+  // With caching the cost drops to O(new_messages * L) amortised.
+  var _tokenCache = new Map();
+
   function _findRelatedMessages(messages) {
     if (messages.length < 3) return [];
     const recent = messages.slice(-2);
     const recentTokens = new Set(_tokenize(recent.map(m => m.text).join(' ')));
+    if (recentTokens.size === 0) return [];
     const scored = [];
-    const older = messages.slice(0, -2);
-    older.forEach(msg => {
-      const tokens = _tokenize(msg.text);
+    const olderLen = messages.length - 2;
+    for (let i = 0; i < olderLen; i++) {
+      const msg = messages[i];
+      let tokens = _tokenCache.get(msg.text);
+      if (!tokens) {
+        tokens = _tokenize(msg.text);
+        _tokenCache.set(msg.text, tokens);
+      }
       let overlap = 0;
-      tokens.forEach(t => { if (recentTokens.has(t)) overlap++; });
+      for (let j = 0; j < tokens.length; j++) {
+        if (recentTokens.has(tokens[j])) overlap++;
+      }
       const score = tokens.length > 0 ? overlap / Math.sqrt(tokens.length) : 0;
       if (score > 0.5) scored.push({ msg: msg, score: score });
-    });
+    }
+    // Evict stale entries when cache grows too large
+    if (_tokenCache.size > 500) {
+      const keep = new Set(messages.map(m => m.text));
+      for (const key of _tokenCache.keys()) {
+        if (!keep.has(key)) _tokenCache.delete(key);
+      }
+    }
     scored.sort((a, b) => b.score - a.score);
     return scored.slice(0, 5);
   }
