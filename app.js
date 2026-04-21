@@ -10035,9 +10035,7 @@ const ConversationSummarizer = (() => {
 
   function getMessages() {
     if (typeof ConversationManager !== 'undefined') {
-      return ConversationManager.getMessages().filter(function(m) {
-        return m.role !== 'system';
-      });
+      return ConversationManager.getUserMessages();
     }
     return [];
   }
@@ -14892,7 +14890,7 @@ const ConversationReplay = (() => {
   // ── Public API ──
 
   function start() {
-    messages = ConversationManager.getMessages().filter(function(m) { return m.role !== 'system'; });
+    messages = ConversationManager.getUserMessages();
     if (messages.length === 0) {
       if (typeof UIController !== 'undefined') {
         UIController.setChatOutput('No messages to replay.');
@@ -19266,7 +19264,7 @@ const ConversationSentiment = (() => {
    */
   function analyse(messages) {
     const msgs = messages || (typeof ConversationManager !== 'undefined'
-      ? ConversationManager.getHistory().filter(m => m.role !== 'system')
+      ? ConversationManager.getUserMessages()
       : []);
 
     const scores = msgs.map(m => scoreMessage(m.content || ''));
@@ -26702,7 +26700,7 @@ const ReadabilityAnalyzer = (() => {
   /* ── Analysis across messages ─────────────────────────────── */
   function analyzeConversation() {
     const msgs = typeof ConversationManager !== 'undefined'
-      ? ConversationManager.getHistory().filter(m => m.role !== 'system')
+      ? ConversationManager.getUserMessages()
       : [];
 
     const userMsgs = msgs.filter(m => m.role === 'user');
@@ -29559,8 +29557,8 @@ const ConversationShareLink = (() => {
 
   /* ── Get conversation messages ─────────────────────────── */
   function _getMessages() {
-    if (typeof ConversationManager !== 'undefined' && ConversationManager.getHistory) {
-      return ConversationManager.getHistory().filter(m => m.role !== 'system');
+    if (typeof ConversationManager !== 'undefined' && ConversationManager.getUserMessages) {
+      return ConversationManager.getUserMessages();
     }
     return [];
   }
@@ -32296,7 +32294,7 @@ const ConversationScreenshot = (() => {
 
   function _getMessages() {
     if (typeof ConversationManager === 'undefined') return [];
-    return ConversationManager.getHistory().filter(m => m.role !== 'system');
+    return ConversationManager.getUserMessages();
   }
 
   function _wrapText(ctx, text, maxWidth) {
@@ -32652,9 +32650,7 @@ const PromptEnhancer = (() => {
   }
 
   function _escHtml(str) {
-    var d = document.createElement('div');
-    d.textContent = str;
-    return d.innerHTML;
+    return _escapeHtml(str);
   }
 
   function _simpleDiff(a, b) {
@@ -32801,7 +32797,7 @@ var ConversationAutopilot = (function () {
   var MIN_STEP_INTERVAL_MS = 5000; // minimum 5s between API calls
   var _lastApiCallTime = 0;
 
-  function _esc(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+  function _esc(s) { return _escapeHtml(s); }
 
   function _getConversation() {
     var msgs = [];
@@ -33419,9 +33415,7 @@ var ConversationMoodRing = (function () {
   }
 
   function _esc(s) {
-    var d = document.createElement('div');
-    d.textContent = s;
-    return d.innerHTML;
+    return _escapeHtml(s);
   }
 
   function _render() {
