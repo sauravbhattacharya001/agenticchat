@@ -33588,6 +33588,11 @@ const ConversationDriftDetector = (() => {
   var _dismissed = {}; // sessionId -> last dismissed drift score
   var _autoAlertEnabled = true;
 
+  // Cache anchor TF-IDF vector + topics — the first N messages never change
+  // once established, so tokenizing + computing term frequencies every
+  // analyze() call was pure waste.
+  var _anchorCache = { key: '', tf: null, topics: null };
+
   // Delegate NLP utilities to shared TextAnalytics module
   var _tokenize = TextAnalytics.tokenize;
   var _termFreq = TextAnalytics.termFreq;
@@ -33617,11 +33622,20 @@ const ConversationDriftDetector = (() => {
       return { status: 'insufficient', similarity: 1, anchorTopics: [], recentTopics: [], messages: msgs.length, driftPoints: [] };
     }
 
-    // Anchor = first N messages
+    // Anchor = first N messages — content is immutable once established,
+    // so cache the TF vector and topics keyed on the concatenated text.
     var anchorMsgs = msgs.slice(0, _anchorSize);
-    var anchorText = anchorMsgs.map(function(m) { return m.content || ''; }).join(' ');
-    var anchorTf = _termFreq(_tokenize(anchorText));
-    var anchorTopics = _extractTopics(anchorMsgs);
+    var anchorKey = anchorMsgs.map(function(m) { return m.content || ''; }).join('\x00');
+    var anchorTf, anchorTopics;
+    if (_anchorCache.key === anchorKey) {
+      anchorTf = _anchorCache.tf;
+      anchorTopics = _anchorCache.topics;
+    } else {
+      var anchorText = anchorMsgs.map(function(m) { return m.content || ''; }).join(' ');
+      anchorTf = _termFreq(_tokenize(anchorText));
+      anchorTopics = _extractTopics(anchorMsgs);
+      _anchorCache = { key: anchorKey, tf: anchorTf, topics: anchorTopics };
+    }
 
     // Recent window
     var recentMsgs = msgs.slice(-_windowSize);
@@ -34665,7 +34679,7 @@ const SmartContextSidebar = (() => {
   // concatenated ALL message text and ran 5 regex passes over it plus a
   // separate stats pass — O(M*L) work on every mutation even if only the
   // last message grew by a few characters.
-  var _renderCache = { msgCount: -1, lastText: '', entities: null, stats: null };
+  var _renderCache = { msgCount: -1, lastText: '', entities: null, stats: null, related: null, followups: null };
 
   function _render() {
     if (!_panel) return;
@@ -34686,10 +34700,12 @@ const SmartContextSidebar = (() => {
       _renderCache.lastText = lastText;
       _renderCache.entities = entities;
       _renderCache.stats = stats;
+      _renderCache.related = _findRelatedMessages(messages);
+      _renderCache.followups = _getFollowups(messages);
     }
 
-    const related = _findRelatedMessages(messages);
-    const followups = _getFollowups(messages);
+    const related = _renderCache.related;
+    const followups = _renderCache.followups;
 
     let html = '<div class="context-sidebar-header"><h3>\ud83e\udde9 Smart Context</h3><button class="context-close-btn" onclick="SmartContextSidebar.hide()">\u2715</button></div>';
 
