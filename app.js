@@ -701,6 +701,30 @@ function _escapeHtml(str) {
   return String(str).replace(_HTML_ESCAPE_RE, ch => _HTML_ESCAPE_MAP[ch]);
 }
 
+/* ---------- Shared Overlay Factory ---------- */
+/**
+ * Create a modal overlay + panel pair with click-outside-to-close.
+ *
+ * Returns { overlay, panel } where:
+ *   - `overlay` has `overlayClass` and a click listener that calls `closeFn`
+ *     when the click target is the overlay itself (not the panel).
+ *   - `panel` is a child div with `panelClass`, already appended to overlay.
+ *   - overlay is appended to document.body.
+ *
+ * Used by TextExpander, PreferencePanel, ShareOverlay, and others that
+ * share the same overlay+panel+click-to-close boilerplate.
+ */
+function _makeOverlayPair(overlayClass, panelClass, closeFn) {
+  const overlay = document.createElement('div');
+  overlay.className = overlayClass;
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) closeFn(); });
+  const panel = document.createElement('div');
+  panel.className = panelClass;
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+  return { overlay, panel };
+}
+
 /* ---------- Shared Stop Words ---------- */
 /**
  * Common English stop words shared across modules that perform text analysis
@@ -23948,13 +23972,9 @@ const TextExpander = (() => {
   }
 
   function _createOverlay() {
-    _overlay = document.createElement('div');
-    _overlay.className = 'te-overlay';
-    _overlay.addEventListener('click', (e) => { if (e.target === _overlay) close(); });
-    _panel = document.createElement('div');
-    _panel.className = 'te-panel';
-    _overlay.appendChild(_panel);
-    document.body.appendChild(_overlay);
+    const pair = _makeOverlayPair('te-overlay', 'te-panel', close);
+    _overlay = pair.overlay;
+    _panel = pair.panel;
   }
 
   /* --- Init --- */
@@ -24161,13 +24181,9 @@ const PreferencesPanel = (() => {
   }
 
   function _createOverlay() {
-    _overlay = document.createElement('div');
-    _overlay.className = 'pref-overlay';
-    _overlay.addEventListener('click', (e) => { if (e.target === _overlay) close(); });
-    _panel = document.createElement('div');
-    _panel.className = 'pref-panel';
-    _overlay.appendChild(_panel);
-    document.body.appendChild(_overlay);
+    const pair = _makeOverlayPair('pref-overlay', 'pref-panel', close);
+    _overlay = pair.overlay;
+    _panel = pair.panel;
   }
 
   function toggle() { _isOpen ? close() : open(); }
@@ -29691,12 +29707,9 @@ const ConversationShareLink = (() => {
     // Select all by default
     _selected = new Set(messages.map((_, i) => i));
 
-    _overlay = document.createElement('div');
-    _overlay.className = 'share-overlay';
-    _overlay.addEventListener('click', e => { if (e.target === _overlay) close(); });
-
-    _panel = document.createElement('div');
-    _panel.className = 'share-panel';
+    const pair = _makeOverlayPair('share-overlay', 'share-panel', close);
+    _overlay = pair.overlay;
+    _panel = pair.panel;
 
     // Header
     const header = document.createElement('div');
