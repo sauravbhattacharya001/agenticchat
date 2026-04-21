@@ -101,6 +101,7 @@
  *   PromptEnhancer       - AI-powered prompt improvement with 5 enhancement modes (Alt+E)
  *   ConversationMoodRing - real-time sentiment monitor with mood shifts, alerts, suggestions (Alt+M)
  *   SmartModelAdvisor   - proactive model recommendation based on task analysis with one-click switching (Alt+Shift+A)
+ *   SmartSessionPrioritizer - autonomous session priority scoring with urgency/action-item detection, priority queue dashboard (Alt+Shift+P)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -35126,4 +35127,241 @@ const ConversationMomentum = (() => {
   });
 
   return { toggle: toggle, show: show, hide: hide };
+})();
+
+/* ================================================================
+ * SmartSessionPrioritizer  -  Autonomous Session Priority Scoring
+ *
+ * Scans all saved sessions and ranks them by importance based on
+ * unresolved questions, action items, urgency signals, recency,
+ * and staleness.  Dashboard overlay with priority queue, filters,
+ * and click-to-switch.  Toggle: Alt+Shift+P
+ *
+ * @namespace SmartSessionPrioritizer
+ * ================================================================ */
+const SmartSessionPrioritizer = (function () {
+  'use strict';
+
+  const STORAGE_KEY = 'agenticchat_session_priorities';
+  const SESSION_KEY = 'agenticchat_sessions';
+
+  // ── Scoring weights ──
+  const W = {
+    unresolvedQ:  30,
+    actionItem:   25,
+    urgency:      20,
+    recencyBase:  15,
+    lengthBonus:   5,
+    stalenessPen: -10
+  };
+
+  const URGENCY_RE = /\b(urgent|asap|deadline|important|critical|immediately|time.?sensitive|high.?priority)\b/i;
+  const ACTION_RE  = /\b(todo|action item|next step|follow.?up|deliverable|must do|need to|should do|don'?t forget)\b/i;
+  const QUESTION_RE = /\?[\s]*$/;
+
+  let _visible = false;
+  let _scores = {};
+  let _filter = 'all'; // all | critical | medium | low
+  let _autoScan = false;
+  let _autoTimer = null;
+
+  // ── Helpers ──
+  function _allSessions() {
+    try {
+      const raw = (typeof SafeStorage !== 'undefined' ? SafeStorage.get(SESSION_KEY) : localStorage.getItem(SESSION_KEY));
+      return JSON.parse(raw || '[]');
+    } catch { return []; }
+  }
+
+  function _save() {
+    try {
+      const s = typeof SafeStorage !== 'undefined' ? SafeStorage : localStorage;
+      s.setItem ? s.setItem(STORAGE_KEY, JSON.stringify(_scores)) : (SafeStorage.set && SafeStorage.set(STORAGE_KEY, JSON.stringify(_scores)));
+    } catch {}
+  }
+
+  function _load() {
+    try {
+      const s = typeof SafeStorage !== 'undefined' ? SafeStorage.get(STORAGE_KEY) : localStorage.getItem(STORAGE_KEY);
+      _scores = JSON.parse(s || '{}');
+    } catch { _scores = {}; }
+  }
+
+  // ── Analysis ──
+  function _analyseSession(session) {
+    const msgs = session.messages || session.history || [];
+    let unresolvedQs = 0;
+    let actionItems = 0;
+    let urgencyHits = 0;
+    const reasons = [];
+
+    for (let i = 0; i < msgs.length; i++) {
+      const m = msgs[i];
+      const content = (m.content || m.text || '').toString();
+      const role = (m.role || '').toLowerCase();
+
+      // Unresolved questions: user question not followed by assistant
+      if (role === 'user' && /\?/.test(content)) {
+        const next = msgs[i + 1];
+        if (!next || (next.role || '').toLowerCase() !== 'assistant') unresolvedQs++;
+      }
+
+      if (ACTION_RE.test(content)) actionItems++;
+      if (URGENCY_RE.test(content)) urgencyHits++;
+    }
+
+    // Recency
+    const ts = session.updatedAt || session.createdAt || session.savedAt || 0;
+    const ageHours = (Date.now() - new Date(ts).getTime()) / 3600000;
+    const recencyScore = Math.max(0, W.recencyBase * Math.exp(-ageHours / 168)); // decay over ~1 week
+
+    // Staleness
+    const staleDays = ageHours / 24;
+    const stalenessPen = staleDays > 7 ? W.stalenessPen * Math.min(staleDays / 7, 3) : 0;
+
+    // Length bonus (log scale)
+    const lengthBonus = Math.min(W.lengthBonus * Math.log2(Math.max(msgs.length, 1) + 1), 20);
+
+    let score = 0;
+    score += unresolvedQs * W.unresolvedQ;
+    score += actionItems * W.actionItem;
+    score += urgencyHits * W.urgency;
+    score += recencyScore;
+    score += lengthBonus;
+    score += stalenessPen;
+    score = Math.max(0, Math.round(score));
+
+    if (unresolvedQs > 0) reasons.push(unresolvedQs + ' unresolved question' + (unresolvedQs > 1 ? 's' : ''));
+    if (actionItems > 0) reasons.push(actionItems + ' action item' + (actionItems > 1 ? 's' : ''));
+    if (urgencyHits > 0) reasons.push('urgency detected');
+    if (staleDays > 7) reasons.push('stale (' + Math.round(staleDays) + 'd)');
+    if (reasons.length === 0) reasons.push('normal');
+
+    const level = score >= 60 ? 'critical' : score >= 25 ? 'medium' : 'low';
+
+    return { id: session.id, name: session.name || session.title || 'Untitled', score: score, level: level, reasons: reasons, updatedAt: ts };
+  }
+
+  function scan() {
+    _load();
+    const sessions = _allSessions();
+    const results = sessions.map(_analyseSession).sort(function (a, b) { return b.score - a.score; });
+    _scores = {};
+    results.forEach(function (r) { _scores[r.id] = r; });
+    _save();
+    return results;
+  }
+
+  // ── UI ──
+  function _ensureDOM() {
+    if (document.getElementById('prioritizer-overlay')) return;
+
+    var ov = document.createElement('div');
+    ov.id = 'prioritizer-overlay';
+    ov.addEventListener('click', hide);
+
+    var panel = document.createElement('div');
+    panel.id = 'prioritizer-panel';
+    panel.addEventListener('click', function (e) { e.stopPropagation(); });
+
+    panel.innerHTML =
+      '<div class="prioritizer-header">' +
+        '<h2>\u2691 Session Prioritizer</h2>' +
+        '<div class="prioritizer-controls">' +
+          '<label class="prioritizer-auto-label"><input type="checkbox" id="prioritizer-auto-toggle"> Auto-scan</label>' +
+          '<select id="prioritizer-filter">' +
+            '<option value="all">All</option>' +
+            '<option value="critical">\ud83d\udd34 Critical</option>' +
+            '<option value="medium">\ud83d\udfe1 Medium</option>' +
+            '<option value="low">\ud83d\udfe2 Low</option>' +
+          '</select>' +
+          '<button id="prioritizer-scan-btn" title="Rescan">\ud83d\udd04 Scan</button>' +
+          '<button id="prioritizer-close-btn" title="Close">\u2715</button>' +
+        '</div>' +
+      '</div>' +
+      '<div id="prioritizer-list"></div>';
+
+    ov.appendChild(panel);
+    document.body.appendChild(ov);
+
+    document.getElementById('prioritizer-close-btn').addEventListener('click', hide);
+    document.getElementById('prioritizer-scan-btn').addEventListener('click', function () { scan(); _render(); });
+    document.getElementById('prioritizer-filter').addEventListener('change', function (e) { _filter = e.target.value; _render(); });
+    document.getElementById('prioritizer-auto-toggle').addEventListener('change', function (e) {
+      _autoScan = e.target.checked;
+      if (_autoScan && !_autoTimer) _autoTimer = setInterval(function () { scan(); if (_visible) _render(); }, 60000);
+      if (!_autoScan && _autoTimer) { clearInterval(_autoTimer); _autoTimer = null; }
+    });
+  }
+
+  function _render() {
+    var list = document.getElementById('prioritizer-list');
+    if (!list) return;
+    var items = Object.values(_scores);
+    if (_filter !== 'all') items = items.filter(function (i) { return i.level === _filter; });
+    items.sort(function (a, b) { return b.score - a.score; });
+
+    if (items.length === 0) {
+      list.innerHTML = '<div class="prioritizer-empty">No sessions match the filter.</div>';
+      return;
+    }
+
+    var badge = { critical: '\ud83d\udd34', medium: '\ud83d\udfe1', low: '\ud83d\udfe2' };
+    var html = '';
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i];
+      var tags = it.reasons.map(function (r) { return '<span class="priority-tag">' + r + '</span>'; }).join('');
+      html += '<div class="prioritizer-item" data-sid="' + it.id + '">' +
+        '<span class="priority-badge ' + it.level + '">' + badge[it.level] + ' ' + it.score + '</span>' +
+        '<span class="prioritizer-name">' + (it.name || 'Untitled').replace(/</g, '&lt;') + '</span>' +
+        '<span class="prioritizer-tags">' + tags + '</span>' +
+      '</div>';
+    }
+    list.innerHTML = html;
+
+    list.querySelectorAll('.prioritizer-item').forEach(function (el) {
+      el.addEventListener('click', function () {
+        var sid = el.getAttribute('data-sid');
+        if (typeof SessionManager !== 'undefined' && SessionManager.load) SessionManager.load(sid);
+        hide();
+      });
+    });
+  }
+
+  function show() {
+    _ensureDOM();
+    scan();
+    _render();
+    document.getElementById('prioritizer-overlay').style.display = 'block';
+    document.getElementById('prioritizer-panel').style.display = 'flex';
+    _visible = true;
+  }
+
+  function hide() {
+    var ov = document.getElementById('prioritizer-overlay');
+    var pn = document.getElementById('prioritizer-panel');
+    if (ov) ov.style.display = 'none';
+    if (pn) pn.style.display = 'none';
+    _visible = false;
+  }
+
+  function toggle() { _visible ? hide() : show(); }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    _load();
+    document.addEventListener('keydown', function (e) {
+      if (e.altKey && e.shiftKey && e.key === 'P') { e.preventDefault(); toggle(); }
+    });
+    if (typeof KeyboardShortcuts !== 'undefined' && KeyboardShortcuts.register) {
+      KeyboardShortcuts.register('Alt+Shift+P', 'Session Prioritizer', toggle);
+    }
+    if (typeof CommandPalette !== 'undefined' && CommandPalette.register) {
+      CommandPalette.register({ name: 'prioritizer', description: 'Smart Session Prioritizer', icon: '\u2691', action: toggle });
+    }
+    if (typeof SlashCommands !== 'undefined' && SlashCommands.register) {
+      SlashCommands.register('/prioritizer', 'Open Session Prioritizer', toggle);
+    }
+  });
+
+  return { toggle: toggle, show: show, hide: hide, scan: scan };
 })();

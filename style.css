@@ -5003,3 +5003,24 @@ body.light-theme .enhance-panel .enhance-modes button.active { background: #3b82
 .momentum-alert.high { background: rgba(76,175,80,0.12); color: #4caf50; border: 1px solid rgba(76,175,80,0.25); }
 .momentum-summary-grid { display: flex; gap: 20px; font-size: 0.8rem; color: var(--text-secondary, #aaa); }
 .momentum-summary-grid strong { color: var(--text-primary, #ddd); }
+
+/* ── Smart Session Prioritizer ── */
+#prioritizer-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:11000;display:none;justify-content:center;align-items:center}
+#prioritizer-panel{display:none;flex-direction:column;width:540px;max-width:95vw;max-height:80vh;background:var(--bg-primary,#1e1e2e);border:1px solid var(--border-color,#333);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.45);color:var(--text-primary,#e0e0e0);overflow:hidden;z-index:11001}
+.prioritizer-header{display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid var(--border-color,#333)}
+.prioritizer-header h2{margin:0;font-size:1.1rem;font-weight:600}
+.prioritizer-controls{display:flex;gap:8px;align-items:center}
+.prioritizer-controls button,.prioritizer-controls select{background:var(--bg-secondary,#2a2a3c);color:var(--text-primary,#ccc);border:1px solid var(--border-color,#444);border-radius:6px;padding:4px 10px;cursor:pointer;font-size:.82rem}
+.prioritizer-controls button:hover{background:var(--bg-hover,#3a3a50)}
+.prioritizer-auto-label{font-size:.8rem;display:flex;align-items:center;gap:4px;cursor:pointer}
+#prioritizer-list{overflow-y:auto;padding:10px 14px;flex:1}
+.prioritizer-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;cursor:pointer;transition:background .15s}
+.prioritizer-item:hover{background:var(--bg-hover,#2f2f45)}
+.priority-badge{font-size:.85rem;font-weight:700;min-width:60px;text-align:center}
+.priority-badge.critical{color:#ff5555}
+.priority-badge.medium{color:#f0c040}
+.priority-badge.low{color:#50e050}
+.prioritizer-name{flex:1;font-size:.92rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.prioritizer-tags{display:flex;flex-wrap:wrap;gap:4px}
+.priority-tag{font-size:.7rem;padding:2px 7px;border-radius:10px;background:var(--bg-secondary,#2a2a3c);color:var(--text-secondary,#aaa)}
+.prioritizer-empty{text-align:center;padding:32px;color:var(--text-secondary,#888);font-style:italic}
