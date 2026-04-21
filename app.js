@@ -34659,14 +34659,37 @@ const SmartContextSidebar = (() => {
     return typeof _escapeHtml === 'function' ? _escapeHtml(s) : s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
 
+  // Cache expensive entity extraction and stats so _render() (called on
+  // every MutationObserver fire ~300ms during active chat) only recomputes
+  // when the message list actually changes.  Previously, each render
+  // concatenated ALL message text and ran 5 regex passes over it plus a
+  // separate stats pass — O(M*L) work on every mutation even if only the
+  // last message grew by a few characters.
+  var _renderCache = { msgCount: -1, lastText: '', entities: null, stats: null };
+
   function _render() {
     if (!_panel) return;
     const messages = _getMessages();
-    const allText = messages.map(m => m.text).join('\n');
-    const entities = _extractEntities(allText);
+
+    // Recompute entities + stats only when message count changes or the
+    // last message text changed (covers streaming growth).
+    var lastText = messages.length > 0 ? messages[messages.length - 1].text : '';
+    var entities, stats;
+    if (messages.length === _renderCache.msgCount && lastText === _renderCache.lastText) {
+      entities = _renderCache.entities;
+      stats = _renderCache.stats;
+    } else {
+      var allText = messages.map(m => m.text).join('\n');
+      entities = _extractEntities(allText);
+      stats = _getStats(messages);
+      _renderCache.msgCount = messages.length;
+      _renderCache.lastText = lastText;
+      _renderCache.entities = entities;
+      _renderCache.stats = stats;
+    }
+
     const related = _findRelatedMessages(messages);
     const followups = _getFollowups(messages);
-    const stats = _getStats(messages);
 
     let html = '<div class="context-sidebar-header"><h3>\ud83e\udde9 Smart Context</h3><button class="context-close-btn" onclick="SmartContextSidebar.hide()">\u2715</button></div>';
 
