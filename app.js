@@ -34180,6 +34180,16 @@ const SmartModelAdvisor = (function () {
     }
   };
 
+  // Pre-compile gi-flagged pattern variants once at module init
+  // to avoid reconstructing RegExp objects on every _analyzeContent call.
+  var _giPatterns = {};
+  for (var _tp in TASK_PROFILES) {
+    if (!TASK_PROFILES.hasOwnProperty(_tp)) continue;
+    _giPatterns[_tp] = TASK_PROFILES[_tp].patterns.map(function(p) {
+      return new RegExp(p.source, 'gi');
+    });
+  }
+
   var _panel = null;
   var _banner = null;
   var _visible = false;
@@ -34220,8 +34230,10 @@ const SmartModelAdvisor = (function () {
       if (!TASK_PROFILES.hasOwnProperty(task)) continue;
       var profile = TASK_PROFILES[task];
       var score = 0;
-      for (var i = 0; i < profile.patterns.length; i++) {
-        var matches = text.match(new RegExp(profile.patterns[i].source, 'gi'));
+      var giPats = _giPatterns[task];
+      for (var i = 0; i < giPats.length; i++) {
+        giPats[i].lastIndex = 0;
+        var matches = text.match(giPats[i]);
         if (matches) score += matches.length;
       }
       score *= profile.weight;
