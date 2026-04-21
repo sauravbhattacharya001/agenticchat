@@ -10158,8 +10158,10 @@ const ConversationSummarizer = (() => {
   function extractDecisions(messages) {
     var decisions = [];
     for (var i = 0; i < messages.length; i++) {
-      var sentences = (messages[i].content || '')
-        .replace(/```[\s\S]*?```/g, '')
+      // Use pre-stripped content (code blocks already removed by
+      // _preStripCodeBlocks in generateSummary) to avoid redundant
+      // regex work over all messages.
+      var sentences = (messages[i]._stripped || messages[i].content || '')
         .split(/[.!]\s+|\n/);
       for (var s = 0; s < sentences.length; s++) {
         var sent = sentences[s].trim();
@@ -10186,8 +10188,10 @@ const ConversationSummarizer = (() => {
   function extractActionItems(messages) {
     var items = [];
     for (var i = 0; i < messages.length; i++) {
-      var lines = (messages[i].content || '')
-        .replace(/```[\s\S]*?```/g, '')
+      // Use pre-stripped content (code blocks already removed by
+      // _preStripCodeBlocks in generateSummary) to avoid redundant
+      // regex work.
+      var lines = (messages[i]._stripped || messages[i].content || '')
         .split('\n');
       for (var j = 0; j < lines.length; j++) {
         var line = lines[j].trim();
@@ -10279,6 +10283,21 @@ const ConversationSummarizer = (() => {
 
   // ── Core: Generate Summary ──
 
+  /**
+   * Strip code blocks from message content once.
+   * Both extractDecisions and extractActionItems previously did this
+   * independently — doubling the regex work over all messages.
+   * @param {Array} messages - Conversation messages.
+   * @returns {Array} Messages augmented with ._stripped (code-block-free text).
+   */
+  function _preStripCodeBlocks(messages) {
+    for (var i = 0; i < messages.length; i++) {
+      var content = messages[i].content || '';
+      messages[i]._stripped = content.replace(/```[\s\S]*?```/g, '');
+    }
+    return messages;
+  }
+
   function generateSummary() {
     var messages = getMessages();
     if (messages.length === 0) {
@@ -10287,6 +10306,11 @@ const ConversationSummarizer = (() => {
     }
 
     var allText = messages.map(function(m) { return m.content || ''; }).join(' ');
+
+    // Pre-strip code blocks once instead of redundantly in each
+    // extraction function (extractDecisions + extractActionItems
+    // both applied the same code-block regex per message).
+    _preStripCodeBlocks(messages);
 
     lastSummary = {
       generatedAt: Date.now(),
