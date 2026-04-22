@@ -28070,7 +28070,45 @@ const WordCloudGenerator = (() => {
     const minSize = 12, maxSize = 56;
     const colors = ['#FF6B6B','#4ECDC4','#45B7D1','#96CEB4','#FFEAA7','#DDA0DD','#98D8C8','#F7DC6F','#BB8FCE','#85C1E9','#F0B27A','#82E0AA'];
     const isDark = !document.body.classList.contains('light');
-    const placed = [];
+    // Spatial grid for O(1) amortised collision detection instead of
+    // O(placed) linear scan per candidate position.  Each cell is 64px;
+    // only cells overlapping a candidate rectangle are checked.
+    const CELL = 64;
+    const gridCols = Math.ceil(canvas.width / CELL);
+    const gridRows = Math.ceil(canvas.height / CELL);
+    const grid = Array.from({ length: gridRows * gridCols }, () => []);
+
+    function _gridInsert(rect) {
+      const c0 = Math.max(0, (rect.x / CELL) | 0);
+      const c1 = Math.min(gridCols - 1, ((rect.x + rect.w) / CELL) | 0);
+      const r0 = Math.max(0, ((rect.y - rect.h) / CELL) | 0);
+      const r1 = Math.min(gridRows - 1, (rect.y / CELL) | 0);
+      for (let r = r0; r <= r1; r++) {
+        for (let c = c0; c <= c1; c++) {
+          grid[r * gridCols + c].push(rect);
+        }
+      }
+    }
+
+    function _gridOverlaps(x, y, w, h) {
+      const c0 = Math.max(0, (x / CELL) | 0);
+      const c1 = Math.min(gridCols - 1, ((x + w) / CELL) | 0);
+      const r0 = Math.max(0, ((y - h) / CELL) | 0);
+      const r1 = Math.min(gridRows - 1, (y / CELL) | 0);
+      const seen = new Set();
+      for (let r = r0; r <= r1; r++) {
+        for (let c = c0; c <= c1; c++) {
+          const bucket = grid[r * gridCols + c];
+          for (let i = 0; i < bucket.length; i++) {
+            const p = bucket[i];
+            if (seen.has(p)) continue;
+            seen.add(p);
+            if (!(x + w < p.x || x > p.x + p.w || y - h > p.y || y < p.y - p.h)) return true;
+          }
+        }
+      }
+      return false;
+    }
 
     words.forEach(([word, freq], idx) => {
       const size = Math.max(minSize, Math.round((freq / maxFreq) * maxSize));
@@ -28082,15 +28120,14 @@ const WordCloudGenerator = (() => {
 
       let bestX = canvas.width / 2, bestY = canvas.height / 2;
       let foundSpot = false;
-      // Spiral placement
+      // Spiral placement with spatial-grid collision detection
       for (let r = 0; r < 300 && !foundSpot; r += 2) {
         for (let a = 0; a < 360 && !foundSpot; a += 15) {
           const rad = (a * Math.PI) / 180;
           const x = canvas.width / 2 + r * Math.cos(rad) - w / 2;
           const y = canvas.height / 2 + r * Math.sin(rad) + h / 4;
           if (x < 5 || y < 5 || x + w > canvas.width - 5 || y > canvas.height - 5 || y - h < 0) continue;
-          const overlap = placed.some(p => !(x + w < p.x || x > p.x + p.w || y - h > p.y || y < p.y - p.h));
-          if (!overlap) {
+          if (!_gridOverlaps(x, y, w, h)) {
             bestX = x; bestY = y; foundSpot = true;
           }
         }
@@ -28099,7 +28136,8 @@ const WordCloudGenerator = (() => {
         ctx.fillStyle = color;
         ctx.font = `bold ${size}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
         ctx.fillText(word, bestX, bestY);
-        placed.push({ x: bestX, y: bestY, w, h });
+        const rect = { x: bestX, y: bestY, w, h };
+        _gridInsert(rect);
       }
     });
   }
