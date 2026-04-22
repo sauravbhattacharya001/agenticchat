@@ -5090,3 +5090,18 @@ body.light-theme .enhance-panel .enhance-modes button.active { background: #3b82
 .coach-dash-tips ul{margin:0;padding-left:20px;font-size:13px}
 .coach-dash-tips li{margin:4px 0}
 .coach-toggle-label{font-size:13px;display:flex;align-items:center;gap:8px;cursor:pointer;opacity:.8}
+
+/* ---- Smart Knowledge Map ---- */
+.skm-panel{position:fixed;top:0;right:-520px;width:500px;height:100vh;background:#1a1a1a;border-left:1px solid #333;z-index:10001;transition:right .3s ease;display:flex;flex-direction:column;box-shadow:-4px 0 20px rgba(0,0,0,.5)}
+.skm-panel.visible{right:0}
+.skm-header{display:flex;align-items:center;padding:12px 16px;border-bottom:1px solid #333;font-size:15px;font-weight:600;color:#e0e0e0}
+.skm-header .skm-close{margin-left:auto;background:none;border:none;color:#888;font-size:18px;cursor:pointer;padding:4px 8px}
+.skm-header .skm-close:hover{color:#fff}
+.skm-tabs{display:flex;border-bottom:1px solid #333}
+.skm-tab{flex:1;padding:8px;background:none;border:none;color:#888;cursor:pointer;font-size:12px;border-bottom:2px solid transparent;transition:all .2s}
+.skm-tab.active{color:#e0e0e0;border-bottom-color:#4a90d9}
+.skm-tab:hover{color:#bbb}
+.skm-tab-content{flex:1}
+#skm-canvas{display:block;width:100%;background:#111;cursor:grab}
+#skm-canvas:active{cursor:grabbing}
+.skm-legend{padding:8px 12px;font-size:10px;border-top:1px solid #333;display:flex;gap:12px;justify-content:center;color:#888}

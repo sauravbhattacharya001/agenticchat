@@ -36170,3 +36170,505 @@ const ConversationCoach = (() => {
 
   return { toggle: toggle, show: show, hide: hide, setEnabled: setEnabled };
 })();
+
+
+/* ============================================================
+ * SmartKnowledgeMap (Alt+Shift+K)
+ *
+ * Autonomous knowledge graph that extracts entities, concepts, and
+ * relationships from conversation messages and renders them as an
+ * interactive force-directed Canvas graph.
+ *
+ * Entity extraction is fully heuristic (no API calls):
+ *   - Capitalised multi-word phrases (proper nouns)
+ *   - Code/tech terms (backtick, camelCase, PascalCase, UPPER_CASE)
+ *   - Quoted terms
+ *   - Frequent non-stopword terms (via TextAnalytics if available)
+ *   - Co-occurrence within same message creates relationship edges
+ *
+ * Toggle: Alt+Shift+K | Slash: /knowledgemap | Command Palette
+ * ============================================================ */
+const SmartKnowledgeMap = (function () {
+  'use strict';
+
+  /* ---------- state ---------- */
+  var nodes = [];      // { id, label, category, count, x, y, vx, vy }
+  var edges = [];      // { source, target, label, weight }
+  var nodeMap = {};    // label(lower) -> node
+  var edgeMap = {};    // 'a|b' -> edge
+  var visible = false;
+  var canvas, ctx, panel;
+  var width = 480, height = 400;
+  var animId = null;
+  var dragging = null, dragOff = { x: 0, y: 0 };
+  var camX = 0, camY = 0, zoom = 1;
+  var selectedNode = null;
+  var searchTerm = '';
+  var activeTab = 'graph';
+  var storageKey = 'skm_graph';
+  var cooldown = 1;
+
+  /* ---------- categories ---------- */
+  var COLORS = { person: '#4a90d9', tech: '#27ae60', concept: '#8e44ad', action: '#e67e22', unknown: '#7f8c8d' };
+  var CATEGORY_PATTERNS = {
+    tech: /^(api|sdk|html|css|js|sql|llm|ai|ml|gpt|react|vue|node|python|java|docker|git|aws|http|json|xml|yaml|cli|npm|pip|rust|go|swift|kotlin|typescript|flutter|dart|redis|mongo|postgres|mysql|graphql|rest|oauth|jwt|ci|cd|gpu|cpu|ram|ssd|linux|windows|macos|ios|android|chrome|firefox|vscode|webpack|babel|eslint|prettier|tailwind|bootstrap|express|django|flask|spring|rails|laravel|tensorflow|pytorch|openai|langchain|vector|embedding|rag|agent|webhook|websocket|grpc|protobuf|kafka|rabbitmq|nginx|apache|k8s|kubernetes|terraform|ansible|prometheus|grafana)$/i
+  };
+
+  /* ---------- helpers ---------- */
+  var STOPWORDS_SET = null;
+  function getStopwords() {
+    if (STOPWORDS_SET) return STOPWORDS_SET;
+    if (typeof TextAnalytics !== 'undefined' && TextAnalytics.STOP_WORDS) {
+      STOPWORDS_SET = new Set(TextAnalytics.STOP_WORDS);
+    } else {
+      STOPWORDS_SET = new Set(['the','a','an','is','are','was','were','be','been','being','have','has','had',
+        'do','does','did','will','would','shall','should','may','might','can','could','must',
+        'i','you','he','she','it','we','they','me','him','her','us','them','my','your','his',
+        'its','our','their','this','that','these','those','what','which','who','whom',
+        'and','but','or','nor','not','no','so','if','then','else','when','where','how','why',
+        'all','each','every','both','few','more','most','other','some','such','only','own',
+        'same','than','too','very','just','also','about','above','after','again','against',
+        'at','before','below','between','by','down','during','for','from','in','into','of',
+        'off','on','once','out','over','per','through','to','under','until','up','with']);
+    }
+    return STOPWORDS_SET;
+  }
+
+  function tokenise(text) {
+    if (typeof TextAnalytics !== 'undefined' && TextAnalytics.tokenise) {
+      return TextAnalytics.tokenise(text);
+    }
+    return text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(function (w) { return w.length > 1; });
+  }
+
+  function classify(term) {
+    if (CATEGORY_PATTERNS.tech.test(term)) return 'tech';
+    if (/^[A-Z][a-z]+(\s[A-Z][a-z]+)+$/.test(term)) return 'person';
+    if (/^[a-z]+[A-Z]|^[A-Z][a-z]+[A-Z]/.test(term)) return 'tech'; // camelCase/PascalCase
+    if (/^[A-Z_]{2,}$/.test(term)) return 'tech';
+    return 'concept';
+  }
+
+  function nodeId(label) { return label.toLowerCase().replace(/\s+/g, '_'); }
+
+  function addEntity(label, category) {
+    var key = label.toLowerCase();
+    if (key.length < 2 || getStopwords().has(key)) return null;
+    if (nodeMap[key]) {
+      nodeMap[key].count++;
+      return nodeMap[key];
+    }
+    var n = { id: nodeId(label), label: label, category: category || classify(label), count: 1,
+      x: width / 2 + (Math.random() - 0.5) * 200, y: height / 2 + (Math.random() - 0.5) * 200, vx: 0, vy: 0 };
+    nodes.push(n);
+    nodeMap[key] = n;
+    cooldown = 1;
+    return n;
+  }
+
+  function addEdge(a, b, label) {
+    var ka = a.label.toLowerCase(), kb = b.label.toLowerCase();
+    if (ka === kb) return;
+    var ek = ka < kb ? ka + '|' + kb : kb + '|' + ka;
+    if (edgeMap[ek]) { edgeMap[ek].weight++; return; }
+    var e = { source: a, target: b, label: label || 'related', weight: 1 };
+    edges.push(e);
+    edgeMap[ek] = e;
+  }
+
+  /* ---------- extraction ---------- */
+  function extractEntities(text) {
+    var found = [];
+    // 1. Backtick code terms
+    var bt = text.match(/`([^`]{2,40})`/g);
+    if (bt) bt.forEach(function (m) { var t = m.replace(/`/g, '').trim(); if (t) found.push({ label: t, cat: 'tech' }); });
+    // 2. Quoted terms
+    var qt = text.match(/"([^"]{2,40})"/g);
+    if (qt) qt.forEach(function (m) { var t = m.replace(/"/g, '').trim(); if (t) found.push({ label: t, cat: 'concept' }); });
+    // 3. Capitalized multi-word phrases
+    var cp = text.match(/\b[A-Z][a-z]+(?:\s[A-Z][a-z]+)+\b/g);
+    if (cp) cp.forEach(function (m) { found.push({ label: m, cat: classify(m) }); });
+    // 4. camelCase / PascalCase
+    var cc = text.match(/\b[a-z]+[A-Z][a-zA-Z]*\b|\b[A-Z][a-z]+[A-Z][a-zA-Z]*\b/g);
+    if (cc) cc.forEach(function (m) { found.push({ label: m, cat: 'tech' }); });
+    // 5. UPPER_CASE
+    var uc = text.match(/\b[A-Z][A-Z_]{2,}\b/g);
+    if (uc) uc.forEach(function (m) { if (!getStopwords().has(m.toLowerCase())) found.push({ label: m, cat: 'tech' }); });
+    // 6. Frequent single words (top non-stopword tokens)
+    var tokens = tokenise(text);
+    var freq = {};
+    tokens.forEach(function (t) { if (!getStopwords().has(t) && t.length > 2) freq[t] = (freq[t] || 0) + 1; });
+    Object.keys(freq).sort(function (a, b) { return freq[b] - freq[a]; }).slice(0, 5).forEach(function (t) {
+      if (freq[t] >= 1) found.push({ label: t, cat: classify(t) });
+    });
+    return found;
+  }
+
+  function processMessage(text) {
+    var entities = extractEntities(text);
+    var added = [];
+    entities.forEach(function (e) {
+      var n = addEntity(e.label, e.cat);
+      if (n) added.push(n);
+    });
+    // Co-occurrence edges
+    for (var i = 0; i < added.length; i++) {
+      for (var j = i + 1; j < added.length; j++) {
+        addEdge(added[i], added[j], 'co-occurs');
+      }
+    }
+    saveGraph();
+    if (visible && activeTab === 'graph') { cooldown = 1; startAnim(); }
+    if (visible && activeTab === 'insights') renderInsights();
+  }
+
+  /* ---------- persistence ---------- */
+  function saveGraph() {
+    try {
+      var data = { nodes: nodes.map(function (n) { return { id: n.id, label: n.label, category: n.category, count: n.count, x: n.x, y: n.y }; }),
+        edges: edges.map(function (e) { return { source: e.source.label, target: e.target.label, label: e.label, weight: e.weight }; }) };
+      if (typeof SafeStorage !== 'undefined') SafeStorage.setItem(storageKey, JSON.stringify(data));
+      else localStorage.setItem(storageKey, JSON.stringify(data));
+    } catch (e) { /* quota */ }
+  }
+
+  function loadGraph() {
+    try {
+      var raw = (typeof SafeStorage !== 'undefined') ? SafeStorage.getItem(storageKey) : localStorage.getItem(storageKey);
+      if (!raw) return;
+      var data = JSON.parse(raw);
+      nodes = []; edges = []; nodeMap = {}; edgeMap = {};
+      (data.nodes || []).forEach(function (n) {
+        var node = { id: n.id, label: n.label, category: n.category, count: n.count || 1,
+          x: n.x || Math.random() * width, y: n.y || Math.random() * height, vx: 0, vy: 0 };
+        nodes.push(node);
+        nodeMap[n.label.toLowerCase()] = node;
+      });
+      (data.edges || []).forEach(function (e) {
+        var s = nodeMap[e.source.toLowerCase()], t = nodeMap[e.target.toLowerCase()];
+        if (s && t) { var edge = { source: s, target: t, label: e.label, weight: e.weight || 1 }; edges.push(edge);
+          var ek = s.label.toLowerCase() < t.label.toLowerCase() ? s.label.toLowerCase() + '|' + t.label.toLowerCase() : t.label.toLowerCase() + '|' + s.label.toLowerCase();
+          edgeMap[ek] = edge; }
+      });
+    } catch (e) { /* ignore */ }
+  }
+
+  /* ---------- physics ---------- */
+  function simulate() {
+    if (cooldown <= 0.01) return;
+    cooldown *= 0.98;
+    var k = 80, gravity = 0.02;
+    // Repulsion
+    for (var i = 0; i < nodes.length; i++) {
+      for (var j = i + 1; j < nodes.length; j++) {
+        var dx = nodes[j].x - nodes[i].x, dy = nodes[j].y - nodes[i].y;
+        var dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        var force = k * k / dist * cooldown;
+        var fx = dx / dist * force, fy = dy / dist * force;
+        nodes[i].vx -= fx; nodes[i].vy -= fy;
+        nodes[j].vx += fx; nodes[j].vy += fy;
+      }
+    }
+    // Attraction along edges
+    edges.forEach(function (e) {
+      var dx = e.target.x - e.source.x, dy = e.target.y - e.source.y;
+      var dist = Math.sqrt(dx * dx + dy * dy) || 1;
+      var force = (dist - k) * 0.01 * cooldown;
+      var fx = dx / dist * force, fy = dy / dist * force;
+      e.source.vx += fx; e.source.vy += fy;
+      e.target.vx -= fx; e.target.vy -= fy;
+    });
+    // Centering
+    var cx = width / 2, cy = height / 2;
+    nodes.forEach(function (n) {
+      if (n === dragging) return;
+      n.vx += (cx - n.x) * gravity * cooldown;
+      n.vy += (cy - n.y) * gravity * cooldown;
+      n.vx *= 0.85; n.vy *= 0.85;
+      n.x += n.vx; n.y += n.vy;
+      n.x = Math.max(20, Math.min(width - 20, n.x));
+      n.y = Math.max(20, Math.min(height - 20, n.y));
+    });
+  }
+
+  /* ---------- render ---------- */
+  function render() {
+    if (!ctx) return;
+    ctx.clearRect(0, 0, width, height);
+    ctx.save();
+    ctx.translate(width / 2, height / 2);
+    ctx.scale(zoom, zoom);
+    ctx.translate(-width / 2 + camX, -height / 2 + camY);
+
+    var st = searchTerm.toLowerCase();
+    // Edges
+    edges.forEach(function (e) {
+      var dim = st && e.source.label.toLowerCase().indexOf(st) < 0 && e.target.label.toLowerCase().indexOf(st) < 0;
+      ctx.beginPath();
+      ctx.moveTo(e.source.x, e.source.y);
+      ctx.lineTo(e.target.x, e.target.y);
+      ctx.strokeStyle = (selectedNode && (e.source === selectedNode || e.target === selectedNode)) ? '#f1c40f' : (dim ? 'rgba(150,150,150,0.15)' : 'rgba(150,150,150,0.4)');
+      ctx.lineWidth = Math.min(e.weight, 4);
+      ctx.stroke();
+    });
+    // Nodes
+    nodes.forEach(function (n) {
+      var dim = st && n.label.toLowerCase().indexOf(st) < 0;
+      var r = Math.max(6, Math.min(20, 4 + n.count * 2));
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = dim ? 'rgba(150,150,150,0.3)' : (COLORS[n.category] || COLORS.unknown);
+      if (n === selectedNode) { ctx.shadowColor = '#f1c40f'; ctx.shadowBlur = 12; }
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = n === selectedNode ? '#f1c40f' : 'rgba(255,255,255,0.6)';
+      ctx.lineWidth = n === selectedNode ? 2 : 1;
+      ctx.stroke();
+      // Label
+      if (!dim || n === selectedNode) {
+        ctx.fillStyle = dim ? 'rgba(200,200,200,0.4)' : '#e0e0e0';
+        ctx.font = (n === selectedNode ? 'bold ' : '') + '10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(n.label, n.x, n.y - r - 4);
+      }
+    });
+    ctx.restore();
+  }
+
+  function frame() {
+    simulate();
+    render();
+    if (cooldown > 0.01 && visible) animId = requestAnimationFrame(frame);
+    else animId = null;
+  }
+
+  function startAnim() {
+    if (!animId) { cooldown = Math.max(cooldown, 0.3); animId = requestAnimationFrame(frame); }
+  }
+
+  /* ---------- interaction ---------- */
+  function nodeAt(mx, my) {
+    var cx = (mx - width / 2) / zoom + width / 2 - camX;
+    var cy = (my - height / 2) / zoom + height / 2 - camY;
+    for (var i = nodes.length - 1; i >= 0; i--) {
+      var n = nodes[i], r = Math.max(6, Math.min(20, 4 + n.count * 2));
+      if (Math.hypot(n.x - cx, n.y - cy) <= r + 4) return n;
+    }
+    return null;
+  }
+
+  function setupCanvas() {
+    if (!canvas) return;
+    canvas.addEventListener('mousedown', function (e) {
+      var rect = canvas.getBoundingClientRect();
+      var n = nodeAt(e.clientX - rect.left, e.clientY - rect.top);
+      if (n) { dragging = n; dragOff.x = n.x - ((e.clientX - rect.left - width / 2) / zoom + width / 2 - camX); dragOff.y = n.y - ((e.clientY - rect.top - height / 2) / zoom + height / 2 - camY); selectedNode = n; renderDetails(n); }
+      else { selectedNode = null; }
+      cooldown = 1; startAnim();
+    });
+    canvas.addEventListener('mousemove', function (e) {
+      if (!dragging) return;
+      var rect = canvas.getBoundingClientRect();
+      dragging.x = (e.clientX - rect.left - width / 2) / zoom + width / 2 - camX + dragOff.x;
+      dragging.y = (e.clientY - rect.top - height / 2) / zoom + height / 2 - camY + dragOff.y;
+      dragging.vx = 0; dragging.vy = 0;
+      render();
+    });
+    canvas.addEventListener('mouseup', function () { dragging = null; saveGraph(); });
+    canvas.addEventListener('mouseleave', function () { dragging = null; });
+    canvas.addEventListener('wheel', function (e) {
+      e.preventDefault();
+      zoom = Math.max(0.3, Math.min(3, zoom + (e.deltaY > 0 ? -0.1 : 0.1)));
+      render();
+    }, { passive: false });
+  }
+
+  /* ---------- details ---------- */
+  function renderDetails(n) {
+    var det = document.getElementById('skm-details');
+    if (!det) return;
+    var conns = edges.filter(function (e) { return e.source === n || e.target === n; });
+    var html = '<strong style="color:' + (COLORS[n.category] || COLORS.unknown) + '">' + n.label + '</strong>';
+    html += ' <span style="opacity:0.6">(' + n.category + ', mentioned ' + n.count + 'x)</span>';
+    if (conns.length) {
+      html += '<br>Connected: ';
+      html += conns.map(function (e) { var other = e.source === n ? e.target : e.source; return other.label; }).join(', ');
+    }
+    det.innerHTML = html;
+  }
+
+  /* ---------- insights ---------- */
+  function renderInsights() {
+    var cont = document.getElementById('skm-insights');
+    if (!cont) return;
+    var sorted = nodes.slice().sort(function (a, b) { return b.count - a.count; });
+    var html = '<h4 style="margin:0 0 8px">Top Entities</h4><table style="width:100%;font-size:12px;border-collapse:collapse">';
+    html += '<tr style="border-bottom:1px solid #444"><th style="text-align:left;padding:2px 6px">Entity</th><th>Type</th><th>Mentions</th><th>Connections</th></tr>';
+    sorted.slice(0, 10).forEach(function (n) {
+      var conns = edges.filter(function (e) { return e.source === n || e.target === n; }).length;
+      html += '<tr style="border-bottom:1px solid #333"><td style="padding:2px 6px;color:' + (COLORS[n.category] || COLORS.unknown) + '">' + n.label + '</td><td style="text-align:center">' + n.category + '</td><td style="text-align:center">' + n.count + '</td><td style="text-align:center">' + conns + '</td></tr>';
+    });
+    html += '</table>';
+    // Emerging topics (low count but multiple connections)
+    var emerging = nodes.filter(function (n) { return n.count <= 2; }).filter(function (n) {
+      return edges.filter(function (e) { return e.source === n || e.target === n; }).length >= 2;
+    }).slice(0, 5);
+    if (emerging.length) {
+      html += '<h4 style="margin:12px 0 8px">Emerging Topics</h4><ul style="margin:0;padding-left:16px;font-size:12px">';
+      emerging.forEach(function (n) { html += '<li style="color:' + (COLORS[n.category] || COLORS.unknown) + '">' + n.label + '</li>'; });
+      html += '</ul>';
+    }
+    // Knowledge gaps (entities with only 1 connection)
+    var gaps = nodes.filter(function (n) {
+      return edges.filter(function (e) { return e.source === n || e.target === n; }).length <= 1 && n.count >= 2;
+    }).slice(0, 5);
+    if (gaps.length) {
+      html += '<h4 style="margin:12px 0 8px">Knowledge Gaps</h4><p style="font-size:11px;opacity:0.6;margin:0 0 4px">Mentioned but underexplored:</p><ul style="margin:0;padding-left:16px;font-size:12px">';
+      gaps.forEach(function (n) { html += '<li>' + n.label + ' (' + n.count + ' mentions, few connections)</li>'; });
+      html += '</ul>';
+    }
+    cont.innerHTML = html;
+  }
+
+  /* ---------- export ---------- */
+  function renderExport() {
+    var cont = document.getElementById('skm-export');
+    if (!cont) return;
+    cont.innerHTML = '<button id="skm-export-json" style="padding:8px 16px;margin:8px;border:1px solid #555;background:#2a2a2a;color:#ddd;border-radius:4px;cursor:pointer">Download JSON</button>' +
+      '<button id="skm-export-png" style="padding:8px 16px;margin:8px;border:1px solid #555;background:#2a2a2a;color:#ddd;border-radius:4px;cursor:pointer">Download PNG</button>' +
+      '<button id="skm-clear" style="padding:8px 16px;margin:8px;border:1px solid #855;background:#3a2020;color:#ddd;border-radius:4px;cursor:pointer">Clear Graph</button>';
+    document.getElementById('skm-export-json').addEventListener('click', function () {
+      var data = { nodes: nodes.map(function (n) { return { label: n.label, category: n.category, count: n.count }; }),
+        edges: edges.map(function (e) { return { source: e.source.label, target: e.target.label, weight: e.weight }; }) };
+      var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'knowledge-map.json'; a.click();
+    });
+    document.getElementById('skm-export-png').addEventListener('click', function () {
+      if (!canvas) return;
+      var a = document.createElement('a'); a.href = canvas.toDataURL('image/png'); a.download = 'knowledge-map.png'; a.click();
+    });
+    document.getElementById('skm-clear').addEventListener('click', function () {
+      if (!confirm('Clear entire knowledge graph?')) return;
+      nodes = []; edges = []; nodeMap = {}; edgeMap = {}; selectedNode = null; saveGraph(); render();
+      if (typeof ToastManager !== 'undefined') ToastManager.show('Knowledge graph cleared', 'info');
+    });
+  }
+
+  /* ---------- UI ---------- */
+  function buildPanel() {
+    panel = document.createElement('div');
+    panel.id = 'skm-panel';
+    panel.className = 'skm-panel';
+    panel.innerHTML =
+      '<div class="skm-header"><span>\ud83e\udde0 Knowledge Map</span>' +
+      '<span style="font-size:11px;opacity:0.5;margin-left:8px">' + nodes.length + ' entities</span>' +
+      '<button class="skm-close" onclick="SmartKnowledgeMap.hide()">\u2715</button></div>' +
+      '<div class="skm-tabs">' +
+      '<button class="skm-tab active" data-tab="graph">Graph</button>' +
+      '<button class="skm-tab" data-tab="insights">Insights</button>' +
+      '<button class="skm-tab" data-tab="export">Export</button></div>' +
+      '<div id="skm-tab-graph" class="skm-tab-content active">' +
+      '<canvas id="skm-canvas" width="' + width + '" height="' + height + '"></canvas>' +
+      '<input id="skm-search" type="text" placeholder="Search entities\u2026" style="width:calc(100% - 24px);margin:8px 12px;padding:6px 10px;border:1px solid #444;background:#1e1e1e;color:#ddd;border-radius:4px;font-size:12px">' +
+      '<div id="skm-details" style="padding:4px 12px;font-size:12px;min-height:24px;color:#ccc"></div>' +
+      '<div style="padding:4px 12px;font-size:10px;opacity:0.4">Drag nodes \u2022 Scroll to zoom \u2022 Click to inspect</div></div>' +
+      '<div id="skm-tab-insights" class="skm-tab-content" style="display:none;padding:12px;overflow-y:auto;max-height:' + (height + 80) + 'px"></div>' +
+      '<div id="skm-tab-export" class="skm-tab-content" style="display:none;padding:12px;text-align:center"></div>' +
+      '<div class="skm-legend">' +
+      '<span style="color:#4a90d9">\u25cf Person</span> ' +
+      '<span style="color:#27ae60">\u25cf Tech</span> ' +
+      '<span style="color:#8e44ad">\u25cf Concept</span> ' +
+      '<span style="color:#e67e22">\u25cf Action</span></div>';
+    document.body.appendChild(panel);
+    canvas = document.getElementById('skm-canvas');
+    ctx = canvas.getContext('2d');
+    setupCanvas();
+    // Tabs
+    panel.querySelectorAll('.skm-tab').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        panel.querySelectorAll('.skm-tab').forEach(function (b) { b.classList.remove('active'); });
+        panel.querySelectorAll('.skm-tab-content').forEach(function (c) { c.style.display = 'none'; });
+        btn.classList.add('active');
+        activeTab = btn.getAttribute('data-tab');
+        document.getElementById('skm-tab-' + activeTab).style.display = '';
+        if (activeTab === 'insights') renderInsights();
+        if (activeTab === 'export') renderExport();
+        if (activeTab === 'graph') { cooldown = 1; startAnim(); }
+      });
+    });
+    // Search
+    document.getElementById('skm-search').addEventListener('input', function (e) {
+      searchTerm = e.target.value;
+      render();
+    });
+  }
+
+  function show() {
+    if (!panel) buildPanel();
+    panel.classList.add('visible');
+    visible = true;
+    // Update counter
+    var counter = panel.querySelector('.skm-header span:nth-child(2)');
+    if (counter) counter.textContent = nodes.length + ' entities';
+    cooldown = 1;
+    startAnim();
+  }
+
+  function hide() {
+    if (panel) panel.classList.remove('visible');
+    visible = false;
+    if (animId) { cancelAnimationFrame(animId); animId = null; }
+  }
+
+  function toggle() { visible ? hide() : show(); }
+
+  /* ---------- message observer ---------- */
+  function observeMessages() {
+    var chatOutput = document.getElementById('chat-output');
+    if (!chatOutput) return;
+    // Process existing messages
+    chatOutput.querySelectorAll('.user-message, .bot-message').forEach(function (el) {
+      var text = (el.textContent || '').trim();
+      if (text.length > 10) processMessage(text);
+    });
+    // Watch for new messages
+    var observer = new MutationObserver(function (mutations) {
+      mutations.forEach(function (m) {
+        m.addedNodes.forEach(function (n) {
+          if (n.nodeType === 1 && n.classList && (n.classList.contains('user-message') || n.classList.contains('bot-message'))) {
+            var text = (n.textContent || '').trim();
+            if (text.length > 10) processMessage(text);
+          }
+        });
+      });
+    });
+    observer.observe(chatOutput, { childList: true });
+  }
+
+  /* ---------- init ---------- */
+  document.addEventListener('DOMContentLoaded', function () {
+    loadGraph();
+    observeMessages();
+
+    // Keyboard shortcut
+    document.addEventListener('keydown', function (e) {
+      if (e.altKey && e.shiftKey && e.key === 'K') {
+        e.preventDefault();
+        toggle();
+      }
+    });
+
+    // Integrations
+    if (typeof KeyboardShortcuts !== 'undefined' && KeyboardShortcuts.register) {
+      KeyboardShortcuts.register('Alt+Shift+K', 'Smart Knowledge Map', toggle);
+    }
+    if (typeof CommandPalette !== 'undefined' && CommandPalette.register) {
+      CommandPalette.register({ name: 'knowledge map', description: 'Interactive knowledge graph from conversations', icon: '\ud83e\udde0', action: toggle });
+    }
+    if (typeof SlashCommands !== 'undefined' && SlashCommands.register) {
+      SlashCommands.register('/knowledgemap', 'Open Smart Knowledge Map', toggle);
+    }
+  });
+
+  return { toggle: toggle, show: show, hide: hide, processMessage: processMessage };
+})();
