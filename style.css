@@ -5024,3 +5024,41 @@ body.light-theme .enhance-panel .enhance-modes button.active { background: #3b82
 .prioritizer-tags{display:flex;flex-wrap:wrap;gap:4px}
 .priority-tag{font-size:.7rem;padding:2px 7px;border-radius:10px;background:var(--bg-secondary,#2a2a3c);color:var(--text-secondary,#aaa)}
 .prioritizer-empty{text-align:center;padding:32px;color:var(--text-secondary,#888);font-style:italic}
+
+/* ============================================================
+   Module: ConversationMemory
+   ============================================================ */
+.memory-panel{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.55);z-index:10000}
+.memory-panel-inner{position:absolute;top:4%;left:6%;width:88%;height:92%;background:var(--bg,#1a1a2e);border-radius:12px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,.5)}
+.memory-header{padding:12px 18px;display:flex;gap:10px;align-items:center;border-bottom:1px solid rgba(255,255,255,.08);flex-wrap:wrap}
+.memory-header h3{margin:0;font-size:1.15rem;color:var(--fg,#eee);flex:1;white-space:nowrap}
+.memory-search{flex:0 1 260px;padding:6px 10px;border-radius:8px;border:1px solid rgba(255,255,255,.12);background:var(--bg-secondary,#16213e);color:var(--fg,#eee);font-size:.85rem}
+.memory-filters{display:flex;gap:6px;padding:8px 18px;border-bottom:1px solid rgba(255,255,255,.06);flex-wrap:wrap}
+.memory-filter-btn{padding:4px 12px;border-radius:14px;border:1px solid rgba(255,255,255,.1);background:transparent;color:var(--text-secondary,#aaa);cursor:pointer;font-size:.78rem;transition:all .15s}
+.memory-filter-btn.active,.memory-filter-btn:hover{background:var(--accent,#2196f3);color:#fff;border-color:var(--accent,#2196f3)}
+.memory-stats{display:flex;gap:14px;padding:8px 18px;font-size:.78rem;color:var(--text-secondary,#999);border-bottom:1px solid rgba(255,255,255,.04);flex-wrap:wrap}
+.memory-stat-chip{display:inline-flex;align-items:center;gap:4px}
+.memory-list{flex:1;overflow-y:auto;padding:12px 18px}
+.memory-card{background:var(--bg-secondary,#16213e);border-radius:10px;padding:12px 14px;margin-bottom:10px;display:flex;flex-direction:column;gap:6px;border-left:3px solid transparent}
+.memory-card[data-type="fact"]{border-left-color:#42a5f5}
+.memory-card[data-type="decision"]{border-left-color:#66bb6a}
+.memory-card[data-type="preference"]{border-left-color:#ab47bc}
+.memory-card[data-type="action"]{border-left-color:#ffa726}
+.memory-card[data-type="insight"]{border-left-color:#26a69a}
+.memory-card-top{display:flex;align-items:center;gap:8px}
+.memory-type-badge{font-size:.7rem;padding:2px 8px;border-radius:10px;color:#fff;font-weight:600;text-transform:uppercase}
+.memory-type-badge.fact{background:#42a5f5}
+.memory-type-badge.decision{background:#66bb6a}
+.memory-type-badge.preference{background:#ab47bc}
+.memory-type-badge.action{background:#ffa726}
+.memory-type-badge.insight{background:#26a69a}
+.memory-card-content{font-size:.88rem;color:var(--fg,#ddd);line-height:1.45}
+.memory-card-meta{font-size:.72rem;color:var(--text-secondary,#777);display:flex;justify-content:space-between;align-items:center}
+.memory-card-del{background:none;border:none;color:var(--text-secondary,#777);cursor:pointer;font-size:.75rem;padding:2px 6px;border-radius:4px}
+.memory-card-del:hover{color:#e57373;background:rgba(229,115,115,.12)}
+.memory-indicator{position:fixed;bottom:72px;right:24px;background:var(--accent,#2196f3);color:#fff;border:none;border-radius:20px;padding:4px 12px;font-size:.8rem;cursor:pointer;z-index:9000;box-shadow:0 2px 8px rgba(0,0,0,.3);display:none;animation:memPulse 2s infinite}
+@keyframes memPulse{0%,100%{opacity:1}50%{opacity:.7}}
+.memory-recall-popup{position:fixed;bottom:110px;right:24px;width:340px;max-height:260px;overflow-y:auto;background:var(--bg,#1a1a2e);border:1px solid rgba(255,255,255,.1);border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,.4);z-index:9001;padding:10px;display:none}
+.memory-recall-item{padding:6px 8px;border-radius:6px;margin-bottom:4px;font-size:.8rem;color:var(--fg,#ddd);background:var(--bg-secondary,#16213e);cursor:pointer}
+.memory-recall-item:hover{background:rgba(33,150,243,.15)}
+.memory-empty{text-align:center;padding:40px;color:var(--text-secondary,#888);font-style:italic}

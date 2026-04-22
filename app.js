@@ -35407,3 +35407,481 @@ const SmartSessionPrioritizer = (function () {
 
   return { toggle: toggle, show: show, hide: hide, scan: scan };
 })();
+
+/* ============================================================
+ *  ConversationMemory — autonomous cross-session knowledge base
+ *
+ *  Extracts facts, decisions, preferences, action items, and
+ *  insights from conversations via heuristic pattern matching.
+ *  Memories persist in localStorage across sessions and are
+ *  proactively surfaced when relevant to the current input.
+ *  Toggle panel: Alt+Shift+Y  |  Slash: /memory  /remember
+ * ============================================================ */
+var ConversationMemory = (function () {
+  'use strict';
+
+  var STORAGE_KEY = 'agenticchat_memory';
+  var MAX_MEMORIES = 500;
+  var DEDUP_THRESHOLD = 0.8;
+  var _panel = null;
+  var _visible = false;
+  var _indicator = null;
+  var _recallPopup = null;
+  var _filter = 'all';
+  var _searchTerm = '';
+  var _debounceTimer = null;
+
+  /* ---- Pattern definitions ---- */
+
+  var PATTERNS = {
+    fact: [
+      /\b(?:i am|i'm|i use|i have|i've got|my \w+ is|we use|our \w+ is|i work (?:at|on|with)|i live|i code in|i run|i built)\b/i
+    ],
+    decision: [
+      /\b(?:let'?s|we'?ll|decided to|going with|i'?ll use|the plan is|we chose|we agreed|settled on|picking|opting for)\b/i
+    ],
+    preference: [
+      /\b(?:i prefer|i like|i want|better to|i always|i never|i'd rather|i enjoy|i hate|i love|i favor|rather than)\b/i
+    ],
+    action: [
+      /\b(?:todo|need to|should|will do|don'?t forget|remember to|action item|have to|must|gonna|going to|plan to)\b/i
+    ],
+    insight: [
+      /\b(?:the reason|turns out|the key is|learned that|the issue was|root cause|realized|the trick is|the problem was|it works because|the fix is|the bottleneck)\b/i
+    ]
+  };
+
+  var TYPE_ICONS = { fact: '\ud83d\udcd8', decision: '\u2705', preference: '\ud83d\udc9c', action: '\ud83d\udccc', insight: '\ud83d\udca1' };
+
+  /* ---- Storage ---- */
+
+  function _load() {
+    return _safeParse(SafeStorage.get(STORAGE_KEY), []);
+  }
+
+  function _save(memories) {
+    try { SafeStorage.set(STORAGE_KEY, JSON.stringify(memories)); } catch (e) {}
+  }
+
+  /* ---- Helpers ---- */
+
+  function _tokenize(text) {
+    return (text || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(function (w) { return w.length > 2; });
+  }
+
+  function _wordOverlap(a, b) {
+    var tokA = _tokenize(a);
+    var tokB = _tokenize(b);
+    if (tokA.length === 0 || tokB.length === 0) return 0;
+    var setB = {};
+    for (var i = 0; i < tokB.length; i++) setB[tokB[i]] = true;
+    var shared = 0;
+    for (var j = 0; j < tokA.length; j++) { if (setB[tokA[j]]) shared++; }
+    return shared / Math.max(tokA.length, tokB.length);
+  }
+
+  function _isDuplicate(content, memories) {
+    for (var i = 0; i < memories.length; i++) {
+      if (_wordOverlap(content, memories[i].content) >= DEDUP_THRESHOLD) return true;
+    }
+    return false;
+  }
+
+  function _generateId() {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  }
+
+  function _sessionInfo() {
+    var sid = 'default';
+    var sname = 'Default Session';
+    if (typeof SessionManager !== 'undefined' && SessionManager.currentId) sid = SessionManager.currentId();
+    if (typeof SessionManager !== 'undefined' && SessionManager.currentName) sname = SessionManager.currentName();
+    return { sessionId: sid, sessionName: sname, timestamp: new Date().toISOString() };
+  }
+
+  /* ---- Extraction ---- */
+
+  function _extractSentences(text) {
+    return text.split(/(?<=[.!?])\s+/).filter(function (s) { return s.length > 10 && s.length < 300; });
+  }
+
+  function _classifySentence(sentence) {
+    var results = [];
+    var types = Object.keys(PATTERNS);
+    for (var t = 0; t < types.length; t++) {
+      var type = types[t];
+      var pats = PATTERNS[type];
+      for (var p = 0; p < pats.length; p++) {
+        if (pats[p].test(sentence)) {
+          var confidence = 0.6;
+          if (sentence.length > 30) confidence += 0.1;
+          if (sentence.length > 60) confidence += 0.1;
+          results.push({ type: type, confidence: Math.min(confidence, 1.0) });
+          break;
+        }
+      }
+    }
+    return results;
+  }
+
+  function extractFromConversation() {
+    var memories = _load();
+    var messages = [];
+    if (typeof ConversationManager !== 'undefined' && ConversationManager.getUserMessages) {
+      messages = ConversationManager.getUserMessages();
+    }
+    var source = _sessionInfo();
+    var added = 0;
+
+    for (var m = 0; m < messages.length; m++) {
+      var msg = messages[m];
+      if (msg.role !== 'user') continue;
+      var sentences = _extractSentences(msg.content || '');
+      for (var s = 0; s < sentences.length; s++) {
+        var classifications = _classifySentence(sentences[s]);
+        for (var c = 0; c < classifications.length; c++) {
+          var cls = classifications[c];
+          var content = sentences[s].trim();
+          if (_isDuplicate(content, memories)) continue;
+          memories.push({
+            id: _generateId(),
+            type: cls.type,
+            content: content,
+            source: source,
+            confidence: cls.confidence,
+            tags: _tokenize(content).slice(0, 5)
+          });
+          added++;
+        }
+      }
+    }
+
+    // Enforce cap
+    if (memories.length > MAX_MEMORIES) {
+      memories.sort(function (a, b) { return b.confidence - a.confidence; });
+      memories = memories.slice(0, MAX_MEMORIES);
+    }
+
+    _save(memories);
+    if (_visible) _render();
+    return added;
+  }
+
+  /* ---- Recall ---- */
+
+  function _findRelevant(query, limit) {
+    var memories = _load();
+    var tokens = _tokenize(query);
+    if (tokens.length === 0) return [];
+    var scored = [];
+    for (var i = 0; i < memories.length; i++) {
+      var overlap = _wordOverlap(query, memories[i].content);
+      if (overlap > 0.15) scored.push({ memory: memories[i], relevance: overlap });
+    }
+    scored.sort(function (a, b) { return b.relevance - a.relevance; });
+    return scored.slice(0, limit || 5);
+  }
+
+  function _showRecall(results) {
+    if (!_recallPopup) {
+      _recallPopup = document.createElement('div');
+      _recallPopup.className = 'memory-recall-popup';
+      document.body.appendChild(_recallPopup);
+    }
+    if (results.length === 0) {
+      _recallPopup.style.display = 'none';
+      if (_indicator) _indicator.style.display = 'none';
+      return;
+    }
+    var html = '';
+    for (var i = 0; i < results.length; i++) {
+      var r = results[i];
+      html += '<div class="memory-recall-item">' +
+        '<span>' + (TYPE_ICONS[r.memory.type] || '') + '</span> ' +
+        _escapeHtml(r.memory.content.substring(0, 120)) +
+        '</div>';
+    }
+    _recallPopup.innerHTML = html;
+    _recallPopup.style.display = 'block';
+    if (_indicator) _indicator.style.display = 'inline-block';
+  }
+
+  function _hideRecall() {
+    if (_recallPopup) _recallPopup.style.display = 'none';
+    if (_indicator) _indicator.style.display = 'none';
+  }
+
+  /* ---- Manual add ---- */
+
+  function addManual(text, type) {
+    var memories = _load();
+    if (_isDuplicate(text, memories)) return false;
+    memories.push({
+      id: _generateId(),
+      type: type || 'fact',
+      content: text.trim(),
+      source: _sessionInfo(),
+      confidence: 1.0,
+      tags: _tokenize(text).slice(0, 5)
+    });
+    if (memories.length > MAX_MEMORIES) {
+      memories.sort(function (a, b) { return b.confidence - a.confidence; });
+      memories = memories.slice(0, MAX_MEMORIES);
+    }
+    _save(memories);
+    if (_visible) _render();
+    return true;
+  }
+
+  /* ---- Panel ---- */
+
+  function _buildPanel() {
+    _panel = document.createElement('div');
+    _panel.className = 'memory-panel';
+    _panel.addEventListener('click', function (e) { if (e.target === _panel) hide(); });
+
+    var inner = document.createElement('div');
+    inner.className = 'memory-panel-inner';
+
+    // Header
+    var header = document.createElement('div');
+    header.className = 'memory-header';
+    header.innerHTML = '<h3>\ud83e\udde0 Conversation Memory</h3>' +
+      '<input class="memory-search" id="memory-search-input" placeholder="Search memories\u2026" autocomplete="off">' +
+      '<button class="btn-secondary" id="memory-export-btn" title="Export as JSON">\ud83d\udce4 Export</button>' +
+      '<button class="btn-secondary" id="memory-clear-btn" title="Clear all memories">\ud83d\uddd1\ufe0f Clear</button>' +
+      '<button class="btn-secondary" id="memory-close-btn">\u2715 Close</button>';
+
+    // Filters
+    var filters = document.createElement('div');
+    filters.className = 'memory-filters';
+    filters.id = 'memory-filters';
+    var types = ['all', 'fact', 'decision', 'preference', 'action', 'insight'];
+    for (var t = 0; t < types.length; t++) {
+      filters.innerHTML += '<button class="memory-filter-btn' + (types[t] === 'all' ? ' active' : '') +
+        '" data-type="' + types[t] + '">' + (types[t] === 'all' ? '\ud83d\udcda All' : (TYPE_ICONS[types[t]] || '') + ' ' + types[t].charAt(0).toUpperCase() + types[t].slice(1)) + '</button>';
+    }
+
+    // Stats
+    var stats = document.createElement('div');
+    stats.className = 'memory-stats';
+    stats.id = 'memory-stats';
+
+    // List
+    var list = document.createElement('div');
+    list.className = 'memory-list';
+    list.id = 'memory-list';
+
+    inner.appendChild(header);
+    inner.appendChild(filters);
+    inner.appendChild(stats);
+    inner.appendChild(list);
+    _panel.appendChild(inner);
+    document.body.appendChild(_panel);
+
+    // Events
+    document.getElementById('memory-close-btn').addEventListener('click', hide);
+    document.getElementById('memory-search-input').addEventListener('input', function (e) {
+      _searchTerm = e.target.value.toLowerCase();
+      _render();
+    });
+    document.getElementById('memory-export-btn').addEventListener('click', function () {
+      var data = JSON.stringify(_load(), null, 2);
+      var blob = new Blob([data], { type: 'application/json' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url; a.download = 'conversation-memories.json'; a.click();
+      URL.revokeObjectURL(url);
+    });
+    document.getElementById('memory-clear-btn').addEventListener('click', function () {
+      if (confirm('Delete all conversation memories? This cannot be undone.')) {
+        _save([]);
+        _render();
+      }
+    });
+    document.getElementById('memory-filters').addEventListener('click', function (e) {
+      var btn = e.target.closest('.memory-filter-btn');
+      if (!btn) return;
+      _filter = btn.dataset.type;
+      filters.querySelectorAll('.memory-filter-btn').forEach(function (b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      _render();
+    });
+  }
+
+  function _render() {
+    var memories = _load();
+    var listEl = document.getElementById('memory-list');
+    var statsEl = document.getElementById('memory-stats');
+    if (!listEl || !statsEl) return;
+
+    // Stats
+    var counts = { fact: 0, decision: 0, preference: 0, action: 0, insight: 0 };
+    for (var i = 0; i < memories.length; i++) { if (counts.hasOwnProperty(memories[i].type)) counts[memories[i].type]++; }
+    statsEl.innerHTML = '<span class="memory-stat-chip">\ud83d\udcda ' + memories.length + ' total</span>' +
+      '<span class="memory-stat-chip">\ud83d\udcd8 ' + counts.fact + ' facts</span>' +
+      '<span class="memory-stat-chip">\u2705 ' + counts.decision + ' decisions</span>' +
+      '<span class="memory-stat-chip">\ud83d\udc9c ' + counts.preference + ' prefs</span>' +
+      '<span class="memory-stat-chip">\ud83d\udccc ' + counts.action + ' actions</span>' +
+      '<span class="memory-stat-chip">\ud83d\udca1 ' + counts.insight + ' insights</span>';
+
+    // Filter + search
+    var filtered = memories.filter(function (m) {
+      if (_filter !== 'all' && m.type !== _filter) return false;
+      if (_searchTerm && m.content.toLowerCase().indexOf(_searchTerm) === -1) return false;
+      return true;
+    });
+
+    // Sort newest first
+    filtered.sort(function (a, b) {
+      var ta = a.source && a.source.timestamp ? a.source.timestamp : '';
+      var tb = b.source && b.source.timestamp ? b.source.timestamp : '';
+      return tb.localeCompare(ta);
+    });
+
+    if (filtered.length === 0) {
+      listEl.innerHTML = '<div class="memory-empty">' + (_searchTerm || _filter !== 'all' ? 'No matching memories' : 'No memories yet \u2014 they\u2019ll appear as you chat!') + '</div>';
+      return;
+    }
+
+    var html = '';
+    for (var j = 0; j < filtered.length; j++) {
+      var mem = filtered[j];
+      var ts = mem.source && mem.source.timestamp ? new Date(mem.source.timestamp).toLocaleString() : '';
+      var sess = mem.source && mem.source.sessionName ? _escapeHtml(mem.source.sessionName) : '';
+      html += '<div class="memory-card" data-type="' + mem.type + '" data-id="' + mem.id + '">' +
+        '<div class="memory-card-top">' +
+          '<span class="memory-type-badge ' + mem.type + '">' + (TYPE_ICONS[mem.type] || '') + ' ' + mem.type + '</span>' +
+          '<span style="font-size:.72rem;color:var(--text-secondary,#777)">' + Math.round(mem.confidence * 100) + '% conf</span>' +
+        '</div>' +
+        '<div class="memory-card-content">' + _escapeHtml(mem.content) + '</div>' +
+        '<div class="memory-card-meta">' +
+          '<span>' + sess + (ts ? ' \u00b7 ' + ts : '') + '</span>' +
+          '<button class="memory-card-del" data-mid="' + mem.id + '" title="Delete">\ud83d\uddd1\ufe0f</button>' +
+        '</div>' +
+      '</div>';
+    }
+    listEl.innerHTML = html;
+
+    // Delete handlers
+    listEl.querySelectorAll('.memory-card-del').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var mid = btn.dataset.mid;
+        var all = _load();
+        all = all.filter(function (m) { return m.id !== mid; });
+        _save(all);
+        _render();
+      });
+    });
+  }
+
+  /* ---- Show / Hide ---- */
+
+  function show() {
+    if (!_panel) _buildPanel();
+    _render();
+    _panel.style.display = 'block';
+    _visible = true;
+    var inp = document.getElementById('memory-search-input');
+    if (inp) inp.focus();
+  }
+
+  function hide() {
+    if (_panel) _panel.style.display = 'none';
+    _visible = false;
+  }
+
+  function toggle() { _visible ? hide() : show(); }
+
+  /* ---- Init ---- */
+
+  document.addEventListener('DOMContentLoaded', function () {
+    // Indicator button
+    _indicator = document.createElement('button');
+    _indicator.className = 'memory-indicator';
+    _indicator.textContent = '\ud83e\udde0 Memories';
+    _indicator.style.display = 'none';
+    _indicator.addEventListener('click', function () {
+      if (_recallPopup && _recallPopup.style.display !== 'none') {
+        _hideRecall();
+      } else {
+        var input = document.getElementById('chat-input');
+        if (input && input.value) {
+          var results = _findRelevant(input.value, 5);
+          _showRecall(results);
+        }
+      }
+    });
+    document.body.appendChild(_indicator);
+
+    // Input monitoring for recall
+    var chatInput = document.getElementById('chat-input');
+    if (chatInput) {
+      chatInput.addEventListener('input', function () {
+        clearTimeout(_debounceTimer);
+        _debounceTimer = setTimeout(function () {
+          var val = chatInput.value;
+          if (val.length < 8) { _hideRecall(); return; }
+          var results = _findRelevant(val, 5);
+          if (results.length > 0) {
+            if (_indicator) _indicator.style.display = 'inline-block';
+          } else {
+            _hideRecall();
+          }
+        }, 400);
+      });
+      chatInput.addEventListener('blur', function () {
+        setTimeout(_hideRecall, 300);
+      });
+    }
+
+    // Auto-extraction via MutationObserver
+    var chatOutput = document.getElementById('chat-output');
+    if (chatOutput) {
+      var extractTimer = null;
+      var observer = new MutationObserver(function () {
+        clearTimeout(extractTimer);
+        extractTimer = setTimeout(function () {
+          extractFromConversation();
+        }, 500);
+      });
+      observer.observe(chatOutput, { childList: true, subtree: true });
+    }
+
+    // Keyboard shortcut Alt+Shift+Y
+    document.addEventListener('keydown', function (e) {
+      if (e.altKey && e.shiftKey && e.key === 'Y') {
+        e.preventDefault();
+        toggle();
+      }
+    });
+
+    // Integrations
+    if (typeof KeyboardShortcuts !== 'undefined' && KeyboardShortcuts.register) {
+      KeyboardShortcuts.register('Alt+Shift+Y', 'Conversation Memory', toggle);
+    }
+    if (typeof CommandPalette !== 'undefined' && CommandPalette.register) {
+      CommandPalette.register({ name: 'conversation memory', description: 'Cross-session knowledge base', icon: '\ud83e\udde0', action: toggle });
+    }
+    if (typeof SlashCommands !== 'undefined' && SlashCommands.register) {
+      SlashCommands.register('/memory', 'Open Conversation Memory panel', toggle);
+      SlashCommands.register('/remember', 'Save a memory manually', function (args) {
+        if (args && args.trim()) {
+          addManual(args.trim());
+          if (typeof UIController !== 'undefined' && UIController.setConsoleOutput) {
+            UIController.setConsoleOutput('\ud83e\udde0 Memory saved: ' + args.trim().substring(0, 80));
+          }
+        }
+      });
+    }
+  });
+
+  return {
+    toggle: toggle,
+    show: show,
+    hide: hide,
+    extract: extractFromConversation,
+    addManual: addManual,
+    findRelevant: _findRelevant
+  };
+})();
