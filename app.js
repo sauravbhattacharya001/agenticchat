@@ -35885,3 +35885,288 @@ var ConversationMemory = (function () {
     findRelevant: _findRelevant
   };
 })();
+
+/* ============================================================
+ * ConversationCoach  -  autonomous prompt coaching & conversation health
+ *
+ * Monitors user messages for common prompt anti-patterns and shows
+ * non-intrusive coaching tips.  Dashboard (Alt+Shift+H) shows quality
+ * score, improvement suggestions, and streaks.
+ * ============================================================ */
+const ConversationCoach = (() => {
+  'use strict';
+
+  const STORAGE_KEY = 'conversation_coach';
+  const TIP_COOLDOWN = 3;          // messages between tips
+  const TIP_DISMISS_MEMORY = 10;   // don't repeat same tip type for N msgs
+  const TIP_AUTO_DISMISS_MS = 8000;
+  const HEALTH_INTERVAL = 10;      // messages between health summaries
+
+  // ---- state ----
+  var _enabled = true;
+  var _msgCount = 0;
+  var _lastTipAt = -TIP_COOLDOWN;
+  var _dismissedTypes = {};         // type -> dismissed-at-msg-count
+  var _stats = { totalMessages: 0, goodPrompts: 0, streak: 0, bestStreak: 0, lengths: [], scores: [] };
+  var _tipBarEl = null;
+  var _dashEl = null;
+  var _tipTimeout = null;
+
+  // ---- persistence ----
+  function _load() {
+    try {
+      var raw = (typeof SafeStorage !== 'undefined' ? SafeStorage : localStorage).getItem(STORAGE_KEY);
+      if (raw) {
+        var d = JSON.parse(raw);
+        _enabled = d.enabled !== false;
+        _stats = Object.assign(_stats, d.stats || {});
+        _dismissedTypes = d.dismissedTypes || {};
+        _msgCount = d.msgCount || 0;
+        _lastTipAt = d.lastTipAt || -TIP_COOLDOWN;
+      }
+    } catch (_) {}
+  }
+  function _save() {
+    try {
+      var store = (typeof SafeStorage !== 'undefined' ? SafeStorage : localStorage);
+      store.setItem(STORAGE_KEY, JSON.stringify({
+        enabled: _enabled, stats: _stats, dismissedTypes: _dismissedTypes,
+        msgCount: _msgCount, lastTipAt: _lastTipAt
+      }));
+    } catch (_) {}
+  }
+
+  // ---- tip definitions ----
+  var TIPS = [
+    { type: 'vague', test: function (t) { return t.length < 15 && !/\b(code|fix|list|show|create|write|explain)\b/i.test(t); },
+      msg: 'Try being more specific — add context about what you need and why.' },
+    { type: 'no_context', test: function (t) { return t.length < 60 && /^(help|how do i|can you|i need|please)\b/i.test(t) && t.split(' ').length < 12; },
+      msg: 'Adding context (language, framework, goal) helps the AI give targeted answers.' },
+    { type: 'wall_of_text', test: function (t) { return t.length > 500 && t.split('\n').length < 3; },
+      msg: 'Break long prompts into sections with line breaks for clearer structure.' },
+    { type: 'no_format', test: function (t) { return /\b(format|table|list|json|csv|output)\b/i.test(t) && !/\b(as|in|like)\s+(json|csv|table|list|markdown|yaml|bullet)/i.test(t); },
+      msg: 'Specify your desired output format (JSON, table, bullet list, etc.).' },
+    { type: 'no_example', test: function (t) { return /\b(like this|similar to|for example|e\.g\.)\b/i.test(t) === false && /\b(format|template|style|pattern)\b/i.test(t); },
+      msg: 'Including an example of what you want helps the AI match your expectations.' },
+    { type: 'repeated', test: function () { return false; }, // handled separately
+      msg: 'Looks like a similar question — try rephrasing with new details or constraints.' }
+  ];
+
+  // ---- analysis ----
+  var _recentTexts = [];
+
+  function _analyzeMessage(text) {
+    _msgCount++;
+    _stats.totalMessages++;
+    _stats.lengths.push(text.length);
+    if (_stats.lengths.length > 100) _stats.lengths = _stats.lengths.slice(-100);
+
+    var score = _scorePrompt(text);
+    _stats.scores.push(score);
+    if (_stats.scores.length > 100) _stats.scores = _stats.scores.slice(-100);
+
+    if (score >= 60) {
+      _stats.goodPrompts++;
+      _stats.streak++;
+      if (_stats.streak > _stats.bestStreak) _stats.bestStreak = _stats.streak;
+    } else {
+      _stats.streak = 0;
+    }
+
+    // repetition check
+    var dominated = _recentTexts.some(function (prev) { return _jaccard(text, prev) > 0.6; });
+    _recentTexts.push(text);
+    if (_recentTexts.length > 10) _recentTexts.shift();
+
+    // find applicable tip
+    if (_enabled && (_msgCount - _lastTipAt) >= TIP_COOLDOWN) {
+      if (dominated && !_isTypeDismissed('repeated')) {
+        _showTip(TIPS[5]);
+        return;
+      }
+      for (var i = 0; i < TIPS.length; i++) {
+        if (!_isTypeDismissed(TIPS[i].type) && TIPS[i].test(text)) {
+          _showTip(TIPS[i]);
+          return;
+        }
+      }
+    }
+
+    // periodic health summary
+    if (_msgCount % HEALTH_INTERVAL === 0 && _enabled) {
+      _showHealthSummary();
+    }
+
+    _save();
+  }
+
+  function _scorePrompt(t) {
+    var s = 50;
+    if (t.length > 30) s += 10;
+    if (t.length > 100) s += 10;
+    if (t.split('\n').length > 1) s += 5;
+    if (/\b(please|could you|explain|create|write|fix|list|show|analyze)\b/i.test(t)) s += 5;
+    if (/```/.test(t)) s += 10;
+    if (/\b(example|e\.g\.|for instance)\b/i.test(t)) s += 5;
+    if (/\b(json|csv|table|markdown|bullet|yaml)\b/i.test(t)) s += 5;
+    if (t.length < 15) s -= 20;
+    if (t.length > 500 && t.split('\n').length < 3) s -= 10;
+    return Math.max(0, Math.min(100, s));
+  }
+
+  function _jaccard(a, b) {
+    var sa = new Set(a.toLowerCase().split(/\s+/));
+    var sb = new Set(b.toLowerCase().split(/\s+/));
+    var inter = 0;
+    sa.forEach(function (w) { if (sb.has(w)) inter++; });
+    var union = sa.size + sb.size - inter;
+    return union === 0 ? 0 : inter / union;
+  }
+
+  function _isTypeDismissed(type) {
+    return _dismissedTypes[type] && (_msgCount - _dismissedTypes[type]) < TIP_DISMISS_MEMORY;
+  }
+
+  // ---- tip bar UI ----
+  function _showTip(tip) {
+    _lastTipAt = _msgCount;
+    _dismissTipBar();
+
+    _tipBarEl = document.createElement('div');
+    _tipBarEl.className = 'coach-tip-bar';
+    _tipBarEl.innerHTML = '<span class="coach-tip-icon">\ud83c\udfaf</span><span class="coach-tip-text">' +
+      _escHtml(tip.msg) + '</span><button class="coach-tip-close">\u00d7</button>';
+    _tipBarEl.querySelector('.coach-tip-close').onclick = function () {
+      _dismissedTypes[tip.type] = _msgCount;
+      _dismissTipBar();
+      _save();
+    };
+    _tipBarEl.onclick = function (e) {
+      if (e.target.classList.contains('coach-tip-close')) return;
+      _dismissTipBar();
+    };
+
+    var chatInput = document.getElementById('chat-input') || document.getElementById('user-input');
+    if (chatInput && chatInput.parentNode) {
+      chatInput.parentNode.insertBefore(_tipBarEl, chatInput);
+    } else {
+      document.body.appendChild(_tipBarEl);
+    }
+
+    _tipTimeout = setTimeout(_dismissTipBar, TIP_AUTO_DISMISS_MS);
+    _save();
+  }
+
+  function _dismissTipBar() {
+    clearTimeout(_tipTimeout);
+    if (_tipBarEl && _tipBarEl.parentNode) _tipBarEl.parentNode.removeChild(_tipBarEl);
+    _tipBarEl = null;
+  }
+
+  function _showHealthSummary() {
+    var avg = _stats.scores.length ? Math.round(_stats.scores.reduce(function (a, b) { return a + b; }, 0) / _stats.scores.length) : 50;
+    var avgLen = _stats.lengths.length ? Math.round(_stats.lengths.reduce(function (a, b) { return a + b; }, 0) / _stats.lengths.length) : 0;
+    var msg = '\ud83c\udfaf Coach: Quality ' + avg + '/100 | Avg length ' + avgLen + ' chars | Streak ' + _stats.streak;
+    if (typeof UIController !== 'undefined' && UIController.setConsoleOutput) {
+      UIController.setConsoleOutput(msg);
+    }
+  }
+
+  // ---- dashboard ----
+  function _createDashboard() {
+    if (_dashEl) return _dashEl;
+    _dashEl = document.createElement('div');
+    _dashEl.id = 'coach-dashboard';
+    _dashEl.className = 'coach-dashboard-overlay';
+    _dashEl.style.display = 'none';
+    document.body.appendChild(_dashEl);
+    return _dashEl;
+  }
+
+  function _renderDashboard() {
+    var d = _createDashboard();
+    var avg = _stats.scores.length ? Math.round(_stats.scores.reduce(function (a, b) { return a + b; }, 0) / _stats.scores.length) : 50;
+    var avgLen = _stats.lengths.length ? Math.round(_stats.lengths.reduce(function (a, b) { return a + b; }, 0) / _stats.lengths.length) : 0;
+    var successRate = _stats.totalMessages ? Math.round((_stats.goodPrompts / _stats.totalMessages) * 100) : 0;
+
+    var suggestions = [];
+    if (avgLen < 40) suggestions.push('Write longer, more detailed prompts');
+    if (avg < 60) suggestions.push('Add context: language, framework, or goal');
+    if (_stats.streak < 3) suggestions.push('Try including examples in your prompts');
+    if (suggestions.length === 0) suggestions.push('Great prompting! Keep it up \ud83c\udf1f');
+
+    d.innerHTML = '<div class="coach-dashboard-content">' +
+      '<div class="coach-dash-header"><h3>\ud83c\udfaf Conversation Coach</h3>' +
+      '<button class="coach-dash-close" onclick="ConversationCoach.toggle()">\u00d7</button></div>' +
+      '<div class="coach-dash-score"><div class="coach-score-circle" style="--score:' + avg + '">' +
+      '<span>' + avg + '</span></div><div class="coach-score-label">Prompt Quality</div></div>' +
+      '<div class="coach-dash-stats">' +
+      '<div class="coach-stat"><span class="coach-stat-val">' + _stats.totalMessages + '</span><span class="coach-stat-lbl">Messages</span></div>' +
+      '<div class="coach-stat"><span class="coach-stat-val">' + avgLen + '</span><span class="coach-stat-lbl">Avg Length</span></div>' +
+      '<div class="coach-stat"><span class="coach-stat-val">' + successRate + '%</span><span class="coach-stat-lbl">Good Prompts</span></div>' +
+      '<div class="coach-stat"><span class="coach-stat-val">' + _stats.streak + ' \ud83d\udd25</span><span class="coach-stat-lbl">Streak (best: ' + _stats.bestStreak + ')</span></div>' +
+      '</div>' +
+      '<div class="coach-dash-tips"><h4>Suggestions</h4><ul>' +
+      suggestions.map(function (s) { return '<li>' + _escHtml(s) + '</li>'; }).join('') +
+      '</ul></div>' +
+      '<label class="coach-toggle-label"><input type="checkbox" ' + (_enabled ? 'checked' : '') +
+      ' onchange="ConversationCoach.setEnabled(this.checked)"> Enable coaching tips</label>' +
+      '</div>';
+    d.style.display = 'flex';
+  }
+
+  function toggle() {
+    if (_dashEl && _dashEl.style.display !== 'none') { hide(); } else { show(); }
+  }
+  function show() { _renderDashboard(); }
+  function hide() { if (_dashEl) _dashEl.style.display = 'none'; }
+  function setEnabled(v) { _enabled = !!v; _save(); }
+
+  function _escHtml(s) {
+    var d = document.createElement('div');
+    d.appendChild(document.createTextNode(s));
+    return d.innerHTML;
+  }
+
+  // ---- init ----
+  document.addEventListener('DOMContentLoaded', function () {
+    _load();
+
+    // Watch for user messages
+    var chatOutput = document.getElementById('chat-output');
+    if (chatOutput) {
+      var observer = new MutationObserver(function (muts) {
+        muts.forEach(function (m) {
+          m.addedNodes.forEach(function (n) {
+            if (n.nodeType === 1 && n.classList && n.classList.contains('user-message')) {
+              var text = (n.textContent || '').trim();
+              if (text) _analyzeMessage(text);
+            }
+          });
+        });
+      });
+      observer.observe(chatOutput, { childList: true });
+    }
+
+    // Keyboard shortcut
+    document.addEventListener('keydown', function (e) {
+      if (e.altKey && e.shiftKey && e.key === 'H') {
+        e.preventDefault();
+        toggle();
+      }
+    });
+
+    // Integrations
+    if (typeof KeyboardShortcuts !== 'undefined' && KeyboardShortcuts.register) {
+      KeyboardShortcuts.register('Alt+Shift+H', 'Conversation Coach', toggle);
+    }
+    if (typeof CommandPalette !== 'undefined' && CommandPalette.register) {
+      CommandPalette.register({ name: 'conversation coach', description: 'Prompt quality coaching & tips', icon: '\ud83c\udfaf', action: toggle });
+    }
+    if (typeof SlashCommands !== 'undefined' && SlashCommands.register) {
+      SlashCommands.register('/coach', 'Open Conversation Coach dashboard', toggle);
+    }
+  });
+
+  return { toggle: toggle, show: show, hide: hide, setEnabled: setEnabled };
+})();

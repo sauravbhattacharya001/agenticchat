@@ -5062,3 +5062,31 @@ body.light-theme .enhance-panel .enhance-modes button.active { background: #3b82
 .memory-recall-item{padding:6px 8px;border-radius:6px;margin-bottom:4px;font-size:.8rem;color:var(--fg,#ddd);background:var(--bg-secondary,#16213e);cursor:pointer}
 .memory-recall-item:hover{background:rgba(33,150,243,.15)}
 .memory-empty{text-align:center;padding:40px;color:var(--text-secondary,#888);font-style:italic}
+
+/* ---- Conversation Coach ---- */
+.coach-tip-bar{display:flex;align-items:center;gap:8px;padding:6px 12px;margin:4px 0;background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.25);border-radius:8px;font-size:13px;color:var(--text-color,#e0e0e0);animation:coachFadeIn .3s ease}
+.coach-tip-icon{font-size:16px}
+.coach-tip-text{flex:1}
+.coach-tip-close{background:none;border:none;color:var(--text-color,#e0e0e0);font-size:16px;cursor:pointer;padding:0 4px;opacity:.6}
+.coach-tip-close:hover{opacity:1}
+@keyframes coachFadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+
+.coach-dashboard-overlay{display:none;position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.5);align-items:center;justify-content:center}
+.coach-dashboard-content{background:var(--bg-color,#1e1e2e);color:var(--text-color,#e0e0e0);border-radius:12px;padding:24px;max-width:420px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.4)}
+.coach-dash-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+.coach-dash-header h3{margin:0;font-size:18px}
+.coach-dash-close{background:none;border:none;color:var(--text-color,#e0e0e0);font-size:20px;cursor:pointer}
+.coach-dash-score{text-align:center;margin:16px 0}
+.coach-score-circle{width:80px;height:80px;border-radius:50%;background:conic-gradient(#3b82f6 calc(var(--score)*3.6deg),rgba(255,255,255,.1) 0);display:inline-flex;align-items:center;justify-content:center;position:relative}
+.coach-score-circle::before{content:'';position:absolute;inset:8px;border-radius:50%;background:var(--bg-color,#1e1e2e)}
+.coach-score-circle span{position:relative;font-size:24px;font-weight:700}
+.coach-score-label{margin-top:8px;font-size:13px;opacity:.7}
+.coach-dash-stats{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:16px 0}
+.coach-stat{text-align:center;padding:8px;background:rgba(255,255,255,.05);border-radius:8px}
+.coach-stat-val{display:block;font-size:18px;font-weight:600}
+.coach-stat-lbl{font-size:11px;opacity:.6}
+.coach-dash-tips{margin:16px 0}
+.coach-dash-tips h4{margin:0 0 8px;font-size:14px}
+.coach-dash-tips ul{margin:0;padding-left:20px;font-size:13px}
+.coach-dash-tips li{margin:4px 0}
+.coach-toggle-label{font-size:13px;display:flex;align-items:center;gap:8px;cursor:pointer;opacity:.8}
