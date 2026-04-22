@@ -102,6 +102,7 @@
  *   ConversationMoodRing - real-time sentiment monitor with mood shifts, alerts, suggestions (Alt+M)
  *   SmartModelAdvisor   - proactive model recommendation based on task analysis with one-click switching (Alt+Shift+A)
  *   SmartSessionPrioritizer - autonomous session priority scoring with urgency/action-item detection, priority queue dashboard (Alt+Shift+P)
+ *   SmartDeadlineTracker  - autonomous deadline detection from conversations with countdown dashboard, proactive alerts (Alt+D)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -36680,4 +36681,338 @@ const SmartKnowledgeMap = (function () {
   });
 
   return { toggle: toggle, show: show, hide: hide, processMessage: processMessage };
+})();
+
+/* ============================================================
+ *  SmartDeadlineTracker  (Alt+D)
+ *
+ *  Autonomously scans conversation messages for dates, deadlines,
+ *  and time references. Displays an interactive panel with sorted
+ *  deadlines, live countdown timers, color-coded urgency, and
+ *  proactive toast alerts when deadlines approach.
+ * ============================================================ */
+const SmartDeadlineTracker = (() => {
+  'use strict';
+
+  const STORAGE_KEY = 'ac-deadline-tracker';
+  let _panel = null;
+  let _isOpen = false;
+  let _refreshTimer = null;
+  let _observer = null;
+
+  /* ---------- state ---------- */
+  let _deadlines = [];   // {id, dateISO, label, snippet, dismissed, alerted}
+  let _dismissed = {};    // id -> true
+
+  function _load() {
+    try {
+      const raw = SafeStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const d = JSON.parse(raw);
+        _deadlines = d.deadlines || [];
+        _dismissed = d.dismissed || {};
+      }
+    } catch (_) {}
+  }
+
+  function _save() {
+    SafeStorage.setItem(STORAGE_KEY, JSON.stringify({ deadlines: _deadlines, dismissed: _dismissed }));
+  }
+
+  function _hash(s) {
+    let h = 0;
+    for (let i = 0; i < s.length; i++) { h = ((h << 5) - h + s.charCodeAt(i)) | 0; }
+    return 'dl_' + Math.abs(h).toString(36);
+  }
+
+  /* ---------- date parsing ---------- */
+  const MONTHS = { jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11,
+    january:0,february:1,march:2,april:3,june:5,july:6,august:7,september:8,october:9,november:10,december:11 };
+  const DAYS = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+
+  function _parseRelative(text) {
+    const now = new Date();
+    const lower = text.toLowerCase();
+
+    if (/\btomorrow\b/.test(lower)) { const d = new Date(now); d.setDate(d.getDate()+1); d.setHours(23,59,0,0); return d; }
+    if (/\btonight\b/.test(lower))  { const d = new Date(now); d.setHours(23,0,0,0); return d; }
+
+    let m = lower.match(/\bin\s+(\d+)\s+(day|hour|week|month)s?\b/);
+    if (m) {
+      const n = parseInt(m[1],10); const d = new Date(now);
+      if (m[2]==='day') d.setDate(d.getDate()+n);
+      else if (m[2]==='hour') d.setHours(d.getHours()+n);
+      else if (m[2]==='week') d.setDate(d.getDate()+n*7);
+      else if (m[2]==='month') d.setMonth(d.getMonth()+n);
+      return d;
+    }
+
+    m = lower.match(/\bnext\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/);
+    if (m) {
+      const target = DAYS.indexOf(m[1]);
+      const d = new Date(now); const cur = d.getDay();
+      let diff = target - cur; if (diff <= 0) diff += 7;
+      d.setDate(d.getDate()+diff); d.setHours(23,59,0,0);
+      return d;
+    }
+
+    if (/\bnext\s+week\b/.test(lower)) { const d = new Date(now); d.setDate(d.getDate()+7); return d; }
+    if (/\bnext\s+month\b/.test(lower)) { const d = new Date(now); d.setMonth(d.getMonth()+1); return d; }
+
+    // "by Friday", "before Monday"
+    m = lower.match(/\b(?:by|before|until)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/);
+    if (m) {
+      const target = DAYS.indexOf(m[1]);
+      const d = new Date(now); const cur = d.getDay();
+      let diff = target - cur; if (diff <= 0) diff += 7;
+      d.setDate(d.getDate()+diff); d.setHours(17,0,0,0);
+      return d;
+    }
+
+    return null;
+  }
+
+  function _parseExplicit(text) {
+    const results = [];
+    // ISO: 2026-01-15
+    const isoRe = /\b(\d{4})-(\d{2})-(\d{2})\b/g;
+    let m;
+    while ((m = isoRe.exec(text)) !== null) {
+      const d = new Date(parseInt(m[1]),parseInt(m[2])-1,parseInt(m[3]),23,59,0);
+      if (!isNaN(d.getTime())) results.push(d);
+    }
+    // US: 01/15/2026
+    const usRe = /\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/g;
+    while ((m = usRe.exec(text)) !== null) {
+      const d = new Date(parseInt(m[3]),parseInt(m[1])-1,parseInt(m[2]),23,59,0);
+      if (!isNaN(d.getTime())) results.push(d);
+    }
+    // "January 15" or "Jan 15, 2026"
+    const namedRe = /\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+(\d{1,2})(?:\s*,?\s*(\d{4}))?\b/gi;
+    while ((m = namedRe.exec(text)) !== null) {
+      const mon = MONTHS[m[1].toLowerCase()];
+      const day = parseInt(m[2],10);
+      const yr = m[3] ? parseInt(m[3],10) : new Date().getFullYear();
+      if (mon !== undefined) {
+        const d = new Date(yr, mon, day, 23, 59, 0);
+        if (!isNaN(d.getTime())) results.push(d);
+      }
+    }
+    return results;
+  }
+
+  function _hasDeadlineContext(text) {
+    return /\b(due|deadline|by|before|until|submit|expires?|deliver|ship|launch|release|complete|finish)\b/i.test(text);
+  }
+
+  function _scanText(text) {
+    const found = [];
+    // Relative
+    const relDate = _parseRelative(text);
+    if (relDate) found.push(relDate);
+    // Explicit (only if deadline keyword nearby or relative didn't match)
+    if (_hasDeadlineContext(text)) {
+      _parseExplicit(text).forEach(d => found.push(d));
+    }
+    return found;
+  }
+
+  function _processMessage(text) {
+    const dates = _scanText(text);
+    const snippet = text.length > 80 ? text.substring(0, 77) + '...' : text;
+    let added = 0;
+    dates.forEach(d => {
+      const id = _hash(text + d.toISOString());
+      if (_deadlines.some(dl => dl.id === id)) return;
+      _deadlines.push({ id: id, dateISO: d.toISOString(), label: d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit'}), snippet: snippet, dismissed: false, alerted: false });
+      added++;
+      // Toast
+      if (typeof ToastManager !== 'undefined' && ToastManager.show) {
+        ToastManager.show('⏰ Deadline detected: ' + d.toLocaleDateString('en-US',{month:'short',day:'numeric'}), 'info');
+      }
+    });
+    if (added) { _save(); if (_isOpen) _render(); }
+  }
+
+  /* ---------- countdown helpers ---------- */
+  function _formatCountdown(dateISO) {
+    const diff = new Date(dateISO).getTime() - Date.now();
+    if (diff < 0) {
+      const ago = Math.abs(diff);
+      if (ago < 3600000) return Math.ceil(ago/60000) + 'm ago — OVERDUE';
+      if (ago < 86400000) return Math.floor(ago/3600000) + 'h ago — OVERDUE';
+      return Math.floor(ago/86400000) + 'd ago — OVERDUE';
+    }
+    if (diff < 3600000) return Math.ceil(diff/60000) + ' min left';
+    if (diff < 86400000) return Math.floor(diff/3600000) + 'h ' + Math.floor((diff%3600000)/60000) + 'm left';
+    return Math.floor(diff/86400000) + 'd ' + Math.floor((diff%86400000)/3600000) + 'h left';
+  }
+
+  function _urgencyClass(dateISO) {
+    const diff = new Date(dateISO).getTime() - Date.now();
+    if (diff < 0) return 'dl-overdue';
+    if (diff < 86400000) return 'dl-urgent';
+    if (diff < 259200000) return 'dl-soon';
+    return 'dl-ok';
+  }
+
+  /* ---------- panel ---------- */
+  function _injectStyles() {
+    if (typeof _injectCSS === 'function') {
+      _injectCSS('deadline-tracker-styles', `
+        .dl-panel{position:fixed;top:60px;right:20px;width:380px;max-height:70vh;background:var(--bg,#1a1a2e);border:1px solid var(--border,#333);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.5);z-index:10001;display:flex;flex-direction:column;font-family:system-ui,sans-serif;color:var(--text,#e2e8f0)}
+        .dl-panel .dl-hdr{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--border,#333)}
+        .dl-panel .dl-hdr h3{margin:0;font-size:15px}
+        .dl-panel .dl-close{background:none;border:none;color:var(--text,#e2e8f0);font-size:20px;cursor:pointer}
+        .dl-panel .dl-body{overflow-y:auto;flex:1;padding:8px}
+        .dl-item{padding:10px 12px;margin:6px 0;border-radius:8px;border-left:4px solid #4ade80;background:rgba(255,255,255,.04);position:relative}
+        .dl-item.dl-overdue{border-left-color:#ef4444;background:rgba(239,68,68,.08)}
+        .dl-item.dl-urgent{border-left-color:#f97316;background:rgba(249,115,22,.08)}
+        .dl-item.dl-soon{border-left-color:#eab308;background:rgba(234,179,8,.08)}
+        .dl-item.dl-ok{border-left-color:#4ade80}
+        .dl-item .dl-date{font-weight:600;font-size:13px;margin-bottom:2px}
+        .dl-item .dl-countdown{font-size:12px;opacity:.8;margin-bottom:4px}
+        .dl-item .dl-snippet{font-size:11px;opacity:.55;font-style:italic}
+        .dl-item .dl-dismiss{position:absolute;top:8px;right:8px;background:none;border:none;color:var(--text,#e2e8f0);opacity:.4;cursor:pointer;font-size:14px}
+        .dl-item .dl-dismiss:hover{opacity:1}
+        .dl-stats{padding:10px 16px;border-top:1px solid var(--border,#333);font-size:12px;opacity:.7;display:flex;gap:12px}
+        .dl-empty{text-align:center;padding:30px;opacity:.5;font-size:13px}
+      `);
+    }
+  }
+
+  function _buildPanel() {
+    if (_panel) return;
+    _injectStyles();
+    _panel = document.createElement('div');
+    _panel.className = 'dl-panel';
+    _panel.style.display = 'none';
+    _panel.innerHTML = '<div class="dl-hdr"><h3>⏰ Deadline Tracker</h3><button class="dl-close" title="Close">&times;</button></div><div class="dl-body"></div><div class="dl-stats"></div>';
+    document.body.appendChild(_panel);
+    _panel.querySelector('.dl-close').addEventListener('click', hide);
+    _panel.querySelector('.dl-body').addEventListener('click', function(e) {
+      if (e.target.classList.contains('dl-dismiss')) {
+        const id = e.target.dataset.id;
+        _dismissed[id] = true;
+        _deadlines = _deadlines.filter(d => d.id !== id);
+        _save(); _render();
+      }
+    });
+  }
+
+  function _render() {
+    _buildPanel();
+    const body = _panel.querySelector('.dl-body');
+    const stats = _panel.querySelector('.dl-stats');
+    const active = _deadlines.filter(d => !_dismissed[d.id]);
+    active.sort((a,b) => new Date(a.dateISO) - new Date(b.dateISO));
+    if (active.length === 0) {
+      body.innerHTML = '<div class="dl-empty">No deadlines detected yet.<br>Deadlines mentioned in chat will appear here automatically.</div>';
+      stats.textContent = '';
+      return;
+    }
+    let overdue = 0, upcoming = 0;
+    let html = '';
+    active.forEach(d => {
+      const uc = _urgencyClass(d.dateISO);
+      if (uc === 'dl-overdue') overdue++; else upcoming++;
+      const esc = typeof _escapeHtml === 'function' ? _escapeHtml : function(s){return s.replace(/</g,'&lt;');};
+      html += '<div class="dl-item ' + uc + '">' +
+        '<div class="dl-date">' + esc(d.label) + '</div>' +
+        '<div class="dl-countdown">' + _formatCountdown(d.dateISO) + '</div>' +
+        '<div class="dl-snippet">' + esc(d.snippet) + '</div>' +
+        '<button class="dl-dismiss" data-id="' + d.id + '" title="Dismiss">&times;</button></div>';
+    });
+    body.innerHTML = html;
+    stats.textContent = active.length + ' deadline' + (active.length!==1?'s':'') + ' · ' + upcoming + ' upcoming · ' + overdue + ' overdue';
+  }
+
+  function show() {
+    _buildPanel();
+    _panel.style.display = 'flex';
+    _isOpen = true;
+    _render();
+    _refreshTimer = setInterval(_render, 60000);
+    if (typeof PanelRegistry !== 'undefined' && PanelRegistry.closeAllExcept) PanelRegistry.closeAllExcept('deadline-tracker');
+  }
+
+  function hide() {
+    if (_panel) _panel.style.display = 'none';
+    _isOpen = false;
+    if (_refreshTimer) { clearInterval(_refreshTimer); _refreshTimer = null; }
+  }
+
+  function toggle() { _isOpen ? hide() : show(); }
+
+  /* ---------- auto-scan via MutationObserver ---------- */
+  function _startObserver() {
+    const target = document.getElementById('chat-output');
+    if (!target) return;
+    _observer = new MutationObserver(function(mutations) {
+      mutations.forEach(function(mut) {
+        mut.addedNodes.forEach(function(node) {
+          if (node.nodeType === 1) {
+            const text = node.textContent || '';
+            if (text.length > 5) _processMessage(text);
+          }
+        });
+      });
+    });
+    _observer.observe(target, { childList: true, subtree: true });
+  }
+
+  /* ---------- proactive urgency check ---------- */
+  function _checkUrgent() {
+    const now = Date.now();
+    _deadlines.forEach(function(d) {
+      if (d.alerted || _dismissed[d.id]) return;
+      const diff = new Date(d.dateISO).getTime() - now;
+      if (diff > 0 && diff < 7200000) {
+        d.alerted = true;
+        if (typeof ToastManager !== 'undefined' && ToastManager.show) {
+          ToastManager.show('🚨 Deadline in <2h: ' + d.label, 'warning');
+        }
+      }
+    });
+    _save();
+  }
+
+  /* ---------- init ---------- */
+  function init() {
+    _load();
+    _startObserver();
+    setInterval(_checkUrgent, 120000);
+    // Also scan existing messages
+    const out = document.getElementById('chat-output');
+    if (out) {
+      const msgs = out.querySelectorAll('.message');
+      msgs.forEach(function(el) { _processMessage(el.textContent || ''); });
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  // Keyboard shortcut
+  document.addEventListener('keydown', function(e) {
+    if (e.altKey && !e.shiftKey && !e.ctrlKey && e.key.toLowerCase() === 'd') {
+      e.preventDefault(); toggle();
+    }
+  });
+
+  document.addEventListener('DOMContentLoaded', function() {
+    if (typeof KeyboardShortcuts !== 'undefined' && KeyboardShortcuts.register) {
+      KeyboardShortcuts.register('Alt+D', 'Smart Deadline Tracker', toggle);
+    }
+    if (typeof CommandPalette !== 'undefined' && CommandPalette.register) {
+      CommandPalette.register({ name: 'deadline tracker', description: 'Autonomous deadline detection with countdown dashboard', icon: '⏰', action: toggle });
+    }
+    if (typeof SlashCommands !== 'undefined' && SlashCommands.register) {
+      SlashCommands.register('/deadlines', 'Show detected deadlines', toggle);
+    }
+    if (typeof PanelRegistry !== 'undefined' && PanelRegistry.register) {
+      PanelRegistry.register('deadline-tracker', hide);
+    }
+  });
+
+  return { toggle: toggle, show: show, hide: hide, scan: _processMessage };
 })();
