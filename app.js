@@ -28090,19 +28090,23 @@ const WordCloudGenerator = (() => {
       }
     }
 
+    // Generation counter for deduplication — avoids allocating a new Set
+    // on every _gridOverlaps call (thousands of calls during spiral placement).
+    let _overlapGen = 0;
+
     function _gridOverlaps(x, y, w, h) {
       const c0 = Math.max(0, (x / CELL) | 0);
       const c1 = Math.min(gridCols - 1, ((x + w) / CELL) | 0);
       const r0 = Math.max(0, ((y - h) / CELL) | 0);
       const r1 = Math.min(gridRows - 1, (y / CELL) | 0);
-      const seen = new Set();
+      const gen = ++_overlapGen;
       for (let r = r0; r <= r1; r++) {
         for (let c = c0; c <= c1; c++) {
           const bucket = grid[r * gridCols + c];
           for (let i = 0; i < bucket.length; i++) {
             const p = bucket[i];
-            if (seen.has(p)) continue;
-            seen.add(p);
+            if (p._gen === gen) continue;
+            p._gen = gen;
             if (!(x + w < p.x || x > p.x + p.w || y - h > p.y || y < p.y - p.h)) return true;
           }
         }
