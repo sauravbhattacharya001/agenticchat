@@ -142,6 +142,36 @@ describe('ConversationManager', () => {
 - Does it follow the existing code style?
 - Is the change necessary and well-scoped?
 
+## Commit Convention
+
+This project follows [Conventional Commits](https://www.conventionalcommits.org/) for clear, machine-readable history:
+
+```
+<type>(<scope>): <description>
+```
+
+| Type | When to Use |
+|------|-------------|
+| `feat` | New user-facing feature |
+| `fix` | Bug fix |
+| `perf` | Performance improvement |
+| `refactor` | Code restructuring without behavior change |
+| `test` | Adding or updating tests |
+| `docs` | Documentation only |
+| `ci` | CI/CD pipeline changes |
+| `chore` | Tooling, config, housekeeping |
+| `security` | Security fix or hardening |
+
+**Scopes** (optional): `sandbox`, `api`, `ui`, `config`, `tests`, `sw` (service worker)
+
+Examples:
+```
+feat(sandbox): add execution timeout configuration
+fix(ui): prevent double-submit on rapid Enter key
+perf(api): batch token estimation for multi-turn history
+security(sandbox): strengthen CSP nonce validation
+```
+
 ## Style Guide
 
 ### JavaScript
@@ -152,17 +182,22 @@ describe('ConversationManager', () => {
 - Keep functions focused — one responsibility per function
 - Add JSDoc comments for public module APIs
 - Use `Object.freeze()` for configuration objects
+- Prefer early returns over deeply nested conditionals
+- Use `??` (nullish coalescing) over `||` when `0` or `''` are valid values
+- Avoid magic numbers — define constants in `ChatConfig`
 
 ### CSS
 
 - Use CSS custom properties (variables) for theming values
 - Follow existing naming conventions
 - Mobile-first: ensure changes work on small screens
+- Group properties: positioning → box model → typography → visual → misc
 
 ### HTML
 
 - Semantic elements where appropriate
 - Accessible: labels, ARIA attributes, keyboard navigation
+- All interactive elements must be keyboard-reachable (`tabindex`, focus styles)
 
 ## Reporting Bugs
 
@@ -207,6 +242,27 @@ If you discover a security vulnerability, **do not open a public issue.** Instea
 - **Debugging sandbox:** The iframe sandbox uses `srcdoc` — inspect it via browser DevTools → Elements → find the `<iframe>` and switch to its context in the console.
 - **API mocking:** For testing without burning API credits, mock `fetch` in your test setup (see `tests/setup.js` for examples).
 - **Service Worker:** Changes to `sw.js` require clearing the SW cache in DevTools → Application → Service Workers → Unregister, then hard refresh.
+
+## Troubleshooting
+
+| Problem | Solution |
+|---------|----------|
+| Tests fail with `ReferenceError: document is not defined` | Ensure `tests/setup.js` is loaded — check `jest.config` or `package.json` `setupFiles` |
+| Sandbox code execution hangs | Check `SandboxRunner` timeout config; the iframe `srcdoc` may have a CSP error — look at browser console |
+| API key modal won't dismiss | Clear `localStorage` key `openai_api_key` and refresh |
+| Service worker serves stale assets | Unregister SW in DevTools → Application → Service Workers, then hard refresh (Ctrl+Shift+R) |
+| `npm test` passes but browser shows errors | jsdom and real browsers differ — test in Chrome DevTools console too |
+| Changes to `style.css` not visible | SW cache — see Service Worker tip above, or use DevTools → Network → Disable cache |
+
+## Branching Strategy
+
+We use a simple trunk-based flow:
+
+- `main` — stable, always deployable
+- Feature branches: `feature/<short-name>` (e.g., `feature/voice-input`)
+- Bug fixes: `fix/<issue-number>-<short-name>` (e.g., `fix/42-sandbox-timeout`)
+- Keep branches short-lived — merge within a few days, not weeks
+- Rebase onto `main` before opening a PR to keep history linear
 
 ---
 
