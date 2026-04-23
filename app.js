@@ -36480,18 +36480,25 @@ const SmartKnowledgeMap = (function () {
   function renderInsights() {
     var cont = document.getElementById('skm-insights');
     if (!cont) return;
+    // Pre-compute degree map in a single O(E) pass instead of
+    // O(N×E) per-node edge scans for connections/emerging/gaps.
+    var degreeMap = new Map();
+    for (var ei = 0; ei < edges.length; ei++) {
+      var e = edges[ei];
+      degreeMap.set(e.source, (degreeMap.get(e.source) || 0) + 1);
+      degreeMap.set(e.target, (degreeMap.get(e.target) || 0) + 1);
+    }
+    function _deg(n) { return degreeMap.get(n) || 0; }
     var sorted = nodes.slice().sort(function (a, b) { return b.count - a.count; });
     var html = '<h4 style="margin:0 0 8px">Top Entities</h4><table style="width:100%;font-size:12px;border-collapse:collapse">';
     html += '<tr style="border-bottom:1px solid #444"><th style="text-align:left;padding:2px 6px">Entity</th><th>Type</th><th>Mentions</th><th>Connections</th></tr>';
     sorted.slice(0, 10).forEach(function (n) {
-      var conns = edges.filter(function (e) { return e.source === n || e.target === n; }).length;
+      var conns = _deg(n);
       html += '<tr style="border-bottom:1px solid #333"><td style="padding:2px 6px;color:' + (COLORS[n.category] || COLORS.unknown) + '">' + n.label + '</td><td style="text-align:center">' + n.category + '</td><td style="text-align:center">' + n.count + '</td><td style="text-align:center">' + conns + '</td></tr>';
     });
     html += '</table>';
     // Emerging topics (low count but multiple connections)
-    var emerging = nodes.filter(function (n) { return n.count <= 2; }).filter(function (n) {
-      return edges.filter(function (e) { return e.source === n || e.target === n; }).length >= 2;
-    }).slice(0, 5);
+    var emerging = nodes.filter(function (n) { return n.count <= 2 && _deg(n) >= 2; }).slice(0, 5);
     if (emerging.length) {
       html += '<h4 style="margin:12px 0 8px">Emerging Topics</h4><ul style="margin:0;padding-left:16px;font-size:12px">';
       emerging.forEach(function (n) { html += '<li style="color:' + (COLORS[n.category] || COLORS.unknown) + '">' + n.label + '</li>'; });
@@ -36499,7 +36506,7 @@ const SmartKnowledgeMap = (function () {
     }
     // Knowledge gaps (entities with only 1 connection)
     var gaps = nodes.filter(function (n) {
-      return edges.filter(function (e) { return e.source === n || e.target === n; }).length <= 1 && n.count >= 2;
+      return _deg(n) <= 1 && n.count >= 2;
     }).slice(0, 5);
     if (gaps.length) {
       html += '<h4 style="margin:12px 0 8px">Knowledge Gaps</h4><p style="font-size:11px;opacity:0.6;margin:0 0 4px">Mentioned but underexplored:</p><ul style="margin:0;padding-left:16px;font-size:12px">';
