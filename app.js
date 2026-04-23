@@ -1,7 +1,7 @@
 /* ============================================================
  * Agentic Chat - Application Logic
  *
- * Architecture (50 modules, all revealing-module-pattern IIFEs):
+ * Architecture (51 modules, all revealing-module-pattern IIFEs):
  *
  *   Core:
  *   SafeStorage          - safe localStorage wrapper for restricted-storage environments
@@ -102,6 +102,7 @@
  *   ConversationMoodRing - real-time sentiment monitor with mood shifts, alerts, suggestions (Alt+M)
  *   SmartModelAdvisor   - proactive model recommendation based on task analysis with one-click switching (Alt+Shift+A)
  *   SmartSessionPrioritizer - autonomous session priority scoring with urgency/action-item detection, priority queue dashboard (Alt+Shift+P)
+ *   SmartContradictionDetector - autonomous AI contradiction detection with confidence scoring, clarification prompts (Alt+Shift+X)
  *   SmartDeadlineTracker  - autonomous deadline detection from conversations with countdown dashboard, proactive alerts (Alt+D)
  *
  * All modules communicate through a thin public API; no direct DOM
@@ -36989,4 +36990,418 @@ const SmartDeadlineTracker = (() => {
   });
 
   return { toggle: toggle, show: show, hide: hide, scan: _processMessage };
+})();
+
+/* ============================================================
+ *  SmartContradictionDetector  (Alt+Shift+X)
+ *  Autonomous AI contradiction detection with confidence scoring
+ * ============================================================ */
+var SmartContradictionDetector = (function () {
+  'use strict';
+
+  var STORAGE_PREFIX = 'ac_contradictions_';
+  var _visible = false;
+  var _panel = null;
+  var _contradictions = [];
+  var _filter = 'all'; // all | high | negation | number | sentiment | opposition | yesno
+  var _observer = null;
+  var _assistantMessages = []; // {index, text, el}
+
+  /* ---- antonym / sentiment pairs ---- */
+  var ANTONYMS = [
+    ['fast','slow'],['easy','hard'],['easy','difficult'],['simple','complex'],
+    ['good','bad'],['great','terrible'],['safe','dangerous'],['cheap','expensive'],
+    ['strong','weak'],['hot','cold'],['large','small'],['big','small'],
+    ['efficient','inefficient'],['reliable','unreliable'],['secure','insecure'],
+    ['possible','impossible'],['useful','useless'],['correct','incorrect'],
+    ['true','false'],['better','worse'],['best','worst'],['always','never'],
+    ['increase','decrease'],['above','below'],['before','after'],
+    ['recommended','discouraged'],['allow','block'],['accept','reject'],
+    ['include','exclude'],['enable','disable'],['success','failure'],
+    ['optimal','suboptimal'],['common','rare'],['stable','unstable']
+  ];
+  var POS_ADJ = ['great','good','excellent','wonderful','amazing','fantastic','best','recommended','ideal','perfect','superior','beneficial','helpful','positive'];
+  var NEG_ADJ = ['terrible','bad','awful','horrible','worst','poor','inferior','harmful','negative','useless','detrimental','problematic','dangerous','risky'];
+
+  /* ---- helpers ---- */
+  function _sessionId() {
+    try { return (typeof SessionManager !== 'undefined' && SessionManager.current) ? SessionManager.current() : 'default'; } catch(e) { return 'default'; }
+  }
+  function _storageKey() { return STORAGE_PREFIX + _sessionId(); }
+  function _save() {
+    try { SafeStorage.set(_storageKey(), JSON.stringify(_contradictions)); } catch(e) {}
+  }
+  function _load() {
+    try {
+      var raw = SafeStorage.get(_storageKey());
+      if (raw) _contradictions = JSON.parse(raw);
+    } catch(e) { _contradictions = []; }
+  }
+
+  function _tokenize(text) {
+    return (text || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(function(w) { return w.length > 1; });
+  }
+  function _overlap(a, b) {
+    var sa = {}, sb = {}, shared = 0, total = 0;
+    a.forEach(function(w) { sa[w] = 1; });
+    b.forEach(function(w) { sb[w] = 1; });
+    var all = Object.assign({}, sa, sb);
+    for (var w in all) { total++; if (sa[w] && sb[w]) shared++; }
+    return total ? shared / total : 0;
+  }
+  function _truncate(s, n) { return s.length > n ? s.substring(0, n) + '…' : s; }
+
+  /* ---- detection strategies ---- */
+  function _detectNegationFlip(t1, t2) {
+    var patterns = [
+      { pos: /\b(is|are|was|were)\s+(\w+)/gi, neg: /\b(is not|isn't|are not|aren't|was not|wasn't|were not|weren't)\s+(\w+)/gi }
+    ];
+    var hits = [];
+    patterns.forEach(function(p) {
+      var posMatches1 = [], negMatches2 = [];
+      var m;
+      while ((m = p.pos.exec(t1)) !== null) posMatches1.push(m[2].toLowerCase());
+      while ((m = p.neg.exec(t2)) !== null) negMatches2.push(m[2].toLowerCase());
+      posMatches1.forEach(function(w) { if (negMatches2.indexOf(w) !== -1) hits.push(w); });
+      // also reverse
+      p.pos.lastIndex = 0; p.neg.lastIndex = 0;
+      var posMatches2 = [], negMatches1 = [];
+      while ((m = p.pos.exec(t2)) !== null) posMatches2.push(m[2].toLowerCase());
+      while ((m = p.neg.exec(t1)) !== null) negMatches1.push(m[2].toLowerCase());
+      posMatches2.forEach(function(w) { if (negMatches1.indexOf(w) !== -1) hits.push(w); });
+    });
+    return hits.length > 0 ? { type: 'negation', keyword: hits[0], strength: Math.min(hits.length * 30, 90) } : null;
+  }
+
+  function _detectNumericalContradiction(t1, t2) {
+    var numPattern = /\b(\w{3,})\s+(?:is|are|was|were|has|have|had|of|about|approximately|around|exactly|contains?|equals?)\s+(\d+[\d,.]*)/gi;
+    var map1 = {}, map2 = {};
+    var m;
+    while ((m = numPattern.exec(t1)) !== null) map1[m[1].toLowerCase()] = m[2];
+    numPattern.lastIndex = 0;
+    while ((m = numPattern.exec(t2)) !== null) map2[m[1].toLowerCase()] = m[2];
+    for (var key in map1) {
+      if (map2[key] && map1[key] !== map2[key]) {
+        return { type: 'number', keyword: key, val1: map1[key], val2: map2[key], strength: 80 };
+      }
+    }
+    return null;
+  }
+
+  function _detectSentimentReversal(t1, t2) {
+    var t1l = t1.toLowerCase(), t2l = t2.toLowerCase();
+    for (var i = 0; i < POS_ADJ.length; i++) {
+      var pos = POS_ADJ[i];
+      for (var j = 0; j < NEG_ADJ.length; j++) {
+        var neg = NEG_ADJ[j];
+        // find shared subject near the adjective
+        var r1 = new RegExp('(\\w{3,})\\s+(?:is|are|was|were)\\s+(?:really\\s+|very\\s+|quite\\s+)?' + pos + '\\b', 'i');
+        var r2 = new RegExp('(\\w{3,})\\s+(?:is|are|was|were)\\s+(?:really\\s+|very\\s+|quite\\s+)?' + neg + '\\b', 'i');
+        var m1 = r1.exec(t1l), m2 = r2.exec(t2l);
+        if (m1 && m2 && m1[1] === m2[1]) {
+          return { type: 'sentiment', keyword: m1[1], pos: pos, neg: neg, strength: 70 };
+        }
+        m1 = r1.exec(t2l); m2 = r2.exec(t1l);
+        if (m1 && m2 && m1[1] === m2[1]) {
+          return { type: 'sentiment', keyword: m1[1], pos: pos, neg: neg, strength: 70 };
+        }
+      }
+    }
+    return null;
+  }
+
+  function _detectDirectOpposition(t1, t2) {
+    var t1l = t1.toLowerCase(), t2l = t2.toLowerCase();
+    for (var i = 0; i < ANTONYMS.length; i++) {
+      var a = ANTONYMS[i][0], b = ANTONYMS[i][1];
+      // check if same subject has antonym descriptions
+      var ra = new RegExp('(\\w{3,})\\s+(?:is|are|was|were)\\s+(?:\\w+\\s+)?' + a + '\\b', 'i');
+      var rb = new RegExp('(\\w{3,})\\s+(?:is|are|was|were)\\s+(?:\\w+\\s+)?' + b + '\\b', 'i');
+      var ma = ra.exec(t1l), mb = rb.exec(t2l);
+      if (ma && mb && ma[1] === mb[1]) return { type: 'opposition', keyword: ma[1], pair: [a, b], strength: 75 };
+      ma = ra.exec(t2l); mb = rb.exec(t1l);
+      if (ma && mb && ma[1] === mb[1]) return { type: 'opposition', keyword: ma[1], pair: [a, b], strength: 75 };
+    }
+    return null;
+  }
+
+  function _detectYesNoFlip(t1, t2) {
+    var yesStart = /^(yes|yeah|yep|correct|absolutely|definitely|indeed)\b/i;
+    var noStart = /^(no|nope|not really|incorrect|actually no|negative)\b/i;
+    var s1 = t1.trim().split(/\n/)[0] || '';
+    var s2 = t2.trim().split(/\n/)[0] || '';
+    if ((yesStart.test(s1) && noStart.test(s2)) || (noStart.test(s1) && yesStart.test(s2))) {
+      var overlap = _overlap(_tokenize(t1), _tokenize(t2));
+      if (overlap > 0.15) return { type: 'yesno', strength: 60 + Math.round(overlap * 40) };
+    }
+    return null;
+  }
+
+  /* ---- main analysis ---- */
+  function _analyzeNewMessage(newIdx) {
+    var newMsg = _assistantMessages[newIdx];
+    if (!newMsg) return;
+    var found = [];
+    for (var i = 0; i < newIdx; i++) {
+      var old = _assistantMessages[i];
+      var overlap = _overlap(_tokenize(old.text), _tokenize(newMsg.text));
+      if (overlap < 0.08) continue; // not about the same topic
+
+      var detectors = [_detectNegationFlip, _detectNumericalContradiction, _detectSentimentReversal, _detectDirectOpposition, _detectYesNoFlip];
+      for (var d = 0; d < detectors.length; d++) {
+        var result = detectors[d](old.text, newMsg.text);
+        if (result) {
+          var distance = newIdx - i;
+          var temporalBoost = Math.max(0, 20 - distance * 3);
+          var overlapBoost = Math.round(overlap * 30);
+          var confidence = Math.min(100, result.strength + temporalBoost + overlapBoost);
+          found.push({
+            id: Date.now() + '_' + Math.random().toString(36).substr(2,5),
+            type: result.type,
+            confidence: confidence,
+            msgIdx1: old.index,
+            msgIdx2: newMsg.index,
+            excerpt1: _truncate(old.text, 120),
+            excerpt2: _truncate(newMsg.text, 120),
+            keyword: result.keyword || '',
+            detail: result,
+            ts: Date.now()
+          });
+          break; // one detection per pair
+        }
+      }
+    }
+    if (found.length) {
+      _contradictions = _contradictions.concat(found);
+      _save();
+      found.forEach(function(c) {
+        _addMessageIndicator(c);
+        if (c.confidence >= 70) _toast(c);
+      });
+      if (_visible) _render();
+    }
+  }
+
+  /* ---- message indicators ---- */
+  function _addMessageIndicator(c) {
+    var msgs = document.querySelectorAll('#chat-output .message');
+    [c.msgIdx1, c.msgIdx2].forEach(function(idx) {
+      var el = msgs[idx];
+      if (!el || el.querySelector('.contradiction-indicator')) return;
+      var badge = document.createElement('span');
+      badge.className = 'contradiction-indicator';
+      badge.textContent = '🔍';
+      badge.title = 'Potential contradiction detected (confidence: ' + c.confidence + '%)';
+      el.style.position = 'relative';
+      el.appendChild(badge);
+    });
+  }
+
+  /* ---- toast ---- */
+  function _toast(c) {
+    var t = document.createElement('div');
+    t.className = 'contradiction-toast';
+    t.innerHTML = '🔍 <strong>Contradiction detected</strong> (' + c.confidence + '% confidence)<br><small>' + (c.keyword ? 'regarding "' + c.keyword + '"' : c.type + ' flip') + '</small>';
+    document.body.appendChild(t);
+    setTimeout(function() { t.classList.add('contradiction-toast-show'); }, 10);
+    setTimeout(function() { t.classList.remove('contradiction-toast-show'); setTimeout(function() { t.remove(); }, 400); }, 4000);
+  }
+
+  /* ---- clarification prompt ---- */
+  function _clarify(c) {
+    var prompts = {
+      negation: 'I noticed you previously said something was ' + (c.keyword||'X') + ' but then said it was not. Could you clarify which is correct?',
+      number: 'You mentioned ' + (c.keyword||'this') + ' was ' + ((c.detail||{}).val1||'?') + ' earlier but now say ' + ((c.detail||{}).val2||'?') + '. Which number is accurate?',
+      sentiment: 'You described ' + (c.keyword||'this') + ' positively before but negatively now. What\'s your actual assessment?',
+      opposition: 'You said ' + (c.keyword||'this') + ' was "' + ((c.detail||{}).pair||['?','?'])[0] + '" before but "' + ((c.detail||{}).pair||['?','?'])[1] + '" now. Could you reconcile these views?',
+      yesno: 'You gave a "yes" answer earlier but a "no" now (or vice versa) on what seems like the same topic. Could you clarify?'
+    };
+    var input = document.getElementById('chat-input');
+    if (input) { input.value = prompts[c.type] || 'Could you clarify the apparent contradiction in your previous responses?'; input.focus(); input.dispatchEvent(new Event('input', {bubbles:true})); }
+  }
+
+  /* ---- type labels ---- */
+  var TYPE_INFO = {
+    negation: { icon: '⛔', label: 'Negation Flip' },
+    number: { icon: '🔢', label: 'Numerical' },
+    sentiment: { icon: '😊↔😠', label: 'Sentiment Reversal' },
+    opposition: { icon: '⚔️', label: 'Direct Opposition' },
+    yesno: { icon: '✅❌', label: 'Yes/No Flip' }
+  };
+
+  /* ---- UI ---- */
+  function _injectStyles() {
+    if (document.getElementById('contradiction-detector-styles')) return;
+    var s = document.createElement('style');
+    s.id = 'contradiction-detector-styles';
+    s.textContent = [
+      '.contradiction-panel{position:fixed;top:0;right:-400px;width:380px;height:100%;background:rgba(255,255,255,0.95);backdrop-filter:blur(12px);box-shadow:-4px 0 24px rgba(0,0,0,0.12);z-index:10001;transition:right 0.3s ease;display:flex;flex-direction:column;font-family:system-ui,sans-serif;font-size:14px}',
+      '.contradiction-panel.open{right:0}',
+      '[data-theme="dark"] .contradiction-panel{background:rgba(30,30,40,0.95);color:#e0e0e0;box-shadow:-4px 0 24px rgba(0,0,0,0.4)}',
+      '.contradiction-header{padding:16px;border-bottom:1px solid rgba(0,0,0,0.1);display:flex;align-items:center;gap:8px}',
+      '[data-theme="dark"] .contradiction-header{border-color:rgba(255,255,255,0.1)}',
+      '.contradiction-header h3{margin:0;flex:1;font-size:15px}',
+      '.contradiction-badge{background:#e74c3c;color:#fff;border-radius:12px;padding:2px 8px;font-size:12px;font-weight:600}',
+      '.contradiction-close{background:none;border:none;font-size:20px;cursor:pointer;color:inherit;padding:4px 8px}',
+      '.contradiction-summary{padding:10px 16px;background:rgba(0,0,0,0.03);font-size:12px;color:#666;display:flex;gap:16px}',
+      '[data-theme="dark"] .contradiction-summary{background:rgba(255,255,255,0.03);color:#999}',
+      '.contradiction-filters{padding:8px 16px;display:flex;gap:4px;flex-wrap:wrap}',
+      '.contradiction-filter-btn{padding:4px 10px;border-radius:12px;border:1px solid rgba(0,0,0,0.15);background:none;font-size:11px;cursor:pointer;color:inherit}',
+      '.contradiction-filter-btn.active{background:#3498db;color:#fff;border-color:#3498db}',
+      '[data-theme="dark"] .contradiction-filter-btn{border-color:rgba(255,255,255,0.15)}',
+      '.contradiction-list{flex:1;overflow-y:auto;padding:8px 16px}',
+      '.contradiction-card{border:1px solid rgba(0,0,0,0.08);border-radius:10px;padding:12px;margin-bottom:10px;border-left:4px solid #f39c12}',
+      '.contradiction-card.high{border-left-color:#e74c3c}',
+      '.contradiction-card.low{border-left-color:#f1c40f}',
+      '[data-theme="dark"] .contradiction-card{border-color:rgba(255,255,255,0.08)}',
+      '.contradiction-confidence{display:inline-block;padding:2px 8px;border-radius:8px;font-size:11px;font-weight:600;color:#fff}',
+      '.contradiction-confidence.high{background:#e74c3c}',
+      '.contradiction-confidence.mid{background:#e67e22}',
+      '.contradiction-confidence.low{background:#f1c40f;color:#333}',
+      '.contradiction-excerpt{font-size:12px;color:#555;margin:6px 0;padding:6px 8px;background:rgba(0,0,0,0.03);border-radius:6px;line-height:1.4}',
+      '[data-theme="dark"] .contradiction-excerpt{color:#aaa;background:rgba(255,255,255,0.04)}',
+      '.contradiction-type{font-size:11px;color:#888;margin:4px 0}',
+      '.contradiction-clarify{padding:5px 12px;border-radius:8px;border:1px solid #3498db;background:none;color:#3498db;font-size:12px;cursor:pointer;margin-top:6px}',
+      '.contradiction-clarify:hover{background:#3498db;color:#fff}',
+      '.contradiction-empty{text-align:center;padding:40px 20px;color:#999}',
+      '.contradiction-empty h4{margin:0 0 8px}',
+      '.contradiction-clear{padding:5px 12px;border-radius:8px;border:1px solid #e74c3c;background:none;color:#e74c3c;font-size:12px;cursor:pointer}',
+      '.contradiction-clear:hover{background:#e74c3c;color:#fff}',
+      '.contradiction-indicator{position:absolute;top:4px;right:4px;font-size:14px;animation:contradiction-pulse 2s infinite}',
+      '@keyframes contradiction-pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.5;transform:scale(1.2)}}',
+      '.contradiction-toast{position:fixed;bottom:20px;right:20px;background:rgba(231,76,60,0.95);color:#fff;padding:12px 18px;border-radius:10px;z-index:10002;opacity:0;transform:translateY(20px);transition:all 0.3s ease;font-size:13px;max-width:320px;backdrop-filter:blur(8px)}',
+      '.contradiction-toast-show{opacity:1;transform:translateY(0)}'
+    ].join('\n');
+    document.head.appendChild(s);
+  }
+
+  function _createPanel() {
+    if (_panel) return;
+    _panel = document.createElement('div');
+    _panel.className = 'contradiction-panel';
+    _panel.innerHTML = '<div class="contradiction-header"><h3>🔍 Contradiction Detector</h3><span class="contradiction-badge" id="contradiction-count">0</span><button class="contradiction-close" id="contradiction-close-btn">&times;</button></div><div class="contradiction-summary" id="contradiction-summary"></div><div class="contradiction-filters" id="contradiction-filters"></div><div class="contradiction-list" id="contradiction-list"></div>';
+    document.body.appendChild(_panel);
+    document.getElementById('contradiction-close-btn').addEventListener('click', hide);
+    _renderFilters();
+  }
+
+  function _renderFilters() {
+    var c = document.getElementById('contradiction-filters');
+    if (!c) return;
+    var filters = [['all','All'],['high','High Conf.'],['negation','⛔ Negation'],['number','🔢 Number'],['sentiment','😊 Sentiment'],['opposition','⚔️ Opposition'],['yesno','✅❌ Yes/No']];
+    c.innerHTML = filters.map(function(f) {
+      return '<button class="contradiction-filter-btn' + (_filter === f[0] ? ' active' : '') + '" data-f="' + f[0] + '">' + f[1] + '</button>';
+    }).join('') + ' <button class="contradiction-clear" id="contradiction-clear-btn">Clear All</button>';
+    c.querySelectorAll('.contradiction-filter-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() { _filter = btn.dataset.f; _renderFilters(); _render(); });
+    });
+    document.getElementById('contradiction-clear-btn').addEventListener('click', function() { _contradictions = []; _save(); _render(); });
+  }
+
+  function _render() {
+    _createPanel();
+    var list = document.getElementById('contradiction-list');
+    var countEl = document.getElementById('contradiction-count');
+    var summaryEl = document.getElementById('contradiction-summary');
+    var filtered = _contradictions.filter(function(c) {
+      if (_filter === 'all') return true;
+      if (_filter === 'high') return c.confidence >= 70;
+      return c.type === _filter;
+    });
+    countEl.textContent = _contradictions.length;
+    var avg = _contradictions.length ? Math.round(_contradictions.reduce(function(s,c){return s+c.confidence;},0)/_contradictions.length) : 0;
+    summaryEl.innerHTML = '<span>Total: <strong>' + _contradictions.length + '</strong></span><span>Avg Confidence: <strong>' + avg + '%</strong></span>';
+
+    if (!filtered.length) {
+      list.innerHTML = '<div class="contradiction-empty"><h4>No contradictions found</h4><p>The detector monitors AI responses for inconsistencies like negation flips, numerical mismatches, sentiment reversals, and yes/no changes.</p></div>';
+      return;
+    }
+    list.innerHTML = filtered.sort(function(a,b){return b.confidence-a.confidence;}).map(function(c) {
+      var cls = c.confidence >= 70 ? 'high' : (c.confidence >= 40 ? 'mid' : 'low');
+      var cardCls = c.confidence >= 70 ? 'high' : (c.confidence < 40 ? 'low' : '');
+      var ti = TYPE_INFO[c.type] || {icon:'?',label:c.type};
+      return '<div class="contradiction-card ' + cardCls + '">' +
+        '<span class="contradiction-confidence ' + cls + '">' + c.confidence + '%</span> ' +
+        '<span class="contradiction-type">' + ti.icon + ' ' + ti.label + (c.keyword ? ' — "' + c.keyword + '"' : '') + '</span>' +
+        '<div class="contradiction-excerpt">Msg #' + (c.msgIdx1+1) + ': ' + c.excerpt1 + '</div>' +
+        '<div class="contradiction-excerpt">Msg #' + (c.msgIdx2+1) + ': ' + c.excerpt2 + '</div>' +
+        '<button class="contradiction-clarify" data-id="' + c.id + '">Ask for Clarification</button></div>';
+    }).join('');
+    list.querySelectorAll('.contradiction-clarify').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var c = _contradictions.find(function(x){return x.id===btn.dataset.id;});
+        if (c) _clarify(c);
+      });
+    });
+  }
+
+  function show() { _createPanel(); _render(); _panel.classList.add('open'); _visible = true; }
+  function hide() { if (_panel) _panel.classList.remove('open'); _visible = false; }
+  function toggle() { _visible ? hide() : show(); }
+
+  /* ---- observer ---- */
+  function _startObserver() {
+    var out = document.getElementById('chat-output');
+    if (!out) return;
+    _observer = new MutationObserver(function(mutations) {
+      mutations.forEach(function(m) {
+        m.addedNodes.forEach(function(node) {
+          if (node.nodeType !== 1) return;
+          var el = node.classList && node.classList.contains('message') ? node : node.querySelector && node.querySelector('.message');
+          if (!el) return;
+          if (el.classList.contains('assistant-message')) {
+            var allMsgs = out.querySelectorAll('.message');
+            var idx = Array.prototype.indexOf.call(allMsgs, el);
+            _assistantMessages.push({ index: idx, text: el.textContent || '', el: el });
+            _analyzeNewMessage(_assistantMessages.length - 1);
+          }
+        });
+      });
+    });
+    _observer.observe(out, { childList: true, subtree: true });
+  }
+
+  /* ---- init ---- */
+  function init() {
+    _injectStyles();
+    _load();
+    // index existing assistant messages
+    var out = document.getElementById('chat-output');
+    if (out) {
+      var msgs = out.querySelectorAll('.message');
+      msgs.forEach(function(el, i) {
+        if (el.classList.contains('assistant-message')) {
+          _assistantMessages.push({ index: i, text: el.textContent || '', el: el });
+        }
+      });
+      // re-analyze all for existing contradictions on reload
+      for (var i = 1; i < _assistantMessages.length; i++) _analyzeNewMessage(i);
+    }
+    _startObserver();
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  document.addEventListener('keydown', function(e) {
+    if (e.altKey && e.shiftKey && !e.ctrlKey && e.key.toLowerCase() === 'x') {
+      e.preventDefault(); toggle();
+    }
+  });
+
+  document.addEventListener('DOMContentLoaded', function() {
+    if (typeof KeyboardShortcuts !== 'undefined' && KeyboardShortcuts.register) {
+      KeyboardShortcuts.register('Alt+Shift+X', 'Smart Contradiction Detector', toggle);
+    }
+    if (typeof CommandPalette !== 'undefined' && CommandPalette.register) {
+      CommandPalette.register({ name: 'contradiction detector', description: 'Autonomous contradiction detection in AI responses', icon: '🔍', action: toggle });
+    }
+    if (typeof SlashCommands !== 'undefined' && SlashCommands.register) {
+      SlashCommands.register('/contradictions', 'Show detected contradictions', toggle);
+    }
+    if (typeof PanelRegistry !== 'undefined' && PanelRegistry.register) {
+      PanelRegistry.register('contradiction-detector', hide);
+    }
+  });
+
+  return { toggle: toggle, show: show, hide: hide };
 })();
