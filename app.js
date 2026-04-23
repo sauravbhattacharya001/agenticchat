@@ -37023,6 +37023,18 @@ var SmartContradictionDetector = (function () {
   var POS_ADJ = ['great','good','excellent','wonderful','amazing','fantastic','best','recommended','ideal','perfect','superior','beneficial','helpful','positive'];
   var NEG_ADJ = ['terrible','bad','awful','horrible','worst','poor','inferior','harmful','negative','useless','detrimental','problematic','dangerous','risky'];
 
+  /* ---- pre-compiled regex maps (avoid per-call RegExp allocation) ---- */
+  var _sentimentRegexes = POS_ADJ.concat(NEG_ADJ).reduce(function(m, adj) {
+    m[adj] = new RegExp('(\\w{3,})\\s+(?:is|are|was|were)\\s+(?:really\\s+|very\\s+|quite\\s+)?' + adj + '\\b', 'i');
+    return m;
+  }, {});
+  var _oppositionRegexes = ANTONYMS.reduce(function(m, pair) {
+    pair.forEach(function(word) {
+      if (!m[word]) m[word] = new RegExp('(\\w{3,})\\s+(?:is|are|was|were)\\s+(?:\\w+\\s+)?' + word + '\\b', 'i');
+    });
+    return m;
+  }, {});
+
   /* ---- helpers ---- */
   function _sessionId() {
     try { return (typeof SessionManager !== 'undefined' && SessionManager.current) ? SessionManager.current() : 'default'; } catch(e) { return 'default'; }
@@ -37092,15 +37104,16 @@ var SmartContradictionDetector = (function () {
     var t1l = t1.toLowerCase(), t2l = t2.toLowerCase();
     for (var i = 0; i < POS_ADJ.length; i++) {
       var pos = POS_ADJ[i];
+      var r1 = _sentimentRegexes[pos];
       for (var j = 0; j < NEG_ADJ.length; j++) {
         var neg = NEG_ADJ[j];
-        // find shared subject near the adjective
-        var r1 = new RegExp('(\\w{3,})\\s+(?:is|are|was|were)\\s+(?:really\\s+|very\\s+|quite\\s+)?' + pos + '\\b', 'i');
-        var r2 = new RegExp('(\\w{3,})\\s+(?:is|are|was|were)\\s+(?:really\\s+|very\\s+|quite\\s+)?' + neg + '\\b', 'i');
+        var r2 = _sentimentRegexes[neg];
+        r1.lastIndex = 0; r2.lastIndex = 0;
         var m1 = r1.exec(t1l), m2 = r2.exec(t2l);
         if (m1 && m2 && m1[1] === m2[1]) {
           return { type: 'sentiment', keyword: m1[1], pos: pos, neg: neg, strength: 70 };
         }
+        r1.lastIndex = 0; r2.lastIndex = 0;
         m1 = r1.exec(t2l); m2 = r2.exec(t1l);
         if (m1 && m2 && m1[1] === m2[1]) {
           return { type: 'sentiment', keyword: m1[1], pos: pos, neg: neg, strength: 70 };
@@ -37114,11 +37127,11 @@ var SmartContradictionDetector = (function () {
     var t1l = t1.toLowerCase(), t2l = t2.toLowerCase();
     for (var i = 0; i < ANTONYMS.length; i++) {
       var a = ANTONYMS[i][0], b = ANTONYMS[i][1];
-      // check if same subject has antonym descriptions
-      var ra = new RegExp('(\\w{3,})\\s+(?:is|are|was|were)\\s+(?:\\w+\\s+)?' + a + '\\b', 'i');
-      var rb = new RegExp('(\\w{3,})\\s+(?:is|are|was|were)\\s+(?:\\w+\\s+)?' + b + '\\b', 'i');
+      var ra = _oppositionRegexes[a], rb = _oppositionRegexes[b];
+      ra.lastIndex = 0; rb.lastIndex = 0;
       var ma = ra.exec(t1l), mb = rb.exec(t2l);
       if (ma && mb && ma[1] === mb[1]) return { type: 'opposition', keyword: ma[1], pair: [a, b], strength: 75 };
+      ra.lastIndex = 0; rb.lastIndex = 0;
       ma = ra.exec(t2l); mb = rb.exec(t1l);
       if (ma && mb && ma[1] === mb[1]) return { type: 'opposition', keyword: ma[1], pair: [a, b], strength: 75 };
     }
