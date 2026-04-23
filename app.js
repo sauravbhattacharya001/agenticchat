@@ -9273,11 +9273,8 @@ const ConversationTimeline = (() => {
   const REFRESH_DEBOUNCE_MS = 150;
 
   /** CSS injected once. */
-  let styleInjected = false;
   function injectStyles() {
-    if (styleInjected) return;
-    styleInjected = true;
-    const css = [
+    _injectCSS('timeline-styles', [
       '#timeline-container {',
       '  position: fixed; right: 0; top: 0; width: 48px; height: 100vh;',
       '  background: var(--tl-bg, #0d1117); border-left: 1px solid var(--tl-border, #30363d);',
@@ -9328,10 +9325,7 @@ const ConversationTimeline = (() => {
       '}',
       '.tl-tooltip-role { font-weight: 600; margin-right: 4px; }',
       '.tl-tooltip-preview { color: #8b949e; }'
-    ].join('\n');
-    let style = document.createElement('style');
-    style.textContent = css;
-    document.head.appendChild(style);
+    ].join('\n'));
   }
 
   function init() {
@@ -9974,7 +9968,6 @@ const ConversationSummarizer = (() => {
 
   let panelEl = null;
   let overlayEl = null;
-  let styleInjected = false;
   let lastSummary = null;
 
   // ── Decision indicator patterns ──
@@ -9999,10 +9992,7 @@ const ConversationSummarizer = (() => {
   // ── Styles ──
 
   function injectStyles() {
-    if (styleInjected) return;
-    styleInjected = true;
-    const style = document.createElement('style');
-    style.textContent = [
+    _injectCSS('summarizer-styles', [
       '#summary-overlay {',
       '  position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 1050;',
       '  display: none;',
@@ -10077,8 +10067,7 @@ const ConversationSummarizer = (() => {
       '.sum-empty {',
       '  color: #6e7681; font-size: 13px; text-align: center; padding: 32px 16px;',
       '}',
-    ].join('\n');
-    document.head.appendChild(style);
+    ].join('\n'));
   }
 
   // ── Analysis helpers ──
@@ -10749,15 +10738,8 @@ const MessageAnnotations = (() => {
   let annotations = {};
   let panelEl = null;
   let overlayEl = null;
-  let styleInjected = false;
-
-  // ── Styles ──
-
   function injectStyles() {
-    if (styleInjected) return;
-    styleInjected = true;
-    const style = document.createElement('style');
-    style.textContent = [
+    _injectCSS('annotations-styles', [
       '.ann-badge {',
       '  position: absolute; top: 4px; right: 4px; width: 22px; height: 22px;',
       '  border-radius: 50%; display: flex; align-items: center; justify-content: center;',
@@ -10855,8 +10837,7 @@ const MessageAnnotations = (() => {
       '.ann-editor-cancel { background: #21262d; color: #c9d1d9; }',
       '.ann-editor-delete { background: #da3633 !important; color: #fff !important; border-color: #f85149 !important; }',
       '.ann-count { font-size: 10px; color: #6e7681; margin-left: 4px; }',
-    ].join('\n');
-    document.head.appendChild(style);
+    ].join('\n'));
   }
 
   // ── Persistence ──
@@ -11479,7 +11460,6 @@ const ConversationChapters = (() => {
     return { re: new RegExp('\\b' + kw + '\\b', 'i'), label: _topicKeywordMap[kw] };
   });
   let overlayEl = null;
-  let styleInjected = false;
 
   // -- Persistence --
 
@@ -11502,10 +11482,7 @@ const ConversationChapters = (() => {
   // -- Styles --
 
   function injectStyles() {
-    if (styleInjected) return;
-    styleInjected = true;
-    const style = document.createElement('style');
-    style.textContent = [
+    _injectCSS('chapters-panel-styles', [
       '#chapters-panel {',
       '  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);',
       '  width: 420px; max-width: 90vw; max-height: 70vh; z-index: 1100;',
@@ -11584,8 +11561,7 @@ const ConversationChapters = (() => {
       '.history-msg { position: relative; }',
       '.history-msg:hover .ch-add-btn { opacity: 0.6; }',
       '.history-msg:hover .ch-add-btn:hover { opacity: 1; }',
-    ].join('\n');
-    document.head.appendChild(style);
+    ].join('\n'));
   }
 
   // -- CRUD --
@@ -14197,7 +14173,6 @@ const ResponseRating = (() => {
   let ratings = [];
   let dashboardEl = null;
   let dashboardOverlayEl = null;
-  let styleInjected = false;
 
   function init() {
     load();
@@ -14217,10 +14192,7 @@ const ResponseRating = (() => {
   }
 
   function injectStyles() {
-    if (styleInjected) return;
-    styleInjected = true;
-    const style = document.createElement('style');
-    style.textContent = `
+    _injectCSS('rating-bar-styles', `
       .rating-bar { display:flex; gap:4px; align-items:center; margin-top:6px; }
       .rating-btn {
         background:transparent; border:1px solid #555; border-radius:6px;
@@ -14265,8 +14237,7 @@ const ResponseRating = (() => {
       }
       .rating-actions button:hover { background:rgba(255,255,255,0.08); }
       .rating-actions .btn-danger-sm { border-color:#f44336; color:#f44336; }
-    `;
-    document.head.appendChild(style);
+    `);
   }
 
   function rate(messageIndex, rating) {
@@ -14761,7 +14732,6 @@ const ConversationReplay = (() => {
   var speed = 1;
   var timerId = null;
   var barEl = null;
-  var styleInjected = false;
 
   var USER_DELAY_MS    = 2000;
   var ASSIST_DELAY_MS  = 3000;
@@ -14778,10 +14748,7 @@ const ConversationReplay = (() => {
   }
 
   function _injectStyles() {
-    if (styleInjected) return;
-    styleInjected = true;
-    var s = document.createElement('style');
-    s.textContent = [
+    _injectCSS('replay-bar-styles', [
       '.replay-bar {',
       '  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);',
       '  background: #1e1e2e; border: 1px solid #45475a; border-radius: 12px;',
@@ -14828,8 +14795,7 @@ const ConversationReplay = (() => {
       '  from { opacity: 0; transform: translateY(8px); }',
       '  to   { opacity: 1; transform: translateY(0); }',
       '}',
-    ].join('\n');
-    document.body.appendChild(s);
+    ].join('\n'));
   }
 
   // ── Control bar ──
@@ -15578,7 +15544,6 @@ const MessageTranslator = (() => {
   ];
 
   let cache = {};
-  let styleInjected = false;
   let activeDropdown = null;
   let lastPreferredLang = 'es';
   let hoveredMsgIndex = -1;
@@ -15622,10 +15587,7 @@ const MessageTranslator = (() => {
   }
 
   function injectStyles() {
-    if (styleInjected) return;
-    styleInjected = true;
-    var style = document.createElement('style');
-    style.textContent = [
+    _injectCSS('translate-btn-styles', [
       '.translate-btn { background:transparent; border:1px solid #555; border-radius:6px;',
       '  padding:2px 8px; cursor:pointer; font-size:13px; opacity:0.6;',
       '  transition:opacity 0.2s, background 0.2s; margin-left:4px; }',
@@ -15657,8 +15619,7 @@ const MessageTranslator = (() => {
       '  opacity:0.6; padding:2px 4px; }',
       '.translate-result-actions button:hover { opacity:1; }',
       '.translate-loading { color:#888; font-style:italic; font-size:12px; margin-top:6px; }',
-    ].join('\n');
-    document.head.appendChild(style);
+    ].join('\n'));
   }
 
   function cacheKey(msgIndex, langCode) {
@@ -18039,7 +18000,6 @@ const ConversationAgenda = (() => {
   let agendas = {};
   let panelEl = null;
   let overlayEl = null;
-  let styleInjected = false;
 
   // ── Persistence ──
 
@@ -18069,10 +18029,7 @@ const ConversationAgenda = (() => {
   // ── Styles ──
 
   function _injectStyles() {
-    if (styleInjected) return;
-    styleInjected = true;
-    const s = document.createElement('style');
-    s.textContent = `
+    _injectCSS('agenda-overlay-styles', `
       #agenda-overlay {
         position: fixed; inset: 0; background: rgba(0,0,0,0.5);
         z-index: 1099; display: none;
@@ -18152,8 +18109,7 @@ const ConversationAgenda = (() => {
         padding: 4px 10px !important;
       }
       .agenda-clear-btn:hover { color: #f85149 !important; }
-    `;
-    document.head.appendChild(s);
+    `);
   }
 
   // ── UI ──
@@ -26393,16 +26349,12 @@ const MessageReaderView = (() => {
   'use strict';
 
   let overlayEl = null;
-  let styleInjected = false;
   let currentSourceEl = null;
 
   // ── Styles ──
 
   function _injectStyles() {
-    if (styleInjected) return;
-    styleInjected = true;
-    const css = document.createElement('style');
-    css.textContent = `
+    _injectCSS('reader-view-styles', `
       /* Reader overlay */
       .reader-overlay {
         position: fixed; inset: 0; z-index: 99999;
@@ -26506,8 +26458,7 @@ const MessageReaderView = (() => {
       [data-theme="light"] .reader-toolbar button {
         background: #e8e8e8; color: #333;
       }
-    `;
-    document.head.appendChild(css);
+    `);
   }
 
   // ── Overlay creation ──
