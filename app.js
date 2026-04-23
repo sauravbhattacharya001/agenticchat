@@ -31273,6 +31273,14 @@ var StickyNotesBoard = (function () {
   var _nextId = 1;
   var _visible = false;
   var _dragState = null;
+  var _saveTimer = null;
+
+  /** Debounced save — coalesces rapid writes (e.g. per-keystroke input events)
+   *  into a single JSON.stringify + localStorage.setItem after 400 ms of quiet. */
+  function _debouncedSave() {
+    if (_saveTimer) clearTimeout(_saveTimer);
+    _saveTimer = setTimeout(_save, 400);
+  }
 
   function _sessionKey() {
     if (typeof SessionManager !== 'undefined' && SessionManager.currentId) return SessionManager.currentId();
@@ -31355,7 +31363,7 @@ var StickyNotesBoard = (function () {
     textarea.style.cssText = 'width:100%;height:calc(100% - 28px);border:none;background:transparent;resize:none;padding:6px;font-family:inherit;font-size:13px;outline:none;box-sizing:border-box;';
     textarea.addEventListener('input', function () {
       note.text = textarea.value;
-      _save();
+      _debouncedSave();
     });
 
     el.appendChild(header);
@@ -37511,8 +37519,18 @@ var SmartQuestionTracker = (function() {
     return results;
   }
 
-  function _assessAnswer(question, responseText) {
-    var qWords = question.toLowerCase().replace(/[?.,!]/g, '').split(/\s+/).filter(function(w) { return w.length > 3; });
+  /** Pre-tokenise a question's significant words (length > 3).
+   *  Result is cached on the question object so _assessAnswer avoids
+   *  repeated toLowerCase + regex split + filter on every assistant message. */
+  function _getQuestionWords(q) {
+    if (!q._words) {
+      q._words = q.text.toLowerCase().replace(/[?.,!]/g, '').split(/\s+/).filter(function(w) { return w.length > 3; });
+    }
+    return q._words;
+  }
+
+  function _assessAnswer(questionObj, responseText) {
+    var qWords = _getQuestionWords(questionObj);
     if (qWords.length === 0) return 0;
     var rLower = responseText.toLowerCase();
     var hits = 0;
@@ -37534,7 +37552,7 @@ var SmartQuestionTracker = (function() {
     if (isAssistant) {
       _questions.forEach(function(q) {
         if (q.answered) return;
-        var score = _assessAnswer(q.text, text);
+        var score = _assessAnswer(q, text);
         if (score >= 0.4) {
           q.answered = true;
           q.answeredAt = Date.now();
