@@ -803,6 +803,48 @@ const COMMON_STOP_WORDS = new Set([
   'able', 'example',
 ]);
 
+/* ---------- Shared Fuzzy Match / Score ---------- */
+/**
+ * Subsequence fuzzy match — returns true when every character in `query`
+ * appears in `text` in order (case-insensitive).
+ *
+ * Previously duplicated in QuickSwitcher and CommandPalette.
+ */
+function _fuzzyMatch(query, text) {
+  const q = query.toLowerCase();
+  const t = text.toLowerCase();
+  let qi = 0;
+  for (let ti = 0; ti < t.length && qi < q.length; ti++) {
+    if (t[ti] === q[qi]) qi++;
+  }
+  return qi === q.length;
+}
+
+/**
+ * Simple fuzzy ranking: 0 = prefix, 1 = substring, 2 = other match.
+ *
+ * Previously duplicated in QuickSwitcher and CommandPalette.
+ */
+function _fuzzyScore(query, text) {
+  const q = query.toLowerCase();
+  const t = text.toLowerCase();
+  if (t.startsWith(q)) return 0;
+  if (t.includes(q)) return 1;
+  return 2;
+}
+
+/* ---------- Shared Truncate ---------- */
+/**
+ * Truncate `str` to `max` characters, appending an ellipsis when shortened.
+ *
+ * Previously duplicated in ConversationFork, SplitView, and
+ * SmartContradictionDetector.
+ */
+function _truncate(str, max) {
+  if (!str || str.length <= max) return str || '';
+  return str.substring(0, max - 1) + '\u2026';
+}
+
 /* ---------- Conversation Manager ---------- */
 /**
  * Manages the conversation message history sent to the OpenAI API.
@@ -7805,12 +7847,8 @@ const ConversationFork = (() => {
   }
 
   /**
-   * Truncate a string with ellipsis.
+   * Truncate a string with ellipsis — uses shared top-level _truncate.
    */
-  function _truncate(str, max) {
-    if (!str || str.length <= max) return str || '';
-    return str.substring(0, max - 1) + '\u2026';
-  }
 
   /**
    * Show a temporary notification when a fork is created.
@@ -19463,23 +19501,9 @@ const QuickSwitcher = (() => {
   let selectedIndex = 0;
   let filteredSessions = [];
 
-  function fuzzyMatch(query, text) {
-    const q = query.toLowerCase();
-    const t = text.toLowerCase();
-    let qi = 0;
-    for (let ti = 0; ti < t.length && qi < q.length; ti++) {
-      if (t[ti] === q[qi]) qi++;
-    }
-    return qi === q.length;
-  }
-
-  function fuzzyScore(query, text) {
-    const q = query.toLowerCase();
-    const t = text.toLowerCase();
-    if (t.startsWith(q)) return 0;
-    if (t.includes(q)) return 1;
-    return 2;
-  }
+  // fuzzyMatch / fuzzyScore — use shared top-level _fuzzyMatch / _fuzzyScore
+  const fuzzyMatch = _fuzzyMatch;
+  const fuzzyScore = _fuzzyScore;
 
   function _createOverlay() {
     let overlay = DOMCache.get('quick-switcher-overlay');
@@ -22100,23 +22124,7 @@ const CommandPalette = (() => {
     if (idx !== -1) _commands.splice(idx, 1);
   }
 
-  function _fuzzyMatch(query, text) {
-    const q = query.toLowerCase();
-    const t = text.toLowerCase();
-    let qi = 0;
-    for (let ti = 0; ti < t.length && qi < q.length; ti++) {
-      if (t[ti] === q[qi]) qi++;
-    }
-    return qi === q.length;
-  }
-
-  function _fuzzyScore(query, text) {
-    const q = query.toLowerCase();
-    const t = text.toLowerCase();
-    if (t.startsWith(q)) return 0;
-    if (t.includes(q)) return 1;
-    return 2;
-  }
+  // _fuzzyMatch / _fuzzyScore — use shared top-level definitions
 
   function _loadRecent() {
     try {
@@ -22371,11 +22379,7 @@ const SplitView = (() => {
   let _syncScroll = true;
 
   // uses global _escapeHtml
-
-  function _truncate(text, max) {
-    if (!text) return '';
-    return text.length > max ? text.substring(0, max) + '…' : text;
-  }
+  // uses shared top-level _truncate
 
   function _getSessions() {
     if (typeof SessionManager === 'undefined') return [];
@@ -34720,9 +34724,7 @@ const SmartContextSidebar = (() => {
     return { totalMsgs: totalMsgs, codeBlocks: codeBlocks, avgLen: avgLen };
   }
 
-  function _escapeH(s) {
-    return typeof _escapeHtml === 'function' ? _escapeHtml(s) : s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  }
+  // _escapeH removed — use shared top-level _escapeHtml directly
 
   // Cache expensive entity extraction and stats so _render() (called on
   // every MutationObserver fire ~300ms during active chat) only recomputes
@@ -34770,11 +34772,11 @@ const SmartContextSidebar = (() => {
 
     // Entities
     html += '<div class="context-section"><div class="context-section-title" onclick="this.parentElement.classList.toggle(\'collapsed\')">\u25bc Detected Entities</div><div class="context-section-body">';
-    if (entities.urls.length) html += '<div class="context-entity-group"><small>URLs</small><div>' + entities.urls.map(u => '<a class="context-entity-tag url" href="' + _escapeH(u) + '" target="_blank" rel="noopener">' + _escapeH(u.slice(0,40)) + '</a>').join('') + '</div></div>';
-    if (entities.codeLangs.length) html += '<div class="context-entity-group"><small>Languages</small><div>' + entities.codeLangs.map(l => '<span class="context-entity-tag lang">' + _escapeH(l) + '</span>').join('') + '</div></div>';
-    if (entities.filePaths.length) html += '<div class="context-entity-group"><small>Files</small><div>' + entities.filePaths.map(p => '<span class="context-entity-tag file">' + _escapeH(p) + '</span>').join('') + '</div></div>';
-    if (entities.numbers.length) html += '<div class="context-entity-group"><small>Numbers</small><div>' + entities.numbers.map(n => '<span class="context-entity-tag num">' + _escapeH(n) + '</span>').join('') + '</div></div>';
-    if (entities.terms.length) html += '<div class="context-entity-group"><small>Key Terms</small><div>' + entities.terms.map(t => '<span class="context-entity-tag term">' + _escapeH(t) + '</span>').join('') + '</div></div>';
+    if (entities.urls.length) html += '<div class="context-entity-group"><small>URLs</small><div>' + entities.urls.map(u => '<a class="context-entity-tag url" href="' + _escapeHtml(u) + '" target="_blank" rel="noopener">' + _escapeHtml(u.slice(0,40)) + '</a>').join('') + '</div></div>';
+    if (entities.codeLangs.length) html += '<div class="context-entity-group"><small>Languages</small><div>' + entities.codeLangs.map(l => '<span class="context-entity-tag lang">' + _escapeHtml(l) + '</span>').join('') + '</div></div>';
+    if (entities.filePaths.length) html += '<div class="context-entity-group"><small>Files</small><div>' + entities.filePaths.map(p => '<span class="context-entity-tag file">' + _escapeHtml(p) + '</span>').join('') + '</div></div>';
+    if (entities.numbers.length) html += '<div class="context-entity-group"><small>Numbers</small><div>' + entities.numbers.map(n => '<span class="context-entity-tag num">' + _escapeHtml(n) + '</span>').join('') + '</div></div>';
+    if (entities.terms.length) html += '<div class="context-entity-group"><small>Key Terms</small><div>' + entities.terms.map(t => '<span class="context-entity-tag term">' + _escapeHtml(t) + '</span>').join('') + '</div></div>';
     if (!entities.urls.length && !entities.codeLangs.length && !entities.filePaths.length && !entities.numbers.length && !entities.terms.length) html += '<p class="context-empty">No entities detected yet</p>';
     html += '</div></div>';
 
@@ -34783,7 +34785,7 @@ const SmartContextSidebar = (() => {
     if (related.length) {
       related.forEach((r, i) => {
         const preview = r.msg.text.slice(0, 80).replace(/\n/g, ' ');
-        html += '<div class="context-related-msg" data-idx="' + r.msg.index + '" onclick="SmartContextSidebar.scrollTo(' + r.msg.index + ')">' + _escapeH(preview) + '\u2026</div>';
+        html += '<div class="context-related-msg" data-idx="' + r.msg.index + '" onclick="SmartContextSidebar.scrollTo(' + r.msg.index + ')">' + _escapeHtml(preview) + '\u2026</div>';
       });
     } else {
       html += '<p class="context-empty">Not enough messages for analysis</p>';
@@ -34793,7 +34795,7 @@ const SmartContextSidebar = (() => {
     // Follow-ups
     html += '<div class="context-section"><div class="context-section-title" onclick="this.parentElement.classList.toggle(\'collapsed\')">\u25bc Suggested Follow-ups</div><div class="context-section-body">';
     followups.forEach(q => {
-      html += '<button class="context-followup-btn" onclick="SmartContextSidebar.insertFollowup(this.textContent)">' + _escapeH(q) + '</button>';
+      html += '<button class="context-followup-btn" onclick="SmartContextSidebar.insertFollowup(this.textContent)">' + _escapeHtml(q) + '</button>';
     });
     html += '</div></div>';
 
@@ -37061,7 +37063,7 @@ var SmartContradictionDetector = (function () {
     for (var w in all) { total++; if (sa[w] && sb[w]) shared++; }
     return total ? shared / total : 0;
   }
-  function _truncate(s, n) { return s.length > n ? s.substring(0, n) + '…' : s; }
+  // uses shared top-level _truncate
 
   /* ---- detection strategies ---- */
   function _detectNegationFlip(t1, t2) {
