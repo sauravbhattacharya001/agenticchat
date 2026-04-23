@@ -6361,8 +6361,13 @@ const ChatStats = (() => {
         if (times.length === 0) return null;
         const values = times.map(t => t.responseTimeMs);
         const avg = Math.round(values.reduce((a, b) => a + b, 0) / values.length);
-        const min = Math.min(...values);
-        const max = Math.max(...values);
+        // Use a loop instead of Math.min/max(...values) to avoid
+        // blowing the call stack on large conversation histories.
+        let min = values[0], max = values[0];
+        for (let i = 1; i < values.length; i++) {
+          if (values[i] < min) min = values[i];
+          if (values[i] > max) max = values[i];
+        }
         const total = values.reduce((a, b) => a + b, 0);
         return { count: values.length, avg, min, max, total };
       })(),
@@ -21116,10 +21121,23 @@ const TypingSpeedMonitor = (() => {
 
     if (_wordTimestamps.length < 2) return;
 
-    const maxWpm = Math.max(..._wordTimestamps.map(s => s.wpm), 10);
+    // Find max WPM in a single pass — avoids allocating an intermediate
+    // array via .map() + spreading into Math.max (O(n) alloc + stack).
+    let maxWpm = 10;
+    for (let i = 0; i < _wordTimestamps.length; i++) {
+      if (_wordTimestamps[i].wpm > maxWpm) maxWpm = _wordTimestamps[i].wpm;
+    }
     const w = canvas.width;
     const h = canvas.height;
     const step = w / (_wordTimestamps.length - 1);
+
+    // Pre-compute Y coordinates once — previously the identical
+    // h - (wpm / maxWpm) * h was calculated in two separate forEach
+    // passes (one for fill area, one for stroke line).
+    const ys = new Float32Array(_wordTimestamps.length);
+    for (let i = 0; i < _wordTimestamps.length; i++) {
+      ys[i] = h - (_wordTimestamps[i].wpm / maxWpm) * h;
+    }
 
     // Gradient fill
     const grad = ctx.createLinearGradient(0, 0, 0, h);
@@ -21128,25 +21146,20 @@ const TypingSpeedMonitor = (() => {
 
     ctx.beginPath();
     ctx.moveTo(0, h);
-    _wordTimestamps.forEach((s, i) => {
-      const x = i * step;
-      const y = h - (s.wpm / maxWpm) * h;
-      if (i === 0) ctx.lineTo(x, y);
-      else ctx.lineTo(x, y);
-    });
+    for (let i = 0; i < ys.length; i++) {
+      ctx.lineTo(i * step, ys[i]);
+    }
     ctx.lineTo(w, h);
     ctx.closePath();
     ctx.fillStyle = grad;
     ctx.fill();
 
-    // Line
+    // Line — reuses pre-computed ys[]
     ctx.beginPath();
-    _wordTimestamps.forEach((s, i) => {
-      const x = i * step;
-      const y = h - (s.wpm / maxWpm) * h;
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
+    ctx.moveTo(0, ys[0]);
+    for (let i = 1; i < ys.length; i++) {
+      ctx.lineTo(i * step, ys[i]);
+    }
     ctx.strokeStyle = '#4fc3f7';
     ctx.lineWidth = 2;
     ctx.stroke();
@@ -26759,8 +26772,13 @@ const ReadabilityAnalyzer = (() => {
   /* ── Sparkline renderer ───────────────────────────────────── */
   function sparkline(values, width, height, color) {
     if (values.length < 2) return '';
-    const min = Math.min(...values);
-    const max = Math.max(...values);
+    // Use a loop instead of Math.min/max(...values) to avoid stack
+    // overflow on large arrays (>100k response-time samples).
+    let min = values[0], max = values[0];
+    for (let i = 1; i < values.length; i++) {
+      if (values[i] < min) min = values[i];
+      if (values[i] > max) max = values[i];
+    }
     const range = max - min || 1;
     const step = width / (values.length - 1);
     const points = values.map((v, i) =>
