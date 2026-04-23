@@ -15964,7 +15964,7 @@ const ModelCompare = (() => {
   /** Save history to localStorage. */
   function _save() {
     try {
-      SafeStorage.set(STORAGE_KEY, JSON.stringify(_history));
+      SafeStorage.setJSON(STORAGE_KEY, _history);
     } catch (_) { /* quota */ }
   }
 
@@ -27046,7 +27046,7 @@ const MessageDiffViewer = (() => {
   /** Save diff to history. */
   function saveDiffHistory(indexA, indexB, stats) {
     try {
-      const hist = _safeParse(SafeStorage.get(STORAGE_KEY), []);
+      const hist = SafeStorage.getJSON(STORAGE_KEY, []);
       hist.unshift({ indexA, indexB, stats, timestamp: Date.now() });
       if (hist.length > MAX_HISTORY) hist.length = MAX_HISTORY;
       SafeStorage.trySetJSON(STORAGE_KEY, hist);
@@ -28247,7 +28247,7 @@ const PinBoard = (() => {
   let isOpen = false;
 
   function _load() {
-    return _safeParse(SafeStorage.get(STORAGE_KEY), []);
+    return SafeStorage.getJSON(STORAGE_KEY, []);
   }
 
   function _save(pins) {
@@ -28494,7 +28494,7 @@ const EmojiPicker = (() => {
   const MAX_RECENT = 24;
 
   function _loadRecent() {
-    try { return _safeParse(SafeStorage.get(RECENT_KEY), []); } catch { return []; }
+    return SafeStorage.getJSON(RECENT_KEY, []);
   }
   function _saveRecent(arr) { SafeStorage.trySetJSON(RECENT_KEY, arr.slice(0, MAX_RECENT)); }
   function _addRecent(emoji) {
@@ -29188,11 +29188,11 @@ const MessageHighlighter = (() => {
   // ── Persistence ──
 
   function _loadHighlights() {
-    return _safeParse(SafeStorage.get(STORAGE_KEY), {});
+    return SafeStorage.getJSON(STORAGE_KEY, {});
   }
 
   function _saveHighlights(data) {
-    SafeStorage.set(STORAGE_KEY, JSON.stringify(data));
+    SafeStorage.setJSON(STORAGE_KEY, data);
   }
 
   function _sessionKey() {
@@ -30854,7 +30854,7 @@ const AmbientSoundPlayer = (() => {
     for (const s of SOUNDS) {
       volumes[s.id] = _channels[s.id]?.volume ?? 0;
     }
-    SafeStorage.set(STORAGE_KEY, JSON.stringify({ volumes, masterVol: _masterVol }));
+    SafeStorage.setJSON(STORAGE_KEY, { volumes, masterVol: _masterVol });
   }
 
   function _ctx() {
@@ -31311,7 +31311,7 @@ var StickyNotesBoard = (function () {
     var data = _notes.map(function (n) {
       return { id: n.id, x: n.x, y: n.y, w: n.w, h: n.h, color: n.color, text: n.text };
     });
-    try { SafeStorage.set(_storageKey(), JSON.stringify(data)); } catch (_) {}
+    try { SafeStorage.setJSON(_storageKey(), data); } catch (_) {}
   }
 
   function _load() {
@@ -31580,11 +31580,11 @@ const ConversationStash = (() => {
   /* ---- Storage ---- */
 
   function _load() {
-    return _safeParse(SafeStorage.get(STORAGE_KEY), []);
+    return SafeStorage.getJSON(STORAGE_KEY, []);
   }
 
   function _save(stack) {
-    try { SafeStorage.set(STORAGE_KEY, JSON.stringify(stack)); } catch {}
+    try { SafeStorage.setJSON(STORAGE_KEY, stack); } catch {}
   }
 
   function _updateBadge() {
@@ -34103,14 +34103,14 @@ var SmartContextCompressor = (function () {
   function _saveState() {
     if (typeof SafeStorage !== 'undefined') {
       SafeStorage.set('ctx_compressor_auto', _autoCompress ? '1' : '0');
-      SafeStorage.set('ctx_compressor_history', JSON.stringify(_history.slice(-50)));
+      SafeStorage.setJSON('ctx_compressor_history', _history.slice(-50));
     }
   }
 
   function _loadState() {
     if (typeof SafeStorage !== 'undefined') {
       _autoCompress = SafeStorage.get('ctx_compressor_auto') === '1';
-      try { _history = JSON.parse(SafeStorage.get('ctx_compressor_history') || '[]'); } catch(e) { _history = []; }
+      _history = SafeStorage.getJSON('ctx_compressor_history', []);
     }
   }
 
@@ -35461,11 +35461,11 @@ var ConversationMemory = (function () {
   /* ---- Storage ---- */
 
   function _load() {
-    return _safeParse(SafeStorage.get(STORAGE_KEY), []);
+    return SafeStorage.getJSON(STORAGE_KEY, []);
   }
 
   function _save(memories) {
-    try { SafeStorage.set(STORAGE_KEY, JSON.stringify(memories)); } catch (e) {}
+    try { SafeStorage.setJSON(STORAGE_KEY, memories); } catch (e) {}
   }
 
   /* ---- Helpers ---- */
@@ -37076,7 +37076,7 @@ var SmartContradictionDetector = (function () {
   }
   function _storageKey() { return STORAGE_PREFIX + _sessionId(); }
   function _save() {
-    try { SafeStorage.set(_storageKey(), JSON.stringify(_contradictions)); } catch(e) {}
+    try { SafeStorage.setJSON(_storageKey(), _contradictions); } catch(e) {}
   }
   function _load() {
     try {
@@ -37840,11 +37840,11 @@ var FollowUpReminder = (function () {
   }
 
   function load() {
-    try { _reminders = JSON.parse(SafeStorage.get(getSessionKey()) || '[]'); } catch(e) { _reminders = []; }
+    _reminders = SafeStorage.getJSON(getSessionKey(), []);
   }
 
   function save() {
-    SafeStorage.set(getSessionKey(), JSON.stringify(_reminders));
+    SafeStorage.setJSON(getSessionKey(), _reminders);
     updateBadge();
   }
 
