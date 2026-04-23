@@ -37055,12 +37055,25 @@ var SmartContradictionDetector = (function () {
   function _tokenize(text) {
     return (text || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(function(w) { return w.length > 1; });
   }
+  /**
+   * Jaccard similarity between two token arrays using Sets.
+   * Previous implementation created 3 plain objects (sa, sb,
+   * Object.assign merge) — O(|a|+|b|) allocations plus a
+   * for-in enumeration of the merged object.  Set-based version
+   * avoids the merge allocation entirely and uses O(1) .has()
+   * lookups instead of property access through prototype chains.
+   */
   function _overlap(a, b) {
-    var sa = {}, sb = {}, shared = 0, total = 0;
-    a.forEach(function(w) { sa[w] = 1; });
-    b.forEach(function(w) { sb[w] = 1; });
-    var all = Object.assign({}, sa, sb);
-    for (var w in all) { total++; if (sa[w] && sb[w]) shared++; }
+    var setA = new Set(a);
+    var setB = new Set(b);
+    var shared = 0;
+    // Iterate the smaller set for fewer .has() lookups
+    if (setA.size <= setB.size) {
+      setA.forEach(function(w) { if (setB.has(w)) shared++; });
+    } else {
+      setB.forEach(function(w) { if (setA.has(w)) shared++; });
+    }
+    var total = setA.size + setB.size - shared;
     return total ? shared / total : 0;
   }
   // uses shared top-level _truncate
@@ -37102,24 +37115,44 @@ var SmartContradictionDetector = (function () {
     return null;
   }
 
+  /**
+   * Detect sentiment reversal: same subject described with a positive
+   * adjective in one message and a negative adjective in another.
+   *
+   * Optimised: extracts {subject → adjective} maps from each text in
+   * O(POS+NEG) regex executions, then cross-checks via Set lookups.
+   * Previous O(POS×NEG) nested loop ran 196 regex pairs per call;
+   * this runs at most 28 (14 POS + 14 NEG) regexes per text.
+   */
   function _detectSentimentReversal(t1, t2) {
     var t1l = t1.toLowerCase(), t2l = t2.toLowerCase();
-    for (var i = 0; i < POS_ADJ.length; i++) {
-      var pos = POS_ADJ[i];
-      var r1 = _sentimentRegexes[pos];
-      for (var j = 0; j < NEG_ADJ.length; j++) {
-        var neg = NEG_ADJ[j];
-        var r2 = _sentimentRegexes[neg];
-        r1.lastIndex = 0; r2.lastIndex = 0;
-        var m1 = r1.exec(t1l), m2 = r2.exec(t2l);
-        if (m1 && m2 && m1[1] === m2[1]) {
-          return { type: 'sentiment', keyword: m1[1], pos: pos, neg: neg, strength: 70 };
-        }
-        r1.lastIndex = 0; r2.lastIndex = 0;
-        m1 = r1.exec(t2l); m2 = r2.exec(t1l);
-        if (m1 && m2 && m1[1] === m2[1]) {
-          return { type: 'sentiment', keyword: m1[1], pos: pos, neg: neg, strength: 70 };
-        }
+
+    // Build subject→adjective maps for each text
+    function _extractSubjects(text, adjList) {
+      var map = {};  // subject → adjective
+      for (var i = 0; i < adjList.length; i++) {
+        var r = _sentimentRegexes[adjList[i]];
+        r.lastIndex = 0;
+        var m = r.exec(text);
+        if (m) map[m[1]] = adjList[i];
+      }
+      return map;
+    }
+
+    // Extract positive subjects from t1, negative from t2
+    var posMap1 = _extractSubjects(t1l, POS_ADJ);
+    var negMap2 = _extractSubjects(t2l, NEG_ADJ);
+    for (var subj in posMap1) {
+      if (negMap2[subj]) {
+        return { type: 'sentiment', keyword: subj, pos: posMap1[subj], neg: negMap2[subj], strength: 70 };
+      }
+    }
+    // Reverse: positive in t2, negative in t1
+    var posMap2 = _extractSubjects(t2l, POS_ADJ);
+    var negMap1 = _extractSubjects(t1l, NEG_ADJ);
+    for (var subj2 in posMap2) {
+      if (negMap1[subj2]) {
+        return { type: 'sentiment', keyword: subj2, pos: posMap2[subj2], neg: negMap1[subj2], strength: 70 };
       }
     }
     return null;
@@ -37152,19 +37185,32 @@ var SmartContradictionDetector = (function () {
     return null;
   }
 
+  /* ---- detector list (hoisted to avoid per-iteration allocation) ---- */
+  var _detectors = [_detectNegationFlip, _detectNumericalContradiction, _detectSentimentReversal, _detectDirectOpposition, _detectYesNoFlip];
+
   /* ---- main analysis ---- */
+  /**
+   * Analyse a newly added assistant message for contradictions
+   * against all prior assistant messages.
+   *
+   * Optimised: tokenises the new message once and reuses across all
+   * _overlap comparisons (previously re-tokenised on every iteration,
+   * O(n) redundant tokenisations for n prior messages).  Also hoists
+   * the detectors array to module scope to avoid re-creating the
+   * 5-element array on every inner-loop iteration.
+   */
   function _analyzeNewMessage(newIdx) {
     var newMsg = _assistantMessages[newIdx];
     if (!newMsg) return;
     var found = [];
+    var newTokens = _tokenize(newMsg.text);
     for (var i = 0; i < newIdx; i++) {
       var old = _assistantMessages[i];
-      var overlap = _overlap(_tokenize(old.text), _tokenize(newMsg.text));
+      var overlap = _overlap(_tokenize(old.text), newTokens);
       if (overlap < 0.08) continue; // not about the same topic
 
-      var detectors = [_detectNegationFlip, _detectNumericalContradiction, _detectSentimentReversal, _detectDirectOpposition, _detectYesNoFlip];
-      for (var d = 0; d < detectors.length; d++) {
-        var result = detectors[d](old.text, newMsg.text);
+      for (var d = 0; d < _detectors.length; d++) {
+        var result = _detectors[d](old.text, newMsg.text);
         if (result) {
           var distance = newIdx - i;
           var temporalBoost = Math.max(0, 20 - distance * 3);
