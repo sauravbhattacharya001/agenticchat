@@ -37762,3 +37762,336 @@ var SmartQuestionTracker = (function() {
 
   return { toggle: toggle, show: show, hide: hide, markAnswered: markAnswered, copyQuestion: copyQuestion, dismiss: dismiss, switchTab: switchTab };
 })();
+
+
+/* ============================================================
+ *  FollowUpReminder  (Alt+Shift+R)
+ *  Autonomous follow-up action item detection with timed reminders
+ * ============================================================ */
+var FollowUpReminder = (function () {
+  'use strict';
+
+  var STORAGE_KEY = 'ac_followup_reminders_';
+  var _visible = false;
+  var _panel = null;
+  var _overlay = null;
+  var _reminders = [];
+  var _filter = 'pending';
+  var _timerInterval = null;
+  var _notifPermission = 'default';
+
+  var ACTION_PATTERNS = [
+    /\b(?:i(?:'ll| will| need to| should| must| have to| gotta|'m going to)|(?:we|you) (?:should|need to|must|have to|will)|(?:don'?t forget(?: to)?|remember to|remind me to|todo:?|follow up on|make sure to|be sure to|plan to|going to|let me|let's|action item:?))\s+(.{5,80})/gi,
+    /\b(?:deadline|due|by|before|until)\s*:?\s*(.{5,40})/gi
+  ];
+
+  var TIME_PATTERNS = [
+    { re: /\bin\s+(\d+)\s*min(?:ute)?s?\b/i, fn: function(m) { return addMs(parseInt(m[1])*60000); } },
+    { re: /\bin\s+(\d+)\s*hours?\b/i, fn: function(m) { return addMs(parseInt(m[1])*3600000); } },
+    { re: /\bin\s+(\d+)\s*days?\b/i, fn: function(m) { return addMs(parseInt(m[1])*86400000); } },
+    { re: /\btomorrow\b/i, fn: function() { var d = new Date(); d.setDate(d.getDate()+1); d.setHours(9,0,0,0); return d; } },
+    { re: /\bnext week\b/i, fn: function() { var d = new Date(); d.setDate(d.getDate()+7); d.setHours(9,0,0,0); return d; } },
+    { re: /\bby\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)/i, fn: function(m) { var days=['sunday','monday','tuesday','wednesday','thursday','friday','saturday']; var target=days.indexOf(m[1].toLowerCase()); var d=new Date(); var diff=target-d.getDay(); if(diff<=0) diff+=7; d.setDate(d.getDate()+diff); d.setHours(9,0,0,0); return d; } },
+    { re: /\btonight\b/i, fn: function() { var d = new Date(); d.setHours(20,0,0,0); return d; } },
+    { re: /\bthis afternoon\b/i, fn: function() { var d = new Date(); d.setHours(14,0,0,0); return d; } }
+  ];
+
+  function addMs(ms) { return new Date(Date.now() + ms); }
+
+  function getSessionKey() {
+    var sid = (typeof SessionManager !== 'undefined' && SessionManager.current) ? SessionManager.current() : 'default';
+    return STORAGE_KEY + sid;
+  }
+
+  function load() {
+    try { _reminders = JSON.parse(SafeStorage.get(getSessionKey()) || '[]'); } catch(e) { _reminders = []; }
+  }
+
+  function save() {
+    SafeStorage.set(getSessionKey(), JSON.stringify(_reminders));
+    updateBadge();
+  }
+
+  function updateBadge() {
+    var badge = document.getElementById('reminder-badge');
+    if (!badge) return;
+    var count = _reminders.filter(function(r) { return r.status === 'pending'; }).length;
+    badge.textContent = count;
+    badge.style.display = count > 0 ? 'inline-block' : 'none';
+  }
+
+  function parseTimeHint(text) {
+    for (var i = 0; i < TIME_PATTERNS.length; i++) {
+      var m = TIME_PATTERNS[i].re.exec(text);
+      if (m) return TIME_PATTERNS[i].fn(m);
+    }
+    return null;
+  }
+
+  function scanMessage(text, role, messageIndex) {
+    if (!text || text.length < 10) return;
+    var found = [];
+    for (var p = 0; p < ACTION_PATTERNS.length; p++) {
+      ACTION_PATTERNS[p].lastIndex = 0;
+      var m;
+      while ((m = ACTION_PATTERNS[p].exec(text)) !== null) {
+        var action = (m[1] || m[0]).trim().replace(/[.!,;]+$/, '');
+        if (action.length < 5 || action.length > 120) continue;
+        var dup = _reminders.some(function(r) { return r.action.toLowerCase() === action.toLowerCase(); });
+        if (dup) continue;
+        var dueDate = parseTimeHint(text);
+        var reminder = {
+          id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+          action: action,
+          source: text.substring(0, 120),
+          role: role || 'unknown',
+          messageIndex: messageIndex || -1,
+          status: 'pending',
+          dueDate: dueDate ? dueDate.toISOString() : null,
+          createdAt: new Date().toISOString()
+        };
+        _reminders.push(reminder);
+        found.push(reminder);
+      }
+    }
+    if (found.length > 0) {
+      save();
+      showToast(found.length + ' reminder' + (found.length > 1 ? 's' : '') + ' detected');
+      if (_visible) render();
+    }
+    return found;
+  }
+
+  function showToast(msg) {
+    var toast = document.createElement('div');
+    toast.className = 'reminder-toast';
+    toast.textContent = '\uD83D\uDD14 ' + msg;
+    document.body.appendChild(toast);
+    requestAnimationFrame(function() { toast.classList.add('show'); });
+    setTimeout(function() { toast.classList.remove('show'); setTimeout(function() { toast.remove(); }, 300); }, 3000);
+  }
+
+  function checkDueReminders() {
+    var now = Date.now();
+    _reminders.forEach(function(r) {
+      if (r.status === 'pending' && r.dueDate && new Date(r.dueDate).getTime() <= now && !r._notified) {
+        r._notified = true;
+        if (_notifPermission === 'granted') {
+          try { new Notification('Follow-Up Reminder', { body: r.action }); } catch(e) {}
+        }
+        showToast('Due: ' + r.action.substring(0, 50));
+      }
+    });
+  }
+
+  function addManual(action, dueDate) {
+    var reminder = {
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      action: action,
+      source: 'Manual entry',
+      role: 'user',
+      messageIndex: -1,
+      status: 'pending',
+      dueDate: dueDate || null,
+      createdAt: new Date().toISOString()
+    };
+    _reminders.push(reminder);
+    save();
+    if (_visible) render();
+    return reminder;
+  }
+
+  function setStatus(id, status) {
+    var r = _reminders.find(function(x) { return x.id === id; });
+    if (r) { r.status = status; save(); if (_visible) render(); }
+  }
+
+  function removeReminder(id) {
+    _reminders = _reminders.filter(function(x) { return x.id !== id; });
+    save();
+    if (_visible) render();
+  }
+
+  function buildPanel() {
+    if (_panel) return;
+    _overlay = document.createElement('div');
+    _overlay.id = 'reminder-overlay';
+    _overlay.className = 'modal-overlay';
+    _overlay.style.display = 'none';
+    _overlay.onclick = hide;
+    document.body.appendChild(_overlay);
+
+    _panel = document.createElement('div');
+    _panel.id = 'reminder-panel';
+    _panel.className = 'reminder-panel';
+    _panel.style.display = 'none';
+    _panel.setAttribute('role', 'dialog');
+    _panel.setAttribute('aria-label', 'Follow-Up Reminders');
+    _panel.innerHTML =
+      '<div class="reminder-header">' +
+        '<h3>\uD83D\uDD14 Follow-Up Reminders</h3>' +
+        '<button onclick="FollowUpReminder.hide()" class="btn-sm" title="Close">\u2715</button>' +
+      '</div>' +
+      '<div class="reminder-add-row">' +
+        '<input id="reminder-add-input" type="text" placeholder="Add a reminder\u2026" autocomplete="off">' +
+        '<input id="reminder-add-due" type="datetime-local" title="Optional due date">' +
+        '<button id="reminder-add-btn" class="btn-sm" title="Add">+</button>' +
+      '</div>' +
+      '<div class="reminder-tabs">' +
+        '<button class="reminder-tab active" data-f="pending" onclick="FollowUpReminder.switchTab(this)">\u23F3 Pending</button>' +
+        '<button class="reminder-tab" data-f="done" onclick="FollowUpReminder.switchTab(this)">\u2705 Done</button>' +
+        '<button class="reminder-tab" data-f="all" onclick="FollowUpReminder.switchTab(this)">\uD83D\uDCCA All</button>' +
+      '</div>' +
+      '<div id="reminder-list" class="reminder-list"></div>' +
+      '<div id="reminder-empty" class="reminder-empty">No reminders yet. They will be auto-detected from your conversations!</div>';
+    document.body.appendChild(_panel);
+
+    document.getElementById('reminder-add-btn').onclick = function() {
+      var input = document.getElementById('reminder-add-input');
+      var due = document.getElementById('reminder-add-due');
+      if (input.value.trim()) {
+        addManual(input.value.trim(), due.value ? new Date(due.value).toISOString() : null);
+        input.value = '';
+        due.value = '';
+      }
+    };
+    document.getElementById('reminder-add-input').addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') document.getElementById('reminder-add-btn').click();
+    });
+  }
+
+  function render() {
+    if (!_panel) return;
+    var list = document.getElementById('reminder-list');
+    var empty = document.getElementById('reminder-empty');
+    var filtered = _filter === 'all' ? _reminders : _reminders.filter(function(r) { return r.status === _filter; });
+    filtered.sort(function(a, b) {
+      if (a.dueDate && b.dueDate) return new Date(a.dueDate) - new Date(b.dueDate);
+      if (a.dueDate) return -1;
+      if (b.dueDate) return 1;
+      return new Date(b.createdAt) - new Date(a.createdAt);
+    });
+    if (filtered.length === 0) {
+      list.innerHTML = '';
+      empty.style.display = 'block';
+      return;
+    }
+    empty.style.display = 'none';
+    var now = Date.now();
+    list.innerHTML = filtered.map(function(r) {
+      var overdue = r.status === 'pending' && r.dueDate && new Date(r.dueDate).getTime() < now;
+      var cls = 'reminder-item status-' + r.status + (overdue ? ' overdue' : '');
+      var dueStr = r.dueDate ? '<span class="reminder-due">' + (overdue ? '\u26A0\uFE0F OVERDUE ' : '\u23F0 ') + new Date(r.dueDate).toLocaleString() + '</span>' : '';
+      var actions = '';
+      if (r.status === 'pending') {
+        actions = '<button class="btn-sm" onclick="FollowUpReminder.setStatus(\'' + r.id + '\',\'done\')" title="Mark done">\u2705</button>' +
+          '<button class="btn-sm" onclick="FollowUpReminder.snooze(\'' + r.id + '\')" title="Snooze 1h">\uD83D\uDCA4</button>' +
+          '<button class="btn-sm" onclick="FollowUpReminder.setStatus(\'' + r.id + '\',\'dismissed\')" title="Dismiss">\u2715</button>';
+      } else if (r.status === 'done') {
+        actions = '<button class="btn-sm" onclick="FollowUpReminder.setStatus(\'' + r.id + '\',\'pending\')" title="Reopen">\u21A9\uFE0F</button>';
+      }
+      actions += '<button class="btn-sm" onclick="FollowUpReminder.remove(\'' + r.id + '\')" title="Delete">\uD83D\uDDD1\uFE0F</button>';
+      return '<div class="' + cls + '">' +
+        '<div class="reminder-action">' + r.action + '</div>' +
+        '<div class="reminder-meta">' +
+          '<span class="reminder-source">' + r.role + ': ' + r.source.substring(0, 60) + '\u2026</span>' +
+          dueStr +
+        '</div>' +
+        '<div class="reminder-actions">' + actions + '</div>' +
+        '</div>';
+    }).join('');
+  }
+
+  function snooze(id) {
+    var r = _reminders.find(function(x) { return x.id === id; });
+    if (r) {
+      r.dueDate = new Date(Date.now() + 3600000).toISOString();
+      r._notified = false;
+      save();
+      if (_visible) render();
+      showToast('Snoozed for 1 hour');
+    }
+  }
+
+  function show() {
+    buildPanel();
+    load();
+    _visible = true;
+    _overlay.style.display = 'block';
+    _panel.style.display = 'block';
+    render();
+    if (typeof PanelRegistry !== 'undefined' && PanelRegistry.closeBut) PanelRegistry.closeBut('followup-reminder');
+  }
+
+  function hide() {
+    if (!_panel) return;
+    _visible = false;
+    _overlay.style.display = 'none';
+    _panel.style.display = 'none';
+  }
+
+  function toggle() { _visible ? hide() : show(); }
+
+  function switchTab(btn) {
+    _filter = btn.getAttribute('data-f');
+    var tabs = _panel.querySelectorAll('.reminder-tab');
+    tabs.forEach(function(t) { t.classList.remove('active'); });
+    btn.classList.add('active');
+    render();
+  }
+
+  function hookChat() {
+    var chatOutput = document.getElementById('chat-output');
+    if (chatOutput && typeof MutationObserver !== 'undefined') {
+      var obs = new MutationObserver(function(mutations) {
+        mutations.forEach(function(m) {
+          m.addedNodes.forEach(function(node) {
+            if (node.nodeType === 1 && node.classList && node.classList.contains('msg')) {
+              var text = node.textContent || '';
+              var role = node.classList.contains('user') ? 'user' : 'assistant';
+              try { scanMessage(text, role); } catch(e) {}
+            }
+          });
+        });
+      });
+      obs.observe(chatOutput, { childList: true });
+    }
+  }
+
+  function init() {
+    load();
+    updateBadge();
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      _notifPermission = 'granted';
+    } else if (typeof Notification !== 'undefined' && Notification.permission !== 'denied') {
+      try { Notification.requestPermission().then(function(p) { _notifPermission = p; }); } catch(e) {}
+    }
+    hookChat();
+    _timerInterval = setInterval(function() { load(); checkDueReminders(); }, 30000);
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  document.addEventListener('keydown', function(e) {
+    if (e.altKey && e.shiftKey && !e.ctrlKey && e.key.toLowerCase() === 'r') {
+      e.preventDefault(); toggle();
+    }
+  });
+
+  document.addEventListener('DOMContentLoaded', function() {
+    if (typeof KeyboardShortcuts !== 'undefined' && KeyboardShortcuts.register) {
+      KeyboardShortcuts.register('Alt+Shift+R', 'Follow-Up Reminders', toggle);
+    }
+    if (typeof CommandPalette !== 'undefined' && CommandPalette.register) {
+      CommandPalette.register({ name: 'follow-up reminders', description: 'Track action items and follow-ups', icon: '\uD83D\uDD14', action: toggle });
+    }
+    if (typeof SlashCommands !== 'undefined' && SlashCommands.register) {
+      SlashCommands.register('/reminders', 'Show follow-up reminders panel', toggle);
+    }
+    if (typeof PanelRegistry !== 'undefined' && PanelRegistry.register) {
+      PanelRegistry.register('followup-reminder', hide);
+    }
+  });
+
+  return { toggle: toggle, show: show, hide: hide, setStatus: setStatus, snooze: snooze, remove: removeReminder, switchTab: switchTab, scan: scanMessage, addManual: addManual };
+})();
