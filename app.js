@@ -37420,3 +37420,292 @@ var SmartContradictionDetector = (function () {
 
   return { toggle: toggle, show: show, hide: hide };
 })();
+
+/* ============================================================
+ *  SmartQuestionTracker (Alt+Shift+Q)
+ *  Autonomous unanswered-question detection & tracking.
+ *  Monitors conversation for questions posed by both user and
+ *  assistant, tracks which have been answered, and surfaces
+ *  forgotten/unanswered threads in a floating panel with
+ *  proactive nudge alerts.
+ * ============================================================ */
+var SmartQuestionTracker = (function() {
+  'use strict';
+
+  var STORE_KEY = 'agenticchat_question_tracker';
+  var _questions = []; // {id, text, askedBy, askedAt, msgIndex, answered, answeredAt, confidence}
+  var _visible = false;
+  var _observer = null;
+  var _nudgeTimer = null;
+  var _nextId = 1;
+
+  /* ---- question detection patterns ---- */
+  var DIRECT_Q = /[?]\s*$/;
+  var WH_PATTERN = /\b(what|where|when|who|why|how|which|could you|can you|would you|do you|is there|are there|should|shall)\b/i;
+  var RHETORICAL = /\b(how about that|why not|isn't it|right\?|you know\?|don't you think)\b/i;
+
+  function _extractQuestions(text) {
+    var sentences = text.split(/(?<=[.!?])\s+|(?<=\n)/);
+    var results = [];
+    sentences.forEach(function(s) {
+      s = s.trim();
+      if (s.length < 8) return;
+      if (RHETORICAL.test(s)) return;
+      if (DIRECT_Q.test(s) || (WH_PATTERN.test(s) && s.length > 15)) {
+        results.push(s.replace(/^\s*[-*>]+\s*/, '').substring(0, 200));
+      }
+    });
+    return results;
+  }
+
+  function _assessAnswer(question, responseText) {
+    var qWords = question.toLowerCase().replace(/[?.,!]/g, '').split(/\s+/).filter(function(w) { return w.length > 3; });
+    if (qWords.length === 0) return 0;
+    var rLower = responseText.toLowerCase();
+    var hits = 0;
+    qWords.forEach(function(w) { if (rLower.indexOf(w) !== -1) hits++; });
+    var overlap = hits / qWords.length;
+    // boost if response is substantial
+    if (responseText.length > 100) overlap = Math.min(1, overlap * 1.3);
+    return overlap;
+  }
+
+  function _processNewMessage(el, msgIndex) {
+    var text = (el.textContent || '').trim();
+    if (text.length < 5) return;
+    var isUser = el.classList.contains('user-message');
+    var isAssistant = el.classList.contains('assistant-message');
+    if (!isUser && !isAssistant) return;
+
+    // check if this message answers existing questions
+    if (isAssistant) {
+      _questions.forEach(function(q) {
+        if (q.answered) return;
+        var score = _assessAnswer(q.text, text);
+        if (score >= 0.4) {
+          q.answered = true;
+          q.answeredAt = Date.now();
+          q.confidence = Math.round(score * 100);
+        }
+      });
+    }
+
+    // extract new questions
+    var newQs = _extractQuestions(text);
+    newQs.forEach(function(qText) {
+      // dedupe
+      var isDupe = _questions.some(function(eq) {
+        return eq.text.toLowerCase() === qText.toLowerCase();
+      });
+      if (isDupe) return;
+      _questions.push({
+        id: _nextId++,
+        text: qText,
+        askedBy: isUser ? 'user' : 'assistant',
+        askedAt: Date.now(),
+        msgIndex: msgIndex,
+        answered: false,
+        answeredAt: null,
+        confidence: 0
+      });
+    });
+    _save();
+    if (_visible) _render();
+    _checkNudge();
+  }
+
+  /* ---- proactive nudge ---- */
+  function _checkNudge() {
+    var unanswered = _questions.filter(function(q) { return !q.answered; });
+    if (unanswered.length >= 3 && !_visible) {
+      _showNudge(unanswered.length);
+    }
+  }
+
+  function _showNudge(count) {
+    var existing = document.getElementById('qt-nudge');
+    if (existing) existing.remove();
+    var nudge = document.createElement('div');
+    nudge.id = 'qt-nudge';
+    nudge.className = 'qt-nudge';
+    nudge.innerHTML = '❓ <strong>' + count + ' unanswered question' + (count > 1 ? 's' : '') + '</strong> detected. <a href="#" onclick="SmartQuestionTracker.show();this.parentNode.remove();return false;">Review</a> <button onclick="this.parentNode.remove()" class="btn-sm">✕</button>';
+    document.body.appendChild(nudge);
+    setTimeout(function() { if (nudge.parentNode) nudge.remove(); }, 15000);
+  }
+
+  /* ---- observer ---- */
+  function _startObserver() {
+    var out = document.getElementById('chat-output');
+    if (!out) return;
+    var msgCount = out.querySelectorAll('.message').length;
+    _observer = new MutationObserver(function() {
+      var msgs = out.querySelectorAll('.message');
+      while (msgCount < msgs.length) {
+        _processNewMessage(msgs[msgCount], msgCount);
+        msgCount++;
+      }
+    });
+    _observer.observe(out, { childList: true, subtree: true });
+  }
+
+  /* ---- persistence ---- */
+  function _save() {
+    try { localStorage.setItem(STORE_KEY, JSON.stringify({ questions: _questions, nextId: _nextId })); } catch(e) {}
+  }
+  function _load() {
+    try {
+      var d = JSON.parse(localStorage.getItem(STORE_KEY));
+      if (d && d.questions) { _questions = d.questions; _nextId = d.nextId || _questions.length + 1; }
+    } catch(e) {}
+  }
+
+  /* ---- UI ---- */
+  function _injectStyles() {
+    if (document.getElementById('qt-styles')) return;
+    var s = document.createElement('style');
+    s.id = 'qt-styles';
+    s.textContent = [
+      '.qt-panel { position:fixed;top:50%;right:20px;transform:translateY(-50%);width:380px;max-height:70vh;background:var(--bg,#1e1e1e);border:1px solid var(--border,#444);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.4);z-index:10100;display:flex;flex-direction:column;overflow:hidden; }',
+      '.qt-header { display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border,#444); }',
+      '.qt-header h3 { margin:0;font-size:15px; }',
+      '.qt-tabs { display:flex;gap:4px;padding:8px 12px;border-bottom:1px solid var(--border,#333); }',
+      '.qt-tab { background:none;border:1px solid transparent;padding:4px 10px;border-radius:6px;cursor:pointer;font-size:12px;color:var(--text,#ccc); }',
+      '.qt-tab.active { background:var(--accent,#2196F3);color:#fff;border-color:var(--accent,#2196F3); }',
+      '.qt-body { flex:1;overflow-y:auto;padding:12px; }',
+      '.qt-card { background:var(--card-bg,#2a2a2a);border-radius:8px;padding:10px 12px;margin-bottom:8px;border-left:3px solid var(--accent,#2196F3); }',
+      '.qt-card.answered { border-left-color:#4CAF50;opacity:.7; }',
+      '.qt-card .qt-q { font-size:13px;margin-bottom:4px; }',
+      '.qt-card .qt-meta { font-size:11px;color:#888;display:flex;justify-content:space-between; }',
+      '.qt-card .qt-actions { margin-top:6px;display:flex;gap:6px; }',
+      '.qt-card .qt-actions button { font-size:11px;padding:2px 8px;border-radius:4px;border:1px solid var(--border,#555);background:none;color:var(--text,#ccc);cursor:pointer; }',
+      '.qt-card .qt-actions button:hover { background:var(--accent,#2196F3);color:#fff; }',
+      '.qt-stats { padding:12px;text-align:center;font-size:13px;color:#888; }',
+      '.qt-empty { padding:32px;text-align:center;color:#666; }',
+      '.qt-nudge { position:fixed;bottom:80px;right:20px;background:var(--bg,#1e1e1e);border:1px solid var(--accent,#2196F3);border-radius:10px;padding:10px 16px;z-index:10200;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,.3);animation:qt-slide .3s ease; }',
+      '@keyframes qt-slide { from{transform:translateX(100px);opacity:0} to{transform:translateX(0);opacity:1} }'
+    ].join('\n');
+    document.head.appendChild(s);
+  }
+
+  function _render() {
+    var body = document.getElementById('qt-body');
+    if (!body) return;
+    var tab = document.querySelector('.qt-tab.active');
+    var filter = tab ? tab.dataset.filter : 'unanswered';
+    var list = _questions.filter(function(q) {
+      if (filter === 'unanswered') return !q.answered;
+      if (filter === 'answered') return q.answered;
+      return true;
+    });
+
+    // stats
+    var unanswered = _questions.filter(function(q) { return !q.answered; }).length;
+    var answered = _questions.filter(function(q) { return q.answered; }).length;
+    var statsEl = document.getElementById('qt-stats');
+    if (statsEl) statsEl.innerHTML = '❓ ' + unanswered + ' unanswered &nbsp;|&nbsp; ✅ ' + answered + ' answered &nbsp;|&nbsp; 📊 ' + _questions.length + ' total';
+
+    if (list.length === 0) {
+      body.innerHTML = '<div class="qt-empty">' + (filter === 'unanswered' ? '🎉 No unanswered questions!' : 'No questions found.') + '</div>';
+      return;
+    }
+
+    body.innerHTML = list.map(function(q) {
+      var ago = _timeAgo(q.askedAt);
+      var icon = q.askedBy === 'user' ? '👤' : '🤖';
+      return '<div class="qt-card' + (q.answered ? ' answered' : '') + '" data-id="' + q.id + '">' +
+        '<div class="qt-q">' + _escHtml(q.text) + '</div>' +
+        '<div class="qt-meta"><span>' + icon + ' ' + ago + '</span>' +
+        (q.answered ? '<span>✅ ' + q.confidence + '% confident</span>' : '<span style="color:#FF9800">⏳ Unanswered</span>') +
+        '</div>' +
+        '<div class="qt-actions">' +
+        (q.answered ? '' : '<button onclick="SmartQuestionTracker.markAnswered(' + q.id + ')">✅ Mark Answered</button>') +
+        '<button onclick="SmartQuestionTracker.copyQuestion(' + q.id + ')">📋 Copy</button>' +
+        '<button onclick="SmartQuestionTracker.dismiss(' + q.id + ')">🗑️ Dismiss</button>' +
+        '</div></div>';
+    }).join('');
+  }
+
+  function _escHtml(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+  function _timeAgo(ts) {
+    var s = Math.floor((Date.now() - ts) / 1000);
+    if (s < 60) return 'just now';
+    if (s < 3600) return Math.floor(s/60) + 'm ago';
+    if (s < 86400) return Math.floor(s/3600) + 'h ago';
+    return Math.floor(s/86400) + 'd ago';
+  }
+
+  function show() {
+    _injectStyles();
+    var panel = document.getElementById('qt-panel');
+    var overlay = document.getElementById('qt-overlay');
+    if (!panel) return;
+    overlay.style.display = 'block';
+    panel.style.display = 'flex';
+    _visible = true;
+    _render();
+    if (typeof PanelRegistry !== 'undefined' && PanelRegistry.closeOthers) PanelRegistry.closeOthers('question-tracker');
+  }
+  function hide() {
+    var panel = document.getElementById('qt-panel');
+    var overlay = document.getElementById('qt-overlay');
+    if (panel) panel.style.display = 'none';
+    if (overlay) overlay.style.display = 'none';
+    _visible = false;
+  }
+  function toggle() { _visible ? hide() : show(); }
+
+  function markAnswered(id) {
+    _questions.forEach(function(q) { if (q.id === id) { q.answered = true; q.answeredAt = Date.now(); q.confidence = 100; } });
+    _save(); _render();
+  }
+  function copyQuestion(id) {
+    var q = _questions.find(function(q) { return q.id === id; });
+    if (q && navigator.clipboard) navigator.clipboard.writeText(q.text);
+  }
+  function dismiss(id) {
+    _questions = _questions.filter(function(q) { return q.id !== id; });
+    _save(); _render();
+  }
+  function switchTab(el) {
+    document.querySelectorAll('.qt-tab').forEach(function(t) { t.classList.remove('active'); });
+    el.classList.add('active');
+    _render();
+  }
+
+  function init() {
+    _injectStyles();
+    _load();
+    // index existing messages
+    var out = document.getElementById('chat-output');
+    if (out) {
+      var msgs = out.querySelectorAll('.message');
+      msgs.forEach(function(el, i) { _processNewMessage(el, i); });
+    }
+    _startObserver();
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  document.addEventListener('keydown', function(e) {
+    if (e.altKey && e.shiftKey && !e.ctrlKey && e.key.toLowerCase() === 'q') {
+      e.preventDefault(); toggle();
+    }
+  });
+
+  document.addEventListener('DOMContentLoaded', function() {
+    if (typeof KeyboardShortcuts !== 'undefined' && KeyboardShortcuts.register) {
+      KeyboardShortcuts.register('Alt+Shift+Q', 'Smart Question Tracker', toggle);
+    }
+    if (typeof CommandPalette !== 'undefined' && CommandPalette.register) {
+      CommandPalette.register({ name: 'question tracker', description: 'Track unanswered questions in conversation', icon: '❓', action: toggle });
+    }
+    if (typeof SlashCommands !== 'undefined' && SlashCommands.register) {
+      SlashCommands.register('/questions', 'Show unanswered questions tracker', toggle);
+    }
+    if (typeof PanelRegistry !== 'undefined' && PanelRegistry.register) {
+      PanelRegistry.register('question-tracker', hide);
+    }
+  });
+
+  return { toggle: toggle, show: show, hide: hide, markAnswered: markAnswered, copyQuestion: copyQuestion, dismiss: dismiss, switchTab: switchTab };
+})();
