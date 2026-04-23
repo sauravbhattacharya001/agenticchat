@@ -28035,18 +28035,33 @@ const WordCloudGenerator = (() => {
     'doing', 'done', 'said', 'went', 'going', 'got', 'getting',
   ]);
 
+  /**
+   * Build word-frequency list for the word cloud.
+   * Optimised: builds frequency map in a single pass per message
+   * without concatenating all content into one giant string.
+   * Eliminates the intermediate filtered array, the joined text
+   * string, the lowercased copy, the replaced copy, the split
+   * array, and the filter pass — each of which previously
+   * allocated O(totalChars) or O(totalWords) temporaries.
+   */
+  const _WCG_WORD_RE = /[a-z0-9'-]{3,}/g;
   function _extractWords(source) {
     const messages = (typeof ConversationManager !== 'undefined' && ConversationManager.getHistory)
       ? ConversationManager.getHistory() : [];
-    const filtered = messages.filter(m => {
-      if (source === 'user') return m.role === 'user';
-      if (source === 'assistant') return m.role === 'assistant';
-      return m.role === 'user' || m.role === 'assistant';
-    });
-    const text = filtered.map(m => m.content || '').join(' ');
-    const words = text.toLowerCase().replace(/[^a-z0-9\s'-]/g, ' ').split(/\s+/).filter(w => w.length > 2 && !STOP_WORDS.has(w));
-    const freq = {};
-    words.forEach(w => { freq[w] = (freq[w] || 0) + 1; });
+    const freq = Object.create(null);
+    for (let i = 0; i < messages.length; i++) {
+      const m = messages[i];
+      if (source === 'user' && m.role !== 'user') continue;
+      if (source === 'assistant' && m.role !== 'assistant') continue;
+      if (m.role !== 'user' && m.role !== 'assistant') continue;
+      const lower = (m.content || '').toLowerCase();
+      _WCG_WORD_RE.lastIndex = 0;
+      let match;
+      while ((match = _WCG_WORD_RE.exec(lower)) !== null) {
+        const w = match[0];
+        if (!STOP_WORDS.has(w)) freq[w] = (freq[w] || 0) + 1;
+      }
+    }
     return Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 80);
   }
 
@@ -36703,6 +36718,10 @@ const SmartDeadlineTracker = (() => {
   /* ---------- state ---------- */
   let _deadlines = [];   // {id, dateISO, label, snippet, dismissed, alerted}
   let _dismissed = {};    // id -> true
+  // O(1) membership set for deadline IDs — avoids O(n) linear scan in
+  // _processMessage when checking for duplicate deadlines.  Rebuilt on
+  // _load() and kept in sync by _processMessage.
+  let _deadlineIds = new Set();
 
   function _load() {
     try {
@@ -36711,6 +36730,7 @@ const SmartDeadlineTracker = (() => {
         const d = JSON.parse(raw);
         _deadlines = d.deadlines || [];
         _dismissed = d.dismissed || {};
+        _deadlineIds = new Set(_deadlines.map(dl => dl.id));
       }
     } catch (_) {}
   }
@@ -36823,8 +36843,10 @@ const SmartDeadlineTracker = (() => {
     let added = 0;
     dates.forEach(d => {
       const id = _hash(text + d.toISOString());
-      if (_deadlines.some(dl => dl.id === id)) return;
-      _deadlines.push({ id: id, dateISO: d.toISOString(), label: d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit'}), snippet: snippet, dismissed: false, alerted: false });
+      if (_deadlineIds.has(id)) return;
+      const entry = { id: id, dateISO: d.toISOString(), label: d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit'}), snippet: snippet, dismissed: false, alerted: false };
+      _deadlines.push(entry);
+      _deadlineIds.add(id);
       added++;
       // Toast
       if (typeof ToastManager !== 'undefined' && ToastManager.show) {
@@ -36895,6 +36917,7 @@ const SmartDeadlineTracker = (() => {
         const id = e.target.dataset.id;
         _dismissed[id] = true;
         _deadlines = _deadlines.filter(d => d.id !== id);
+        _deadlineIds.delete(id);
         _save(); _render();
       }
     });
