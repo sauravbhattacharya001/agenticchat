@@ -38175,3 +38175,489 @@ var FollowUpReminder = (function () {
 
   return { toggle: toggle, show: show, hide: hide, setStatus: setStatus, snooze: snooze, remove: removeReminder, switchTab: switchTab, scan: scanMessage, addManual: addManual };
 })();
+
+/* ---------- Smart Conversation Brancher ---------- */
+/**
+ * Autonomous branch intelligence layer on top of ConversationFork.
+ * Tracks parent-child branch relationships, provides a visual branch tree
+ * panel, detects topic drift and proactively suggests forking, and
+ * offers side-by-side branch comparison.
+ *
+ * Toggle panel: Alt+Shift+B
+ *
+ * @namespace ConversationBrancher
+ */
+const ConversationBrancher = (() => {
+  const TREE_KEY = 'agenticchat_branch_tree';
+  const DRIFT_INTERVAL = 10; // check drift every N messages
+  let _panel = null;
+  let _shown = false;
+  let _lastDriftCheck = 0;
+  let _compareMode = false;
+  let _compareIds = [];
+
+  /* ── Persistence ─────────────────────────────── */
+
+  function _loadTree() {
+    try {
+      const raw = SafeStorage.get(TREE_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch { return {}; }
+  }
+
+  function _saveTree(tree) {
+    try { SafeStorage.set(TREE_KEY, JSON.stringify(tree)); } catch {}
+  }
+
+  /** Record a parent→child branch link. */
+  function recordBranch(parentId, childId, forkIndex) {
+    const tree = _loadTree();
+    const key = parentId + ':' + childId;
+    tree[key] = {
+      parentId: parentId,
+      childId: childId,
+      forkIndex: forkIndex,
+      createdAt: new Date().toISOString()
+    };
+    _saveTree(tree);
+  }
+
+  /** Get all children of a session. */
+  function _getChildren(sessionId) {
+    const tree = _loadTree();
+    const children = [];
+    for (const key in tree) {
+      if (tree[key].parentId === sessionId) children.push(tree[key]);
+    }
+    return children;
+  }
+
+  /** Get parent of a session (if any). */
+  function _getParent(sessionId) {
+    const tree = _loadTree();
+    for (const key in tree) {
+      if (tree[key].childId === sessionId) return tree[key];
+    }
+    return null;
+  }
+
+  /** Get root session of the branch family. */
+  function _getRoot(sessionId) {
+    let current = sessionId;
+    const visited = new Set();
+    while (true) {
+      if (visited.has(current)) break;
+      visited.add(current);
+      const parent = _getParent(current);
+      if (!parent) break;
+      current = parent.parentId;
+    }
+    return current;
+  }
+
+  /** Build full family tree from a root. Returns array of { id, parentId, depth, forkIndex, name }. */
+  function _buildFamilyTree(rootId) {
+    const sessions = SessionManager.getAll();
+    const sessionMap = {};
+    sessions.forEach(function(s) { sessionMap[s.id] = s; });
+
+    const nodes = [];
+    const queue = [{ id: rootId, depth: 0, forkIndex: null }];
+    const visited = new Set();
+
+    while (queue.length > 0) {
+      const item = queue.shift();
+      if (visited.has(item.id)) continue;
+      visited.add(item.id);
+      const session = sessionMap[item.id];
+      nodes.push({
+        id: item.id,
+        parentId: item.parentId || null,
+        depth: item.depth,
+        forkIndex: item.forkIndex,
+        name: session ? session.name : '(deleted)',
+        messageCount: session ? (session.messageCount || (session.messages ? session.messages.length : 0)) : 0,
+        exists: !!session
+      });
+      const children = _getChildren(item.id);
+      children.forEach(function(c) {
+        queue.push({ id: c.childId, parentId: item.id, depth: item.depth + 1, forkIndex: c.forkIndex });
+      });
+    }
+    return nodes;
+  }
+
+  /* ── Drift Detection ─────────────────────────── */
+
+  /** Simple keyword extraction: split on whitespace, lowercase, filter short/stop words. */
+  function _extractKeywords(text) {
+    const stops = new Set(['the','a','an','is','are','was','were','be','been','being','have','has','had',
+      'do','does','did','will','would','could','should','can','may','might','shall','must',
+      'i','you','he','she','it','we','they','me','him','her','us','them','my','your','his',
+      'its','our','their','this','that','these','those','what','which','who','whom',
+      'and','but','or','nor','not','so','yet','for','with','from','to','of','in','on','at',
+      'by','about','as','into','through','during','before','after','above','below','between',
+      'if','then','else','when','where','how','all','each','every','both','few','more','most',
+      'other','some','such','no','only','own','same','than','too','very','just','also']);
+    return text.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/)
+      .filter(function(w) { return w.length > 3 && !stops.has(w); });
+  }
+
+  /** Jaccard similarity between two keyword sets. */
+  function _jaccard(setA, setB) {
+    if (setA.size === 0 && setB.size === 0) return 1;
+    let intersection = 0;
+    setA.forEach(function(w) { if (setB.has(w)) intersection++; });
+    const union = setA.size + setB.size - intersection;
+    return union === 0 ? 1 : intersection / union;
+  }
+
+  /** Check topic drift in current conversation. Returns { drifted, similarity, splitIndex }. */
+  function checkDrift() {
+    const history = ConversationManager.getHistory();
+    const userMsgs = [];
+    for (let i = 0; i < history.length; i++) {
+      if (history[i].role === 'user') userMsgs.push({ text: history[i].content, index: i });
+    }
+    if (userMsgs.length < 6) return { drifted: false, similarity: 1, splitIndex: -1 };
+
+    const mid = Math.floor(userMsgs.length / 2);
+    const firstHalf = userMsgs.slice(0, mid).map(function(m) { return m.text; }).join(' ');
+    const secondHalf = userMsgs.slice(mid).map(function(m) { return m.text; }).join(' ');
+
+    const kwFirst = new Set(_extractKeywords(firstHalf));
+    const kwSecond = new Set(_extractKeywords(secondHalf));
+    const sim = _jaccard(kwFirst, kwSecond);
+
+    return {
+      drifted: sim < 0.15,
+      similarity: sim,
+      splitIndex: userMsgs[mid].index
+    };
+  }
+
+  /** Called after messages are added. Proactively suggests fork if drift detected. */
+  function onMessageAdded() {
+    const history = ConversationManager.getHistory();
+    const msgCount = history.length;
+    if (msgCount - _lastDriftCheck < DRIFT_INTERVAL) return;
+    _lastDriftCheck = msgCount;
+
+    const drift = checkDrift();
+    if (drift.drifted) {
+      _showDriftSuggestion(drift.splitIndex, drift.similarity);
+    }
+  }
+
+  function _showDriftSuggestion(splitIndex, similarity) {
+    // Don't spam suggestions
+    if (document.querySelector('.branch-suggest')) return;
+
+    const note = document.createElement('div');
+    note.className = 'branch-suggest';
+    note.setAttribute('role', 'status');
+    note.setAttribute('aria-live', 'polite');
+    const pct = Math.round((1 - similarity) * 100);
+    note.innerHTML =
+      '<span class="branch-suggest-icon">\uD83D\uDD00</span> ' +
+      '<span>Topic drift detected (' + pct + '% divergence). ' +
+      '<button class="branch-suggest-action" data-split="' + splitIndex + '">Fork here</button> ' +
+      'to keep threads focused.</span>' +
+      '<button class="branch-suggest-dismiss" title="Dismiss">\u2715</button>';
+
+    note.querySelector('.branch-suggest-action').addEventListener('click', function() {
+      const idx = parseInt(this.getAttribute('data-split'), 10);
+      ConversationFork.forkAt(idx);
+      // Record the branch
+      const activeId = SessionManager.getActiveId();
+      if (activeId) {
+        const sessions = SessionManager.getAll();
+        const newest = sessions[0]; // most recent
+        if (newest && newest.id !== activeId) {
+          recordBranch(activeId, newest.id, idx);
+        }
+      }
+      note.remove();
+    });
+
+    note.querySelector('.branch-suggest-dismiss').addEventListener('click', function() {
+      note.classList.remove('visible');
+      setTimeout(function() { note.remove(); }, 300);
+    });
+
+    document.body.appendChild(note);
+    requestAnimationFrame(function() { note.classList.add('visible'); });
+
+    // Auto-dismiss after 15 seconds
+    setTimeout(function() {
+      if (note.parentNode) {
+        note.classList.remove('visible');
+        setTimeout(function() { note.remove(); }, 300);
+      }
+    }, 15000);
+  }
+
+  /* ── Branch Panel ─────────────────────────────── */
+
+  function _createPanel() {
+    if (_panel) return _panel;
+
+    _panel = document.createElement('div');
+    _panel.className = 'branch-panel';
+    _panel.id = 'branch-panel';
+    _panel.setAttribute('role', 'complementary');
+    _panel.setAttribute('aria-label', 'Conversation branches');
+    _panel.innerHTML =
+      '<div class="branch-panel-header">' +
+        '<h3>\uD83C\uDF33 Branch Tree</h3>' +
+        '<div class="branch-panel-actions">' +
+          '<button class="branch-panel-compare-btn" title="Compare two branches">\u2194\uFE0F Compare</button>' +
+          '<button class="branch-panel-close" title="Close (Alt+Shift+B)">\u2715</button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="branch-panel-body">' +
+        '<div class="branch-tree" id="branch-tree"></div>' +
+        '<div class="branch-diff" id="branch-diff" style="display:none"></div>' +
+      '</div>';
+
+    document.body.appendChild(_panel);
+
+    _panel.querySelector('.branch-panel-close').addEventListener('click', hide);
+    _panel.querySelector('.branch-panel-compare-btn').addEventListener('click', function() {
+      _compareMode = !_compareMode;
+      _compareIds = [];
+      this.classList.toggle('active', _compareMode);
+      if (!_compareMode) {
+        document.getElementById('branch-diff').style.display = 'none';
+        document.getElementById('branch-tree').style.display = '';
+      }
+      _renderTree();
+    });
+
+    return _panel;
+  }
+
+  function _renderTree() {
+    const treeEl = document.getElementById('branch-tree');
+    if (!treeEl) return;
+
+    const activeId = SessionManager.getActiveId();
+    if (!activeId) {
+      treeEl.innerHTML = '<div class="branch-empty">No active session.<br>Save a session first.</div>';
+      return;
+    }
+
+    const rootId = _getRoot(activeId);
+    const family = _buildFamilyTree(rootId);
+
+    if (family.length <= 1 && _getChildren(activeId).length === 0) {
+      treeEl.innerHTML =
+        '<div class="branch-empty">' +
+          '<div class="branch-empty-icon">\uD83C\uDF31</div>' +
+          '<div>No branches yet.</div>' +
+          '<div class="branch-empty-hint">Right-click any message and choose<br>"Fork from Here" to create a branch.</div>' +
+        '</div>';
+      return;
+    }
+
+    let html = '';
+    family.forEach(function(node) {
+      const isActive = node.id === activeId;
+      const indent = node.depth * 24;
+      const connector = node.depth > 0 ? '<span class="branch-connector">\u2514\u2500</span> ' : '';
+      const selectClass = _compareMode && _compareIds.indexOf(node.id) !== -1 ? ' branch-node-selected' : '';
+      html +=
+        '<div class="branch-node' + (isActive ? ' active' : '') + selectClass +
+        '" data-id="' + node.id + '" style="padding-left:' + indent + 'px" title="' +
+        (node.forkIndex !== null ? 'Forked at message #' + node.forkIndex : 'Root session') + '">' +
+        connector +
+        '<span class="branch-node-icon">' + (isActive ? '\u25C9' : '\u25CB') + '</span> ' +
+        '<span class="branch-node-name">' + _escapeHtml(node.name) + '</span>' +
+        '<span class="branch-node-meta">' + node.messageCount + ' msgs</span>' +
+        (!node.exists ? ' <span class="branch-node-deleted">(deleted)</span>' : '') +
+        '</div>';
+    });
+    treeEl.innerHTML = html;
+
+    // Click handlers
+    treeEl.querySelectorAll('.branch-node').forEach(function(el) {
+      el.addEventListener('click', function() {
+        const id = this.getAttribute('data-id');
+        if (_compareMode) {
+          if (_compareIds.indexOf(id) !== -1) {
+            _compareIds = _compareIds.filter(function(x) { return x !== id; });
+          } else {
+            _compareIds.push(id);
+          }
+          if (_compareIds.length === 2) {
+            _showComparison(_compareIds[0], _compareIds[1]);
+          }
+          _renderTree();
+        } else {
+          SessionManager.load(id);
+          _renderTree();
+        }
+      });
+    });
+  }
+
+  /* ── Branch Comparison ───────────────────────── */
+
+  function _showComparison(idA, idB) {
+    const diffEl = document.getElementById('branch-diff');
+    const treeEl = document.getElementById('branch-tree');
+    if (!diffEl) return;
+
+    const sessionA = SessionManager.get(idA);
+    const sessionB = SessionManager.get(idB);
+    if (!sessionA || !sessionB) {
+      diffEl.innerHTML = '<div class="branch-empty">One or both sessions not found.</div>';
+      diffEl.style.display = '';
+      treeEl.style.display = 'none';
+      return;
+    }
+
+    const msgsA = sessionA.messages || [];
+    const msgsB = sessionB.messages || [];
+
+    // Find divergence point
+    let divergeAt = 0;
+    const minLen = Math.min(msgsA.length, msgsB.length);
+    for (let i = 0; i < minLen; i++) {
+      if (msgsA[i].content !== msgsB[i].content || msgsA[i].role !== msgsB[i].role) break;
+      divergeAt = i + 1;
+    }
+
+    let html =
+      '<div class="branch-diff-header">' +
+        '<button class="branch-diff-back" title="Back to tree">\u2190 Back</button>' +
+        '<span>Comparing branches</span>' +
+      '</div>' +
+      '<div class="branch-diff-info">' +
+        '<div class="branch-diff-badge">Shared: ' + divergeAt + ' messages</div>' +
+        '<div class="branch-diff-badge">Diverged after message #' + divergeAt + '</div>' +
+      '</div>' +
+      '<div class="branch-diff-columns">' +
+        '<div class="branch-diff-col">' +
+          '<div class="branch-diff-col-title">' + _escapeHtml(sessionA.name) + '</div>';
+
+    for (let i = divergeAt; i < msgsA.length; i++) {
+      html += '<div class="branch-diff-msg branch-diff-msg-' + msgsA[i].role + '">' +
+        '<strong>' + msgsA[i].role + ':</strong> ' +
+        _escapeHtml(msgsA[i].content.substring(0, 200)) +
+        (msgsA[i].content.length > 200 ? '\u2026' : '') + '</div>';
+    }
+    if (msgsA.length <= divergeAt) html += '<div class="branch-diff-empty">No divergent messages</div>';
+
+    html += '</div><div class="branch-diff-col">' +
+      '<div class="branch-diff-col-title">' + _escapeHtml(sessionB.name) + '</div>';
+
+    for (let i = divergeAt; i < msgsB.length; i++) {
+      html += '<div class="branch-diff-msg branch-diff-msg-' + msgsB[i].role + '">' +
+        '<strong>' + msgsB[i].role + ':</strong> ' +
+        _escapeHtml(msgsB[i].content.substring(0, 200)) +
+        (msgsB[i].content.length > 200 ? '\u2026' : '') + '</div>';
+    }
+    if (msgsB.length <= divergeAt) html += '<div class="branch-diff-empty">No divergent messages</div>';
+
+    html += '</div></div>';
+
+    diffEl.innerHTML = html;
+    diffEl.style.display = '';
+    treeEl.style.display = 'none';
+
+    diffEl.querySelector('.branch-diff-back').addEventListener('click', function() {
+      diffEl.style.display = 'none';
+      treeEl.style.display = '';
+      _compareMode = false;
+      _compareIds = [];
+      var cmpBtn = _panel.querySelector('.branch-panel-compare-btn');
+      if (cmpBtn) cmpBtn.classList.remove('active');
+      _renderTree();
+    });
+  }
+
+  /* ── Show / Hide / Toggle ────────────────────── */
+
+  function show() {
+    _createPanel();
+    _panel.classList.add('open');
+    _shown = true;
+    _renderTree();
+    if (typeof PanelRegistry !== 'undefined' && PanelRegistry.closeAllExcept) {
+      PanelRegistry.closeAllExcept('branch');
+    }
+  }
+
+  function hide() {
+    if (_panel) _panel.classList.remove('open');
+    _shown = false;
+  }
+
+  function toggle() {
+    _shown ? hide() : show();
+  }
+
+  /* ── Monkey-patch ConversationFork to auto-record branches ── */
+
+  const _origForkAt = ConversationFork.forkAt;
+  ConversationFork.forkAt = function(historyIndex) {
+    const parentId = SessionManager.getActiveId();
+    const result = _origForkAt(historyIndex);
+    if (result && parentId) {
+      recordBranch(parentId, result.id, historyIndex);
+    }
+    return result;
+  };
+
+  /* ── Init ─────────────────────────────────────── */
+
+  document.addEventListener('DOMContentLoaded', function() {
+    // Register keyboard shortcut
+    if (typeof KeyboardShortcuts !== 'undefined' && KeyboardShortcuts.register) {
+      KeyboardShortcuts.register('Alt+Shift+B', 'Branch Tree', toggle);
+    }
+    // Register with command palette
+    if (typeof CommandPalette !== 'undefined' && CommandPalette.register) {
+      CommandPalette.register({ name: 'branch tree', description: 'View conversation branch tree', icon: '\uD83C\uDF33', action: toggle });
+    }
+    // Register slash command
+    if (typeof SlashCommands !== 'undefined' && SlashCommands.register) {
+      SlashCommands.register('/branches', 'Show conversation branch tree', toggle);
+    }
+    // Register with panel registry
+    if (typeof PanelRegistry !== 'undefined' && PanelRegistry.register) {
+      PanelRegistry.register('branch', hide);
+    }
+
+    // Hook into message additions for drift detection
+    const origAddMessage = ConversationManager.addMessage;
+    ConversationManager.addMessage = function(role, content, meta) {
+      origAddMessage.call(ConversationManager, role, content, meta);
+      if (role === 'assistant') {
+        try { onMessageAdded(); } catch(e) { console.warn('[Brancher] drift check error:', e); }
+      }
+    };
+
+    // Add toolbar button
+    var toolbar = document.querySelector('.toolbar');
+    if (toolbar) {
+      var branchBtn = document.getElementById('branch-btn');
+      if (!branchBtn) {
+        branchBtn = document.createElement('button');
+        branchBtn.id = 'branch-btn';
+        branchBtn.className = 'btn-secondary';
+        branchBtn.title = 'Conversation Branches (Alt+Shift+B)';
+        branchBtn.textContent = '\uD83C\uDF33';
+        branchBtn.addEventListener('click', toggle);
+        toolbar.appendChild(branchBtn);
+      }
+    }
+  });
+
+  return {
+    toggle: toggle, show: show, hide: hide,
+    recordBranch: recordBranch, checkDrift: checkDrift,
+    onMessageAdded: onMessageAdded
+  };
+})();
