@@ -33685,19 +33685,61 @@ const ConversationDriftDetector = (() => {
     return [];
   }
 
-  function _extractTopics(messages) {
+  /**
+   * Extract top topics from pre-tokenized message arrays.
+   * Accepts an array of token arrays (one per message) to avoid
+   * re-tokenizing messages that were already tokenized in analyze().
+   * @param {string[][]} tokenArrays - pre-computed token arrays
+   * @returns {string[]}
+   */
+  function _extractTopicsFromTokens(tokenArrays) {
     var allTokens = [];
-    for (var i = 0; i < messages.length; i++) {
-      var tokens = _tokenize(messages[i].content || '');
-      allTokens = allTokens.concat(tokens);
+    for (var i = 0; i < tokenArrays.length; i++) {
+      var arr = tokenArrays[i];
+      for (var j = 0; j < arr.length; j++) allTokens.push(arr[j]);
     }
     return TextAnalytics.topTerms(allTokens, 8);
+  }
+
+  // Legacy wrapper for callers that pass message objects
+  function _extractTopics(messages) {
+    var tokenArrays = [];
+    for (var i = 0; i < messages.length; i++) {
+      tokenArrays.push(_tokenize(messages[i].content || ''));
+    }
+    return _extractTopicsFromTokens(tokenArrays);
+  }
+
+  /**
+   * Build a term-frequency vector from pre-tokenized arrays by
+   * concatenating them without intermediate string allocation.
+   * @param {string[][]} tokenArrays
+   * @returns {Object} TF vector
+   */
+  function _termFreqFromTokenArrays(tokenArrays) {
+    var merged = [];
+    for (var i = 0; i < tokenArrays.length; i++) {
+      var arr = tokenArrays[i];
+      for (var j = 0; j < arr.length; j++) merged.push(arr[j]);
+    }
+    return _termFreq(merged);
   }
 
   function analyze() {
     var msgs = _getMessages();
     if (msgs.length < _anchorSize + 2) {
       return { status: 'insufficient', similarity: 1, anchorTopics: [], recentTopics: [], messages: msgs.length, driftPoints: [] };
+    }
+
+    // Pre-tokenize every message once.  The drift trajectory loop
+    // previously re-tokenized overlapping windows from scratch —
+    // O(W × tokens_per_msg) work repeated for each sliding step.
+    // With N messages and step S, this caused O(N/S × W) tokenizations;
+    // now it's O(N) tokenizations total, with the loop doing only
+    // TF aggregation over pre-computed token arrays.
+    var msgTokens = new Array(msgs.length);
+    for (var t = 0; t < msgs.length; t++) {
+      msgTokens[t] = _tokenize(msgs[t].content || '');
     }
 
     // Anchor = first N messages — content is immutable once established,
@@ -33709,28 +33751,27 @@ const ConversationDriftDetector = (() => {
       anchorTf = _anchorCache.tf;
       anchorTopics = _anchorCache.topics;
     } else {
-      var anchorText = anchorMsgs.map(function(m) { return m.content || ''; }).join(' ');
-      anchorTf = _termFreq(_tokenize(anchorText));
-      anchorTopics = _extractTopics(anchorMsgs);
+      anchorTf = _termFreqFromTokenArrays(msgTokens.slice(0, _anchorSize));
+      anchorTopics = _extractTopicsFromTokens(msgTokens.slice(0, _anchorSize));
       _anchorCache = { key: anchorKey, tf: anchorTf, topics: anchorTopics };
     }
 
-    // Recent window
-    var recentMsgs = msgs.slice(-_windowSize);
-    var recentText = recentMsgs.map(function(m) { return m.content || ''; }).join(' ');
-    var recentTf = _termFreq(_tokenize(recentText));
-    var recentTopics = _extractTopics(recentMsgs);
+    // Recent window — reuse pre-tokenized arrays
+    var recentTokens = msgTokens.slice(-_windowSize);
+    var recentTf = _termFreqFromTokenArrays(recentTokens);
+    var recentTopics = _extractTopicsFromTokens(recentTokens);
 
     var similarity = _cosineSim(anchorTf, recentTf);
 
     // Calculate drift trajectory (sliding window similarity over time)
+    // Reuses msgTokens[] — no re-tokenization per window.
     var driftPoints = [];
     var step = Math.max(2, Math.floor(_windowSize / 2));
     for (var i = _anchorSize; i <= msgs.length; i += step) {
       var windowEnd = Math.min(i + step, msgs.length);
-      var windowMsgs = msgs.slice(Math.max(0, i - step), windowEnd);
-      var windowText = windowMsgs.map(function(m) { return m.content || ''; }).join(' ');
-      var windowTf = _termFreq(_tokenize(windowText));
+      var windowStart = Math.max(0, i - step);
+      var windowTokens = msgTokens.slice(windowStart, windowEnd);
+      var windowTf = _termFreqFromTokenArrays(windowTokens);
       var sim = _cosineSim(anchorTf, windowTf);
       driftPoints.push({ index: i, similarity: sim });
     }
@@ -33738,8 +33779,10 @@ const ConversationDriftDetector = (() => {
     var drifted = similarity < _alertThreshold;
     var status = drifted ? 'drifted' : similarity < 0.55 ? 'drifting' : 'on-track';
 
-    // Find new topics not in anchor
-    var newTopics = recentTopics.filter(function(t) { return anchorTopics.indexOf(t) === -1; });
+    // Find new topics not in anchor — Set lookup O(1) per topic
+    // instead of indexOf O(n) scan per topic.
+    var anchorTopicSet = new Set(anchorTopics);
+    var newTopics = recentTopics.filter(function(topic) { return !anchorTopicSet.has(topic); });
 
     return {
       status: status,
