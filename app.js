@@ -35226,8 +35226,7 @@ const SmartSessionPrioritizer = (function () {
 
   function _save() {
     try {
-      const s = typeof SafeStorage !== 'undefined' ? SafeStorage : localStorage;
-      s.setItem ? s.setItem(STORAGE_KEY, JSON.stringify(_scores)) : (SafeStorage.set && SafeStorage.set(STORAGE_KEY, JSON.stringify(_scores)));
+      SafeStorage.trySet(STORAGE_KEY, JSON.stringify(_scores));
     } catch {}
   }
 
@@ -35924,7 +35923,7 @@ const ConversationCoach = (() => {
   // ---- persistence ----
   function _load() {
     try {
-      var raw = (typeof SafeStorage !== 'undefined' ? SafeStorage : localStorage).getItem(STORAGE_KEY);
+      var raw = SafeStorage.get(STORAGE_KEY);
       if (raw) {
         var d = sanitizeStorageObject(JSON.parse(raw));
         _enabled = d.enabled !== false;
@@ -35937,8 +35936,7 @@ const ConversationCoach = (() => {
   }
   function _save() {
     try {
-      var store = (typeof SafeStorage !== 'undefined' ? SafeStorage : localStorage);
-      store.setItem(STORAGE_KEY, JSON.stringify({
+      SafeStorage.trySet(STORAGE_KEY, JSON.stringify({
         enabled: _enabled, stats: _stats, dismissedTypes: _dismissedTypes,
         msgCount: _msgCount, lastTipAt: _lastTipAt
       }));
@@ -36336,14 +36334,13 @@ const SmartKnowledgeMap = (function () {
     try {
       var data = { nodes: nodes.map(function (n) { return { id: n.id, label: n.label, category: n.category, count: n.count, x: n.x, y: n.y }; }),
         edges: edges.map(function (e) { return { source: e.source.label, target: e.target.label, label: e.label, weight: e.weight }; }) };
-      if (typeof SafeStorage !== 'undefined') SafeStorage.setItem(storageKey, JSON.stringify(data));
-      else localStorage.setItem(storageKey, JSON.stringify(data));
+      SafeStorage.trySet(storageKey, JSON.stringify(data));
     } catch (e) { /* quota */ }
   }
 
   function loadGraph() {
     try {
-      var raw = (typeof SafeStorage !== 'undefined') ? SafeStorage.getItem(storageKey) : localStorage.getItem(storageKey);
+      var raw = SafeStorage.get(storageKey);
       if (!raw) return;
       var data = sanitizeStorageObject(JSON.parse(raw));
       nodes = []; edges = []; nodeMap = {}; edgeMap = {};
@@ -36716,7 +36713,7 @@ const SmartDeadlineTracker = (() => {
 
   function _load() {
     try {
-      const raw = SafeStorage.getItem(STORAGE_KEY);
+      const raw = SafeStorage.get(STORAGE_KEY);
       if (raw) {
         const d = sanitizeStorageObject(JSON.parse(raw));
         _deadlines = d.deadlines || [];
@@ -36727,7 +36724,7 @@ const SmartDeadlineTracker = (() => {
   }
 
   function _save() {
-    SafeStorage.setItem(STORAGE_KEY, JSON.stringify({ deadlines: _deadlines, dismissed: _dismissed }));
+    SafeStorage.trySet(STORAGE_KEY, JSON.stringify({ deadlines: _deadlines, dismissed: _dismissed }));
   }
 
   function _hash(s) {
@@ -37643,11 +37640,11 @@ var SmartQuestionTracker = (function() {
 
   /* ---- persistence ---- */
   function _save() {
-    try { localStorage.setItem(STORE_KEY, JSON.stringify({ questions: _questions, nextId: _nextId })); } catch(e) {}
+    try { SafeStorage.trySet(STORE_KEY, JSON.stringify({ questions: _questions, nextId: _nextId })); } catch(e) {}
   }
   function _load() {
     try {
-      var d = sanitizeStorageObject(JSON.parse(localStorage.getItem(STORE_KEY)));
+      var d = sanitizeStorageObject(JSON.parse(SafeStorage.get(STORE_KEY)));
       if (d && d.questions) { _questions = d.questions; _nextId = d.nextId || _questions.length + 1; }
     } catch(e) {}
   }
