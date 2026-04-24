@@ -23283,7 +23283,11 @@ const CustomThemeCreator = (() => {
 
   // Validate that a CSS variable value looks like a safe color/font value.
   // Blocks url(), expression(), and other potentially dangerous CSS functions.
-  const _UNSAFE_CSS_RE = /url\s*\(|expression\s*\(|javascript:|@import|behavior\s*:/i;
+  // Also blocks backslash-escape bypasses (e.g. \75rl() decodes to url() in
+  // CSS but would evade a naive regex), -moz-binding (historic Firefox XSS),
+  // image-set/cross-fade/element (can reference external resources),
+  // and raw backslashes which enable character-code escaping in CSS.
+  const _UNSAFE_CSS_RE = /url\s*\(|expression\s*\(|javascript:|@import|behavior\s*:|-moz-binding\s*:|image-set\s*\(|cross-fade\s*\(|element\s*\(|\\/i;
 
   function _applyThemeValues(values) {
     if (typeof document === 'undefined') return;
