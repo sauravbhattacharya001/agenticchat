@@ -33711,18 +33711,30 @@ const ConversationDriftDetector = (() => {
   }
 
   /**
-   * Build a term-frequency vector from pre-tokenized arrays by
-   * concatenating them without intermediate string allocation.
+   * Build a max-normalised term-frequency vector directly from
+   * pre-tokenized arrays without allocating an intermediate merged
+   * array.  The previous implementation concatenated all token arrays
+   * into a single temporary array (O(total_tokens) allocation) then
+   * passed it to _termFreq which iterated it again.  This version
+   * counts frequencies in-place — one fewer full-length pass and zero
+   * intermediate array allocation.
    * @param {string[][]} tokenArrays
-   * @returns {Object} TF vector
+   * @returns {Object} TF vector (max-normalised)
    */
   function _termFreqFromTokenArrays(tokenArrays) {
-    var merged = [];
+    var tf = {};
+    var max = 0;
     for (var i = 0; i < tokenArrays.length; i++) {
       var arr = tokenArrays[i];
-      for (var j = 0; j < arr.length; j++) merged.push(arr[j]);
+      for (var j = 0; j < arr.length; j++) {
+        var w = arr[j];
+        var c = (tf[w] || 0) + 1;
+        tf[w] = c;
+        if (c > max) max = c;
+      }
     }
-    return _termFreq(merged);
+    if (max > 0) { for (var k in tf) { tf[k] /= max; } }
+    return tf;
   }
 
   function analyze() {
