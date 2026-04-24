@@ -38198,14 +38198,42 @@ const ConversationBrancher = (() => {
 
   /* ── Persistence ─────────────────────────────── */
 
+  // In-memory cache: avoids redundant JSON.parse + full-object scans.
+  // _loadTree() was called inside _getChildren/_getParent per BFS node,
+  // causing O(N × keys) JSON.parse calls during _buildFamilyTree.
+  // Now: one parse per external mutation, with O(1) indexed lookups.
+  let _treeCache = null;      // raw tree object { key: { parentId, childId, forkIndex, createdAt } }
+  let _byParent = null;       // Map<parentId, entry[]> — children index
+  let _byChild = null;        // Map<childId, entry>   — parent index
+
+  /** Invalidate indices so next _loadTree rebuilds them. */
+  function _invalidateTreeIndex() {
+    _treeCache = null;
+    _byParent = null;
+    _byChild = null;
+  }
+
+  /** Load tree from storage (cached) and build O(1) lookup indices. */
   function _loadTree() {
+    if (_treeCache !== null) return _treeCache;
     try {
       const raw = SafeStorage.get(TREE_KEY);
-      return raw ? JSON.parse(raw) : {};
-    } catch { return {}; }
+      _treeCache = raw ? JSON.parse(raw) : {};
+    } catch { _treeCache = {}; }
+    // Build indices
+    _byParent = new Map();
+    _byChild = new Map();
+    for (const key in _treeCache) {
+      const entry = _treeCache[key];
+      if (!_byParent.has(entry.parentId)) _byParent.set(entry.parentId, []);
+      _byParent.get(entry.parentId).push(entry);
+      _byChild.set(entry.childId, entry);
+    }
+    return _treeCache;
   }
 
   function _saveTree(tree) {
+    _invalidateTreeIndex();
     try { SafeStorage.set(TREE_KEY, JSON.stringify(tree)); } catch {}
   }
 
@@ -38222,33 +38250,27 @@ const ConversationBrancher = (() => {
     _saveTree(tree);
   }
 
-  /** Get all children of a session. */
+  /** Get all children of a session (O(1) via index). */
   function _getChildren(sessionId) {
-    const tree = _loadTree();
-    const children = [];
-    for (const key in tree) {
-      if (tree[key].parentId === sessionId) children.push(tree[key]);
-    }
-    return children;
+    _loadTree(); // ensure indices exist
+    return _byParent.get(sessionId) || [];
   }
 
-  /** Get parent of a session (if any). */
+  /** Get parent of a session (O(1) via index). */
   function _getParent(sessionId) {
-    const tree = _loadTree();
-    for (const key in tree) {
-      if (tree[key].childId === sessionId) return tree[key];
-    }
-    return null;
+    _loadTree(); // ensure indices exist
+    return _byChild.get(sessionId) || null;
   }
 
   /** Get root session of the branch family. */
   function _getRoot(sessionId) {
+    _loadTree(); // ensure indices exist — single parse for entire traversal
     let current = sessionId;
     const visited = new Set();
     while (true) {
       if (visited.has(current)) break;
       visited.add(current);
-      const parent = _getParent(current);
+      const parent = _byChild.get(current);
       if (!parent) break;
       current = parent.parentId;
     }
@@ -38257,6 +38279,7 @@ const ConversationBrancher = (() => {
 
   /** Build full family tree from a root. Returns array of { id, parentId, depth, forkIndex, name }. */
   function _buildFamilyTree(rootId) {
+    _loadTree(); // ensure indices exist — single parse for entire BFS
     const sessions = SessionManager.getAll();
     const sessionMap = {};
     sessions.forEach(function(s) { sessionMap[s.id] = s; });
@@ -38279,7 +38302,7 @@ const ConversationBrancher = (() => {
         messageCount: session ? (session.messageCount || (session.messages ? session.messages.length : 0)) : 0,
         exists: !!session
       });
-      const children = _getChildren(item.id);
+      const children = _byParent.get(item.id) || [];
       children.forEach(function(c) {
         queue.push({ id: c.childId, parentId: item.id, depth: item.depth + 1, forkIndex: c.forkIndex });
       });
