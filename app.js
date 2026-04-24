@@ -34281,7 +34281,7 @@ const SmartModelAdvisor = (function () {
     try {
       var raw = SafeStorage.get(STORAGE_KEY);
       if (raw) {
-        var s = JSON.parse(raw);
+        var s = sanitizeStorageObject(JSON.parse(raw));
         _enabled = s.enabled !== false;
         _history = Array.isArray(s.history) ? s.history.slice(-50) : [];
         _dismissed = s.dismissed || {};
@@ -35220,7 +35220,7 @@ const SmartSessionPrioritizer = (function () {
   function _allSessions() {
     try {
       const raw = (typeof SafeStorage !== 'undefined' ? SafeStorage.get(SESSION_KEY) : localStorage.getItem(SESSION_KEY));
-      return JSON.parse(raw || '[]');
+      return sanitizeStorageObject(JSON.parse(raw || '[]'));
     } catch { return []; }
   }
 
@@ -35234,7 +35234,7 @@ const SmartSessionPrioritizer = (function () {
   function _load() {
     try {
       const s = typeof SafeStorage !== 'undefined' ? SafeStorage.get(STORAGE_KEY) : localStorage.getItem(STORAGE_KEY);
-      _scores = JSON.parse(s || '{}');
+      _scores = sanitizeStorageObject(JSON.parse(s || '{}'));
     } catch { _scores = {}; }
   }
 
@@ -35926,7 +35926,7 @@ const ConversationCoach = (() => {
     try {
       var raw = (typeof SafeStorage !== 'undefined' ? SafeStorage : localStorage).getItem(STORAGE_KEY);
       if (raw) {
-        var d = JSON.parse(raw);
+        var d = sanitizeStorageObject(JSON.parse(raw));
         _enabled = d.enabled !== false;
         _stats = Object.assign(_stats, d.stats || {});
         _dismissedTypes = d.dismissedTypes || {};
@@ -36345,7 +36345,7 @@ const SmartKnowledgeMap = (function () {
     try {
       var raw = (typeof SafeStorage !== 'undefined') ? SafeStorage.getItem(storageKey) : localStorage.getItem(storageKey);
       if (!raw) return;
-      var data = JSON.parse(raw);
+      var data = sanitizeStorageObject(JSON.parse(raw));
       nodes = []; edges = []; nodeMap = {}; edgeMap = {};
       (data.nodes || []).forEach(function (n) {
         var node = { id: n.id, label: n.label, category: n.category, count: n.count || 1,
@@ -36718,7 +36718,7 @@ const SmartDeadlineTracker = (() => {
     try {
       const raw = SafeStorage.getItem(STORAGE_KEY);
       if (raw) {
-        const d = JSON.parse(raw);
+        const d = sanitizeStorageObject(JSON.parse(raw));
         _deadlines = d.deadlines || [];
         _dismissed = d.dismissed || {};
         _deadlineIds = new Set(_deadlines.map(dl => dl.id));
@@ -37085,7 +37085,7 @@ var SmartContradictionDetector = (function () {
   function _load() {
     try {
       var raw = SafeStorage.get(_storageKey());
-      if (raw) _contradictions = JSON.parse(raw);
+      if (raw) _contradictions = sanitizeStorageObject(JSON.parse(raw));
     } catch(e) { _contradictions = []; }
   }
 
@@ -37647,7 +37647,7 @@ var SmartQuestionTracker = (function() {
   }
   function _load() {
     try {
-      var d = JSON.parse(localStorage.getItem(STORE_KEY));
+      var d = sanitizeStorageObject(JSON.parse(localStorage.getItem(STORE_KEY)));
       if (d && d.questions) { _questions = d.questions; _nextId = d.nextId || _questions.length + 1; }
     } catch(e) {}
   }
