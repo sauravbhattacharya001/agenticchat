@@ -5192,3 +5192,28 @@ body.light-theme .enhance-panel .enhance-modes button.active { background: #3b82
 .predictor-actions { display:flex; gap:8px; margin-top:12px; }
 .predictor-actions button { flex:1; padding:6px; border-radius:6px; border:1px solid var(--border-color,#444); background:var(--bg-primary,#121212); color:var(--text-primary,#eee); cursor:pointer; font-size:0.8rem; }
 .predictor-actions button:hover { background:var(--accent,#2196F3); color:#fff; }
+
+/* ---- Conversation Branching ---- */
+.branch-indicator { display:inline-flex; align-items:center; gap:4px; padding:4px 10px; border-radius:6px; font-size:12px; cursor:pointer; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); margin-left:8px; }
+.branch-indicator:hover { background:rgba(255,255,255,0.1); }
+.branch-icon { font-size:14px; }
+.branch-count { opacity:0.6; font-size:11px; }
+.branch-overlay { z-index:10050; }
+.branch-panel { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); width:420px; max-height:70vh; background:var(--bg,#1a1a2e); border:1px solid var(--border,#333); border-radius:12px; box-shadow:0 8px 32px rgba(0,0,0,0.5); z-index:10051; display:flex; flex-direction:column; overflow:hidden; font-family:system-ui,sans-serif; color:var(--text,#e2e8f0); }
+.branch-header { display:flex; align-items:center; justify-content:space-between; padding:14px 16px; border-bottom:1px solid var(--border,#333); }
+.branch-header h3 { margin:0; font-size:15px; }
+.branch-info { padding:8px 16px; font-size:12px; opacity:0.6; border-bottom:1px solid var(--border,#222); }
+.branch-tree { overflow-y:auto; flex:1; padding:8px 0; }
+.branch-node { padding:8px 12px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.03); transition:background 0.15s; }
+.branch-node:hover { background:rgba(255,255,255,0.05); }
+.branch-node.active { background:rgba(33,150,243,0.1); }
+.branch-node-main { display:flex; align-items:center; gap:4px; flex:1; min-width:0; }
+.branch-connector { font-family:monospace; opacity:0.4; font-size:12px; white-space:pre; }
+.branch-label { font-size:13px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.branch-label.current { color:#2196F3; font-weight:600; }
+.branch-meta { font-size:11px; opacity:0.5; white-space:nowrap; margin-left:4px; }
+.branch-actions { display:flex; gap:4px; margin-left:8px; flex-shrink:0; }
+.branch-actions .btn-sm { font-size:11px; padding:2px 8px; }
+.fork-btn { position:absolute; top:4px; right:4px; background:rgba(0,0,0,0.3); border:none; border-radius:4px; padding:2px 6px; font-size:14px; cursor:pointer; opacity:0; transition:opacity 0.2s; z-index:5; }
+.message:hover .fork-btn, .assistant-message:hover .fork-btn, .bot-message:hover .fork-btn { opacity:0.7; }
+.fork-btn:hover { opacity:1 !important; background:rgba(33,150,243,0.3); }

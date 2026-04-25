@@ -40731,3 +40731,382 @@ var SmartConversationDigest = (function () {
 
   return { toggle: toggle, show: function () { if (!panelEl || panelEl.style.display === 'none') toggle(); }, hide: hidePanel };
 })();
+
+/* ============================================================
+ *  ConversationBranching (Alt+Shift+B)
+ *
+ *  Fork conversations at any AI message to explore alternate
+ *  response paths. Visual branch tree navigator with switch,
+ *  delete, rename. Each session can have multiple branches.
+ *
+ *  Toggle: Alt+Shift+B | Slash: /branches | Command Palette
+ * ============================================================ */
+var ConversationBranching = (function () {
+  'use strict';
+
+  var STORAGE_PREFIX = 'ac_branches_';
+  var _visible = false;
+  var _panel = null;
+  var _overlay = null;
+  var _branches = [];     // [{id, parentId, forkIndex, label, messages[], createdAt}]
+  var _currentBranchId = 'main';
+  var _indicator = null;
+
+  /* ---- helpers ---- */
+  function _sessionId() {
+    try { return (typeof SessionManager !== 'undefined' && SessionManager.current) ? SessionManager.current() : 'default'; } catch (e) { return 'default'; }
+  }
+  function _storageKey() { return STORAGE_PREFIX + _sessionId(); }
+
+  function _save() {
+    try {
+      SafeStorage.trySet(_storageKey(), JSON.stringify({
+        branches: _branches,
+        currentBranchId: _currentBranchId
+      }));
+    } catch (e) { /* quota */ }
+  }
+
+  function _load() {
+    try {
+      var raw = SafeStorage.get(_storageKey());
+      if (raw) {
+        var d = sanitizeStorageObject(JSON.parse(raw));
+        _branches = d.branches || [];
+        _currentBranchId = d.currentBranchId || 'main';
+      }
+    } catch (e) {}
+    // Ensure main branch exists
+    if (!_branches.some(function (b) { return b.id === 'main'; })) {
+      _branches.unshift({
+        id: 'main',
+        parentId: null,
+        forkIndex: -1,
+        label: 'Main',
+        messages: [],
+        createdAt: new Date().toISOString()
+      });
+    }
+  }
+
+  function _currentBranch() {
+    return _branches.find(function (b) { return b.id === _currentBranchId; }) || _branches[0];
+  }
+
+  function _genId() {
+    return 'br_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  }
+
+  function _escHtml(s) {
+    var d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  function _truncate(s, n) {
+    return s.length > n ? s.substring(0, n - 3) + '...' : s;
+  }
+
+  /* ---- capture current messages from DOM ---- */
+  function _captureMessages() {
+    var out = document.getElementById('chat-output');
+    if (!out) return [];
+    var msgs = [];
+    out.querySelectorAll('.message, .user-message, .bot-message, .assistant-message').forEach(function (el) {
+      var role = 'unknown';
+      if (el.classList.contains('user-message') || el.classList.contains('user')) role = 'user';
+      else if (el.classList.contains('bot-message') || el.classList.contains('assistant-message') || el.classList.contains('assistant')) role = 'assistant';
+      msgs.push({ role: role, text: (el.textContent || '').trim(), html: el.innerHTML });
+    });
+    return msgs;
+  }
+
+  /* ---- restore messages to DOM ---- */
+  function _restoreMessages(messages) {
+    var out = document.getElementById('chat-output');
+    if (!out) return;
+    out.innerHTML = '';
+    messages.forEach(function (m) {
+      var div = document.createElement('div');
+      div.className = 'message ' + (m.role === 'user' ? 'user-message' : 'assistant-message');
+      div.innerHTML = m.html || _escHtml(m.text);
+      out.appendChild(div);
+    });
+    out.scrollTop = out.scrollHeight;
+  }
+
+  /* ---- fork at message index ---- */
+  function forkAt(messageIndex) {
+    // Save current branch state first
+    var current = _currentBranch();
+    current.messages = _captureMessages();
+
+    // Create new branch with messages up to (and including) the fork point
+    var forkedMessages = current.messages.slice(0, messageIndex + 1);
+    var lastMsg = forkedMessages[forkedMessages.length - 1];
+    var label = lastMsg ? _truncate(lastMsg.text, 30) : 'Branch';
+
+    var newBranch = {
+      id: _genId(),
+      parentId: current.id,
+      forkIndex: messageIndex,
+      label: 'Fork: ' + label,
+      messages: forkedMessages,
+      createdAt: new Date().toISOString()
+    };
+
+    _branches.push(newBranch);
+    _currentBranchId = newBranch.id;
+    _restoreMessages(forkedMessages);
+    _save();
+    _updateIndicator();
+
+    if (typeof ToastManager !== 'undefined' && ToastManager.show) {
+      ToastManager.show('Forked conversation at message #' + (messageIndex + 1), 'info');
+    }
+
+    // Focus chat input for the user to type a new message
+    var input = document.getElementById('chat-input');
+    if (input) input.focus();
+
+    if (_visible) _render();
+  }
+
+  /* ---- switch branch ---- */
+  function switchTo(branchId) {
+    // Save current state
+    var current = _currentBranch();
+    current.messages = _captureMessages();
+
+    _currentBranchId = branchId;
+    var target = _currentBranch();
+    _restoreMessages(target.messages);
+    _save();
+    _updateIndicator();
+
+    if (typeof ToastManager !== 'undefined' && ToastManager.show) {
+      ToastManager.show('Switched to: ' + target.label, 'info');
+    }
+    if (_visible) _render();
+  }
+
+  /* ---- delete branch ---- */
+  function deleteBranch(branchId) {
+    if (branchId === 'main') return; // can't delete main
+    // Also delete children
+    var toDelete = [branchId];
+    var changed = true;
+    while (changed) {
+      changed = false;
+      _branches.forEach(function (b) {
+        if (toDelete.indexOf(b.parentId) !== -1 && toDelete.indexOf(b.id) === -1) {
+          toDelete.push(b.id);
+          changed = true;
+        }
+      });
+    }
+    _branches = _branches.filter(function (b) { return toDelete.indexOf(b.id) === -1; });
+    if (toDelete.indexOf(_currentBranchId) !== -1) {
+      _currentBranchId = 'main';
+      var main = _currentBranch();
+      _restoreMessages(main.messages);
+    }
+    _save();
+    _updateIndicator();
+    if (_visible) _render();
+  }
+
+  /* ---- rename branch ---- */
+  function renameBranch(branchId, newLabel) {
+    var b = _branches.find(function (x) { return x.id === branchId; });
+    if (b) { b.label = newLabel; _save(); _updateIndicator(); if (_visible) _render(); }
+  }
+
+  /* ---- branch indicator ---- */
+  function _updateIndicator() {
+    if (!_indicator) {
+      _indicator = document.createElement('span');
+      _indicator.id = 'branch-indicator';
+      _indicator.className = 'branch-indicator';
+      _indicator.title = 'Current branch (click to open tree)';
+      _indicator.onclick = toggle;
+      var toolbar = document.querySelector('.toolbar');
+      if (toolbar) toolbar.appendChild(_indicator);
+    }
+    var current = _currentBranch();
+    var count = _branches.length;
+    _indicator.innerHTML = '<span class="branch-icon">🌳</span> ' + _escHtml(current.label) +
+      (count > 1 ? ' <span class="branch-count">(' + count + ')</span>' : '');
+  }
+
+  /* ---- add fork buttons to messages ---- */
+  function _addForkButtons() {
+    var out = document.getElementById('chat-output');
+    if (!out) return;
+    out.querySelectorAll('.message, .assistant-message, .bot-message').forEach(function (el, idx) {
+      if (el.querySelector('.fork-btn')) return;
+      var btn = document.createElement('button');
+      btn.className = 'fork-btn';
+      btn.innerHTML = '🔀';
+      btn.title = 'Fork conversation here';
+      btn.onclick = function (e) {
+        e.stopPropagation();
+        // Recalculate index at click time
+        var allMsgs = out.querySelectorAll('.message, .user-message, .bot-message, .assistant-message');
+        var clickIdx = Array.prototype.indexOf.call(allMsgs, el);
+        if (clickIdx >= 0) forkAt(clickIdx);
+      };
+      el.style.position = 'relative';
+      el.appendChild(btn);
+    });
+  }
+
+  /* ---- observer for new messages ---- */
+  function _startObserver() {
+    var out = document.getElementById('chat-output');
+    if (!out) return;
+    var obs = new MutationObserver(function () {
+      _addForkButtons();
+      // Auto-save current branch messages
+      var current = _currentBranch();
+      current.messages = _captureMessages();
+      _save();
+    });
+    obs.observe(out, { childList: true, subtree: true });
+  }
+
+  /* ---- panel UI ---- */
+  function _buildPanel() {
+    if (_panel) return;
+    _overlay = document.createElement('div');
+    _overlay.className = 'modal-overlay branch-overlay';
+    _overlay.style.display = 'none';
+    _overlay.onclick = hide;
+    document.body.appendChild(_overlay);
+
+    _panel = document.createElement('div');
+    _panel.className = 'branch-panel';
+    _panel.style.display = 'none';
+    document.body.appendChild(_panel);
+  }
+
+  function _render() {
+    _buildPanel();
+    var html = '<div class="branch-header">' +
+      '<h3>🌳 Conversation Branches</h3>' +
+      '<button class="btn-sm" onclick="ConversationBranching.hide()" title="Close">✕</button>' +
+      '</div>';
+
+    html += '<div class="branch-info">Fork at any message to explore alternate paths. ' + _branches.length + ' branch' + (_branches.length !== 1 ? 'es' : '') + '.</div>';
+
+    // Build tree
+    html += '<div class="branch-tree">';
+    html += _renderBranchTree(null, 0);
+    html += '</div>';
+
+    _panel.innerHTML = html;
+
+    // Wire up events
+    _panel.querySelectorAll('.branch-switch-btn').forEach(function (btn) {
+      btn.onclick = function () { switchTo(btn.dataset.id); };
+    });
+    _panel.querySelectorAll('.branch-delete-btn').forEach(function (btn) {
+      btn.onclick = function () {
+        if (confirm('Delete branch "' + btn.dataset.label + '" and its children?')) {
+          deleteBranch(btn.dataset.id);
+        }
+      };
+    });
+    _panel.querySelectorAll('.branch-rename-btn').forEach(function (btn) {
+      btn.onclick = function () {
+        var newName = prompt('Rename branch:', btn.dataset.label);
+        if (newName && newName.trim()) renameBranch(btn.dataset.id, newName.trim());
+      };
+    });
+  }
+
+  function _renderBranchTree(parentId, depth) {
+    var children = _branches.filter(function (b) {
+      return parentId === null ? b.parentId === null : b.parentId === parentId;
+    });
+    if (children.length === 0) return '';
+    var html = '';
+    children.forEach(function (b) {
+      var isCurrent = b.id === _currentBranchId;
+      var msgCount = b.messages ? b.messages.length : 0;
+      var indent = depth * 20;
+      html += '<div class="branch-node' + (isCurrent ? ' active' : '') + '" style="padding-left:' + (12 + indent) + 'px">';
+      html += '<div class="branch-node-main">';
+      html += '<span class="branch-connector">' + (depth > 0 ? '├─ ' : '') + '</span>';
+      html += '<span class="branch-label' + (isCurrent ? ' current' : '') + '">' + (isCurrent ? '▶ ' : '') + _escHtml(b.label) + '</span>';
+      html += '<span class="branch-meta"> (' + msgCount + ' msg' + (msgCount !== 1 ? 's' : '') + ')</span>';
+      html += '</div>';
+      html += '<div class="branch-actions">';
+      if (!isCurrent) {
+        html += '<button class="btn-sm branch-switch-btn" data-id="' + b.id + '" title="Switch to this branch">Switch</button>';
+      }
+      html += '<button class="btn-sm branch-rename-btn" data-id="' + b.id + '" data-label="' + _escHtml(b.label) + '" title="Rename">✏️</button>';
+      if (b.id !== 'main') {
+        html += '<button class="btn-sm branch-delete-btn" data-id="' + b.id + '" data-label="' + _escHtml(b.label) + '" title="Delete">🗑️</button>';
+      }
+      html += '</div></div>';
+      html += _renderBranchTree(b.id, depth + 1);
+    });
+    return html;
+  }
+
+  function show() {
+    _buildPanel();
+    // Save current state before showing
+    var current = _currentBranch();
+    current.messages = _captureMessages();
+    _save();
+    _overlay.style.display = 'block';
+    _panel.style.display = 'block';
+    _visible = true;
+    _render();
+    if (typeof PanelRegistry !== 'undefined' && PanelRegistry.closeAllExcept) PanelRegistry.closeAllExcept('conversation-branching');
+  }
+
+  function hide() {
+    if (_overlay) _overlay.style.display = 'none';
+    if (_panel) _panel.style.display = 'none';
+    _visible = false;
+  }
+
+  function toggle() { _visible ? hide() : show(); }
+
+  /* ---- init ---- */
+  function init() {
+    _load();
+    _addForkButtons();
+    _startObserver();
+    _updateIndicator();
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  document.addEventListener('keydown', function (e) {
+    if (e.altKey && e.shiftKey && !e.ctrlKey && e.key === 'B') {
+      e.preventDefault();
+      toggle();
+    }
+  });
+
+  document.addEventListener('DOMContentLoaded', function () {
+    if (typeof KeyboardShortcuts !== 'undefined' && KeyboardShortcuts.register) {
+      KeyboardShortcuts.register('Alt+Shift+B', 'Conversation Branches', toggle);
+    }
+    if (typeof CommandPalette !== 'undefined' && CommandPalette.register) {
+      CommandPalette.register({ name: 'conversation branches', description: 'Fork and explore alternate conversation paths', icon: '🌳', action: toggle });
+    }
+    if (typeof SlashCommands !== 'undefined' && SlashCommands.register) {
+      SlashCommands.register('/branches', 'Open conversation branch navigator', toggle);
+    }
+    if (typeof PanelRegistry !== 'undefined' && PanelRegistry.register) {
+      PanelRegistry.register('conversation-branching', hide);
+    }
+  });
+
+  return { toggle: toggle, show: show, hide: hide, forkAt: forkAt, switchTo: switchTo, deleteBranch: deleteBranch, renameBranch: renameBranch };
+})();
