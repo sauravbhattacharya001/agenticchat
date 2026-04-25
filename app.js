@@ -106,6 +106,7 @@
  *   SmartDeadlineTracker  - autonomous deadline detection from conversations with countdown dashboard, proactive alerts (Alt+D)
  *   SmartConversationPlanner - goal-oriented conversation planner with auto-generated milestones, progress tracking, drift alerts (Alt+Shift+G)
  *   SmartTokenBudgetManager - autonomous token budget intelligence with usage gauge, growth prediction, compression recommendations (Alt+Shift+B)
+ *   SmartConversationDigest - autonomous cross-session digest with topic extraction, action items, unresolved questions, sentiment, export (Alt+Shift+J)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -40428,4 +40429,305 @@ const SmartConversationReplay = (() => {
   });
 
   return { toggle: toggle, show: function(){ if(!panelEl||panelEl.style.display==='none') toggle(); }, hide: hidePanel };
+})();
+
+/* ============================================================
+ *  SmartConversationDigest  –  autonomous cross-session digest
+ *  Shortcut: Alt+Shift+J
+ * ============================================================ */
+var SmartConversationDigest = (function () {
+  'use strict';
+
+  var panelEl = null;
+
+  /* ---- helpers ---- */
+  function allSessions() {
+    var sessions = [];
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var key = localStorage.key(i);
+        if (key && key.startsWith('session_')) {
+          var raw = localStorage.getItem(key);
+          if (raw) {
+            var parsed = JSON.parse(raw);
+            if (parsed && Array.isArray(parsed.messages)) sessions.push(parsed);
+          }
+        }
+      }
+    } catch (e) { /* restricted storage */ }
+    return sessions;
+  }
+
+  function dayKey(ts) {
+    var d = new Date(ts || Date.now());
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+
+  /* simple NLP helpers */
+  var STOP = new Set(['the','a','an','is','are','was','were','be','been','being','have','has','had','do','does','did','will','would','shall','should','may','might','can','could','i','you','he','she','it','we','they','me','him','her','us','them','my','your','his','its','our','their','this','that','these','those','and','but','or','nor','for','yet','so','in','on','at','to','of','by','with','from','as','if','then','than','no','not','very','just','also','about','up','out','what','which','who','when','where','how','all','each','any','some','into','over','after','before','between','under','above','more','most','other','new','such','only','own','same','too','very','much']);
+
+  function tokenize(text) {
+    return (text || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(function (w) { return w.length > 2 && !STOP.has(w); });
+  }
+
+  function topWords(messages, n) {
+    var freq = {};
+    messages.forEach(function (m) {
+      tokenize(m.content).forEach(function (w) { freq[w] = (freq[w] || 0) + 1; });
+    });
+    return Object.entries(freq).sort(function (a, b) { return b[1] - a[1]; }).slice(0, n || 12);
+  }
+
+  function extractQuestions(messages) {
+    var qs = [];
+    messages.forEach(function (m) {
+      if (m.role !== 'user') return;
+      var lines = (m.content || '').split(/[\n.!]+/);
+      lines.forEach(function (l) {
+        l = l.trim();
+        if (l.endsWith('?') && l.length > 10) qs.push(l);
+      });
+    });
+    return qs;
+  }
+
+  function extractActionItems(messages) {
+    var actions = [];
+    var seen = {};
+    var patterns = [/\bshould\s+\w+/i, /\bneed\s+to\s+\w+/i, /\btodo\b/i, /\baction\s*item/i, /\bremember\s+to\b/i, /\bdon'?t\s+forget/i, /\bmake\s+sure/i];
+    messages.forEach(function (m) {
+      var lines = (m.content || '').split('\n');
+      lines.forEach(function (l) {
+        l = l.trim();
+        if (l.length < 10 || l.length > 200) return;
+        for (var i = 0; i < patterns.length; i++) {
+          if (patterns[i].test(l)) {
+            var clean = l.replace(/^[-*\u2022]\s*/, '');
+            if (!seen[clean]) { seen[clean] = true; actions.push(clean); }
+            break;
+          }
+        }
+      });
+    });
+    return actions.slice(0, 20);
+  }
+
+  function unresolvedQuestions(messages) {
+    var qs = [];
+    var seen = {};
+    for (var i = 0; i < messages.length; i++) {
+      var m = messages[i];
+      if (m.role !== 'user') continue;
+      var lines = (m.content || '').split(/[\n.!]+/);
+      for (var li = 0; li < lines.length; li++) {
+        var l = lines[li].trim();
+        if (!l.endsWith('?') || l.length < 15) continue;
+        var keywords = tokenize(l).slice(0, 3);
+        var answered = false;
+        for (var j = i + 1; j < Math.min(i + 3, messages.length); j++) {
+          if (messages[j].role === 'assistant') {
+            var resp = (messages[j].content || '').toLowerCase();
+            var hits = keywords.filter(function (k) { return resp.indexOf(k) !== -1; });
+            if (hits.length >= Math.max(1, keywords.length - 1)) { answered = true; break; }
+          }
+        }
+        if (!answered && !seen[l]) { seen[l] = true; qs.push(l); }
+      }
+    }
+    return qs.slice(0, 10);
+  }
+
+  var POS = ['great','good','excellent','amazing','love','perfect','awesome','helpful','thanks','thank','nice','wonderful','fantastic','brilliant'];
+  var NEG = ['bad','wrong','error','fail','broken','issue','problem','bug','confused','frustrat','annoying','terrible','awful','hate','worst'];
+  function sentimentScore(messages) {
+    var pos = 0, neg = 0;
+    messages.forEach(function (m) {
+      var t = (m.content || '').toLowerCase();
+      POS.forEach(function (w) { if (t.indexOf(w) !== -1) pos++; });
+      NEG.forEach(function (w) { if (t.indexOf(w) !== -1) neg++; });
+    });
+    var total = pos + neg;
+    if (total === 0) return { label: 'Neutral', emoji: '\uD83D\uDE10', score: 0 };
+    var s = (pos - neg) / total;
+    if (s > 0.3) return { label: 'Positive', emoji: '\uD83D\uDE0A', score: s };
+    if (s < -0.3) return { label: 'Negative', emoji: '\uD83D\uDE1F', score: s };
+    return { label: 'Mixed', emoji: '\uD83D\uDE10', score: s };
+  }
+
+  function generateDigest(periodDays) {
+    var sessions = allSessions();
+    var cutoff = Date.now() - periodDays * 86400000;
+    var relevantSessions = sessions.filter(function (s) {
+      var lastMsg = s.messages[s.messages.length - 1];
+      return lastMsg && (lastMsg.timestamp || s.lastModified || 0) > cutoff;
+    });
+    var allMessages = [];
+    relevantSessions.forEach(function (s) {
+      (s.messages || []).forEach(function (m) { allMessages.push(m); });
+    });
+    var userMsgs = allMessages.filter(function (m) { return m.role === 'user'; });
+    var assistantMsgs = allMessages.filter(function (m) { return m.role === 'assistant'; });
+    return {
+      period: periodDays,
+      sessionCount: relevantSessions.length,
+      totalMessages: allMessages.length,
+      userMessages: userMsgs.length,
+      assistantMessages: assistantMsgs.length,
+      topTopics: topWords(allMessages, 15),
+      questions: extractQuestions(userMsgs).slice(0, 15),
+      unresolvedQuestions: unresolvedQuestions(allMessages),
+      actionItems: extractActionItems(allMessages),
+      sentiment: sentimentScore(allMessages),
+      sessionsBreakdown: relevantSessions.map(function (s) {
+        return {
+          name: s.name || s.id || 'Untitled',
+          messageCount: (s.messages || []).length,
+          sentiment: sentimentScore(s.messages || [])
+        };
+      }).sort(function (a, b) { return b.messageCount - a.messageCount; }).slice(0, 10)
+    };
+  }
+
+  function escHtml(s) {
+    var d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  var lastDigest = null;
+
+  function createPanel() {
+    panelEl = document.createElement('div');
+    panelEl.id = 'digest-panel';
+    panelEl.style.cssText = 'position:fixed;top:0;right:0;width:460px;height:100vh;background:var(--bg-primary,#1a1a2e);color:var(--text-primary,#e0e0e0);border-left:2px solid var(--accent,#00d4ff);z-index:10200;display:none;flex-direction:column;font-family:system-ui,sans-serif;box-shadow:-4px 0 20px rgba(0,0,0,.4);';
+    panelEl.innerHTML = '<div style="padding:12px 16px;border-bottom:1px solid rgba(255,255,255,.1);display:flex;align-items:center;justify-content:space-between;"><div style="display:flex;align-items:center;gap:8px;"><span style="font-size:20px;">\uD83D\uDCCB</span><strong style="font-size:15px;">Conversation Digest</strong></div><div style="display:flex;gap:6px;"><button id="digest-1d" style="padding:4px 10px;border:1px solid rgba(255,255,255,.2);background:transparent;color:inherit;border-radius:4px;cursor:pointer;font-size:12px;">Today</button><button id="digest-7d" style="padding:4px 10px;border:1px solid rgba(255,255,255,.2);background:transparent;color:inherit;border-radius:4px;cursor:pointer;font-size:12px;">7 Days</button><button id="digest-30d" style="padding:4px 10px;border:1px solid rgba(255,255,255,.2);background:transparent;color:inherit;border-radius:4px;cursor:pointer;font-size:12px;">30 Days</button><button id="digest-export" style="padding:4px 10px;border:1px solid rgba(255,255,255,.2);background:transparent;color:inherit;border-radius:4px;cursor:pointer;font-size:12px;">\uD83D\uDCE5</button><button id="digest-close" style="padding:4px 10px;border:none;background:transparent;color:inherit;cursor:pointer;font-size:16px;">\u2715</button></div></div><div id="digest-body" style="flex:1;overflow-y:auto;padding:16px;"></div>';
+    document.body.appendChild(panelEl);
+    document.getElementById('digest-close').onclick = hidePanel;
+    document.getElementById('digest-1d').onclick = function () { render(1); };
+    document.getElementById('digest-7d').onclick = function () { render(7); };
+    document.getElementById('digest-30d').onclick = function () { render(30); };
+    document.getElementById('digest-export').onclick = exportDigest;
+  }
+
+  function render(days) {
+    var d = generateDigest(days);
+    lastDigest = d;
+    var body = document.getElementById('digest-body');
+    if (!body) return;
+    ['digest-1d','digest-7d','digest-30d'].forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el) el.style.background = 'transparent';
+    });
+    var activeId = days === 1 ? 'digest-1d' : days === 7 ? 'digest-7d' : 'digest-30d';
+    var activeEl = document.getElementById(activeId);
+    if (activeEl) activeEl.style.background = 'rgba(0,212,255,.2)';
+    var html = '';
+    html += '<div style="background:rgba(255,255,255,.05);border-radius:8px;padding:12px;margin-bottom:12px;">';
+    html += '<div style="font-size:13px;opacity:.7;margin-bottom:6px;">Overview — Last ' + days + ' day' + (days > 1 ? 's' : '') + '</div>';
+    html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">';
+    html += '<div style="text-align:center;"><div style="font-size:22px;font-weight:bold;">' + d.sessionCount + '</div><div style="font-size:11px;opacity:.6;">Sessions</div></div>';
+    html += '<div style="text-align:center;"><div style="font-size:22px;font-weight:bold;">' + d.totalMessages + '</div><div style="font-size:11px;opacity:.6;">Messages</div></div>';
+    html += '<div style="text-align:center;"><div style="font-size:22px;font-weight:bold;">' + d.sentiment.emoji + '</div><div style="font-size:11px;opacity:.6;">' + d.sentiment.label + '</div></div>';
+    html += '</div></div>';
+    if (d.topTopics.length) {
+      html += '<div style="background:rgba(255,255,255,.05);border-radius:8px;padding:12px;margin-bottom:12px;">';
+      html += '<div style="font-size:13px;opacity:.7;margin-bottom:8px;">Top Topics</div>';
+      html += '<div style="display:flex;flex-wrap:wrap;gap:6px;">';
+      var maxFreq = d.topTopics[0][1];
+      d.topTopics.forEach(function (t) {
+        var size = Math.max(11, Math.min(20, 11 + (t[1] / maxFreq) * 9));
+        var opacity = 0.5 + (t[1] / maxFreq) * 0.5;
+        html += '<span style="font-size:' + size + 'px;opacity:' + opacity.toFixed(2) + ';background:rgba(0,212,255,.1);padding:2px 8px;border-radius:4px;">' + t[0] + ' <small style="opacity:.5;">' + t[1] + '</small></span>';
+      });
+      html += '</div></div>';
+    }
+    if (d.actionItems.length) {
+      html += '<div style="background:rgba(255,180,0,.08);border-radius:8px;padding:12px;margin-bottom:12px;">';
+      html += '<div style="font-size:13px;opacity:.7;margin-bottom:8px;">Action Items Detected</div>';
+      d.actionItems.forEach(function (a) {
+        html += '<div style="font-size:12px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.05);">\u2022 ' + escHtml(a.substring(0, 120)) + '</div>';
+      });
+      html += '</div>';
+    }
+    if (d.unresolvedQuestions.length) {
+      html += '<div style="background:rgba(255,100,100,.08);border-radius:8px;padding:12px;margin-bottom:12px;">';
+      html += '<div style="font-size:13px;opacity:.7;margin-bottom:8px;">Potentially Unresolved Questions</div>';
+      d.unresolvedQuestions.forEach(function (q) {
+        html += '<div style="font-size:12px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.05);">' + escHtml(q.substring(0, 150)) + '</div>';
+      });
+      html += '</div>';
+    }
+    if (d.sessionsBreakdown.length) {
+      html += '<div style="background:rgba(255,255,255,.05);border-radius:8px;padding:12px;margin-bottom:12px;">';
+      html += '<div style="font-size:13px;opacity:.7;margin-bottom:8px;">Sessions Breakdown</div>';
+      d.sessionsBreakdown.forEach(function (s) {
+        html += '<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.05);">';
+        html += '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(s.name) + '</span>';
+        html += '<span style="margin:0 8px;opacity:.6;">' + s.messageCount + ' msgs</span>';
+        html += '<span>' + s.sentiment.emoji + '</span>';
+        html += '</div>';
+      });
+      html += '</div>';
+    }
+    if (d.questions.length) {
+      html += '<div style="background:rgba(255,255,255,.05);border-radius:8px;padding:12px;margin-bottom:12px;">';
+      html += '<div style="font-size:13px;opacity:.7;margin-bottom:8px;">Key Questions Asked</div>';
+      d.questions.slice(0, 8).forEach(function (q) {
+        html += '<div style="font-size:12px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.05);">' + escHtml(q.substring(0, 150)) + '</div>';
+      });
+      html += '</div>';
+    }
+    body.innerHTML = html;
+  }
+
+  function exportDigest() {
+    if (!lastDigest) return;
+    var text = '# Conversation Digest\n\n';
+    text += '**Period:** Last ' + lastDigest.period + ' day(s)\n';
+    text += '**Sessions:** ' + lastDigest.sessionCount + ' | **Messages:** ' + lastDigest.totalMessages + ' | **Mood:** ' + lastDigest.sentiment.emoji + ' ' + lastDigest.sentiment.label + '\n\n';
+    if (lastDigest.topTopics.length) {
+      text += '## Top Topics\n';
+      lastDigest.topTopics.forEach(function (t) { text += '- ' + t[0] + ' (' + t[1] + ')\n'; });
+      text += '\n';
+    }
+    if (lastDigest.actionItems.length) {
+      text += '## Action Items\n';
+      lastDigest.actionItems.forEach(function (a) { text += '- [ ] ' + a + '\n'; });
+      text += '\n';
+    }
+    if (lastDigest.unresolvedQuestions.length) {
+      text += '## Unresolved Questions\n';
+      lastDigest.unresolvedQuestions.forEach(function (q) { text += '- ' + q + '\n'; });
+      text += '\n';
+    }
+    var blob = new Blob([text], { type: 'text/markdown' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = 'conversation-digest-' + dayKey() + '.md';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function toggle() {
+    if (!panelEl) createPanel();
+    if (panelEl.style.display === 'none') {
+      panelEl.style.display = 'flex';
+      render(7);
+    } else {
+      hidePanel();
+    }
+  }
+
+  function hidePanel() {
+    if (panelEl) panelEl.style.display = 'none';
+  }
+
+  document.addEventListener('keydown', function (e) {
+    if (e.altKey && e.shiftKey && e.key === 'J') {
+      e.preventDefault();
+      toggle();
+    }
+  });
+
+  return { toggle: toggle, show: function () { if (!panelEl || panelEl.style.display === 'none') toggle(); }, hide: hidePanel };
 })();
