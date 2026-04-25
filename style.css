@@ -5175,3 +5175,20 @@ body.light-theme .enhance-panel .enhance-modes button.active { background: #3b82
 .branch-suggest-action:hover { background:#ffa726; }
 .branch-suggest-dismiss { background:none; border:none; color:var(--text-secondary,#999); cursor:pointer; font-size:.9rem; padding:0 4px; }
 .branch-suggest-dismiss:hover { color:var(--text-primary,#eee); }
+
+/* Smart Input Predictor */
+.input-predictor-wrapper { position:relative; display:inline-block; flex:1; }
+.input-predictor-ghost { position:absolute; top:0; left:0; right:0; bottom:0; pointer-events:none; color:var(--text-secondary,#888); opacity:0.45; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; padding:8px 12px; font:inherit; line-height:inherit; border:1px solid transparent; box-sizing:border-box; }
+.input-predictor-hint { position:absolute; right:8px; top:50%; transform:translateY(-50%); pointer-events:none; font-size:0.7rem; color:var(--text-secondary,#888); opacity:0.6; }
+.input-predictor-panel { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:var(--bg-secondary,#1e1e1e); border:1px solid var(--border-color,#444); border-radius:12px; padding:20px; z-index:10000; width:400px; max-height:80vh; overflow-y:auto; box-shadow:0 8px 32px rgba(0,0,0,0.5); }
+.input-predictor-panel h3 { margin:0 0 12px; font-size:1.1rem; }
+.input-predictor-panel .predictor-stat { display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px solid var(--border-color,#333); font-size:0.85rem; }
+.input-predictor-panel .predictor-stat:last-child { border-bottom:none; }
+.input-predictor-panel .predictor-phrases { margin-top:12px; }
+.input-predictor-panel .predictor-phrase-item { display:flex; justify-content:space-between; padding:3px 0; font-size:0.82rem; color:var(--text-secondary,#aaa); }
+.input-predictor-panel .predictor-phrase-count { color:var(--accent,#2196F3); font-weight:600; }
+.predictor-toggle { display:flex; align-items:center; gap:8px; margin-bottom:12px; }
+.predictor-toggle label { cursor:pointer; font-size:0.9rem; }
+.predictor-actions { display:flex; gap:8px; margin-top:12px; }
+.predictor-actions button { flex:1; padding:6px; border-radius:6px; border:1px solid var(--border-color,#444); background:var(--bg-primary,#121212); color:var(--text-primary,#eee); cursor:pointer; font-size:0.8rem; }
+.predictor-actions button:hover { background:var(--accent,#2196F3); color:#fff; }

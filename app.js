@@ -39862,3 +39862,312 @@ const SmartTokenBudgetManager = (() => {
 
   return { toggle: toggle, show: show, hide: hide, _checkTimer: null };
 })();
+
+/* ===================== Smart Input Predictor ===================== */
+const SmartInputPredictor = (() => {
+  const STORAGE_KEY = 'ac_input_predictor';
+  const MAX_LEARNED = 50;
+  const DEBOUNCE_MS = 300;
+  const MIN_CHARS = 3;
+
+  let enabled = true;
+  let learnedPhrases = {};
+  let stats = { shown: 0, accepted: 0 };
+  let currentSuggestion = '';
+  let debounceTimer = null;
+  let ghostEl = null;
+  let hintEl = null;
+  let wrapperEl = null;
+  let panelEl = null;
+  let inputEl = null;
+
+  const COMMON_FOLLOWUPS = [
+    'Can you explain that in more detail?',
+    'Can you give me an example?',
+    'What are the alternatives?',
+    'How does this compare to',
+    'What are the pros and cons?',
+    'Can you simplify that?',
+    'Show me the code for',
+    'What would happen if',
+    'Why is that important?',
+    'Can you break this down step by step?',
+    'What are the best practices for',
+    'How do I implement',
+    'What are common mistakes with',
+    'Can you rewrite that as',
+    'Summarize the key points',
+    'What should I do next?',
+    'Is there a simpler way to',
+    'Can you format that as a table?',
+    'Explain like I am five',
+    'What are the trade-offs?'
+  ];
+
+  function load() {
+    try {
+      var d = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+      enabled = d.enabled !== false;
+      learnedPhrases = d.learnedPhrases || {};
+      stats = d.stats || { shown: 0, accepted: 0 };
+    } catch(e) { /* ignore */ }
+  }
+
+  function save() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        enabled: enabled,
+        learnedPhrases: learnedPhrases,
+        stats: stats
+      }));
+    } catch(e) { /* ignore */ }
+  }
+
+  function getConversationPhrases() {
+    var phrases = [];
+    var msgs = document.querySelectorAll('#chat-output .message');
+    msgs.forEach(function(m) {
+      var text = (m.textContent || '').trim();
+      if (text.length > 10 && text.length < 200) {
+        // Extract sentences
+        var sentences = text.split(/[.!?]+/).filter(function(s) { return s.trim().length > 10; });
+        sentences.forEach(function(s) { phrases.push(s.trim()); });
+      }
+    });
+    return phrases;
+  }
+
+  function findBestSuggestion(input) {
+    if (!input || input.length < MIN_CHARS) return '';
+    var lower = input.toLowerCase();
+
+    // 1. Check learned phrases (highest priority)
+    var learnedArr = Object.keys(learnedPhrases).sort(function(a, b) {
+      return (learnedPhrases[b] || 0) - (learnedPhrases[a] || 0);
+    });
+    for (var i = 0; i < learnedArr.length; i++) {
+      if (learnedArr[i].toLowerCase().indexOf(lower) === 0 && learnedArr[i].length > input.length) {
+        return learnedArr[i];
+      }
+    }
+
+    // 2. Check common follow-ups
+    for (var j = 0; j < COMMON_FOLLOWUPS.length; j++) {
+      if (COMMON_FOLLOWUPS[j].toLowerCase().indexOf(lower) === 0) {
+        return COMMON_FOLLOWUPS[j];
+      }
+    }
+
+    // 3. Check conversation context
+    var convPhrases = getConversationPhrases();
+    for (var k = convPhrases.length - 1; k >= 0; k--) {
+      if (convPhrases[k].toLowerCase().indexOf(lower) === 0 && convPhrases[k].length > input.length) {
+        return convPhrases[k];
+      }
+    }
+
+    return '';
+  }
+
+  function showGhost(suggestion, inputValue) {
+    if (!ghostEl || !suggestion) {
+      hideGhost();
+      return;
+    }
+    // Show the full suggestion but only the part after what user typed is visually distinct
+    ghostEl.textContent = suggestion;
+    ghostEl.style.display = 'block';
+    if (hintEl) hintEl.style.display = 'block';
+    currentSuggestion = suggestion;
+    stats.shown++;
+    save();
+  }
+
+  function hideGhost() {
+    if (ghostEl) ghostEl.style.display = 'none';
+    if (hintEl) hintEl.style.display = 'none';
+    currentSuggestion = '';
+  }
+
+  function acceptSuggestion() {
+    if (!currentSuggestion || !inputEl) return false;
+    inputEl.value = currentSuggestion;
+    // Learn this phrase
+    learnedPhrases[currentSuggestion] = (learnedPhrases[currentSuggestion] || 0) + 1;
+    // Trim to MAX_LEARNED
+    var keys = Object.keys(learnedPhrases);
+    if (keys.length > MAX_LEARNED) {
+      keys.sort(function(a, b) { return learnedPhrases[a] - learnedPhrases[b]; });
+      for (var i = 0; i < keys.length - MAX_LEARNED; i++) {
+        delete learnedPhrases[keys[i]];
+      }
+    }
+    stats.accepted++;
+    save();
+    hideGhost();
+    // Move cursor to end
+    inputEl.setSelectionRange(inputEl.value.length, inputEl.value.length);
+    return true;
+  }
+
+  function onInput() {
+    clearTimeout(debounceTimer);
+    if (!enabled) { hideGhost(); return; }
+    var val = inputEl.value;
+    if (val.length < MIN_CHARS) { hideGhost(); return; }
+    debounceTimer = setTimeout(function() {
+      var suggestion = findBestSuggestion(val);
+      if (suggestion) {
+        showGhost(suggestion, val);
+      } else {
+        hideGhost();
+      }
+    }, DEBOUNCE_MS);
+  }
+
+  function onKeydown(e) {
+    if (!enabled || !currentSuggestion) return;
+    if (e.key === 'Tab' && currentSuggestion) {
+      e.preventDefault();
+      acceptSuggestion();
+    } else if (e.key === 'Escape') {
+      hideGhost();
+    }
+  }
+
+  function toggle() {
+    if (panelEl && panelEl.style.display !== 'none') {
+      hidePanel();
+      return;
+    }
+    showPanel();
+  }
+
+  function showPanel() {
+    if (!panelEl) createPanel();
+    updatePanel();
+    panelEl.style.display = 'block';
+    if (typeof PanelRegistry !== 'undefined' && PanelRegistry.closeAll) {
+      PanelRegistry.closeAll('inputPredictor');
+    }
+  }
+
+  function hidePanel() {
+    if (panelEl) panelEl.style.display = 'none';
+  }
+
+  function createPanel() {
+    panelEl = document.createElement('div');
+    panelEl.className = 'input-predictor-panel';
+    panelEl.innerHTML = '<h3>?? Smart Input Predictor</h3><div id= predictor-content></div>';
+    document.body.appendChild(panelEl);
+    // Close on outside click
+    document.addEventListener('click', function(e) {
+      if (panelEl && panelEl.style.display !== 'none' && !panelEl.contains(e.target)) {
+        var btn = document.getElementById('predictor-btn');
+        if (!btn || !btn.contains(e.target)) hidePanel();
+      }
+    });
+  }
+
+  function updatePanel() {
+    if (!panelEl) return;
+    var content = panelEl.querySelector('#predictor-content');
+    var rate = stats.shown > 0 ? Math.round((stats.accepted / stats.shown) * 100) : 0;
+    var topPhrases = Object.keys(learnedPhrases).sort(function(a, b) {
+      return learnedPhrases[b] - learnedPhrases[a];
+    }).slice(0, 10);
+
+    var html = '<div class=predictor-toggle><label><input type=checkbox id=predictor-enabled ' +
+      (enabled ? 'checked' : '') + '> Enable autocomplete suggestions</label></div>';
+    html += '<div class=predictor-stat><span>Suggestions shown</span><span>' + stats.shown + '</span></div>';
+    html += '<div class=predictor-stat><span>Suggestions accepted</span><span>' + stats.accepted + '</span></div>';
+    html += '<div class=predictor-stat><span>Acceptance rate</span><span>' + rate + '%</span></div>';
+    html += '<div class=predictor-stat><span>Learned phrases</span><span>' + Object.keys(learnedPhrases).length + '</span></div>';
+
+    if (topPhrases.length > 0) {
+      html += '<div class=predictor-phrases><strong>Top learned phrases:</strong>';
+      topPhrases.forEach(function(p) {
+        html += '<div class=predictor-phrase-item><span>' + p.substring(0, 40) + (p.length > 40 ? '...' : '') +
+          '</span><span class=predictor-phrase-count>' + learnedPhrases[p] + 'x</span></div>';
+      });
+      html += '</div>';
+    }
+
+    html += '<div class=predictor-actions><button id=predictor-clear-btn>Clear Learned</button><button id=predictor-close-btn>Close</button></div>';
+    content.innerHTML = html;
+
+    var chk = document.getElementById('predictor-enabled');
+    if (chk) {
+      chk.addEventListener('change', function() {
+        enabled = this.checked;
+        if (!enabled) hideGhost();
+        save();
+      });
+    }
+    var clearBtn = document.getElementById('predictor-clear-btn');
+    if (clearBtn) {
+      clearBtn.addEventListener('click', function() {
+        learnedPhrases = {};
+        stats = { shown: 0, accepted: 0 };
+        save();
+        updatePanel();
+      });
+    }
+    var closeBtn = document.getElementById('predictor-close-btn');
+    if (closeBtn) {
+      closeBtn.addEventListener('click', hidePanel);
+    }
+  }
+
+  function init() {
+    load();
+    inputEl = document.getElementById('chat-input');
+    if (!inputEl) return;
+
+    // Wrap input in a relative container for ghost overlay
+    wrapperEl = document.createElement('div');
+    wrapperEl.className = 'input-predictor-wrapper';
+    inputEl.parentNode.insertBefore(wrapperEl, inputEl);
+    wrapperEl.appendChild(inputEl);
+
+    // Ghost text overlay
+    ghostEl = document.createElement('div');
+    ghostEl.className = 'input-predictor-ghost';
+    ghostEl.style.display = 'none';
+    // Match input computed styles
+    var cs = window.getComputedStyle(inputEl);
+    ghostEl.style.font = cs.font;
+    ghostEl.style.padding = cs.padding;
+    ghostEl.style.lineHeight = cs.lineHeight;
+    wrapperEl.appendChild(ghostEl);
+
+    // Tab hint
+    hintEl = document.createElement('div');
+    hintEl.className = 'input-predictor-hint';
+    hintEl.textContent = 'Tab \u2192';
+    hintEl.style.display = 'none';
+    wrapperEl.appendChild(hintEl);
+
+    inputEl.addEventListener('input', onInput);
+    inputEl.addEventListener('keydown', onKeydown);
+    inputEl.addEventListener('blur', function() { setTimeout(hideGhost, 200); });
+
+    // Keyboard shortcut Alt+Shift+P
+    document.addEventListener('keydown', function(e) {
+      if (e.altKey && e.shiftKey && e.key === 'P') {
+        e.preventDefault();
+        toggle();
+      }
+    });
+
+    // Register with PanelRegistry
+    if (typeof PanelRegistry !== 'undefined' && PanelRegistry.register) {
+      PanelRegistry.register('inputPredictor', { close: hidePanel });
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  return { toggle: toggle, show: showPanel, hide: hidePanel, isEnabled: function() { return enabled; } };
+})();
