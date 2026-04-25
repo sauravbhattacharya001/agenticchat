@@ -40444,12 +40444,15 @@ var SmartConversationDigest = (function () {
   function allSessions() {
     var sessions = [];
     try {
-      for (var i = 0; i < localStorage.length; i++) {
-        var key = localStorage.key(i);
+      // Use SafeStorage + sanitizeStorageObject to respect incognito mode
+      // and guard against prototype-pollution from tampered localStorage entries.
+      var count = (typeof SafeStorage !== 'undefined') ? SafeStorage.length() : 0;
+      for (var i = 0; i < count; i++) {
+        var key = (typeof SafeStorage !== 'undefined') ? SafeStorage.key(i) : null;
         if (key && key.startsWith('session_')) {
-          var raw = localStorage.getItem(key);
+          var raw = SafeStorage.get(key);
           if (raw) {
-            var parsed = JSON.parse(raw);
+            var parsed = sanitizeStorageObject(JSON.parse(raw));
             if (parsed && Array.isArray(parsed.messages)) sessions.push(parsed);
           }
         }
