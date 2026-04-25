@@ -40171,3 +40171,261 @@ const SmartInputPredictor = (() => {
 
   return { toggle: toggle, show: showPanel, hide: hidePanel, isEnabled: function() { return enabled; } };
 })();
+
+/* ============================================================
+ *  🎬 Smart Conversation Replay — presentation playback mode
+ *  Replays the current conversation message-by-message with
+ *  typing animation. Great for demos, presentations, reviews.
+ *  Toggle: Alt+Shift+Y | Button: 🎬
+ * ============================================================ */
+const SmartConversationReplay = (() => {
+  let panelEl = null;
+  let isPlaying = false;
+  let isPaused = false;
+  let currentIdx = 0;
+  let typingTimer = null;
+  let replayMessages = [];
+  let speed = 1; // 1x, 2x, 4x
+  let displayEl = null;
+
+  const SPEEDS = [0.5, 1, 2, 4];
+  let speedIdx = 1;
+
+  function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function toggle() {
+    if (!panelEl) createPanel();
+    if (panelEl.style.display === 'none') {
+      if (typeof PanelRegistry !== 'undefined' && PanelRegistry.closeAll) {
+        PanelRegistry.closeAll('conversationReplay');
+      }
+      panelEl.style.display = 'block';
+      loadMessages();
+      renderPanel();
+    } else {
+      stop();
+      panelEl.style.display = 'none';
+    }
+  }
+
+  function hidePanel() {
+    if (panelEl) { stop(); panelEl.style.display = 'none'; }
+  }
+
+  function createPanel() {
+    panelEl = document.createElement('div');
+    panelEl.className = 'replay-panel';
+    panelEl.style.cssText = 'display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);' +
+      'width:700px;max-width:90vw;max-height:85vh;background:var(--bg-secondary,#1e1e2e);' +
+      'border:1px solid var(--border,#444);border-radius:12px;z-index:10001;padding:0;' +
+      'box-shadow:0 8px 32px rgba(0,0,0,.4);display:flex;flex-direction:column;overflow:hidden;';
+    document.body.appendChild(panelEl);
+    document.addEventListener('keydown', function(e) {
+      if (panelEl.style.display === 'none') return;
+      if (e.key === 'Escape') { e.preventDefault(); hidePanel(); }
+    });
+    if (typeof PanelRegistry !== 'undefined' && PanelRegistry.register) {
+      PanelRegistry.register('conversationReplay', { close: hidePanel });
+    }
+  }
+
+  function loadMessages() {
+    replayMessages = [];
+    if (typeof ConversationManager !== 'undefined' && ConversationManager.getMessages) {
+      replayMessages = ConversationManager.getMessages().filter(function(m) {
+        return m.role === 'user' || m.role === 'assistant';
+      });
+    }
+  }
+
+  function renderPanel() {
+    var total = replayMessages.length;
+    panelEl.innerHTML =
+      '<div style="padding:12px 16px;border-bottom:1px solid var(--border,#444);display:flex;align-items:center;justify-content:space-between">' +
+        '<div style="font-weight:600;font-size:1.05em">🎬 Conversation Replay</div>' +
+        '<div style="display:flex;gap:6px;align-items:center">' +
+          '<span style="font-size:.85em;opacity:.7">' + total + ' messages</span>' +
+          '<button id="replay-close" style="background:none;border:none;color:var(--text,#eee);font-size:1.2em;cursor:pointer" title="Close">✕</button>' +
+        '</div>' +
+      '</div>' +
+      '<div id="replay-display" style="flex:1;overflow-y:auto;padding:16px;min-height:300px;font-family:inherit"></div>' +
+      '<div style="padding:10px 16px;border-top:1px solid var(--border,#444);display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
+        '<button id="replay-play" class="btn-secondary" title="Play / Resume">▶ Play</button>' +
+        '<button id="replay-pause" class="btn-secondary" title="Pause" disabled>⏸ Pause</button>' +
+        '<button id="replay-stop" class="btn-secondary" title="Stop & Reset">⏹ Stop</button>' +
+        '<button id="replay-step" class="btn-secondary" title="Step forward one message">⏭ Step</button>' +
+        '<button id="replay-speed" class="btn-secondary" title="Cycle speed">' + SPEEDS[speedIdx] + 'x</button>' +
+        '<div style="flex:1"></div>' +
+        '<div id="replay-progress" style="font-size:.85em;opacity:.7">0 / ' + total + '</div>' +
+        '<div style="width:100%;margin-top:4px;background:var(--border,#444);border-radius:3px;height:4px">' +
+          '<div id="replay-bar" style="height:100%;border-radius:3px;background:var(--accent,#2196F3);width:0;transition:width .3s"></div>' +
+        '</div>' +
+      '</div>';
+
+    displayEl = document.getElementById('replay-display');
+    if (total === 0) {
+      displayEl.innerHTML = '<div style="text-align:center;padding:40px;opacity:.5">No messages to replay. Start a conversation first.</div>';
+    }
+
+    document.getElementById('replay-close').onclick = hidePanel;
+    document.getElementById('replay-play').onclick = play;
+    document.getElementById('replay-pause').onclick = pause;
+    document.getElementById('replay-stop').onclick = stop;
+    document.getElementById('replay-step').onclick = stepForward;
+    document.getElementById('replay-speed').onclick = cycleSpeed;
+  }
+
+  function updateProgress() {
+    var total = replayMessages.length;
+    var prog = document.getElementById('replay-progress');
+    var bar = document.getElementById('replay-bar');
+    if (prog) prog.textContent = currentIdx + ' / ' + total;
+    if (bar) bar.style.width = (total > 0 ? Math.round((currentIdx / total) * 100) : 0) + '%';
+  }
+
+  function appendMessage(msg, animate) {
+    if (!displayEl) return;
+    var isUser = msg.role === 'user';
+    var bubble = document.createElement('div');
+    bubble.style.cssText = 'margin-bottom:12px;padding:10px 14px;border-radius:10px;max-width:85%;word-wrap:break-word;' +
+      'animation:replayFadeIn .3s ease;' +
+      (isUser
+        ? 'background:var(--accent,#2196F3);color:#fff;margin-left:auto;text-align:right;'
+        : 'background:var(--bg-tertiary,#2a2a3e);color:var(--text,#eee);margin-right:auto;');
+
+    var label = document.createElement('div');
+    label.style.cssText = 'font-size:.75em;opacity:.6;margin-bottom:4px;';
+    label.textContent = isUser ? '👤 You' : '🤖 Assistant';
+    bubble.appendChild(label);
+
+    var content = document.createElement('div');
+    content.style.cssText = 'white-space:pre-wrap;line-height:1.5;font-size:.95em;';
+    bubble.appendChild(content);
+    displayEl.appendChild(bubble);
+    displayEl.scrollTop = displayEl.scrollHeight;
+
+    if (animate && msg.content && msg.content.length > 0) {
+      return typeText(content, msg.content);
+    } else {
+      content.textContent = msg.content || '(empty)';
+      return Promise.resolve();
+    }
+  }
+
+  function typeText(el, text) {
+    return new Promise(function(resolve) {
+      var i = 0;
+      var spd = SPEEDS[speedIdx];
+      var delay = Math.max(5, Math.round(20 / spd));
+      // For long messages, show chunks
+      var chunkSize = Math.max(1, Math.round(spd * 3));
+
+      function tick() {
+        if (!isPlaying && !isPaused) { el.textContent = text; resolve(); return; }
+        if (isPaused) { typingTimer = setTimeout(tick, 100); return; }
+        var end = Math.min(i + chunkSize, text.length);
+        el.textContent = text.substring(0, end);
+        if (displayEl) displayEl.scrollTop = displayEl.scrollHeight;
+        i = end;
+        if (i >= text.length) { resolve(); return; }
+        typingTimer = setTimeout(tick, delay);
+      }
+      tick();
+    });
+  }
+
+  function play() {
+    if (replayMessages.length === 0) return;
+    if (isPaused) { isPaused = false; updateButtons(); return; }
+    isPlaying = true;
+    isPaused = false;
+    if (currentIdx === 0 && displayEl) displayEl.innerHTML = '';
+    updateButtons();
+    playNext();
+  }
+
+  function playNext() {
+    if (!isPlaying || currentIdx >= replayMessages.length) {
+      if (currentIdx >= replayMessages.length) {
+        isPlaying = false;
+        updateButtons();
+        // Show completion message
+        if (displayEl) {
+          var done = document.createElement('div');
+          done.style.cssText = 'text-align:center;padding:20px;opacity:.6;font-style:italic;';
+          done.textContent = '🎬 Replay complete';
+          displayEl.appendChild(done);
+          displayEl.scrollTop = displayEl.scrollHeight;
+        }
+      }
+      return;
+    }
+    var msg = replayMessages[currentIdx];
+    currentIdx++;
+    updateProgress();
+    var isUser = msg.role === 'user';
+    // User messages type fast, assistant messages animate
+    appendMessage(msg, !isUser).then(function() {
+      if (!isPlaying) return;
+      // Brief pause between messages
+      var pauseMs = Math.max(200, Math.round(600 / SPEEDS[speedIdx]));
+      typingTimer = setTimeout(playNext, pauseMs);
+    });
+  }
+
+  function pause() {
+    isPaused = true;
+    updateButtons();
+  }
+
+  function stop() {
+    isPlaying = false;
+    isPaused = false;
+    currentIdx = 0;
+    if (typingTimer) { clearTimeout(typingTimer); typingTimer = null; }
+    if (displayEl) displayEl.innerHTML = '';
+    updateProgress();
+    updateButtons();
+  }
+
+  function stepForward() {
+    if (currentIdx >= replayMessages.length) return;
+    var msg = replayMessages[currentIdx];
+    currentIdx++;
+    updateProgress();
+    appendMessage(msg, false);
+  }
+
+  function cycleSpeed() {
+    speedIdx = (speedIdx + 1) % SPEEDS.length;
+    var btn = document.getElementById('replay-speed');
+    if (btn) btn.textContent = SPEEDS[speedIdx] + 'x';
+  }
+
+  function updateButtons() {
+    var playBtn = document.getElementById('replay-play');
+    var pauseBtn = document.getElementById('replay-pause');
+    if (playBtn) {
+      playBtn.textContent = isPaused ? '▶ Resume' : (isPlaying ? '▶ Playing...' : '▶ Play');
+      playBtn.disabled = isPlaying && !isPaused;
+    }
+    if (pauseBtn) pauseBtn.disabled = !isPlaying || isPaused;
+  }
+
+  // Add CSS animation
+  var style = document.createElement('style');
+  style.textContent = '@keyframes replayFadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}';
+  document.head.appendChild(style);
+
+  // Keyboard shortcut Alt+Shift+Y
+  document.addEventListener('keydown', function(e) {
+    if (e.altKey && e.shiftKey && e.key === 'Y') {
+      e.preventDefault();
+      toggle();
+    }
+  });
+
+  return { toggle: toggle, show: function(){ if(!panelEl||panelEl.style.display==='none') toggle(); }, hide: hidePanel };
+})();
