@@ -105,6 +105,7 @@
  *   SmartContradictionDetector - autonomous AI contradiction detection with confidence scoring, clarification prompts (Alt+Shift+X)
  *   SmartDeadlineTracker  - autonomous deadline detection from conversations with countdown dashboard, proactive alerts (Alt+D)
  *   SmartConversationPlanner - goal-oriented conversation planner with auto-generated milestones, progress tracking, drift alerts (Alt+Shift+G)
+ *   SmartTokenBudgetManager - autonomous token budget intelligence with usage gauge, growth prediction, compression recommendations (Alt+Shift+B)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -39440,4 +39441,424 @@ const SmartConversationPlanner = (() => {
   document.addEventListener('DOMContentLoaded', init);
 
   return { toggle: toggle, show: show, hide: hide, onMessage: onMessage };
+})();
+
+/* ============================================================
+ * SmartTokenBudgetManager — Autonomous Token Budget Intelligence
+ *
+ * Monitors token usage in real-time, predicts context window
+ * exhaustion, and proactively recommends compression strategies.
+ * Features:
+ *   - Live token budget gauge with colour-coded zones
+ *   - Per-message token breakdown with largest-first ranking
+ *   - Growth rate tracking with exhaustion ETA prediction
+ *   - Autonomous compression recommendations (summarise old
+ *     messages, drop code blocks, trim verbose responses)
+ *   - Proactive alerts when budget enters warning/critical zones
+ *   - History of budget snapshots for trend analysis
+ *
+ * Keyboard shortcut: Alt+Shift+B
+ * ============================================================ */
+const SmartTokenBudgetManager = (() => {
+  'use strict';
+
+  let panel = null;
+  let visible = false;
+
+  /* ---------- Token Analysis Engine ---------- */
+
+  function estimateTokens(text) {
+    return Math.ceil((text || '').length / (ChatConfig.CHARS_PER_TOKEN || 4));
+  }
+
+  function analyseConversation() {
+    var history = ConversationManager.getHistory();
+    var totalTokens = ConversationManager.estimateTokens();
+    var maxTokens = ChatConfig.MAX_TOTAL_TOKENS || 100000;
+    var usagePct = Math.min(100, (totalTokens / maxTokens) * 100);
+
+    // Per-message breakdown
+    var breakdown = [];
+    for (var i = 0; i < history.length; i++) {
+      var msg = history[i];
+      var tokens = estimateTokens(msg.content);
+      var codeBlocks = (msg.content.match(/```[\s\S]*?```/g) || []).length;
+      var codeTokens = 0;
+      (msg.content.match(/```[\s\S]*?```/g) || []).forEach(function(b) {
+        codeTokens += estimateTokens(b);
+      });
+      breakdown.push({
+        index: i,
+        role: msg.role,
+        tokens: tokens,
+        codeBlocks: codeBlocks,
+        codeTokens: codeTokens,
+        preview: msg.content.substring(0, 80).replace(/\n/g, ' '),
+        timestamp: msg.timestamp || null
+      });
+    }
+
+    // Sort by tokens descending for ranking
+    var ranked = breakdown.slice().sort(function(a, b) { return b.tokens - a.tokens; });
+
+    // Growth rate (tokens per message)
+    var userMsgCount = breakdown.filter(function(b) { return b.role !== 'system'; }).length;
+    var avgTokensPerExchange = userMsgCount > 0 ? (totalTokens - (breakdown[0] ? breakdown[0].tokens : 0)) / userMsgCount : 0;
+    var remainingTokens = maxTokens - totalTokens;
+    var exchangesUntilFull = avgTokensPerExchange > 0 ? Math.floor(remainingTokens / avgTokensPerExchange) : Infinity;
+
+    // Compression opportunities
+    var recommendations = [];
+    var totalCodeTokens = breakdown.reduce(function(s, b) { return s + b.codeTokens; }, 0);
+    var codePct = totalTokens > 0 ? (totalCodeTokens / totalTokens) * 100 : 0;
+
+    if (usagePct > 70) {
+      recommendations.push({
+        severity: usagePct > 90 ? 'critical' : 'warning',
+        type: 'high-usage',
+        message: 'Context is ' + Math.round(usagePct) + '% full. Consider starting a new session or summarising.',
+        savings: 0
+      });
+    }
+
+    if (codePct > 40) {
+      recommendations.push({
+        severity: 'suggestion',
+        type: 'code-heavy',
+        message: Math.round(codePct) + '% of tokens are code blocks. Consider extracting large code to a file.',
+        savings: Math.round(totalCodeTokens * 0.6)
+      });
+    }
+
+    // Find verbose assistant messages (top 3 over 500 tokens)
+    var verboseAssistant = ranked.filter(function(b) { return b.role === 'assistant' && b.tokens > 500; }).slice(0, 3);
+    if (verboseAssistant.length > 0) {
+      var saveable = verboseAssistant.reduce(function(s, b) { return s + Math.round(b.tokens * 0.5); }, 0);
+      recommendations.push({
+        severity: 'suggestion',
+        type: 'verbose-responses',
+        message: verboseAssistant.length + ' verbose response(s) could be summarised to save ~' + saveable + ' tokens.',
+        savings: saveable
+      });
+    }
+
+    // Old messages (first half of conversation)
+    var halfIdx = Math.floor(breakdown.length / 2);
+    if (halfIdx > 2) {
+      var oldTokens = 0;
+      for (var j = 1; j < halfIdx; j++) oldTokens += breakdown[j].tokens;
+      if (oldTokens > totalTokens * 0.3) {
+        recommendations.push({
+          severity: 'suggestion',
+          type: 'old-context',
+          message: 'First half of conversation uses ' + oldTokens + ' tokens. Summarising could reclaim ~' + Math.round(oldTokens * 0.7) + '.',
+          savings: Math.round(oldTokens * 0.7)
+        });
+      }
+    }
+
+    // Duplicate/repetitive content detection
+    var seen = {};
+    var duplicateTokens = 0;
+    for (var k = 1; k < breakdown.length; k++) {
+      var key = breakdown[k].preview.toLowerCase().trim();
+      if (key.length > 20 && seen[key]) {
+        duplicateTokens += breakdown[k].tokens;
+      }
+      seen[key] = true;
+    }
+    if (duplicateTokens > 200) {
+      recommendations.push({
+        severity: 'suggestion',
+        type: 'duplicates',
+        message: 'Detected ~' + duplicateTokens + ' tokens of repetitive content.',
+        savings: duplicateTokens
+      });
+    }
+
+    if (exchangesUntilFull < 5 && exchangesUntilFull > 0) {
+      recommendations.push({
+        severity: 'warning',
+        type: 'exhaustion-near',
+        message: 'At current rate, context exhausts in ~' + exchangesUntilFull + ' more exchanges.',
+        savings: 0
+      });
+    }
+
+    return {
+      totalTokens: totalTokens,
+      maxTokens: maxTokens,
+      usagePct: usagePct,
+      messageCount: history.length,
+      breakdown: breakdown,
+      ranked: ranked,
+      avgTokensPerExchange: Math.round(avgTokensPerExchange),
+      exchangesUntilFull: exchangesUntilFull,
+      recommendations: recommendations,
+      totalCodeTokens: totalCodeTokens,
+      codePct: codePct
+    };
+  }
+
+  /* ---------- Zone Classification ---------- */
+
+  function getZone(pct) {
+    if (pct < 50) return { label: 'Healthy', color: '#22c55e', bg: '#052e16' };
+    if (pct < 70) return { label: 'Moderate', color: '#eab308', bg: '#422006' };
+    if (pct < 90) return { label: 'Warning', color: '#f97316', bg: '#431407' };
+    return { label: 'Critical', color: '#ef4444', bg: '#450a0a' };
+  }
+
+  /* ---------- Snapshot History ---------- */
+
+  var snapshots = [];
+  function takeSnapshot(analysis) {
+    snapshots.push({
+      time: Date.now(),
+      tokens: analysis.totalTokens,
+      pct: analysis.usagePct,
+      messages: analysis.messageCount
+    });
+    if (snapshots.length > 50) snapshots.shift();
+  }
+
+  /* ---------- Render ---------- */
+
+  function render() {
+    if (!panel) return;
+    var analysis = analyseConversation();
+    takeSnapshot(analysis);
+    var zone = getZone(analysis.usagePct);
+
+    var html = '<div style="padding:16px;font-family:system-ui,sans-serif;color:#e2e8f0;">';
+
+    // Header
+    html += '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">';
+    html += '<h3 style="margin:0;font-size:16px;">🔋 Token Budget Manager</h3>';
+    html += '<button id="tbm-close" style="background:none;border:none;color:#94a3b8;font-size:20px;cursor:pointer;">✕</button>';
+    html += '</div>';
+
+    // Budget Gauge
+    html += '<div style="background:#1e293b;border-radius:12px;padding:16px;margin-bottom:12px;">';
+    html += '<div style="display:flex;justify-content:space-between;margin-bottom:8px;">';
+    html += '<span style="font-size:13px;color:#94a3b8;">Context Budget</span>';
+    html += '<span style="font-size:13px;font-weight:600;color:' + zone.color + ';">' + zone.label + '</span>';
+    html += '</div>';
+    // Bar
+    html += '<div style="background:#0f172a;border-radius:8px;height:24px;overflow:hidden;position:relative;">';
+    html += '<div style="width:' + Math.min(100, analysis.usagePct) + '%;height:100%;background:' + zone.color + ';border-radius:8px;transition:width 0.5s;opacity:0.85;"></div>';
+    html += '<div style="position:absolute;top:0;left:0;right:0;bottom:0;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;">';
+    html += analysis.totalTokens.toLocaleString() + ' / ' + analysis.maxTokens.toLocaleString() + ' tokens (' + Math.round(analysis.usagePct) + '%)';
+    html += '</div></div>';
+    // Stats row
+    html += '<div style="display:flex;gap:16px;margin-top:10px;font-size:12px;color:#94a3b8;">';
+    html += '<span>📨 ' + analysis.messageCount + ' msgs</span>';
+    html += '<span>📈 ~' + analysis.avgTokensPerExchange + ' tok/exchange</span>';
+    if (analysis.exchangesUntilFull !== Infinity) {
+      html += '<span>⏳ ~' + analysis.exchangesUntilFull + ' exchanges left</span>';
+    } else {
+      html += '<span>⏳ Plenty of room</span>';
+    }
+    html += '</div></div>';
+
+    // Recommendations
+    if (analysis.recommendations.length > 0) {
+      html += '<div style="margin-bottom:12px;">';
+      html += '<h4 style="margin:0 0 8px;font-size:13px;color:#94a3b8;">🤖 Autonomous Recommendations</h4>';
+      for (var r = 0; r < analysis.recommendations.length; r++) {
+        var rec = analysis.recommendations[r];
+        var recColor = rec.severity === 'critical' ? '#ef4444' : rec.severity === 'warning' ? '#f97316' : '#38bdf8';
+        var recIcon = rec.severity === 'critical' ? '🚨' : rec.severity === 'warning' ? '⚠️' : '💡';
+        html += '<div style="background:#1e293b;border-left:3px solid ' + recColor + ';border-radius:6px;padding:8px 12px;margin-bottom:6px;font-size:12px;">';
+        html += '<span>' + recIcon + ' ' + rec.message + '</span>';
+        if (rec.savings > 0) html += '<span style="color:#22c55e;margin-left:8px;">💾 ~' + rec.savings + ' tokens recoverable</span>';
+        html += '</div>';
+      }
+      html += '</div>';
+    }
+
+    // Token Distribution Chart (ASCII bar chart)
+    html += '<div style="background:#1e293b;border-radius:12px;padding:12px;margin-bottom:12px;">';
+    html += '<h4 style="margin:0 0 8px;font-size:13px;color:#94a3b8;">📊 Token Distribution</h4>';
+    var roleTokens = { system: 0, user: 0, assistant: 0 };
+    for (var d = 0; d < analysis.breakdown.length; d++) {
+      var bd = analysis.breakdown[d];
+      roleTokens[bd.role] = (roleTokens[bd.role] || 0) + bd.tokens;
+    }
+    var roles = ['system', 'user', 'assistant'];
+    var roleColors = { system: '#8b5cf6', user: '#3b82f6', assistant: '#22c55e' };
+    var roleEmoji = { system: '⚙️', user: '👤', assistant: '🤖' };
+    for (var ri = 0; ri < roles.length; ri++) {
+      var rl = roles[ri];
+      var rPct = analysis.totalTokens > 0 ? (roleTokens[rl] / analysis.totalTokens) * 100 : 0;
+      html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;font-size:11px;">';
+      html += '<span style="width:70px;">' + roleEmoji[rl] + ' ' + rl + '</span>';
+      html += '<div style="flex:1;background:#0f172a;border-radius:4px;height:14px;overflow:hidden;">';
+      html += '<div style="width:' + rPct + '%;height:100%;background:' + roleColors[rl] + ';border-radius:4px;"></div>';
+      html += '</div>';
+      html += '<span style="width:60px;text-align:right;color:#94a3b8;">' + roleTokens[rl].toLocaleString() + '</span>';
+      html += '</div>';
+    }
+    if (analysis.totalCodeTokens > 0) {
+      var cpct = analysis.totalTokens > 0 ? (analysis.totalCodeTokens / analysis.totalTokens) * 100 : 0;
+      html += '<div style="display:flex;align-items:center;gap:8px;margin-top:6px;font-size:11px;">';
+      html += '<span style="width:70px;">💻 code</span>';
+      html += '<div style="flex:1;background:#0f172a;border-radius:4px;height:14px;overflow:hidden;">';
+      html += '<div style="width:' + cpct + '%;height:100%;background:#f59e0b;border-radius:4px;"></div>';
+      html += '</div>';
+      html += '<span style="width:60px;text-align:right;color:#94a3b8;">' + analysis.totalCodeTokens.toLocaleString() + '</span>';
+      html += '</div>';
+    }
+    html += '</div>';
+
+    // Top Token Consumers
+    html += '<div style="background:#1e293b;border-radius:12px;padding:12px;margin-bottom:12px;">';
+    html += '<h4 style="margin:0 0 8px;font-size:13px;color:#94a3b8;">🏆 Largest Messages</h4>';
+    var top5 = analysis.ranked.slice(0, 5);
+    for (var t = 0; t < top5.length; t++) {
+      var item = top5[t];
+      var itemPct = analysis.totalTokens > 0 ? ((item.tokens / analysis.totalTokens) * 100).toFixed(1) : '0';
+      var roleIcon = item.role === 'system' ? '⚙️' : item.role === 'user' ? '👤' : '🤖';
+      html += '<div style="display:flex;align-items:center;gap:6px;padding:4px 0;font-size:11px;border-bottom:1px solid #334155;">';
+      html += '<span>' + roleIcon + '</span>';
+      html += '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#cbd5e1;">' + item.preview + '</span>';
+      html += '<span style="color:#94a3b8;white-space:nowrap;">' + item.tokens.toLocaleString() + ' tok (' + itemPct + '%)</span>';
+      html += '</div>';
+    }
+    html += '</div>';
+
+    // Trend Sparkline (if we have snapshots)
+    if (snapshots.length > 1) {
+      html += '<div style="background:#1e293b;border-radius:12px;padding:12px;">';
+      html += '<h4 style="margin:0 0 8px;font-size:13px;color:#94a3b8;">📈 Usage Trend</h4>';
+      html += '<div style="display:flex;align-items:flex-end;gap:2px;height:40px;">';
+      var maxPct = Math.max.apply(null, snapshots.map(function(s) { return s.pct; }));
+      for (var si = 0; si < snapshots.length; si++) {
+        var sh = maxPct > 0 ? (snapshots[si].pct / maxPct) * 36 + 4 : 4;
+        var sc = getZone(snapshots[si].pct).color;
+        html += '<div style="flex:1;min-width:3px;max-width:8px;height:' + sh + 'px;background:' + sc + ';border-radius:2px;" title="' + Math.round(snapshots[si].pct) + '%"></div>';
+      }
+      html += '</div></div>';
+    }
+
+    html += '</div>';
+    panel.innerHTML = html;
+
+    // Event listeners
+    var closeBtn = panel.querySelector('#tbm-close');
+    if (closeBtn) closeBtn.addEventListener('click', hide);
+  }
+
+  /* ---------- Panel Management ---------- */
+
+  function createPanel() {
+    panel = document.createElement('div');
+    panel.id = 'smart-token-budget-panel';
+    panel.style.cssText = 'position:fixed;top:60px;right:16px;width:380px;max-height:calc(100vh - 80px);' +
+      'overflow-y:auto;background:#0f172a;border:1px solid #334155;border-radius:16px;' +
+      'box-shadow:0 20px 60px rgba(0,0,0,0.5);z-index:10010;display:none;';
+    document.body.appendChild(panel);
+  }
+
+  function show() {
+    if (typeof PanelRegistry !== 'undefined' && PanelRegistry.closeAll) PanelRegistry.closeAll();
+    if (!panel) createPanel();
+    panel.style.display = 'block';
+    visible = true;
+    render();
+  }
+
+  function hide() {
+    if (panel) panel.style.display = 'none';
+    visible = false;
+  }
+
+  function toggle() {
+    visible ? hide() : show();
+  }
+
+  /* ---------- Proactive Alert System ---------- */
+
+  var lastAlertPct = 0;
+  function checkProactiveAlert() {
+    if (!visible) {
+      var analysis = analyseConversation();
+      // Alert at 70%, 85%, 95% thresholds
+      var thresholds = [70, 85, 95];
+      for (var i = 0; i < thresholds.length; i++) {
+        if (analysis.usagePct >= thresholds[i] && lastAlertPct < thresholds[i]) {
+          lastAlertPct = thresholds[i];
+          showToast(analysis);
+          break;
+        }
+      }
+    }
+    if (visible) render();
+  }
+
+  function showToast(analysis) {
+    var zone = getZone(analysis.usagePct);
+    var toast = document.createElement('div');
+    toast.style.cssText = 'position:fixed;bottom:80px;right:16px;background:' + zone.bg +
+      ';border:1px solid ' + zone.color + ';border-radius:12px;padding:12px 16px;z-index:10020;' +
+      'font-size:13px;color:#e2e8f0;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.3);' +
+      'animation:tbm-slide-in 0.3s ease;max-width:300px;';
+    toast.innerHTML = '🔋 <strong>Token budget ' + Math.round(analysis.usagePct) + '% used</strong><br>' +
+      '<span style="font-size:11px;color:#94a3b8;">~' + analysis.exchangesUntilFull + ' exchanges remaining. Click to manage.</span>';
+    toast.addEventListener('click', function() {
+      document.body.removeChild(toast);
+      show();
+    });
+    document.body.appendChild(toast);
+    setTimeout(function() {
+      if (toast.parentNode) toast.parentNode.removeChild(toast);
+    }, 8000);
+  }
+
+  /* ---------- Init ---------- */
+
+  function init() {
+    // Inject animation
+    var style = document.createElement('style');
+    style.textContent = '@keyframes tbm-slide-in{from{transform:translateX(100px);opacity:0}to{transform:translateX(0);opacity:1}}';
+    document.head.appendChild(style);
+
+    // Keyboard shortcut Alt+Shift+B
+    document.addEventListener('keydown', function(e) {
+      if (e.altKey && e.shiftKey && e.key === 'B') { e.preventDefault(); toggle(); }
+    });
+
+    // Toolbar button
+    var toolbar = document.querySelector('.toolbar');
+    if (toolbar) {
+      var btn = document.createElement('button');
+      btn.id = 'token-budget-btn';
+      btn.className = 'btn-secondary';
+      btn.title = 'Token Budget Manager — autonomous context budget intelligence (Alt+Shift+B)';
+      btn.textContent = '🔋';
+      btn.addEventListener('click', toggle);
+      toolbar.appendChild(btn);
+    }
+
+    // Register with PanelRegistry
+    if (typeof PanelRegistry !== 'undefined' && PanelRegistry.register) {
+      PanelRegistry.register('tokenBudget', { close: hide });
+    }
+
+    // Hook into chat to monitor after each message
+    var origAppend = typeof UIController !== 'undefined' && UIController.appendMessage;
+    if (origAppend) {
+      var _origFn = UIController.appendMessage;
+      UIController.appendMessage = function() {
+        _origFn.apply(UIController, arguments);
+        // Debounce check
+        clearTimeout(SmartTokenBudgetManager._checkTimer);
+        SmartTokenBudgetManager._checkTimer = setTimeout(checkProactiveAlert, 500);
+      };
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  return { toggle: toggle, show: show, hide: hide, _checkTimer: null };
 })();
