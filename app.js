@@ -3460,7 +3460,7 @@ const ChatBookmarks = (() => {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
       if (!raw) { bookmarks = []; return; }
-      const parsed = JSON.parse(raw);
+      const parsed = sanitizeStorageObject(JSON.parse(raw));
       if (!Array.isArray(parsed)) { bookmarks = []; return; }
       bookmarks = sanitizeStorageObject(parsed);
     } catch (_) {
@@ -38997,7 +38997,7 @@ const SmartConversationPlanner = (() => {
   function _load() {
     try {
       var raw = SafeStorage.get(STORAGE_KEY);
-      if (raw) _plans = JSON.parse(raw) || {};
+      if (raw) _plans = sanitizeStorageObject(JSON.parse(raw)) || {};
     } catch (_) { _plans = {}; }
   }
 
@@ -39906,7 +39906,7 @@ const SmartInputPredictor = (() => {
 
   function load() {
     try {
-      var d = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+      var d = sanitizeStorageObject(JSON.parse(SafeStorage.get(STORAGE_KEY) || '{}'));
       enabled = d.enabled !== false;
       learnedPhrases = d.learnedPhrases || {};
       stats = d.stats || { shown: 0, accepted: 0 };
@@ -39915,7 +39915,7 @@ const SmartInputPredictor = (() => {
 
   function save() {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      SafeStorage.set(STORAGE_KEY, JSON.stringify({
         enabled: enabled,
         learnedPhrases: learnedPhrases,
         stats: stats
