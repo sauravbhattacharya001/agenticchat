@@ -1,7 +1,7 @@
 /* ============================================================
  * Agentic Chat - Application Logic
  *
- * Architecture (51 modules, all revealing-module-pattern IIFEs):
+ * Architecture (52 modules, all revealing-module-pattern IIFEs):
  *
  *   Core:
  *   SafeStorage          - safe localStorage wrapper for restricted-storage environments
@@ -104,6 +104,7 @@
  *   SmartSessionPrioritizer - autonomous session priority scoring with urgency/action-item detection, priority queue dashboard (Alt+Shift+P)
  *   SmartContradictionDetector - autonomous AI contradiction detection with confidence scoring, clarification prompts (Alt+Shift+X)
  *   SmartDeadlineTracker  - autonomous deadline detection from conversations with countdown dashboard, proactive alerts (Alt+D)
+ *   SmartConversationPlanner - goal-oriented conversation planner with auto-generated milestones, progress tracking, drift alerts (Alt+Shift+G)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -38909,4 +38910,534 @@ const SmartResponseCritic = (() => {
   document.addEventListener('DOMContentLoaded', init);
 
   return { toggle: toggle, show: show, hide: hide, analyze: _analyzeResponse };
+})();
+
+/* ── Smart Conversation Planner ── goal-oriented planning with milestones ─── */
+const SmartConversationPlanner = (() => {
+  'use strict';
+
+  const STORAGE_KEY = 'ac-conv-planner';
+  let _panel = null;
+  let _isOpen = false;
+  let _plans = {}; // sessionId -> plan
+
+  const PLAN_TEMPLATES = {
+    research: {
+      name: 'Research Topic',
+      icon: '🔍',
+      milestones: [
+        { title: 'Define scope', description: 'Clarify what you want to learn', keywords: ['scope', 'focus', 'about', 'topic', 'learn'] },
+        { title: 'Gather background', description: 'Get foundational context', keywords: ['background', 'overview', 'basics', 'context', 'history'] },
+        { title: 'Deep dive', description: 'Explore specific aspects in detail', keywords: ['detail', 'specifically', 'explain', 'how does', 'why does'] },
+        { title: 'Compare alternatives', description: 'Evaluate different options/approaches', keywords: ['compare', 'versus', 'vs', 'alternative', 'difference', 'tradeoff'] },
+        { title: 'Synthesize findings', description: 'Summarize key takeaways', keywords: ['summary', 'takeaway', 'conclusion', 'overall', 'so basically'] }
+      ]
+    },
+    debugging: {
+      name: 'Debug Issue',
+      icon: '🐛',
+      milestones: [
+        { title: 'Describe the problem', description: 'Explain what\'s going wrong', keywords: ['error', 'bug', 'broken', 'not working', 'issue', 'problem'] },
+        { title: 'Share context', description: 'Provide code, logs, environment', keywords: ['code', 'log', 'stack trace', 'version', 'environment'] },
+        { title: 'Identify root cause', description: 'Narrow down the cause', keywords: ['cause', 'because', 'reason', 'root', 'why'] },
+        { title: 'Apply fix', description: 'Implement the solution', keywords: ['fix', 'solution', 'change', 'update', 'replace', 'modify'] },
+        { title: 'Verify resolution', description: 'Confirm the fix works', keywords: ['works', 'fixed', 'resolved', 'success', 'passing', 'thank'] }
+      ]
+    },
+    learning: {
+      name: 'Learn Concept',
+      icon: '📚',
+      milestones: [
+        { title: 'Introduction', description: 'Get a high-level overview', keywords: ['what is', 'introduce', 'overview', 'explain'] },
+        { title: 'Core concepts', description: 'Understand fundamental ideas', keywords: ['concept', 'fundamental', 'principle', 'how', 'work'] },
+        { title: 'Examples', description: 'See practical examples', keywords: ['example', 'show me', 'demonstrate', 'sample', 'instance'] },
+        { title: 'Practice', description: 'Try exercises or apply knowledge', keywords: ['try', 'exercise', 'practice', 'challenge', 'build'] },
+        { title: 'Advanced topics', description: 'Explore edge cases and depth', keywords: ['advanced', 'edge case', 'complex', 'beyond', 'deeper'] }
+      ]
+    },
+    brainstorm: {
+      name: 'Brainstorm',
+      icon: '💡',
+      milestones: [
+        { title: 'Define challenge', description: 'State the problem or opportunity', keywords: ['challenge', 'problem', 'opportunity', 'goal', 'want to'] },
+        { title: 'Generate ideas', description: 'Explore many possibilities', keywords: ['idea', 'what if', 'could we', 'maybe', 'another', 'option'] },
+        { title: 'Evaluate feasibility', description: 'Assess which ideas are practical', keywords: ['feasible', 'practical', 'realistic', 'cost', 'effort', 'risk'] },
+        { title: 'Refine top picks', description: 'Develop the best ideas further', keywords: ['refine', 'develop', 'detail', 'plan', 'flesh out'] },
+        { title: 'Action plan', description: 'Decide next steps', keywords: ['next step', 'action', 'implement', 'start', 'first thing'] }
+      ]
+    },
+    writing: {
+      name: 'Write Content',
+      icon: '✍️',
+      milestones: [
+        { title: 'Define audience & purpose', description: 'Who is this for and why?', keywords: ['audience', 'reader', 'purpose', 'tone', 'style'] },
+        { title: 'Outline structure', description: 'Plan the sections/flow', keywords: ['outline', 'structure', 'section', 'flow', 'organize'] },
+        { title: 'Draft content', description: 'Write the main body', keywords: ['write', 'draft', 'compose', 'create', 'content'] },
+        { title: 'Review & refine', description: 'Edit for clarity and quality', keywords: ['review', 'edit', 'revise', 'improve', 'feedback'] },
+        { title: 'Finalize', description: 'Polish and prepare for delivery', keywords: ['final', 'polish', 'done', 'complete', 'publish'] }
+      ]
+    },
+    custom: {
+      name: 'Custom Plan',
+      icon: '⚙️',
+      milestones: []
+    }
+  };
+
+  function _escapeHtml(s) {
+    var d = document.createElement('div'); d.textContent = s; return d.innerHTML;
+  }
+
+  function _getSessionId() {
+    if (typeof SessionManager !== 'undefined' && SessionManager.currentId) return SessionManager.currentId();
+    return '_default';
+  }
+
+  function _load() {
+    try {
+      var raw = SafeStorage.get(STORAGE_KEY);
+      if (raw) _plans = JSON.parse(raw) || {};
+    } catch (_) { _plans = {}; }
+  }
+
+  function _save() {
+    SafeStorage.trySet(STORAGE_KEY, JSON.stringify(_plans));
+  }
+
+  function _getCurrentPlan() {
+    return _plans[_getSessionId()] || null;
+  }
+
+  function _setCurrentPlan(plan) {
+    _plans[_getSessionId()] = plan;
+    _save();
+  }
+
+  function _clearCurrentPlan() {
+    delete _plans[_getSessionId()];
+    _save();
+  }
+
+  /* ── Autonomous milestone detection ─── */
+  function _checkMilestones(userText, assistantText) {
+    var plan = _getCurrentPlan();
+    if (!plan || !plan.milestones) return;
+    var combined = ((userText || '') + ' ' + (assistantText || '')).toLowerCase();
+    var changed = false;
+
+    plan.milestones.forEach(function(m) {
+      if (m.completed) return;
+      var hits = 0;
+      (m.keywords || []).forEach(function(kw) {
+        if (combined.indexOf(kw.toLowerCase()) !== -1) hits++;
+      });
+      if (hits >= 2 || (m.keywords && m.keywords.length <= 2 && hits >= 1)) {
+        m.completed = true;
+        m.completedAt = Date.now();
+        changed = true;
+      }
+    });
+
+    if (changed) {
+      _setCurrentPlan(plan);
+      _render();
+      _showProgressToast(plan);
+    }
+
+    // Drift detection: if 3+ messages with no milestone progress
+    if (!plan._msgSinceProgress) plan._msgSinceProgress = 0;
+    plan._msgSinceProgress = changed ? 0 : plan._msgSinceProgress + 1;
+    if (plan._msgSinceProgress >= 3) {
+      _showDriftAlert(plan);
+      plan._msgSinceProgress = 0;
+    }
+    _setCurrentPlan(plan);
+  }
+
+  function _showProgressToast(plan) {
+    var done = plan.milestones.filter(function(m) { return m.completed; }).length;
+    var total = plan.milestones.length;
+    var pct = Math.round((done / total) * 100);
+    _toast('📋 Milestone completed! Progress: ' + done + '/' + total + ' (' + pct + '%)', '#4caf50');
+  }
+
+  function _showDriftAlert(plan) {
+    var next = plan.milestones.find(function(m) { return !m.completed; });
+    if (next) {
+      _toast('🔄 Conversation may be drifting. Next milestone: ' + next.title, '#ff9800');
+    }
+  }
+
+  function _toast(msg, color) {
+    var el = document.createElement('div');
+    el.textContent = msg;
+    Object.assign(el.style, {
+      position: 'fixed', bottom: '20px', left: '50%', transform: 'translateX(-50%)',
+      background: color || '#333', color: '#fff', padding: '10px 20px',
+      borderRadius: '8px', fontSize: '13px', zIndex: '100001',
+      boxShadow: '0 4px 12px rgba(0,0,0,0.3)', transition: 'opacity 0.3s',
+      maxWidth: '400px', textAlign: 'center'
+    });
+    document.body.appendChild(el);
+    setTimeout(function() { el.style.opacity = '0'; setTimeout(function() { el.remove(); }, 300); }, 3500);
+  }
+
+  /* ── Panel UI ─── */
+  function _createPanel() {
+    if (_panel) return;
+    _panel = document.createElement('div');
+    _panel.id = 'conv-planner-panel';
+    document.body.appendChild(_panel);
+
+    var style = document.createElement('style');
+    style.textContent = `
+      #conv-planner-panel {
+        position:fixed; right:-420px; top:0; width:400px; height:100vh;
+        background:#1a1a2e; color:#e0e0e0; z-index:100000;
+        transition:right 0.3s ease; overflow-y:auto;
+        box-shadow:-4px 0 20px rgba(0,0,0,0.5); font-family:system-ui,sans-serif;
+        padding:20px;
+      }
+      #conv-planner-panel.open { right:0; }
+      .planner-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
+      .planner-header h3 { margin:0; font-size:16px; }
+      .planner-close { background:none; border:none; color:#aaa; font-size:20px; cursor:pointer; }
+      .planner-close:hover { color:#fff; }
+      .planner-section { margin-bottom:16px; }
+      .planner-section h4 { margin:0 0 8px; font-size:13px; color:#888; text-transform:uppercase; letter-spacing:1px; }
+      .planner-templates { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+      .planner-tpl-btn {
+        background:#16213e; border:1px solid #333; border-radius:8px; padding:12px;
+        cursor:pointer; text-align:center; transition:all 0.2s;
+      }
+      .planner-tpl-btn:hover { border-color:#4a9eff; background:#1a2744; }
+      .planner-tpl-icon { font-size:24px; display:block; margin-bottom:4px; }
+      .planner-tpl-name { font-size:12px; color:#ccc; }
+      .planner-goal-input {
+        width:100%; background:#0f0f1a; border:1px solid #333; border-radius:6px;
+        color:#e0e0e0; padding:8px 10px; font-size:13px; resize:vertical; min-height:60px;
+        font-family:inherit;
+      }
+      .planner-goal-input:focus { border-color:#4a9eff; outline:none; }
+      .planner-btn {
+        background:#4a9eff; color:#fff; border:none; border-radius:6px;
+        padding:8px 16px; font-size:13px; cursor:pointer; margin-top:8px;
+      }
+      .planner-btn:hover { background:#3a8eef; }
+      .planner-btn.danger { background:#e74c3c; }
+      .planner-btn.danger:hover { background:#c0392b; }
+      .planner-progress {
+        background:#0f0f1a; border-radius:8px; padding:12px; margin-bottom:12px;
+      }
+      .planner-progress-bar {
+        height:8px; background:#333; border-radius:4px; overflow:hidden; margin:8px 0;
+      }
+      .planner-progress-fill {
+        height:100%; background:linear-gradient(90deg,#4a9eff,#00d4aa); border-radius:4px;
+        transition:width 0.5s ease;
+      }
+      .planner-progress-label { font-size:12px; color:#888; text-align:right; }
+      .planner-milestone {
+        display:flex; align-items:flex-start; gap:10px; padding:10px;
+        background:#0f0f1a; border-radius:8px; margin-bottom:6px;
+        border-left:3px solid #333; transition:all 0.2s;
+      }
+      .planner-milestone.done { border-left-color:#4caf50; opacity:0.7; }
+      .planner-milestone.active { border-left-color:#4a9eff; }
+      .planner-ms-check {
+        width:20px; height:20px; border-radius:50%; border:2px solid #555;
+        display:flex; align-items:center; justify-content:center; cursor:pointer;
+        flex-shrink:0; margin-top:2px; font-size:12px; transition:all 0.2s;
+      }
+      .planner-milestone.done .planner-ms-check { background:#4caf50; border-color:#4caf50; color:#fff; }
+      .planner-ms-info { flex:1; }
+      .planner-ms-title { font-size:13px; font-weight:600; }
+      .planner-ms-desc { font-size:11px; color:#888; margin-top:2px; }
+      .planner-ms-time { font-size:10px; color:#666; margin-top:2px; }
+      .planner-add-ms {
+        background:none; border:1px dashed #444; border-radius:8px;
+        color:#888; padding:8px; cursor:pointer; width:100%; font-size:12px;
+        margin-top:4px;
+      }
+      .planner-add-ms:hover { border-color:#4a9eff; color:#4a9eff; }
+      .planner-empty { text-align:center; color:#666; padding:40px 20px; font-size:13px; }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function _render() {
+    if (!_panel) return;
+    var plan = _getCurrentPlan();
+    if (!plan) {
+      _renderTemplateChooser();
+      return;
+    }
+    _renderActivePlan(plan);
+  }
+
+  function _renderTemplateChooser() {
+    var html = '<div class="planner-header"><h3>📋 Conversation Planner</h3>' +
+      '<button class="planner-close">&times;</button></div>';
+    html += '<div class="planner-section"><h4>Choose a plan template</h4>';
+    html += '<div class="planner-templates">';
+    Object.keys(PLAN_TEMPLATES).forEach(function(key) {
+      var t = PLAN_TEMPLATES[key];
+      html += '<div class="planner-tpl-btn" data-tpl="' + key + '">' +
+        '<span class="planner-tpl-icon">' + t.icon + '</span>' +
+        '<span class="planner-tpl-name">' + _escapeHtml(t.name) + '</span></div>';
+    });
+    html += '</div></div>';
+    html += '<div class="planner-section"><h4>Or describe your goal</h4>';
+    html += '<textarea class="planner-goal-input" placeholder="What do you want to accomplish in this conversation?"></textarea>';
+    html += '<button class="planner-btn" id="planner-start-custom">Create Plan</button></div>';
+    _panel.innerHTML = html;
+
+    _panel.querySelector('.planner-close').addEventListener('click', hide);
+
+    _panel.querySelectorAll('.planner-tpl-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var key = btn.dataset.tpl;
+        var tpl = PLAN_TEMPLATES[key];
+        if (key === 'custom') {
+          _panel.querySelector('.planner-goal-input').focus();
+          return;
+        }
+        var plan = {
+          template: key,
+          goal: tpl.name,
+          milestones: tpl.milestones.map(function(m) {
+            return { title: m.title, description: m.description, keywords: m.keywords, completed: false };
+          }),
+          createdAt: Date.now(),
+          _msgSinceProgress: 0
+        };
+        _setCurrentPlan(plan);
+        _render();
+        _toast('📋 Plan created: ' + tpl.name, '#4a9eff');
+      });
+    });
+
+    var startBtn = _panel.querySelector('#planner-start-custom');
+    if (startBtn) {
+      startBtn.addEventListener('click', function() {
+        var goal = _panel.querySelector('.planner-goal-input').value.trim();
+        if (!goal) { _toast('Please describe your goal', '#e74c3c'); return; }
+        // Auto-generate milestones from goal
+        var milestones = _generateMilestones(goal);
+        var plan = {
+          template: 'custom',
+          goal: goal,
+          milestones: milestones,
+          createdAt: Date.now(),
+          _msgSinceProgress: 0
+        };
+        _setCurrentPlan(plan);
+        _render();
+        _toast('📋 Custom plan created with ' + milestones.length + ' milestones', '#4a9eff');
+      });
+    }
+  }
+
+  function _generateMilestones(goal) {
+    // Heuristic milestone generation from goal text
+    var words = goal.toLowerCase();
+    var milestones = [];
+
+    milestones.push({
+      title: 'Define the objective',
+      description: 'Clearly state what you need',
+      keywords: ['want', 'need', 'goal', 'objective', 'trying to'],
+      completed: false
+    });
+
+    if (/build|create|make|develop|implement/.test(words)) {
+      milestones.push({ title: 'Design approach', description: 'Plan the architecture/structure', keywords: ['design', 'architecture', 'structure', 'approach', 'plan'], completed: false });
+      milestones.push({ title: 'Implement core', description: 'Build the main functionality', keywords: ['implement', 'code', 'build', 'create', 'write'], completed: false });
+      milestones.push({ title: 'Test & verify', description: 'Ensure it works correctly', keywords: ['test', 'verify', 'check', 'works', 'run'], completed: false });
+    } else if (/fix|debug|solve|troubleshoot/.test(words)) {
+      milestones.push({ title: 'Reproduce issue', description: 'Confirm and share details', keywords: ['error', 'reproduce', 'happens when', 'log', 'stack'], completed: false });
+      milestones.push({ title: 'Find root cause', description: 'Identify why it happens', keywords: ['cause', 'because', 'reason', 'found', 'issue is'], completed: false });
+      milestones.push({ title: 'Apply solution', description: 'Fix the problem', keywords: ['fix', 'solution', 'change', 'update', 'resolved'], completed: false });
+    } else if (/learn|understand|explain|teach/.test(words)) {
+      milestones.push({ title: 'Get overview', description: 'Understand the basics', keywords: ['what is', 'overview', 'basics', 'introduction', 'explain'], completed: false });
+      milestones.push({ title: 'Explore details', description: 'Go deeper into specifics', keywords: ['how', 'why', 'detail', 'specific', 'example'], completed: false });
+      milestones.push({ title: 'Apply knowledge', description: 'Practice or use what you learned', keywords: ['try', 'practice', 'apply', 'use', 'build'], completed: false });
+    } else if (/compare|choose|decide|evaluate/.test(words)) {
+      milestones.push({ title: 'List options', description: 'Identify alternatives', keywords: ['option', 'alternative', 'choice', 'available', 'consider'], completed: false });
+      milestones.push({ title: 'Compare pros/cons', description: 'Evaluate trade-offs', keywords: ['pro', 'con', 'advantage', 'disadvantage', 'tradeoff', 'versus'], completed: false });
+      milestones.push({ title: 'Make decision', description: 'Choose the best option', keywords: ['choose', 'decide', 'go with', 'pick', 'best'], completed: false });
+    } else {
+      milestones.push({ title: 'Gather information', description: 'Collect relevant details', keywords: ['tell me', 'what', 'how', 'information', 'detail'], completed: false });
+      milestones.push({ title: 'Analyze & discuss', description: 'Explore the topic in depth', keywords: ['analyze', 'think', 'consider', 'discuss', 'explore'], completed: false });
+      milestones.push({ title: 'Reach conclusion', description: 'Arrive at an answer or next step', keywords: ['conclusion', 'summary', 'answer', 'result', 'next step'], completed: false });
+    }
+
+    milestones.push({
+      title: 'Wrap up',
+      description: 'Confirm all questions answered',
+      keywords: ['thanks', 'thank you', 'perfect', 'great', 'that\'s all', 'done'],
+      completed: false
+    });
+
+    return milestones;
+  }
+
+  function _renderActivePlan(plan) {
+    var done = plan.milestones.filter(function(m) { return m.completed; }).length;
+    var total = plan.milestones.length;
+    var pct = total > 0 ? Math.round((done / total) * 100) : 0;
+
+    var html = '<div class="planner-header"><h3>📋 ' + _escapeHtml(plan.goal) + '</h3>' +
+      '<button class="planner-close">&times;</button></div>';
+
+    html += '<div class="planner-progress">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+      '<span style="font-size:13px;font-weight:600;">Progress</span>' +
+      '<span style="font-size:12px;color:#4a9eff;">' + done + '/' + total + '</span></div>' +
+      '<div class="planner-progress-bar"><div class="planner-progress-fill" style="width:' + pct + '%;"></div></div>' +
+      '<div class="planner-progress-label">' + pct + '% complete</div></div>';
+
+    var firstIncomplete = true;
+    plan.milestones.forEach(function(m, i) {
+      var cls = m.completed ? 'done' : (firstIncomplete ? 'active' : '');
+      if (!m.completed && firstIncomplete) firstIncomplete = false;
+      html += '<div class="planner-milestone ' + cls + '" data-idx="' + i + '">' +
+        '<div class="planner-ms-check">' + (m.completed ? '✓' : '') + '</div>' +
+        '<div class="planner-ms-info">' +
+        '<div class="planner-ms-title">' + _escapeHtml(m.title) + '</div>' +
+        '<div class="planner-ms-desc">' + _escapeHtml(m.description) + '</div>' +
+        (m.completedAt ? '<div class="planner-ms-time">Completed ' + _timeAgo(m.completedAt) + '</div>' : '') +
+        '</div></div>';
+    });
+
+    html += '<button class="planner-add-ms">+ Add milestone</button>';
+    html += '<div style="margin-top:12px;display:flex;gap:8px;">';
+    html += '<button class="planner-btn danger" id="planner-clear">Clear Plan</button>';
+    html += '<button class="planner-btn" id="planner-export" style="background:#555;">Export</button>';
+    html += '</div>';
+
+    _panel.innerHTML = html;
+
+    _panel.querySelector('.planner-close').addEventListener('click', hide);
+
+    // Manual toggle milestones
+    _panel.querySelectorAll('.planner-ms-check').forEach(function(el) {
+      el.addEventListener('click', function() {
+        var idx = parseInt(el.parentElement.dataset.idx);
+        plan.milestones[idx].completed = !plan.milestones[idx].completed;
+        plan.milestones[idx].completedAt = plan.milestones[idx].completed ? Date.now() : null;
+        _setCurrentPlan(plan);
+        _render();
+      });
+    });
+
+    // Add milestone
+    _panel.querySelector('.planner-add-ms').addEventListener('click', function() {
+      var title = prompt('Milestone title:');
+      if (!title) return;
+      var desc = prompt('Description (optional):') || '';
+      plan.milestones.push({
+        title: title, description: desc,
+        keywords: title.toLowerCase().split(/\s+/).filter(function(w) { return w.length > 3; }),
+        completed: false
+      });
+      _setCurrentPlan(plan);
+      _render();
+    });
+
+    var clearBtn = _panel.querySelector('#planner-clear');
+    if (clearBtn) clearBtn.addEventListener('click', function() {
+      if (confirm('Clear this conversation plan?')) { _clearCurrentPlan(); _render(); }
+    });
+
+    var exportBtn = _panel.querySelector('#planner-export');
+    if (exportBtn) exportBtn.addEventListener('click', function() {
+      var text = '# Conversation Plan: ' + plan.goal + '\n\n';
+      plan.milestones.forEach(function(m, i) {
+        text += (m.completed ? '- [x] ' : '- [ ] ') + m.title + ' — ' + m.description + '\n';
+      });
+      navigator.clipboard.writeText(text).then(function() { _toast('📋 Plan copied to clipboard', '#4a9eff'); });
+    });
+  }
+
+  function _timeAgo(ts) {
+    var s = Math.floor((Date.now() - ts) / 1000);
+    if (s < 60) return 'just now';
+    if (s < 3600) return Math.floor(s / 60) + 'm ago';
+    if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+    return Math.floor(s / 86400) + 'd ago';
+  }
+
+  /* ── Show / Hide / Toggle ─── */
+  function show() {
+    _createPanel();
+    _panel.classList.add('open');
+    _isOpen = true;
+    _render();
+    if (typeof PanelRegistry !== 'undefined' && PanelRegistry.closeAllExcept) {
+      PanelRegistry.closeAllExcept('planner');
+    }
+  }
+
+  function hide() {
+    if (_panel) _panel.classList.remove('open');
+    _isOpen = false;
+  }
+
+  function toggle() {
+    _isOpen ? hide() : show();
+  }
+
+  /* ── Hook into message flow ─── */
+  function onMessage(userText, assistantText) {
+    _checkMilestones(userText, assistantText);
+  }
+
+  /* ── Init ─── */
+  function init() {
+    _load();
+
+    // Keyboard shortcut Alt+Shift+G
+    document.addEventListener('keydown', function(e) {
+      if (e.altKey && e.shiftKey && e.key === 'G') { e.preventDefault(); toggle(); }
+    });
+
+    // Toolbar button
+    var toolbar = document.querySelector('.toolbar');
+    if (toolbar) {
+      var btn = document.getElementById('planner-btn');
+      if (!btn) {
+        btn = document.createElement('button');
+        btn.id = 'planner-btn';
+        btn.className = 'btn-secondary';
+        btn.title = 'Conversation Planner — goal-oriented planning with milestones (Alt+Shift+G)';
+        btn.textContent = '📋';
+        btn.addEventListener('click', toggle);
+        toolbar.appendChild(btn);
+      }
+    }
+
+    // Register with PanelRegistry
+    if (typeof PanelRegistry !== 'undefined' && PanelRegistry.register) {
+      PanelRegistry.register('planner', { close: hide });
+    }
+
+    // Hook into chat to detect milestone progress
+    var origAppendMsg = typeof UIController !== 'undefined' && UIController.appendMessage;
+    if (origAppendMsg) {
+      var _lastUserMsg = '';
+      var _origAppend = UIController.appendMessage;
+      UIController.appendMessage = function(role, content) {
+        _origAppend.apply(UIController, arguments);
+        if (role === 'user') _lastUserMsg = content;
+        if (role === 'assistant' && _getCurrentPlan()) {
+          onMessage(_lastUserMsg, content);
+        }
+      };
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  return { toggle: toggle, show: show, hide: hide, onMessage: onMessage };
 })();
