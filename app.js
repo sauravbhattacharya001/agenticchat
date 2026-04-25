@@ -38696,3 +38696,191 @@ const ConversationBrancher = (() => {
     onMessageAdded: onMessageAdded
   };
 })();
+
+/* ─── Smart Response Critic ─── */
+const SmartResponseCritic = (() => {
+  'use strict';
+
+  const STORAGE_KEY = 'ac-response-critic';
+  let _panel = null;
+  let _isOpen = false;
+  let _enabled = true;
+  let _scores = new Map(); // msgIndex -> scoreObj
+
+  const HEDGING = /\b(i think|probably|might be|i'm not sure|it's possible|perhaps|maybe|it depends|generally|usually|typically|could be|not certain|uncertain|arguably|supposedly)\b/gi;
+  const SPECIFIC = /(\d+[\.\d]*%?|\b[A-Z][a-z]+(?:\s[A-Z][a-z]+)+\b|```[\s\S]*?```|`[^`]+`|\bhttps?:\/\/\S+)/g;
+  const ACTION = /(\bstep\s*\d|\b\d+\.\s|```[\s\S]*?```|`[^`]+`|\$ |> |\brun\b|\bexecute\b|\binstall\b|\bcreate\b|\bopen\b|\bclick\b|\bnavigate\b|\btype\b)/gi;
+
+  function _load() {
+    try {
+      const raw = SafeStorage.get(STORAGE_KEY);
+      if (raw) {
+        const d = sanitizeStorageObject(JSON.parse(raw));
+        _enabled = d.enabled !== false;
+      }
+    } catch (_) {}
+  }
+
+  function _save() {
+    SafeStorage.trySet(STORAGE_KEY, JSON.stringify({ enabled: _enabled }));
+  }
+
+  function _analyzeResponse(userText, assistantText) {
+    const uWords = userText.toLowerCase().split(/\s+/).filter(w => w.length > 3 && !COMMON_STOP_WORDS.has(w));
+    const aLower = assistantText.toLowerCase();
+
+    // Completeness: what fraction of user key terms appear in response
+    const matched = uWords.filter(w => aLower.includes(w)).length;
+    const completeness = uWords.length > 0 ? Math.min(1, matched / Math.max(1, uWords.length * 0.6)) : 0.8;
+
+    // Specificity: ratio of concrete details vs total words
+    const specificMatches = (assistantText.match(SPECIFIC) || []).length;
+    const totalWords = assistantText.split(/\s+/).length;
+    const specificity = Math.min(1, specificMatches / Math.max(1, totalWords * 0.03));
+
+    // Confidence: inverse of hedging density
+    const hedgeMatches = (assistantText.match(HEDGING) || []).length;
+    const confidence = Math.max(0, 1 - (hedgeMatches / Math.max(1, totalWords * 0.02)));
+
+    // Actionability: presence of steps, code, commands
+    const actionMatches = (assistantText.match(ACTION) || []).length;
+    const actionability = Math.min(1, actionMatches / Math.max(1, 3));
+
+    // Depth: response length relative to question complexity
+    const qComplexity = Math.max(1, userText.split(/\s+/).length);
+    const ratio = totalWords / (qComplexity * 3);
+    const depth = Math.min(1, ratio);
+
+    const weights = { completeness: 0.25, specificity: 0.2, confidence: 0.2, actionability: 0.15, depth: 0.2 };
+    const overall = completeness * weights.completeness +
+                    specificity * weights.specificity +
+                    confidence * weights.confidence +
+                    actionability * weights.actionability +
+                    depth * weights.depth;
+    const stars = Math.max(1, Math.min(5, Math.round(overall * 5)));
+
+    return {
+      stars,
+      overall: Math.round(overall * 100),
+      dimensions: {
+        completeness: Math.round(completeness * 100),
+        specificity: Math.round(specificity * 100),
+        confidence: Math.round(confidence * 100),
+        actionability: Math.round(actionability * 100),
+        depth: Math.round(depth * 100)
+      }
+    };
+  }
+
+  function _starString(stars) {
+    return '\u2605'.repeat(stars) + '\u2606'.repeat(5 - stars);
+  }
+
+  function _colorForStars(stars) {
+    if (stars >= 4) return '#4ade80';
+    if (stars >= 3) return '#facc15';
+    return '#f87171';
+  }
+
+  function _createBadge(score) {
+    const badge = document.createElement('div');
+    badge.className = 'rc-badge';
+    badge.style.color = _colorForStars(score.stars);
+    badge.textContent = _starString(score.stars);
+    badge.title = 'Response quality: ' + score.overall + '% — click for details';
+    badge.addEventListener('click', function(e) {
+      e.stopPropagation();
+      const existing = badge.parentElement.querySelector('.rc-detail');
+      if (existing) { existing.remove(); return; }
+      const detail = document.createElement('div');
+      detail.className = 'rc-detail';
+      const dims = score.dimensions;
+      detail.innerHTML =
+        '<div class="rc-detail-title">Response Quality Analysis</div>' +
+        '<div class="rc-dim"><span>Completeness</span><div class="rc-bar"><div class="rc-fill" style="width:' + dims.completeness + '%;background:#60a5fa"></div></div><span>' + dims.completeness + '%</span></div>' +
+        '<div class="rc-dim"><span>Specificity</span><div class="rc-bar"><div class="rc-fill" style="width:' + dims.specificity + '%;background:#a78bfa"></div></div><span>' + dims.specificity + '%</span></div>' +
+        '<div class="rc-dim"><span>Confidence</span><div class="rc-bar"><div class="rc-fill" style="width:' + dims.confidence + '%;background:#34d399"></div></div><span>' + dims.confidence + '%</span></div>' +
+        '<div class="rc-dim"><span>Actionability</span><div class="rc-bar"><div class="rc-fill" style="width:' + dims.actionability + '%;background:#fbbf24"></div></div><span>' + dims.actionability + '%</span></div>' +
+        '<div class="rc-dim"><span>Depth</span><div class="rc-bar"><div class="rc-fill" style="width:' + dims.depth + '%;background:#f472b6"></div></div><span>' + dims.depth + '%</span></div>' +
+        '<div class="rc-overall">Overall: <strong>' + score.overall + '%</strong> ' + _starString(score.stars) + '</div>';
+      badge.parentElement.appendChild(detail);
+    });
+    return badge;
+  }
+
+  function _hookConversationManager() {
+    if (typeof ConversationManager === 'undefined') return;
+    var origAdd = ConversationManager.addMessage;
+    ConversationManager.addMessage = function(role, content, meta) {
+      origAdd.call(ConversationManager, role, content, meta);
+      if (!_enabled || role !== 'assistant') return;
+      try {
+        var history = ConversationManager.getHistory();
+        var userMsg = '';
+        for (var i = history.length - 2; i >= 0; i--) {
+          if (history[i].role === 'user') { userMsg = history[i].content; break; }
+        }
+        if (!userMsg) return;
+        var score = _analyzeResponse(userMsg, content);
+        var idx = history.length - 1;
+        _scores.set(idx, score);
+        // Attach badge after short delay to let UI render
+        setTimeout(function() { _attachBadgeToLatest(score); }, 200);
+      } catch(e) { console.warn('[ResponseCritic]', e); }
+    };
+  }
+
+  function _attachBadgeToLatest(score) {
+    var chatOutput = document.getElementById('chat-output');
+    if (!chatOutput) return;
+    // The chat output shows the latest response as text; add badge at bottom
+    var badge = _createBadge(score);
+    chatOutput.appendChild(badge);
+  }
+
+  function toggle() { _enabled = !_enabled; _save(); ToastManager.show(_enabled ? '\uD83D\uDD0D Response Critic enabled' : '\uD83D\uDD0D Response Critic disabled'); }
+  function show() { _enabled = true; _save(); }
+  function hide() { _enabled = false; _save(); }
+
+  function init() {
+    _load();
+    _hookConversationManager();
+
+    _injectCSS('rc-styles', `
+      .rc-badge { display:inline-block; cursor:pointer; font-size:14px; margin-top:8px; padding:2px 8px; border-radius:12px; background:rgba(255,255,255,0.05); user-select:none; transition:transform 0.15s; }
+      .rc-badge:hover { transform:scale(1.15); }
+      .rc-detail { margin-top:8px; padding:12px; background:rgba(0,0,0,0.4); border-radius:8px; font-size:12px; }
+      .rc-detail-title { font-weight:bold; margin-bottom:8px; font-size:13px; color:#e0e0e0; }
+      .rc-dim { display:flex; align-items:center; gap:8px; margin-bottom:4px; }
+      .rc-dim > span:first-child { width:100px; color:#aaa; font-size:11px; }
+      .rc-dim > span:last-child { width:36px; text-align:right; color:#ccc; font-size:11px; }
+      .rc-bar { flex:1; height:6px; background:rgba(255,255,255,0.1); border-radius:3px; overflow:hidden; }
+      .rc-fill { height:100%; border-radius:3px; transition:width 0.3s ease; }
+      .rc-overall { margin-top:8px; text-align:center; color:#e0e0e0; font-size:12px; }
+    `);
+
+    // Keyboard shortcut Alt+Shift+Q
+    document.addEventListener('keydown', function(e) {
+      if (e.altKey && e.shiftKey && e.key === 'Q') { e.preventDefault(); toggle(); }
+    });
+
+    // Add toolbar button
+    var toolbar = document.querySelector('.toolbar');
+    if (toolbar) {
+      var btn = document.getElementById('critic-btn');
+      if (!btn) {
+        btn = document.createElement('button');
+        btn.id = 'critic-btn';
+        btn.className = 'btn-secondary';
+        btn.title = 'Response Critic — analyze AI response quality (Alt+Shift+Q)';
+        btn.textContent = '\uD83D\uDD0D';
+        btn.addEventListener('click', toggle);
+        toolbar.appendChild(btn);
+      }
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  return { toggle: toggle, show: show, hide: hide, analyze: _analyzeResponse };
+})();
