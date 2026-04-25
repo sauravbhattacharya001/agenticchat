@@ -38230,13 +38230,14 @@ const ConversationBrancher = (() => {
     if (_treeCache !== null) return _treeCache;
     try {
       const raw = SafeStorage.get(TREE_KEY);
-      _treeCache = raw ? JSON.parse(raw) : {};
+      _treeCache = raw ? sanitizeStorageObject(JSON.parse(raw)) : {};
     } catch { _treeCache = {}; }
     // Build indices
     _byParent = new Map();
     _byChild = new Map();
-    for (const key in _treeCache) {
-      const entry = _treeCache[key];
+    const treeKeys = Object.keys(_treeCache);
+    for (let ti = 0; ti < treeKeys.length; ti++) {
+      const entry = _treeCache[treeKeys[ti]];
       if (!_byParent.has(entry.parentId)) _byParent.set(entry.parentId, []);
       _byParent.get(entry.parentId).push(entry);
       _byChild.set(entry.childId, entry);
@@ -38253,6 +38254,7 @@ const ConversationBrancher = (() => {
   function recordBranch(parentId, childId, forkIndex) {
     const tree = _loadTree();
     const key = parentId + ':' + childId;
+    if (DANGEROUS_KEYS.has(key)) return;  // prevent prototype-pollution via crafted ids
     tree[key] = {
       parentId: parentId,
       childId: childId,
