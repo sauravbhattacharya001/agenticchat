@@ -33112,21 +33112,45 @@ const TextAnalytics = (() => {
     'could','should','would','something','anything','everything','nothing'
   ]);
 
-  /** Tokenise text: lowercase, strip punctuation, remove stopwords & short words. */
+  /**
+   * Tokenise text: lowercase, extract alphanumeric words, remove stopwords & short words.
+   *
+   * Optimised: uses regex exec loop instead of replace().split().filter()
+   * which allocated 3 intermediate arrays per call.  This is the hot path
+   * for SessionLinker (tokenizes every session), DriftDetector, SmartTitle,
+   * and WordCloud — the allocation savings are significant when processing
+   * dozens of sessions with thousands of messages.
+   */
+  var _TOKEN_RE = /[a-z0-9]{3,}/g;
   function tokenize(text) {
     if (!text) return [];
-    return String(text).toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(function(w) {
-      return w.length > 2 && !STOPWORDS.has(w);
-    });
+    var lower = String(text).toLowerCase();
+    _TOKEN_RE.lastIndex = 0;
+    var result = [];
+    var m;
+    while ((m = _TOKEN_RE.exec(lower)) !== null) {
+      if (!STOPWORDS.has(m[0])) result.push(m[0]);
+    }
+    return result;
   }
 
-  /** Build max-normalised term-frequency vector from a token array. */
+  /**
+   * Build max-normalised term-frequency vector from a token array.
+   *
+   * Optimised: merged the counting and max-finding passes into a single
+   * loop — eliminates one full iteration over all TF keys.  For large
+   * vocabularies (hundreds of unique terms per session) this halves the
+   * object-key iteration overhead.
+   */
   function termFreq(tokens) {
     var tf = {};
-    for (var i = 0; i < tokens.length; i++) { tf[tokens[i]] = (tf[tokens[i]] || 0) + 1; }
     var max = 0;
-    for (var k in tf) { if (tf[k] > max) max = tf[k]; }
-    if (max > 0) { for (var k2 in tf) { tf[k2] /= max; } }
+    for (var i = 0; i < tokens.length; i++) {
+      var c = (tf[tokens[i]] || 0) + 1;
+      tf[tokens[i]] = c;
+      if (c > max) max = c;
+    }
+    if (max > 0) { for (var k in tf) { tf[k] /= max; } }
     return tf;
   }
 
