@@ -336,7 +336,12 @@ function loadApp() {
     'CustomThemeCreator',
     'CrossTabSync',
     'ConversationTimer',
-    'COMMON_STOP_WORDS'
+    'COMMON_STOP_WORDS',
+    'SmartSessionPrioritizer',
+    'ConversationMemory',
+    'SmartKnowledgeMap',
+    'MoodTracker',
+    'SmartModelAdvisor'
   ];
 
   for (const mod of modules) {
