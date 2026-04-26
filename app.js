@@ -30289,7 +30289,7 @@ const ConversationTimer = (() => {
   }
 
   function _saveAll(data) {
-    SafeStorage.trySet(STORAGE_KEY, JSON.stringify(data));
+    SafeStorage.trySetJSON(STORAGE_KEY, data);
   }
 
   function _loadSession() {
@@ -31318,7 +31318,7 @@ var StickyNotesBoard = (function () {
     var data = _notes.map(function (n) {
       return { id: n.id, x: n.x, y: n.y, w: n.w, h: n.h, color: n.color, text: n.text };
     });
-    try { SafeStorage.setJSON(_storageKey(), data); } catch (_) {}
+    SafeStorage.trySetJSON(_storageKey(), data);
   }
 
   function _load() {
@@ -31591,7 +31591,7 @@ const ConversationStash = (() => {
   }
 
   function _save(stack) {
-    try { SafeStorage.setJSON(STORAGE_KEY, stack); } catch {}
+    SafeStorage.trySetJSON(STORAGE_KEY, stack);
   }
 
   function _updateBadge() {
@@ -34372,11 +34372,11 @@ const SmartModelAdvisor = (function () {
   }
 
   function _saveState() {
-    SafeStorage.trySet(STORAGE_KEY, JSON.stringify({
+    SafeStorage.trySetJSON(STORAGE_KEY, {
       enabled: _enabled,
       history: _history.slice(-50),
       dismissed: _dismissed
-    }));
+    });
   }
 
   function _analyzeContent(text) {
@@ -35308,7 +35308,7 @@ const SmartSessionPrioritizer = (function () {
 
   function _save() {
     try {
-      SafeStorage.trySet(STORAGE_KEY, JSON.stringify(_scores));
+      SafeStorage.trySetJSON(STORAGE_KEY, _scores);
     } catch {}
   }
 
@@ -35550,7 +35550,7 @@ var ConversationMemory = (function () {
   }
 
   function _save(memories) {
-    try { SafeStorage.setJSON(STORAGE_KEY, memories); } catch (e) {}
+    SafeStorage.trySetJSON(STORAGE_KEY, memories);
   }
 
   /* ---- Helpers ---- */
@@ -36018,10 +36018,10 @@ const ConversationCoach = (() => {
   }
   function _save() {
     try {
-      SafeStorage.trySet(STORAGE_KEY, JSON.stringify({
+      SafeStorage.trySetJSON(STORAGE_KEY, {
         enabled: _enabled, stats: _stats, dismissedTypes: _dismissedTypes,
         msgCount: _msgCount, lastTipAt: _lastTipAt
-      }));
+      });
     } catch (_) {}
   }
 
@@ -36416,7 +36416,7 @@ const SmartKnowledgeMap = (function () {
     try {
       var data = { nodes: nodes.map(function (n) { return { id: n.id, label: n.label, category: n.category, count: n.count, x: n.x, y: n.y }; }),
         edges: edges.map(function (e) { return { source: e.source.label, target: e.target.label, label: e.label, weight: e.weight }; }) };
-      SafeStorage.trySet(storageKey, JSON.stringify(data));
+      SafeStorage.trySetJSON(storageKey, data);
     } catch (e) { /* quota */ }
   }
 
@@ -36806,7 +36806,7 @@ const SmartDeadlineTracker = (() => {
   }
 
   function _save() {
-    SafeStorage.trySet(STORAGE_KEY, JSON.stringify({ deadlines: _deadlines, dismissed: _dismissed }));
+    SafeStorage.trySetJSON(STORAGE_KEY, { deadlines: _deadlines, dismissed: _dismissed });
   }
 
   function _hash(s) {
@@ -37159,7 +37159,7 @@ var SmartContradictionDetector = (function () {
   }
   function _storageKey() { return STORAGE_PREFIX + _sessionId(); }
   function _save() {
-    try { SafeStorage.setJSON(_storageKey(), _contradictions); } catch(e) {}
+    SafeStorage.trySetJSON(_storageKey(), _contradictions);
   }
   function _load() {
     try {
@@ -37722,11 +37722,11 @@ var SmartQuestionTracker = (function() {
 
   /* ---- persistence ---- */
   function _save() {
-    try { SafeStorage.trySet(STORE_KEY, JSON.stringify({ questions: _questions, nextId: _nextId })); } catch(e) {}
+    SafeStorage.trySetJSON(STORE_KEY, { questions: _questions, nextId: _nextId });
   }
   function _load() {
     try {
-      var d = sanitizeStorageObject(JSON.parse(SafeStorage.get(STORE_KEY)));
+      var d = SafeStorage.getJSON(STORE_KEY);
       if (d && d.questions) { _questions = d.questions; _nextId = d.nextId || _questions.length + 1; }
     } catch(e) {}
   }
@@ -38274,7 +38274,7 @@ const ConversationBrancher = (() => {
 
   function _saveTree(tree) {
     _invalidateTreeIndex();
-    try { SafeStorage.set(TREE_KEY, JSON.stringify(tree)); } catch {}
+    SafeStorage.trySetJSON(TREE_KEY, tree);
   }
 
   /** Record a parent→child branch link. */
@@ -38751,7 +38751,7 @@ const SmartResponseCritic = (() => {
   }
 
   function _save() {
-    SafeStorage.trySet(STORAGE_KEY, JSON.stringify({ enabled: _enabled }));
+    SafeStorage.trySetJSON(STORAGE_KEY, { enabled: _enabled });
   }
 
   function _analyzeResponse(userText, assistantText) {
@@ -39003,7 +39003,7 @@ const SmartConversationPlanner = (() => {
   }
 
   function _save() {
-    SafeStorage.trySet(STORAGE_KEY, JSON.stringify(_plans));
+    SafeStorage.trySetJSON(STORAGE_KEY, _plans);
   }
 
   function _getCurrentPlan() {
@@ -39907,7 +39907,7 @@ const SmartInputPredictor = (() => {
 
   function load() {
     try {
-      var d = sanitizeStorageObject(JSON.parse(SafeStorage.get(STORAGE_KEY) || '{}'));
+      var d = SafeStorage.getJSON(STORAGE_KEY, {});
       enabled = d.enabled !== false;
       learnedPhrases = d.learnedPhrases || {};
       stats = d.stats || { shown: 0, accepted: 0 };
@@ -39916,11 +39916,11 @@ const SmartInputPredictor = (() => {
 
   function save() {
     try {
-      SafeStorage.set(STORAGE_KEY, JSON.stringify({
+      SafeStorage.setJSON(STORAGE_KEY, {
         enabled: enabled,
         learnedPhrases: learnedPhrases,
         stats: stats
-      }));
+      });
     } catch(e) { /* ignore */ }
   }
 
