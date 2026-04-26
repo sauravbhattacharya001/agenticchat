@@ -41113,3 +41113,361 @@ var ConversationBranching = (function () {
 
   return { toggle: toggle, show: show, hide: hide, forkAt: forkAt, switchTo: switchTo, deleteBranch: deleteBranch, renameBranch: renameBranch };
 })();
+
+/* ---------- Smart Conversation Compass ---------- */
+/**
+ * SmartConversationCompass (Alt+Shift+N)
+ *
+ * Autonomous topic trajectory tracker that visualises where the conversation
+ * has been and where it is heading.  Features:
+ *  - Canvas compass rose with animated heading needle
+ *  - Topic waypoint timeline showing progression
+ *  - Heading detection via TF-IDF cosine similarity across sliding windows
+ *  - Proactive course-correction suggestions when drift or stagnation detected
+ *  - Auto-monitor mode with toast alerts
+ *
+ * Usage: Alt+Shift+N  |  /compass  |  Command Palette → "compass"
+ */
+const SmartConversationCompass = (() => {
+  /* ── helpers ── */
+  const _esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+  /* ── topic extraction (reuse TF-IDF idea) ── */
+  const STOP = new Set('the a an is are was were be been being have has had do does did will would shall should may might can could i you he she it we they me him her us them my your his its our their this that these those am not no or and but if then else when where what which who whom how all each every both few more most other some such too very just also about above after again against at before below between by down during for from in into of off on out over through to under until up with'.split(' '));
+
+  function _tokenize(text) {
+    return (text || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 2 && !STOP.has(w));
+  }
+
+  function _tf(tokens) {
+    const m = {};
+    for (const t of tokens) m[t] = (m[t] || 0) + 1;
+    const len = tokens.length || 1;
+    for (const k of Object.keys(m)) m[k] /= len;
+    return m;
+  }
+
+  function _cosineSim(a, b) {
+    let dot = 0, na = 0, nb = 0;
+    const all = new Set([...Object.keys(a), ...Object.keys(b)]);
+    for (const k of all) {
+      const va = a[k] || 0, vb = b[k] || 0;
+      dot += va * vb; na += va * va; nb += vb * vb;
+    }
+    return (na && nb) ? dot / (Math.sqrt(na) * Math.sqrt(nb)) : 0;
+  }
+
+  function _topTerms(tf, n) {
+    return Object.entries(tf).sort((a,b) => b[1] - a[1]).slice(0, n).map(e => e[0]);
+  }
+
+  /* ── state ── */
+  let _panel = null, _visible = false, _autoMonitor = false, _autoTimer = null;
+
+  /* ── analysis ── */
+  function _getMessages() {
+    const out = document.getElementById('chat-output') || document.getElementById('output');
+    if (!out) return [];
+    const msgs = [];
+    out.querySelectorAll('.msg, .message, .chat-message, [class*="msg"]').forEach((el, idx) => {
+      const role = el.classList.contains('user') || el.classList.contains('user-message') ? 'user' : 'assistant';
+      const text = el.textContent || '';
+      if (text.trim()) msgs.push({ role, text, index: idx });
+    });
+    return msgs;
+  }
+
+  function _analyze() {
+    const msgs = _getMessages();
+    if (msgs.length < 2) return null;
+
+    // Build sliding windows of 3 messages
+    const windowSize = 3;
+    const windows = [];
+    for (let i = 0; i < msgs.length; i += windowSize) {
+      const slice = msgs.slice(i, i + windowSize);
+      const combined = slice.map(m => m.text).join(' ');
+      const tokens = _tokenize(combined);
+      const tf = _tf(tokens);
+      windows.push({ startIdx: i, endIdx: Math.min(i + windowSize - 1, msgs.length - 1), tf, tokens, topTerms: _topTerms(tf, 5) });
+    }
+
+    // Compute similarities between consecutive windows
+    const similarities = [];
+    for (let i = 1; i < windows.length; i++) {
+      similarities.push({ from: i - 1, to: i, sim: _cosineSim(windows[i-1].tf, windows[i].tf) });
+    }
+
+    // Overall trajectory: first window vs last window
+    const overallDrift = windows.length >= 2 ? _cosineSim(windows[0].tf, windows[windows.length - 1].tf) : 1;
+
+    // Detect heading: dominant topic shift direction
+    const headings = [];
+    for (let i = 1; i < windows.length; i++) {
+      const newTerms = windows[i].topTerms.filter(t => !windows[i-1].topTerms.includes(t));
+      const droppedTerms = windows[i-1].topTerms.filter(t => !windows[i].topTerms.includes(t));
+      headings.push({ window: i, newTerms, droppedTerms, similarity: similarities[i-1]?.sim || 0 });
+    }
+
+    // Stagnation detection: high similarity across last 3 windows
+    let stagnant = false;
+    if (similarities.length >= 2) {
+      const lastSims = similarities.slice(-2);
+      stagnant = lastSims.every(s => s.sim > 0.85);
+    }
+
+    // Exploration detection: low similarity (big jumps)
+    let exploring = false;
+    if (similarities.length >= 1) {
+      exploring = similarities[similarities.length - 1].sim < 0.2;
+    }
+
+    // Current heading angle (0-360) based on drift from origin
+    const headingAngle = Math.round((1 - overallDrift) * 180); // 0 = same topic, 180 = completely different
+
+    // Generate suggestions
+    const suggestions = [];
+    if (stagnant) suggestions.push({ icon: '🔄', msg: 'Conversation is stagnating — try exploring a new angle or asking a deeper question' });
+    if (exploring) suggestions.push({ icon: '🧭', msg: 'Big topic jump detected — consider bridging back to earlier themes for coherence' });
+    if (overallDrift < 0.15 && msgs.length > 10) suggestions.push({ icon: '🚀', msg: 'You\'ve drifted far from the original topic — that\'s fine if intentional!' });
+    if (overallDrift > 0.7 && msgs.length > 8) suggestions.push({ icon: '🎯', msg: 'Staying well focused on the original topic — great discipline!' });
+    if (!suggestions.length) suggestions.push({ icon: '✨', msg: 'Conversation is flowing naturally with good topic progression' });
+
+    return {
+      windows, similarities, overallDrift, headings, stagnant, exploring,
+      headingAngle, suggestions, totalMessages: msgs.length
+    };
+  }
+
+  /* ── Canvas compass drawing ── */
+  function _drawCompass(canvas, data) {
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width, h = canvas.height;
+    const cx = w / 2, cy = h / 2, r = Math.min(cx, cy) - 20;
+    const isDark = !document.body.classList.contains('light-theme');
+
+    ctx.clearRect(0, 0, w, h);
+
+    // Compass circle
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.strokeStyle = isDark ? '#45475a' : '#ccc';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Inner rings
+    for (let i = 1; i <= 3; i++) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, r * i / 4, 0, Math.PI * 2);
+      ctx.strokeStyle = isDark ? '#313244' : '#e0e0e0';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+
+    // Cardinal directions
+    const dirs = ['FOCUS', 'EXPLORE', 'DRIFT', 'DEPTH'];
+    ctx.font = '10px system-ui';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = isDark ? '#a6adc8' : '#666';
+    for (let i = 0; i < 4; i++) {
+      const angle = (i * Math.PI / 2) - Math.PI / 2;
+      ctx.fillText(dirs[i], cx + Math.cos(angle) * (r + 12), cy + Math.sin(angle) * (r + 12));
+    }
+
+    // Topic waypoints on the compass (plot windows as dots along a spiral)
+    if (data.windows.length > 1) {
+      ctx.beginPath();
+      for (let i = 0; i < data.windows.length; i++) {
+        const t = i / (data.windows.length - 1);
+        const angle = t * Math.PI * 1.5 - Math.PI / 2;
+        const dist = r * 0.3 + (1 - (data.similarities[Math.min(i, data.similarities.length - 1)]?.sim || 0.5)) * r * 0.5;
+        const px = cx + Math.cos(angle) * dist;
+        const py = cy + Math.sin(angle) * dist;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.strokeStyle = '#89b4fa80';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // Dots
+      for (let i = 0; i < data.windows.length; i++) {
+        const t = i / (data.windows.length - 1);
+        const angle = t * Math.PI * 1.5 - Math.PI / 2;
+        const dist = r * 0.3 + (1 - (data.similarities[Math.min(i, data.similarities.length - 1)]?.sim || 0.5)) * r * 0.5;
+        const px = cx + Math.cos(angle) * dist;
+        const py = cy + Math.sin(angle) * dist;
+        ctx.beginPath();
+        ctx.arc(px, py, i === data.windows.length - 1 ? 5 : 3, 0, Math.PI * 2);
+        ctx.fillStyle = i === data.windows.length - 1 ? '#f38ba8' : (i === 0 ? '#a6e3a1' : '#89b4fa');
+        ctx.fill();
+      }
+    }
+
+    // Heading needle
+    const needleAngle = (data.headingAngle * Math.PI / 180) - Math.PI / 2;
+    const needleLen = r * 0.7;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos(needleAngle) * needleLen, cy + Math.sin(needleAngle) * needleLen);
+    ctx.strokeStyle = '#f38ba8';
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+
+    // Center dot
+    ctx.beginPath();
+    ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+    ctx.fillStyle = '#cba6f7';
+    ctx.fill();
+  }
+
+  /* ── UI rendering ── */
+  function _render() {
+    const data = _analyze();
+    if (!_panel) return;
+    const body = _panel.querySelector('.compass-body');
+    if (!body) return;
+
+    if (!data) {
+      body.innerHTML = '<div class="compass-empty">🧭 Need at least 2 messages to plot a course.<br>Start chatting to see your conversation trajectory!</div>';
+      return;
+    }
+
+    let html = '';
+
+    // Compass canvas
+    html += '<div class="compass-canvas-wrap"><canvas id="compass-canvas" width="220" height="220"></canvas></div>';
+
+    // Stats
+    html += '<div class="compass-stats">';
+    html += '<div class="compass-stat"><span class="compass-stat-val">' + Math.round(data.overallDrift * 100) + '%</span><span class="compass-stat-lbl">Focus</span></div>';
+    html += '<div class="compass-stat"><span class="compass-stat-val">' + data.windows.length + '</span><span class="compass-stat-lbl">Waypoints</span></div>';
+    html += '<div class="compass-stat"><span class="compass-stat-val">' + data.totalMessages + '</span><span class="compass-stat-lbl">Messages</span></div>';
+    html += '<div class="compass-stat"><span class="compass-stat-val">' + data.headingAngle + '°</span><span class="compass-stat-lbl">Heading</span></div>';
+    html += '</div>';
+
+    // Status indicator
+    const statusColor = data.stagnant ? '#ffa726' : (data.exploring ? '#42a5f5' : '#66bb6a');
+    const statusLabel = data.stagnant ? '🔁 Stagnating' : (data.exploring ? '🔭 Exploring' : '⛵ Cruising');
+    html += '<div class="compass-status" style="border-left:3px solid ' + statusColor + '">' + statusLabel + '</div>';
+
+    // Topic waypoint timeline
+    html += '<div class="compass-section"><strong>📍 Topic Waypoints</strong>';
+    html += '<div class="compass-waypoints">';
+    for (let i = 0; i < data.windows.length; i++) {
+      const w = data.windows[i];
+      const isLast = i === data.windows.length - 1;
+      const isFirst = i === 0;
+      html += '<div class="compass-waypoint' + (isLast ? ' current' : '') + '">';
+      html += '<span class="compass-wp-dot" style="background:' + (isFirst ? '#a6e3a1' : (isLast ? '#f38ba8' : '#89b4fa')) + '"></span>';
+      html += '<span class="compass-wp-terms">' + w.topTerms.map(t => _esc(t)).join(', ') + '</span>';
+      if (i < data.similarities.length) {
+        html += '<span class="compass-wp-sim">' + Math.round(data.similarities[i].sim * 100) + '%</span>';
+      }
+      html += '</div>';
+    }
+    html += '</div></div>';
+
+    // Heading changes
+    if (data.headings.length) {
+      html += '<div class="compass-section"><strong>🔀 Course Changes</strong>';
+      const recent = data.headings.slice(-4);
+      for (const h of recent) {
+        if (h.newTerms.length || h.droppedTerms.length) {
+          html += '<div class="compass-change">';
+          if (h.newTerms.length) html += '<span class="compass-new">+' + h.newTerms.map(t => _esc(t)).join(', ') + '</span>';
+          if (h.droppedTerms.length) html += '<span class="compass-dropped">-' + h.droppedTerms.map(t => _esc(t)).join(', ') + '</span>';
+          html += '</div>';
+        }
+      }
+      html += '</div>';
+    }
+
+    // Suggestions
+    html += '<div class="compass-section"><strong>💡 Navigation Advice</strong>';
+    for (const s of data.suggestions) {
+      html += '<div class="compass-advice">' + s.icon + ' ' + _esc(s.msg) + '</div>';
+    }
+    html += '</div>';
+
+    // Auto-monitor toggle
+    html += '<div class="compass-section compass-auto">';
+    html += '<label><input type="checkbox" id="compass-auto-toggle" ' + (_autoMonitor ? 'checked' : '') + '> Auto-monitor (toast alerts)</label>';
+    html += '</div>';
+
+    body.innerHTML = html;
+
+    // Draw compass
+    const canvasEl = document.getElementById('compass-canvas');
+    if (canvasEl) _drawCompass(canvasEl, data);
+
+    // Auto-monitor toggle handler
+    const autoEl = document.getElementById('compass-auto-toggle');
+    if (autoEl) autoEl.addEventListener('change', () => { _toggleAutoMonitor(autoEl.checked); });
+  }
+
+  /* ── auto-monitor ── */
+  function _toggleAutoMonitor(on) {
+    _autoMonitor = on;
+    if (on && !_autoTimer) {
+      _autoTimer = setInterval(_autoCheck, 30000);
+    } else if (!on && _autoTimer) {
+      clearInterval(_autoTimer);
+      _autoTimer = null;
+    }
+  }
+
+  function _autoCheck() {
+    const data = _analyze();
+    if (!data) return;
+    if (data.stagnant && typeof ToastManager !== 'undefined') {
+      ToastManager.show('🧭 Compass: conversation is stagnating — try a new angle!', { id: 'compass-alert', durationMs: 4000 });
+    }
+    if (data.exploring && typeof ToastManager !== 'undefined') {
+      ToastManager.show('🧭 Compass: big topic jump — consider bridging themes', { id: 'compass-alert', durationMs: 4000 });
+    }
+    if (_visible) _render();
+  }
+
+  /* ── panel ── */
+  function _createPanel() {
+    if (_panel) return;
+    _panel = document.createElement('div');
+    _panel.className = 'compass-panel';
+    _panel.innerHTML = '<div class="compass-header"><span>🧭 Conversation Compass</span><div class="compass-header-actions"><button class="btn-sm compass-refresh" title="Refresh">🔄</button><button class="btn-sm compass-close" title="Close">✕</button></div></div><div class="compass-body"></div>';
+    document.body.appendChild(_panel);
+
+    _panel.querySelector('.compass-close').addEventListener('click', hide);
+    _panel.querySelector('.compass-refresh').addEventListener('click', _render);
+  }
+
+  function show() { _createPanel(); _render(); _panel.classList.add('open'); _visible = true; }
+  function hide() { if (_panel) _panel.classList.remove('open'); _visible = false; }
+  function toggle() { _visible ? hide() : show(); }
+
+  /* ── init ── */
+  function init() {
+    // Keyboard shortcut
+    document.addEventListener('keydown', e => {
+      if (e.altKey && e.shiftKey && !e.ctrlKey && e.key === 'N') { e.preventDefault(); toggle(); }
+    });
+
+    if (typeof KeyboardShortcuts !== 'undefined' && KeyboardShortcuts.register) {
+      KeyboardShortcuts.register('Alt+Shift+N', 'Conversation Compass', toggle);
+    }
+    if (typeof CommandPalette !== 'undefined' && CommandPalette.register) {
+      CommandPalette.register({ name: 'compass', description: 'Topic trajectory compass with heading detection', icon: '🧭', action: toggle });
+    }
+    if (typeof SlashCommands !== 'undefined' && SlashCommands.register) {
+      SlashCommands.register('/compass', 'Open conversation compass', toggle);
+    }
+    if (typeof PanelRegistry !== 'undefined' && PanelRegistry.register) {
+      PanelRegistry.register('conversation-compass', hide);
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  return { toggle, show, hide, analyze: _analyze };
+})();
