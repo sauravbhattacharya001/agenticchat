@@ -41903,3 +41903,509 @@ const SmartSessionInsights = (() => {
 
   return { toggle, show, hide, analyze };
 })();
+
+/* ---------- Smart Auto-Continue ---------- */
+/**
+ * SmartAutoContinue — autonomous truncation detection & response continuation.
+ *
+ * Monitors AI responses for signs of truncation (unclosed code blocks,
+ * mid-sentence cutoffs, explicit continuation markers) and either prompts
+ * the user or automatically sends a continuation request, merging the
+ * result seamlessly into the original response.
+ *
+ * Agentic capability: the chat detects incomplete responses and acts on
+ * its own to retrieve the rest, reducing user friction.
+ *
+ * Toggle panel: Alt+Shift+U  |  Slash: /autocontinue  |  Command Palette
+ *
+ * @namespace SmartAutoContinue
+ */
+const SmartAutoContinue = (() => {
+  'use strict';
+
+  const STORAGE_KEY = 'ac-autocontinue-cfg';
+  const MAX_CHAIN = 5;          // max consecutive auto-continues to prevent loops
+  const CONTINUE_PROMPT = 'Please continue exactly from where you left off. Do not repeat any content you already provided.';
+
+  let _enabled = true;          // feature on/off
+  let _autoMode = false;        // true = auto-send, false = prompt user
+  let _chainCount = 0;          // consecutive continues in current exchange
+  let _panel = null;
+  let _visible = false;
+  let _stats = { detected: 0, continued: 0, merged: 0 };
+  let _history = [];             // recent truncation events for the panel
+  let _isContinuing = false;     // guard against re-entrant detection
+
+  /* ── persistence ── */
+  function _loadConfig() {
+    try {
+      const raw = (typeof SafeStorage !== 'undefined') ? SafeStorage.get(STORAGE_KEY) : null;
+      if (raw) {
+        const cfg = (typeof sanitizeStorageObject === 'function') ? sanitizeStorageObject(JSON.parse(raw)) : JSON.parse(raw);
+        if (cfg) {
+          _enabled = cfg.enabled !== false;
+          _autoMode = cfg.autoMode === true;
+          _stats = cfg.stats || _stats;
+          _history = Array.isArray(cfg.history) ? cfg.history.slice(-50) : [];
+        }
+      }
+    } catch (_) { /* use defaults */ }
+  }
+
+  function _saveConfig() {
+    try {
+      if (typeof SafeStorage !== 'undefined') {
+        SafeStorage.trySetJSON(STORAGE_KEY, {
+          enabled: _enabled,
+          autoMode: _autoMode,
+          stats: _stats,
+          history: _history.slice(-50)
+        });
+      }
+    } catch (_) { /* best effort */ }
+  }
+
+  /* ── truncation detection engine ── */
+  function detectTruncation(text) {
+    if (!text || typeof text !== 'string') return { truncated: false, signals: [], confidence: 0 };
+
+    const signals = [];
+    let confidence = 0;
+
+    // 1. Unclosed code blocks (strong signal)
+    const openFences = (text.match(/```/g) || []).length;
+    if (openFences % 2 !== 0) {
+      signals.push('unclosed-code-block');
+      confidence += 0.9;
+    }
+
+    // 2. Explicit continuation markers
+    const continuationPatterns = [
+      /(?:I(?:'ll| will|'ll) continue|let me continue|to be continued|continuing (?:in|with|from))[^.]*\.?\s*$/i,
+      /(?:here'?s the (?:rest|next|remaining)|the (?:rest|remaining) (?:of|follows))[^.]*:?\s*$/i,
+      /\.{3,}\s*$/,
+    ];
+    for (const pat of continuationPatterns) {
+      if (pat.test(text.trim())) {
+        signals.push('continuation-marker');
+        confidence += 0.7;
+        break;
+      }
+    }
+
+    // 3. Mid-sentence cutoff — ends without terminal punctuation
+    const trimmed = text.trim();
+    const lastChar = trimmed.charAt(trimmed.length - 1);
+    const terminalChars = new Set(['.', '!', '?', ')', ']', '}', '`', '"', "'", ':', ';', '|']);
+    // Only count mid-sentence if text is long enough to be a real response
+    if (trimmed.length > 100 && !terminalChars.has(lastChar)) {
+      signals.push('mid-sentence-cutoff');
+      confidence += 0.5;
+    }
+
+    // 4. Numbered list interrupted (e.g., "3." but started counting from 1)
+    const numberedItems = trimmed.match(/^\d+[.)]/gm);
+    if (numberedItems && numberedItems.length >= 2) {
+      const lastNum = parseInt(numberedItems[numberedItems.length - 1], 10);
+      // If the last numbered item seems to have content cut short
+      const lastLine = trimmed.split('\n').pop().trim();
+      if (lastLine.match(/^\d+[.)]\s*\S{0,20}$/) && lastLine.length < 40) {
+        signals.push('incomplete-list');
+        confidence += 0.4;
+      }
+    }
+
+    // 5. Response ends abruptly in a markdown heading with no content after
+    if (/^#{1,6}\s+.+$/m.test(trimmed.split('\n').pop().trim())) {
+      signals.push('heading-without-content');
+      confidence += 0.35;
+    }
+
+    // Cap confidence at 1.0
+    confidence = Math.min(confidence, 1.0);
+
+    return {
+      truncated: confidence >= 0.4,
+      signals,
+      confidence: Math.round(confidence * 100) / 100
+    };
+  }
+
+  /* ── continuation logic ── */
+  async function _performContinuation() {
+    if (_isContinuing) return;
+    if (_chainCount >= MAX_CHAIN) {
+      if (typeof ToastManager !== 'undefined') {
+        ToastManager.show('\u26A0\uFE0F Auto-continue chain limit reached (' + MAX_CHAIN + '). Stopping to prevent loops.', 'warning');
+      }
+      _chainCount = 0;
+      return;
+    }
+
+    _isContinuing = true;
+    _chainCount++;
+
+    try {
+      // Get the current last assistant message for merging later
+      const history = ConversationManager.getHistory();
+      const lastAssistant = history.length > 0 && history[history.length - 1].role === 'assistant'
+        ? history[history.length - 1] : null;
+
+      if (!lastAssistant) { _isContinuing = false; return; }
+
+      const originalContent = lastAssistant.content;
+
+      // Add continuation as user message
+      ConversationManager.addMessage('user', CONTINUE_PROMPT);
+
+      // Show UI feedback
+      if (typeof UIController !== 'undefined') {
+        UIController.setChatOutput('');
+        UIController.setConsoleOutput('(auto-continuing…)');
+      }
+      if (typeof TypingIndicatorBubble !== 'undefined') TypingIndicatorBubble.show();
+
+      const apiKey = (typeof ApiKeyManager !== 'undefined') ? ApiKeyManager.getOpenAIKey() : null;
+      if (!apiKey) {
+        _isContinuing = false;
+        return;
+      }
+
+      const messages = ConversationManager.getMessages();
+
+      // Use the same streaming/non-streaming path as ChatController
+      let reply = '';
+      if (typeof OpenAIClient !== 'undefined' && typeof ChatConfig !== 'undefined') {
+        if (ChatConfig.STREAMING_ENABLED) {
+          let firstToken = true;
+          const result = await OpenAIClient.fetchRaw({
+            body: {
+              model: ChatConfig.MODEL,
+              messages: messages,
+              max_tokens: ChatConfig.MAX_TOKENS_RESPONSE,
+              stream: true
+            },
+            apiKey: apiKey,
+            signal: (typeof AbortController !== 'undefined') ? new AbortController().signal : undefined
+          });
+
+          if (result.ok) {
+            const rsp = result.response;
+            const reader = rsp.body.getReader();
+            const decoder = new TextDecoder();
+            const chunks = [];
+            let buffer = '';
+
+            function consumeLine(line) {
+              const t = line.trim();
+              if (!t || !t.startsWith('data: ')) return;
+              const payload = t.slice(6);
+              if (payload === '[DONE]') return;
+              try {
+                const parsed = JSON.parse(payload);
+                const delta = parsed.choices && parsed.choices[0] && parsed.choices[0].delta && parsed.choices[0].delta.content;
+                if (delta) {
+                  chunks.push(delta);
+                  if (firstToken && typeof TypingIndicatorBubble !== 'undefined') { TypingIndicatorBubble.hide(); firstToken = false; }
+                  if (typeof UIController !== 'undefined') UIController.appendChatOutput(delta);
+                }
+              } catch (_) {}
+            }
+
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              buffer += decoder.decode(value, { stream: true });
+              const lines = buffer.split('\n');
+              buffer = lines.pop();
+              for (const line of lines) consumeLine(line);
+            }
+            buffer += decoder.decode();
+            if (buffer.trim()) consumeLine(buffer);
+
+            reply = chunks.join('');
+          }
+        } else {
+          // Non-streaming
+          const result = await OpenAIClient.complete({
+            messages: messages,
+            apiKey: apiKey,
+            model: ChatConfig.MODEL,
+            maxTokens: ChatConfig.MAX_TOKENS_RESPONSE
+          });
+          if (result.ok && result.data) {
+            reply = (result.data.choices && result.data.choices[0] && result.data.choices[0].message && result.data.choices[0].message.content) || '';
+          }
+        }
+      }
+
+      if (typeof TypingIndicatorBubble !== 'undefined') TypingIndicatorBubble.hide();
+
+      if (reply) {
+        // Merge: remove the continuation user message and replace last assistant
+        // with the combined content
+        // Pop the continuation user message
+        ConversationManager.popLast();
+
+        // Pop the original assistant message
+        const h2 = ConversationManager.getHistory();
+        if (h2.length > 0 && h2[h2.length - 1].role === 'assistant') {
+          ConversationManager.popLast();
+        }
+
+        // Add merged message
+        const merged = originalContent + '\n\n' + reply;
+        ConversationManager.addMessage('assistant', merged, { timestamp: Date.now() });
+
+        // Update UI
+        if (typeof UIController !== 'undefined') {
+          UIController.setChatOutput(merged);
+          UIController.setConsoleOutput('(auto-continued and merged)');
+        }
+
+        _stats.continued++;
+        _stats.merged++;
+        _history.push({
+          timestamp: Date.now(),
+          action: 'continued',
+          chainStep: _chainCount,
+          mergedLength: merged.length
+        });
+        _saveConfig();
+
+        // Auto-save session
+        if (typeof SessionManager !== 'undefined' && SessionManager.autoSaveIfEnabled) {
+          SessionManager.autoSaveIfEnabled();
+        }
+
+        // Check if the continuation itself is also truncated
+        const recheck = detectTruncation(reply);
+        if (recheck.truncated && recheck.confidence >= 0.5) {
+          if (_autoMode) {
+            await _performContinuation();
+          } else {
+            _showContinueToast(recheck);
+          }
+        } else {
+          _chainCount = 0; // reset chain on successful completion
+        }
+      } else {
+        // Continuation failed — remove the user message we added
+        ConversationManager.popLast();
+        if (typeof UIController !== 'undefined') {
+          UIController.setConsoleOutput('(continuation failed)');
+        }
+        _chainCount = 0;
+      }
+    } catch (err) {
+      if (typeof TypingIndicatorBubble !== 'undefined') TypingIndicatorBubble.hide();
+      // Remove continuation user message on error
+      const h3 = ConversationManager.getHistory();
+      if (h3.length > 0 && h3[h3.length - 1].role === 'user' && h3[h3.length - 1].content === CONTINUE_PROMPT) {
+        ConversationManager.popLast();
+      }
+      _chainCount = 0;
+    } finally {
+      _isContinuing = false;
+    }
+  }
+
+  /* ── toast notification ── */
+  function _showContinueToast(detection) {
+    if (typeof ToastManager === 'undefined') return;
+
+    const signalText = detection.signals.map(function(s) {
+      switch (s) {
+        case 'unclosed-code-block': return 'unclosed code block';
+        case 'continuation-marker': return 'continuation marker';
+        case 'mid-sentence-cutoff': return 'mid-sentence cutoff';
+        case 'incomplete-list':     return 'incomplete list';
+        case 'heading-without-content': return 'heading without content';
+        default: return s;
+      }
+    }).join(', ');
+
+    const toastId = 'autocontinue-' + Date.now();
+    const msg = '\u2702\uFE0F Response appears truncated (' + signalText +
+      ', ' + Math.round(detection.confidence * 100) + '% confidence). ' +
+      '<button class="toast-btn" data-autocontinue-action="continue">Continue</button> ' +
+      '<button class="toast-btn" data-autocontinue-action="dismiss">Dismiss</button>';
+
+    ToastManager.show(msg, 'info', 15000);
+
+    // Attach click handler via delegation
+    setTimeout(function() {
+      document.addEventListener('click', function _handler(e) {
+        var btn = e.target.closest('[data-autocontinue-action]');
+        if (!btn) return;
+        document.removeEventListener('click', _handler);
+        var action = btn.getAttribute('data-autocontinue-action');
+        if (action === 'continue') {
+          _performContinuation();
+        }
+      });
+    }, 50);
+  }
+
+  /* ── observer hook ── */
+  function _onResponseComplete() {
+    if (!_enabled || _isContinuing) return;
+
+    const history = ConversationManager.getHistory();
+    if (history.length < 2) return;
+
+    const last = history[history.length - 1];
+    if (last.role !== 'assistant') return;
+
+    const detection = detectTruncation(last.content);
+    if (!detection.truncated) {
+      _chainCount = 0;
+      return;
+    }
+
+    _stats.detected++;
+    _history.push({
+      timestamp: Date.now(),
+      action: 'detected',
+      signals: detection.signals,
+      confidence: detection.confidence
+    });
+    _saveConfig();
+
+    if (_autoMode) {
+      _performContinuation();
+    } else {
+      _showContinueToast(detection);
+    }
+  }
+
+  /* ── settings panel ── */
+  function _createPanel() {
+    if (_panel) return;
+    _panel = document.createElement('div');
+    _panel.className = 'sac-panel';
+
+    _panel.innerHTML = '<div class="sac-header">' +
+      '<span>\u2702\uFE0F Auto-Continue</span>' +
+      '<div class="sac-header-actions">' +
+      '<button class="btn-sm sac-close" title="Close">\u2715</button>' +
+      '</div></div>' +
+      '<div class="sac-body">' +
+      '<div class="sac-section">' +
+      '<h4>Settings</h4>' +
+      '<label class="sac-toggle-label"><input type="checkbox" id="sac-enabled"' + (_enabled ? ' checked' : '') + '> Feature enabled</label>' +
+      '<label class="sac-toggle-label"><input type="checkbox" id="sac-auto"' + (_autoMode ? ' checked' : '') + '> Auto-continue (no prompt)</label>' +
+      '<p class="sac-note">When auto-continue is on, truncated responses are automatically continued and merged. Max chain: ' + MAX_CHAIN + '.</p>' +
+      '</div>' +
+      '<div class="sac-section">' +
+      '<h4>Statistics</h4>' +
+      '<div class="sac-stats">' +
+      '<div class="sac-stat"><span class="sac-stat-num" id="sac-stat-detected">' + _stats.detected + '</span><span class="sac-stat-label">Detected</span></div>' +
+      '<div class="sac-stat"><span class="sac-stat-num" id="sac-stat-continued">' + _stats.continued + '</span><span class="sac-stat-label">Continued</span></div>' +
+      '<div class="sac-stat"><span class="sac-stat-num" id="sac-stat-merged">' + _stats.merged + '</span><span class="sac-stat-label">Merged</span></div>' +
+      '</div></div>' +
+      '<div class="sac-section">' +
+      '<h4>Recent Events</h4>' +
+      '<div class="sac-events" id="sac-events"></div>' +
+      '</div>' +
+      '</div>';
+
+    document.body.appendChild(_panel);
+
+    _panel.querySelector('.sac-close').addEventListener('click', hide);
+
+    var enabledEl = _panel.querySelector('#sac-enabled');
+    if (enabledEl) enabledEl.addEventListener('change', function() {
+      _enabled = enabledEl.checked;
+      _saveConfig();
+      if (typeof ToastManager !== 'undefined') ToastManager.show('Auto-Continue ' + (_enabled ? 'enabled' : 'disabled'), 'info');
+    });
+
+    var autoEl = _panel.querySelector('#sac-auto');
+    if (autoEl) autoEl.addEventListener('change', function() {
+      _autoMode = autoEl.checked;
+      _saveConfig();
+      if (typeof ToastManager !== 'undefined') ToastManager.show('Auto-mode ' + (_autoMode ? 'on' : 'off'), 'info');
+    });
+
+    _renderEvents();
+  }
+
+  function _renderEvents() {
+    var container = _panel && _panel.querySelector('#sac-events');
+    if (!container) return;
+    if (_history.length === 0) {
+      container.innerHTML = '<p class="sac-note">No truncation events yet.</p>';
+      return;
+    }
+    var html = '';
+    var items = _history.slice(-20).reverse();
+    items.forEach(function(ev) {
+      var date = new Date(ev.timestamp);
+      var timeStr = date.toLocaleTimeString();
+      var icon = ev.action === 'detected' ? '\uD83D\uDD0D' : '\u2705';
+      var detail = ev.signals ? ev.signals.join(', ') : ('chain step ' + ev.chainStep);
+      html += '<div class="sac-event">' + icon + ' <span class="sac-event-time">' + timeStr + '</span> ' + ev.action + ' — ' + detail + '</div>';
+    });
+    container.innerHTML = html;
+  }
+
+  function _refreshPanel() {
+    if (!_panel) return;
+    var el;
+    el = _panel.querySelector('#sac-stat-detected'); if (el) el.textContent = _stats.detected;
+    el = _panel.querySelector('#sac-stat-continued'); if (el) el.textContent = _stats.continued;
+    el = _panel.querySelector('#sac-stat-merged'); if (el) el.textContent = _stats.merged;
+    _renderEvents();
+  }
+
+  function show() { _createPanel(); _refreshPanel(); _panel.classList.add('open'); _visible = true; }
+  function hide() { if (_panel) _panel.classList.remove('open'); _visible = false; }
+  function toggle() { _visible ? hide() : show(); }
+
+  /* ── init ── */
+  function init() {
+    _loadConfig();
+
+    // Keyboard shortcut
+    document.addEventListener('keydown', function(e) {
+      if (e.altKey && e.shiftKey && !e.ctrlKey && e.key === 'U') { e.preventDefault(); toggle(); }
+    });
+    if (typeof KeyboardShortcuts !== 'undefined' && KeyboardShortcuts.register) {
+      KeyboardShortcuts.register('Alt+Shift+U', 'Smart Auto-Continue', toggle);
+    }
+    if (typeof CommandPalette !== 'undefined' && CommandPalette.register) {
+      CommandPalette.register({ name: 'autocontinue', description: 'Truncation detection & auto-continuation settings', icon: '\u2702\uFE0F', action: toggle });
+    }
+    if (typeof SlashCommands !== 'undefined' && SlashCommands.register) {
+      SlashCommands.register('/autocontinue', 'Configure auto-continue for truncated responses', toggle);
+    }
+    if (typeof PanelRegistry !== 'undefined' && PanelRegistry.register) {
+      PanelRegistry.register('autocontinue', hide);
+    }
+
+    // Hook into ChatOutputObserver to detect when responses finish
+    // We use a debounced approach: wait for output to stabilize
+    var _debounceTimer = null;
+    if (typeof ChatOutputObserver !== 'undefined' && ChatOutputObserver.register) {
+      ChatOutputObserver.register('smart-autocontinue', function() {
+        if (!_enabled || _isContinuing) return;
+        clearTimeout(_debounceTimer);
+        _debounceTimer = setTimeout(_onResponseComplete, 2000); // wait 2s after last DOM change
+      });
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  return {
+    toggle: toggle,
+    show: show,
+    hide: hide,
+    detect: detectTruncation,
+    continueResponse: _performContinuation,
+    isEnabled: function() { return _enabled; },
+    setEnabled: function(v) { _enabled = !!v; _saveConfig(); },
+    setAutoMode: function(v) { _autoMode = !!v; _saveConfig(); }
+  };
+})();

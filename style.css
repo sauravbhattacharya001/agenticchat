@@ -5283,3 +5283,24 @@ body.light-theme .enhance-panel .enhance-modes button.active { background: #3b82
 .ssi-score-bar{position:relative;height:24px;background:var(--border,#333);border-radius:12px;overflow:hidden;margin-top:8px}
 .ssi-score-fill{height:100%;background:linear-gradient(90deg,#42a5f5,#66bb6a);border-radius:12px;transition:width .5s}
 .ssi-score-label{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:.75rem;font-weight:700;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.5)}
+
+/* ── Smart Auto-Continue panel ── */
+.sac-panel{position:fixed;top:60px;right:-380px;width:360px;max-height:80vh;background:var(--bg-secondary,#1e1e2e);border:1px solid var(--border,#45475a);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.4);z-index:9999;transition:right .3s ease;overflow:hidden;display:flex;flex-direction:column}
+.sac-panel.open{right:16px}
+.sac-header{display:flex;justify-content:space-between;align-items:center;padding:14px 16px 10px;border-bottom:1px solid var(--border,#45475a);font-weight:700;font-size:15px;color:var(--text-primary,#cdd6f4)}
+.sac-header-actions{display:flex;gap:6px}
+.sac-body{padding:14px 16px;overflow-y:auto;flex:1}
+.sac-section{margin-bottom:16px}
+.sac-section h4{margin:0 0 8px;font-size:.85rem;color:var(--text-secondary,#a6adc8);font-weight:600}
+.sac-toggle-label{display:flex;align-items:center;gap:8px;font-size:.82rem;color:var(--text-primary,#cdd6f4);cursor:pointer;margin-bottom:6px}
+.sac-toggle-label input[type=checkbox]{accent-color:#42a5f5;width:16px;height:16px}
+.sac-note{font-size:.75rem;color:var(--text-secondary,#888);line-height:1.4;margin:6px 0 0}
+.sac-stats{display:flex;gap:12px}
+.sac-stat{text-align:center;flex:1;padding:10px 8px;background:rgba(255,255,255,.04);border-radius:8px}
+.sac-stat-num{display:block;font-size:1.4rem;font-weight:700;color:#42a5f5}
+.sac-stat-label{font-size:.7rem;color:var(--text-secondary,#888);margin-top:2px}
+.sac-events{max-height:200px;overflow-y:auto}
+.sac-event{font-size:.78rem;padding:4px 0;color:var(--text-primary,#cdd6f4);border-bottom:1px solid rgba(255,255,255,.04)}
+.sac-event-time{color:var(--text-secondary,#888);font-size:.72rem}
+.toast-btn{background:#42a5f5;color:#fff;border:none;border-radius:4px;padding:3px 10px;font-size:.78rem;cursor:pointer;margin-left:4px}
+.toast-btn:hover{background:#1e88e5}
