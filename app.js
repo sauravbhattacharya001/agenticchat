@@ -6882,13 +6882,7 @@ const CostDashboard = (() => {
     const rows = log.map(e =>
       `${new Date(e.ts).toISOString()},${e.model},${e.pt},${e.ct},${e.cost.toFixed(6)}`
     ).join('\n');
-    const blob = new Blob([header + rows], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `agenticchat-costs-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadBlob(`agenticchat-costs-${new Date().toISOString().slice(0, 10)}.csv`, header + rows, 'text/csv;charset=utf-8');
   }
 
   function open()   { if (!isOpen) render(); }
@@ -10525,13 +10519,7 @@ const ConversationSummarizer = (() => {
     jsonBtn.title = 'Download summary as JSON';
     jsonBtn.addEventListener('click', function() {
       var json = exportSummary('json');
-      var blob = new Blob([json], { type: 'application/json' });
-      var url = URL.createObjectURL(blob);
-      var a = document.createElement('a');
-      a.href = url;
-      a.download = 'conversation-summary.json';
-      a.click();
-      URL.revokeObjectURL(url);
+      downloadBlob('conversation-summary.json', json, 'application/json');
     });
     actions.appendChild(jsonBtn);
 
@@ -11254,13 +11242,7 @@ const MessageAnnotations = (() => {
     exportBtn.textContent = '⬇ Export JSON';
     exportBtn.addEventListener('click', () => {
       const data = exportAnnotations();
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'annotations.json';
-      a.click();
-      URL.revokeObjectURL(url);
+      downloadBlob('annotations.json', JSON.stringify(data, null, 2), 'application/json');
     });
     footer.appendChild(exportBtn);
 
@@ -14517,9 +14499,9 @@ const ResponseRating = (() => {
       for (const r of ratings) {
         csv += `${r.messageIndex},${r.rating},"${(r.model || '').replace(/"/g, '""')}",${new Date(r.timestamp).toISOString()},"${(r.snippet || '').replace(/"/g, '""')}"\n`;
       }
-      _download(`ratings-${ts}.csv`, csv, 'text/csv');
+      downloadBlob(`ratings-${ts}.csv`, csv, 'text/csv');
     } else {
-      _download(`ratings-${ts}.json`, JSON.stringify(ratings, null, 2), 'application/json');
+      downloadBlob(`ratings-${ts}.json`, JSON.stringify(ratings, null, 2), 'application/json');
     }
   }
 
@@ -14530,15 +14512,6 @@ const ResponseRating = (() => {
   }
 
   const _esc = _escapeHtml;
-
-  function _download(name, content, mime) {
-    const blob = new Blob([content], { type: mime });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = name;
-    document.body.appendChild(a); a.click();
-    setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
-  }
 
   return {
     init, decorateMessages, decorateOne: _decorateOneRating,
@@ -16384,13 +16357,7 @@ const ModelComparePanel = (() => {
     // Export history
     panelEl.querySelector('.mcp-btn-export').addEventListener('click', function () {
       const json = ModelCompare.exportHistory();
-      const blob = new Blob([json], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'model-comparisons-' + new Date().toISOString().slice(0, 10) + '.json';
-      a.click();
-      URL.revokeObjectURL(url);
+      downloadBlob('model-comparisons-' + new Date().toISOString().slice(0, 10) + '.json', json, 'application/json');
     });
 
     // Clear history
@@ -17822,15 +17789,7 @@ const UsageHeatmap = (() => {
       csv += DAY_NAMES[d] + ',' + grid[d].join(',') + '\n';
     }
 
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'usage-heatmap.csv';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    downloadBlob('usage-heatmap.csv', csv, 'text/csv');
   }
 
   /* -- Init ------------------------------------------------------------ */
@@ -20140,14 +20099,7 @@ const PromptChainRunner = (() => {
   // ── Import / Export ──
 
   function exportChains() {
-    const json = JSON.stringify(_chains, null, 2);
-    const blob = new Blob([json], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'prompt-chains-' + new Date().toISOString().slice(0, 10) + '.json';
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadBlob('prompt-chains-' + new Date().toISOString().slice(0, 10) + '.json', JSON.stringify(_chains, null, 2), 'application/json');
   }
 
   function importChains() {
@@ -23578,12 +23530,7 @@ const CustomThemeCreator = (() => {
       return;
     }
     const json = JSON.stringify(themes, null, 2);
-    const blob = new Blob([json], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = 'agenticchat-themes.json';
-    document.body.appendChild(a); a.click();
-    document.body.removeChild(a); URL.revokeObjectURL(url);
+    downloadBlob('agenticchat-themes.json', json, 'application/json');
   }
 
   function _importThemes() {
@@ -23961,12 +23908,7 @@ const TextExpander = (() => {
   }
 
   function _handleExport() {
-    const json = exportJSON();
-    const blob = new Blob([json], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = 'text-expander-snippets.json'; a.click();
-    URL.revokeObjectURL(url);
+    downloadBlob('text-expander-snippets.json', exportJSON(), 'application/json');
   }
 
   function _handleImport() {
@@ -24619,13 +24561,7 @@ const SessionTemplates = (() => {
 
   /* ---- Export / Import ---- */
   function exportAll() {
-    const templates = _loadTemplates();
-    const blob = new Blob([JSON.stringify(templates, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'session-templates.json';
-    a.click();
-    URL.revokeObjectURL(a.href);
+    downloadBlob('session-templates.json', JSON.stringify(_loadTemplates(), null, 2), 'application/json');
   }
 
   function importFromJSON(jsonString) {
@@ -28384,12 +28320,7 @@ const PinBoard = (() => {
 
   function exportPins() {
     const pins = _load();
-    const blob = new Blob([JSON.stringify(pins, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.download = 'pinboard-export.json';
-    a.href = URL.createObjectURL(blob);
-    a.click();
-    URL.revokeObjectURL(a.href);
+    downloadBlob('pinboard-export.json', JSON.stringify(pins, null, 2), 'application/json');
   }
 
   function clearAll() {
@@ -30775,11 +30706,7 @@ const ApiInspector = (() => {
   }
 
   function _exportLog() {
-    const blob = new Blob([JSON.stringify(_entries, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `api-inspector-${new Date().toISOString().slice(0,10)}.json`;
-    a.click(); URL.revokeObjectURL(url);
+    downloadBlob(`api-inspector-${new Date().toISOString().slice(0,10)}.json`, JSON.stringify(_entries, null, 2), 'application/json');
   }
 
   function _esc(s) {
@@ -33061,8 +32988,7 @@ var ConversationAutopilot = (function () {
     });
     document.getElementById('autopilot-export').addEventListener('click', function () {
       var data = { goal: _state.goal, mode: _state.mode, steps: _state.trail.length, trail: _state.trail, timestamp: new Date().toISOString() };
-      var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'autopilot-trail-' + Date.now() + '.json'; a.click();
+      downloadBlob('autopilot-trail-' + Date.now() + '.json', JSON.stringify(data, null, 2), 'application/json');
     });
   }
 
@@ -35777,12 +35703,7 @@ var ConversationMemory = (function () {
       _render();
     });
     document.getElementById('memory-export-btn').addEventListener('click', function () {
-      var data = JSON.stringify(_load(), null, 2);
-      var blob = new Blob([data], { type: 'application/json' });
-      var url = URL.createObjectURL(blob);
-      var a = document.createElement('a');
-      a.href = url; a.download = 'conversation-memories.json'; a.click();
-      URL.revokeObjectURL(url);
+      downloadBlob('conversation-memories.json', JSON.stringify(_load(), null, 2), 'application/json');
     });
     document.getElementById('memory-clear-btn').addEventListener('click', function () {
       if (confirm('Delete all conversation memories? This cannot be undone.')) {
@@ -36636,8 +36557,7 @@ const SmartKnowledgeMap = (function () {
     document.getElementById('skm-export-json').addEventListener('click', function () {
       var data = { nodes: nodes.map(function (n) { return { label: n.label, category: n.category, count: n.count }; }),
         edges: edges.map(function (e) { return { source: e.source.label, target: e.target.label, weight: e.weight }; }) };
-      var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'knowledge-map.json'; a.click();
+      downloadBlob('knowledge-map.json', JSON.stringify(data, null, 2), 'application/json');
     });
     document.getElementById('skm-export-png').addEventListener('click', function () {
       if (!canvas) return;
@@ -40704,12 +40624,7 @@ var SmartConversationDigest = (function () {
       lastDigest.unresolvedQuestions.forEach(function (q) { text += '- ' + q + '\n'; });
       text += '\n';
     }
-    var blob = new Blob([text], { type: 'text/markdown' });
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement('a');
-    a.href = url; a.download = 'conversation-digest-' + dayKey() + '.md';
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    downloadBlob('conversation-digest-' + dayKey() + '.md', text, 'text/markdown');
   }
 
   function toggle() {
