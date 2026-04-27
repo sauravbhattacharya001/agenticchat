@@ -107,6 +107,7 @@
  *   SmartConversationPlanner - goal-oriented conversation planner with auto-generated milestones, progress tracking, drift alerts (Alt+Shift+G)
  *   SmartTokenBudgetManager - autonomous token budget intelligence with usage gauge, growth prediction, compression recommendations (Alt+Shift+B)
  *   SmartConversationDigest - autonomous cross-session digest with topic extraction, action items, unresolved questions, sentiment, export (Alt+Shift+J)
+ *   SmartSessionInsights  - cross-session analytics dashboard with topic trends, model usage, productivity patterns, proactive recommendations (Alt+Shift+K)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -41470,4 +41471,435 @@ const SmartConversationCompass = (() => {
   document.addEventListener('DOMContentLoaded', init);
 
   return { toggle, show, hide, analyze: _analyze };
+})();
+
+/* ============================================================
+ *  SmartSessionInsights  –  cross-session analytics dashboard
+ *  Shortcut: Alt+Shift+K
+ * ============================================================ */
+const SmartSessionInsights = (() => {
+  'use strict';
+
+  let _panel = null;
+  let _visible = false;
+  let _autoMonitor = false;
+  let _autoTimer = null;
+  let _activeTab = 'overview';
+
+  /* ── helpers ── */
+  const STOP = new Set(['the','a','an','is','are','was','were','be','been','being','have','has','had','do','does','did','will','would','shall','should','may','might','can','could','i','you','he','she','it','we','they','me','him','her','us','them','my','your','his','its','our','their','this','that','these','those','and','but','or','nor','for','yet','so','in','on','at','to','of','by','with','from','as','if','then','than','no','not','very','just','also','about','up','out','what','which','who','when','where','how','all','each','any','some','into','over','after','before','between','under','above','more','most','other','new','such','only','own','same','too','much','like','get','got','one','use','used','using','make','want','know','think','would','could','should']);
+
+  function _allSessions() {
+    const sessions = [];
+    try {
+      const count = (typeof SafeStorage !== 'undefined') ? SafeStorage.length : 0;
+      for (let i = 0; i < count; i++) {
+        const key = (typeof SafeStorage !== 'undefined') ? SafeStorage.key(i) : null;
+        if (key && key.startsWith('session_')) {
+          const raw = SafeStorage.get(key);
+          if (raw) {
+            const parsed = (typeof sanitizeStorageObject === 'function') ? sanitizeStorageObject(JSON.parse(raw)) : JSON.parse(raw);
+            if (parsed && Array.isArray(parsed.messages)) sessions.push(parsed);
+          }
+        }
+      }
+    } catch (e) { /* restricted storage */ }
+    return sessions;
+  }
+
+  function _tokenize(text) {
+    return (text || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 2 && !STOP.has(w));
+  }
+
+  function _dayKey(ts) {
+    const d = new Date(ts || Date.now());
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  }
+
+  function _daysAgo(n) {
+    const d = new Date(); d.setDate(d.getDate() - n);
+    return d.getTime();
+  }
+
+  /* ── analysis engine ── */
+  function analyze() {
+    const sessions = _allSessions();
+    const now = Date.now();
+    const allMsgs = [];
+    const models = {};
+    const hourBuckets = new Array(24).fill(0);
+    const dowBuckets = new Array(7).fill(0);
+    const dayMap = {};
+    const topicsByPeriod = { week: {}, month: {} };
+    let totalUserMsgs = 0;
+    let totalAsstMsgs = 0;
+    let sessionsWithFivePlus = 0;
+
+    sessions.forEach(s => {
+      const msgs = s.messages || [];
+      if (msgs.length >= 5) sessionsWithFivePlus++;
+      const model = s.model || s.modelId || 'unknown';
+      if (!models[model]) models[model] = { count: 0, msgTotal: 0 };
+      models[model].count++;
+      models[model].msgTotal += msgs.length;
+
+      msgs.forEach(m => {
+        allMsgs.push(m);
+        const ts = m.timestamp || s.createdAt || now;
+        const d = new Date(ts);
+        const h = d.getHours();
+        const dow = d.getDay();
+        const dk = _dayKey(ts);
+
+        hourBuckets[h]++;
+        dowBuckets[dow]++;
+        dayMap[dk] = (dayMap[dk] || 0) + 1;
+
+        if (m.role === 'user') totalUserMsgs++;
+        if (m.role === 'assistant') totalAsstMsgs++;
+
+        const words = _tokenize(m.content);
+        const age = now - ts;
+        const period = age < 7 * 86400000 ? 'week' : (age < 30 * 86400000 ? 'month' : null);
+        if (period) {
+          words.forEach(w => { topicsByPeriod[period][w] = (topicsByPeriod[period][w] || 0) + 1; });
+        }
+      });
+    });
+
+    // top topics with trend
+    const weekTopics = Object.entries(topicsByPeriod.week).sort((a, b) => b[1] - a[1]).slice(0, 20);
+    const monthTopics = Object.entries(topicsByPeriod.month).sort((a, b) => b[1] - a[1]).slice(0, 20);
+    const topicTrends = weekTopics.map(([w, c]) => {
+      const monthCount = topicsByPeriod.month[w] || 0;
+      const weekRate = c / 7;
+      const monthRate = monthCount / 30;
+      let trend = 'stable';
+      if (weekRate > monthRate * 1.5) trend = 'rising';
+      else if (weekRate < monthRate * 0.5) trend = 'falling';
+      return { word: w, count: c, trend };
+    });
+
+    // model stats
+    const modelStats = Object.entries(models).map(([name, data]) => ({
+      name, sessions: data.count, avgMsgs: data.msgTotal / (data.count || 1)
+    })).sort((a, b) => b.sessions - a.sessions);
+
+    // peak hour
+    let peakHour = 0;
+    hourBuckets.forEach((v, i) => { if (v > hourBuckets[peakHour]) peakHour = i; });
+
+    const dowNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    let peakDow = 0;
+    dowBuckets.forEach((v, i) => { if (v > dowBuckets[peakDow]) peakDow = i; });
+
+    // days active
+    const dayKeys = Object.keys(dayMap).sort();
+    const activeDays = dayKeys.length;
+    const avgMsgsPerDay = activeDays > 0 ? Math.round(allMsgs.length / activeDays) : 0;
+
+    // recommendations
+    const recs = [];
+    if (peakHour >= 0) recs.push('\u26A1 Your peak productivity hour is ' + peakHour + ':00 \u2013 ' + (peakHour + 1) + ':00');
+    if (modelStats.length > 1) {
+      const least = modelStats[modelStats.length - 1];
+      recs.push('\uD83D\uDCA1 Try using ' + least.name + ' more \u2013 only ' + least.sessions + ' sessions so far');
+    }
+    const risingTopics = topicTrends.filter(t => t.trend === 'rising').slice(0, 3);
+    if (risingTopics.length) recs.push('\uD83D\uDD25 Hot topics this week: ' + risingTopics.map(t => t.word).join(', '));
+    if (sessionsWithFivePlus < sessions.length * 0.5 && sessions.length > 3) {
+      recs.push('\uD83D\uDCDD Many sessions are short \u2013 try going deeper in conversations');
+    }
+    const quietHours = hourBuckets.map((v, i) => ({ h: i, v })).filter(x => x.v === 0).map(x => x.h);
+    if (quietHours.length > 0 && quietHours.length < 12) {
+      recs.push('\uD83C\uDF19 You never chat during hours: ' + quietHours.slice(0, 5).map(h => h + ':00').join(', '));
+    }
+
+    return {
+      totalSessions: sessions.length,
+      totalMessages: allMsgs.length,
+      totalUserMsgs, totalAsstMsgs,
+      sessionsWithFivePlus,
+      completionRate: sessions.length > 0 ? Math.round(sessionsWithFivePlus / sessions.length * 100) : 0,
+      hourBuckets, dowBuckets, dowNames,
+      peakHour, peakDow,
+      dayMap, dayKeys, activeDays, avgMsgsPerDay,
+      topicTrends, monthTopics,
+      modelStats,
+      recommendations: recs
+    };
+  }
+
+  /* ── Canvas chart helpers ── */
+  function _drawBarChart(canvas, labels, values, color, title) {
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width;
+    const h = canvas.height;
+    const pad = { top: 28, right: 10, bottom: 30, left: 36 };
+    const chartW = w - pad.left - pad.right;
+    const chartH = h - pad.top - pad.bottom;
+    const maxVal = Math.max(...values, 1);
+    const barW = Math.max(2, (chartW / labels.length) - 2);
+
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim() || '#e0e0e0';
+    ctx.font = 'bold 11px sans-serif';
+    ctx.fillText(title, pad.left, 16);
+
+    // grid lines
+    ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 4; i++) {
+      const y = pad.top + chartH - (chartH * i / 4);
+      ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(w - pad.right, y); ctx.stroke();
+    }
+
+    // bars
+    labels.forEach((label, i) => {
+      const barH = (values[i] / maxVal) * chartH;
+      const x = pad.left + i * (chartW / labels.length) + 1;
+      const y = pad.top + chartH - barH;
+
+      const grad = ctx.createLinearGradient(x, y, x, y + barH);
+      grad.addColorStop(0, color);
+      grad.addColorStop(1, color + '44');
+      ctx.fillStyle = grad;
+      ctx.fillRect(x, y, barW, barH);
+
+      // label
+      ctx.fillStyle = 'rgba(255,255,255,0.5)';
+      ctx.font = '9px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(label, x + barW / 2, pad.top + chartH + 14);
+    });
+
+    // Y axis labels
+    ctx.textAlign = 'right';
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    ctx.font = '9px sans-serif';
+    for (let i = 0; i <= 4; i++) {
+      const y = pad.top + chartH - (chartH * i / 4);
+      ctx.fillText(String(Math.round(maxVal * i / 4)), pad.left - 4, y + 3);
+    }
+  }
+
+  /* ── render tabs ── */
+  function _renderOverview(container, data) {
+    let html = '<div class="ssi-stats-grid">';
+    html += '<div class="ssi-stat-card"><div class="ssi-stat-num">' + data.totalSessions + '</div><div class="ssi-stat-label">Sessions</div></div>';
+    html += '<div class="ssi-stat-card"><div class="ssi-stat-num">' + data.totalMessages + '</div><div class="ssi-stat-label">Messages</div></div>';
+    html += '<div class="ssi-stat-card"><div class="ssi-stat-num">' + data.completionRate + '%</div><div class="ssi-stat-label">Deep (\u22655 msgs)</div></div>';
+    html += '<div class="ssi-stat-card"><div class="ssi-stat-num">' + data.avgMsgsPerDay + '</div><div class="ssi-stat-label">Msgs/Day</div></div>';
+    html += '<div class="ssi-stat-card"><div class="ssi-stat-num">' + data.peakHour + ':00</div><div class="ssi-stat-label">\u26A1 Peak Hour</div></div>';
+    html += '<div class="ssi-stat-card"><div class="ssi-stat-num">' + data.dowNames[data.peakDow] + '</div><div class="ssi-stat-label">\uD83D\uDCC5 Peak Day</div></div>';
+    html += '</div>';
+
+    // quick topic chips
+    html += '<div class="ssi-section-title">\uD83D\uDD25 Trending Topics (7d)</div><div class="ssi-chips">';
+    data.topicTrends.slice(0, 10).forEach(t => {
+      const icon = t.trend === 'rising' ? '\uD83D\uDCC8' : (t.trend === 'falling' ? '\uD83D\uDCC9' : '\u2796');
+      html += '<span class="ssi-chip ssi-chip-' + t.trend + '">' + icon + ' ' + t.word + ' (' + t.count + ')</span>';
+    });
+    html += '</div>';
+
+    // quick recs
+    if (data.recommendations.length) {
+      html += '<div class="ssi-section-title">\uD83D\uDCA1 Recommendations</div><div class="ssi-recs">';
+      data.recommendations.forEach(r => { html += '<div class="ssi-rec">' + r + '</div>'; });
+      html += '</div>';
+    }
+
+    container.innerHTML = html;
+  }
+
+  function _renderTopics(container, data) {
+    let html = '<div class="ssi-section-title">\uD83D\uDCC8 Topic Trends (Week vs Month)</div>';
+    html += '<table class="ssi-table"><thead><tr><th>Topic</th><th>7d</th><th>30d</th><th>Trend</th></tr></thead><tbody>';
+    data.topicTrends.forEach(t => {
+      const monthCount = data.monthTopics.find(m => m[0] === t.word);
+      const mc = monthCount ? monthCount[1] : 0;
+      const icon = t.trend === 'rising' ? '\uD83D\uDCC8' : (t.trend === 'falling' ? '\uD83D\uDCC9' : '\u2796');
+      html += '<tr><td><strong>' + t.word + '</strong></td><td>' + t.count + '</td><td>' + mc + '</td><td>' + icon + '</td></tr>';
+    });
+    html += '</tbody></table>';
+    container.innerHTML = html;
+  }
+
+  function _renderProductivity(container, data) {
+    let html = '<div class="ssi-section-title">\u23F0 Messages by Hour</div>';
+    html += '<canvas id="ssi-hour-chart" width="390" height="180"></canvas>';
+    html += '<div class="ssi-section-title" style="margin-top:16px">\uD83D\uDCC5 Messages by Day of Week</div>';
+    html += '<canvas id="ssi-dow-chart" width="390" height="160"></canvas>';
+    container.innerHTML = html;
+
+    requestAnimationFrame(() => {
+      const hourCanvas = document.getElementById('ssi-hour-chart');
+      if (hourCanvas) {
+        const labels = Array.from({ length: 24 }, (_, i) => i + 'h');
+        _drawBarChart(hourCanvas, labels, data.hourBuckets, '#42a5f5', 'Messages per Hour');
+      }
+      const dowCanvas = document.getElementById('ssi-dow-chart');
+      if (dowCanvas) {
+        _drawBarChart(dowCanvas, data.dowNames, data.dowBuckets, '#66bb6a', 'Messages per Day of Week');
+      }
+    });
+  }
+
+  function _renderModels(container, data) {
+    if (data.modelStats.length === 0) {
+      container.innerHTML = '<div class="ssi-empty">No model data available</div>';
+      return;
+    }
+    let html = '<div class="ssi-section-title">\uD83E\uDD16 Model Usage</div>';
+    html += '<table class="ssi-table"><thead><tr><th>Model</th><th>Sessions</th><th>Avg Msgs</th></tr></thead><tbody>';
+    data.modelStats.forEach(m => {
+      html += '<tr><td><strong>' + m.name + '</strong></td><td>' + m.sessions + '</td><td>' + Math.round(m.avgMsgs) + '</td></tr>';
+    });
+    html += '</tbody></table>';
+
+    // bar chart
+    html += '<canvas id="ssi-model-chart" width="390" height="160" style="margin-top:12px"></canvas>';
+    container.innerHTML = html;
+
+    requestAnimationFrame(() => {
+      const mc = document.getElementById('ssi-model-chart');
+      if (mc) {
+        const names = data.modelStats.map(m => m.name.length > 12 ? m.name.slice(0, 11) + '\u2026' : m.name);
+        _drawBarChart(mc, names, data.modelStats.map(m => m.sessions), '#ab47bc', 'Sessions per Model');
+      }
+    });
+  }
+
+  function _renderRecommendations(container, data) {
+    if (data.recommendations.length === 0) {
+      container.innerHTML = '<div class="ssi-empty">Not enough data for recommendations yet. Keep chatting!</div>';
+      return;
+    }
+    let html = '<div class="ssi-section-title">\uD83D\uDCA1 Proactive Recommendations</div><div class="ssi-recs-detail">';
+    data.recommendations.forEach(r => {
+      html += '<div class="ssi-rec-card">' + r + '</div>';
+    });
+    html += '</div>';
+
+    // productivity score
+    const score = Math.min(100, Math.round(
+      (data.completionRate * 0.3) +
+      (Math.min(data.avgMsgsPerDay, 50) * 0.6) +
+      (data.modelStats.length * 5)
+    ));
+    html += '<div class="ssi-section-title" style="margin-top:16px">\uD83C\uDFAF Engagement Score</div>';
+    html += '<div class="ssi-score-bar"><div class="ssi-score-fill" style="width:' + score + '%"></div><span class="ssi-score-label">' + score + '/100</span></div>';
+
+    container.innerHTML = html;
+  }
+
+  /* ── render ── */
+  function _render() {
+    const body = _panel.querySelector('.ssi-body');
+    if (!body) return;
+    const data = analyze();
+
+    const tabContent = body.querySelector('.ssi-tab-content');
+    if (!tabContent) return;
+
+    switch (_activeTab) {
+      case 'overview': _renderOverview(tabContent, data); break;
+      case 'topics': _renderTopics(tabContent, data); break;
+      case 'productivity': _renderProductivity(tabContent, data); break;
+      case 'models': _renderModels(tabContent, data); break;
+      case 'recommendations': _renderRecommendations(tabContent, data); break;
+    }
+  }
+
+  /* ── auto-monitor ── */
+  function _toggleAutoMonitor(on) {
+    _autoMonitor = on;
+    if (on && !_autoTimer) {
+      _autoTimer = setInterval(_autoCheck, 60000);
+    } else if (!on && _autoTimer) {
+      clearInterval(_autoTimer);
+      _autoTimer = null;
+    }
+  }
+
+  function _autoCheck() {
+    const data = analyze();
+    if (!data || data.totalSessions < 3) return;
+    if (data.completionRate < 30 && typeof ToastManager !== 'undefined') {
+      ToastManager.show('\uD83D\uDCCA Insights: Most sessions are short \u2013 try deeper conversations!', { id: 'ssi-alert', durationMs: 5000 });
+    }
+    const rising = data.topicTrends.filter(t => t.trend === 'rising');
+    if (rising.length > 0 && typeof ToastManager !== 'undefined') {
+      ToastManager.show('\uD83D\uDCC8 Trending: ' + rising.slice(0, 3).map(t => t.word).join(', '), { id: 'ssi-trend', durationMs: 4000 });
+    }
+    if (_visible) _render();
+  }
+
+  /* ── panel ── */
+  function _createPanel() {
+    if (_panel) return;
+    _panel = document.createElement('div');
+    _panel.className = 'ssi-panel';
+
+    let html = '<div class="ssi-header">';
+    html += '<span>\uD83D\uDCCA Session Insights</span>';
+    html += '<div class="ssi-header-actions">';
+    html += '<label class="ssi-auto-label" title="Auto-monitor"><input type="checkbox" id="ssi-auto-toggle"> Auto</label>';
+    html += '<button class="btn-sm ssi-refresh" title="Refresh">\uD83D\uDD04</button>';
+    html += '<button class="btn-sm ssi-close" title="Close">\u2715</button>';
+    html += '</div></div>';
+
+    html += '<div class="ssi-tabs">';
+    ['overview', 'topics', 'productivity', 'models', 'recommendations'].forEach(tab => {
+      const icons = { overview: '\uD83C\uDFE0', topics: '\uD83D\uDCDD', productivity: '\u23F0', models: '\uD83E\uDD16', recommendations: '\uD83D\uDCA1' };
+      html += '<button class="ssi-tab' + (tab === _activeTab ? ' active' : '') + '" data-tab="' + tab + '">' + (icons[tab] || '') + ' ' + tab.charAt(0).toUpperCase() + tab.slice(1) + '</button>';
+    });
+    html += '</div>';
+    html += '<div class="ssi-body"><div class="ssi-tab-content"></div></div>';
+
+    _panel.innerHTML = html;
+    document.body.appendChild(_panel);
+
+    _panel.querySelector('.ssi-close').addEventListener('click', hide);
+    _panel.querySelector('.ssi-refresh').addEventListener('click', _render);
+
+    const autoEl = _panel.querySelector('#ssi-auto-toggle');
+    if (autoEl) autoEl.addEventListener('change', () => { _toggleAutoMonitor(autoEl.checked); });
+
+    _panel.querySelectorAll('.ssi-tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        _activeTab = btn.dataset.tab;
+        _panel.querySelectorAll('.ssi-tab').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        _render();
+      });
+    });
+  }
+
+  function show() { _createPanel(); _render(); _panel.classList.add('open'); _visible = true; }
+  function hide() { if (_panel) _panel.classList.remove('open'); _visible = false; }
+  function toggle() { _visible ? hide() : show(); }
+
+  /* ── init ── */
+  function init() {
+    document.addEventListener('keydown', e => {
+      if (e.altKey && e.shiftKey && !e.ctrlKey && e.key === 'K') { e.preventDefault(); toggle(); }
+    });
+    if (typeof KeyboardShortcuts !== 'undefined' && KeyboardShortcuts.register) {
+      KeyboardShortcuts.register('Alt+Shift+K', 'Session Insights Dashboard', toggle);
+    }
+    if (typeof CommandPalette !== 'undefined' && CommandPalette.register) {
+      CommandPalette.register({ name: 'insights', description: 'Cross-session analytics dashboard', icon: '\uD83D\uDCCA', action: toggle });
+    }
+    if (typeof SlashCommands !== 'undefined' && SlashCommands.register) {
+      SlashCommands.register('/insights', 'Open session insights dashboard', toggle);
+    }
+    if (typeof PanelRegistry !== 'undefined' && PanelRegistry.register) {
+      PanelRegistry.register('session-insights', hide);
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  return { toggle, show, hide, analyze };
 })();
