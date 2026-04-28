@@ -110,6 +110,7 @@
  *   SmartSessionInsights  - cross-session analytics dashboard with topic trends, model usage, productivity patterns, proactive recommendations (Alt+Shift+K)
  *   SmartFactMemory       - autonomous fact/decision/preference/action-item extractor with persistent cros
  *   SmartContextWatchdog   - autonomous real-time context health monitor with token pressure, topic drift, stale context detection, proactive recommendations, and floating health indicator (Alt+Shift+W)s-session knowledge base (Alt+Shift+F)
+ *   SmartResponseAuditor   - autonomous AI response quality auditor with 7 heuristic checks (hallucination risk, hedge overload, self-contradiction, code quality, unsupported claims, repetition, incomplete response), inline badges, audit panel (Alt+Shift+Q)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -43308,5 +43309,550 @@ var SmartContextWatchdog = (function () {
     setEnabled: function(v) { _config.enabled = !!v; _saveConfig(); },
     setAlertsEnabled: function(v) { _config.alertsEnabled = !!v; _saveConfig(); },
     setFloatVisible: function(v) { _config.floatVisible = !!v; _saveConfig(); _updateFloat(); }
+  };
+})();
+
+/* ============================================================
+ * SmartResponseAuditor — Autonomous AI Response Quality Auditor
+ *
+ * Proactively evaluates every assistant response for quality
+ * signals: hallucination risk, hedge overload, self-contradiction,
+ * code quality issues, unsupported claims, repetition, and
+ * incomplete responses.  Inline badges appear on each message;
+ * click to expand a detailed audit panel.
+ *
+ * Keyboard shortcut: Alt+Shift+Q
+ * ============================================================ */
+var SmartResponseAuditor = (function () {
+  'use strict';
+
+  /* ── constants ── */
+  var AUDITS_KEY = 'sra_audits';
+  var CONFIG_KEY = 'sra_config';
+  var EVAL_THROTTLE_MS = 3000;
+
+  var CONFIDENCE_WORDS = ['definitely', 'certainly', 'always', 'never', 'undoubtedly', 'absolutely', 'guaranteed', 'without a doubt', 'unquestionably', 'clearly'];
+  var FACTUAL_PATTERNS = [/\b\d{4}\b/, /\b(?:invented|discovered|founded|created|built|wrote|published)\b/i, /\b(?:is|was|are|were) (?:the|a) /i];
+  var HEDGE_WORDS = ['might', 'perhaps', 'possibly', 'could be', 'I think', 'it seems', 'maybe', 'probably', 'likely', 'arguably', 'somewhat', 'roughly', 'approximately', 'in my opinion', 'I believe', 'it appears'];
+  var CLAIM_PATTERNS = [/\d+\s*%\s*of\b/i, /studies show/i, /research indicates/i, /according to/i, /data suggests/i, /experts say/i, /surveys? (?:show|found|reveal)/i, /statistics? (?:show|indicate)/i, /it(?:'s| is) (?:well-)?known that/i, /evidence suggests/i];
+  var PLACEHOLDER_PATTERNS = [/example\.com/i, /your[_-]?api[_-]?key/i, /TODO/i, /FIXME/i, /HACK/i, /xxx+/i, /placeholder/i, /lorem ipsum/i, /changeme/i, /replace[_-]?this/i];
+
+  var SENSITIVITY_THRESHOLDS = {
+    low:    { hallucination: 3, hedge: 0.20, claim: 2, repetition: 3, codeIssues: 3 },
+    medium: { hallucination: 2, hedge: 0.15, claim: 1, repetition: 2, codeIssues: 2 },
+    high:   { hallucination: 1, hedge: 0.10, claim: 1, repetition: 1, codeIssues: 1 }
+  };
+
+  /* ── state ── */
+  var _panelEl = null;
+  var _floatEl = null;
+  var _visible = false;
+  var _audits = {};
+  var _config = { enabled: true, alertsEnabled: true, sensitivity: 'medium' };
+  var _lastEval = 0;
+  var _observer = null;
+  var _styleInjected = false;
+
+  /* ── helpers ── */
+  function _loadConfig() {
+    if (typeof SafeStorage !== 'undefined' && SafeStorage.getJSON) {
+      var c = SafeStorage.getJSON(CONFIG_KEY, null);
+      if (c) _config = c;
+    }
+  }
+  function _saveConfig() {
+    if (typeof SafeStorage !== 'undefined' && SafeStorage.trySetJSON) SafeStorage.trySetJSON(CONFIG_KEY, _config);
+  }
+  function _loadAudits() {
+    if (typeof SafeStorage !== 'undefined' && SafeStorage.getJSON) {
+      _audits = SafeStorage.getJSON(AUDITS_KEY, {});
+    }
+  }
+  function _saveAudits() {
+    if (typeof SafeStorage !== 'undefined' && SafeStorage.trySetJSON) SafeStorage.trySetJSON(AUDITS_KEY, _audits);
+  }
+
+  function _splitSentences(text) {
+    return text.split(/(?<=[.!?])\s+/).filter(function(s) { return s.trim().length > 0; });
+  }
+
+  function _countMatches(text, patterns) {
+    var count = 0;
+    for (var i = 0; i < patterns.length; i++) {
+      var re = patterns[i] instanceof RegExp ? patterns[i] : new RegExp('\\b' + patterns[i].replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'gi');
+      var m = text.match(re);
+      if (m) count += m.length;
+    }
+    return count;
+  }
+
+  function _wordCount(text) {
+    var m = text.match(/\b\w+\b/g);
+    return m ? m.length : 0;
+  }
+
+  function _extractCodeBlocks(text) {
+    var blocks = [];
+    var re = /```[\s\S]*?```/g;
+    var m;
+    while ((m = re.exec(text)) !== null) {
+      blocks.push(m[0]);
+    }
+    return blocks;
+  }
+
+  /* ── audit checks ── */
+  function _checkHallucination(text) {
+    var confCount = 0;
+    var flagged = [];
+    for (var i = 0; i < CONFIDENCE_WORDS.length; i++) {
+      var re = new RegExp('\\b' + CONFIDENCE_WORDS[i].replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'gi');
+      var m = text.match(re);
+      if (m) {
+        confCount += m.length;
+        flagged.push(CONFIDENCE_WORDS[i]);
+      }
+    }
+    var hasFactual = false;
+    for (var f = 0; f < FACTUAL_PATTERNS.length; f++) {
+      if (FACTUAL_PATTERNS[f].test(text)) { hasFactual = true; break; }
+    }
+    var score = 0;
+    if (confCount > 0 && hasFactual) {
+      score = Math.min(100, confCount * 25);
+    } else if (confCount > 2) {
+      score = Math.min(60, confCount * 15);
+    }
+    return { name: 'Hallucination Risk', score: score, details: confCount > 0 ? 'Confidence words: ' + flagged.join(', ') : 'No issues', flagged: flagged };
+  }
+
+  function _checkHedgeOverload(text) {
+    var wc = _wordCount(text);
+    if (wc < 10) return { name: 'Hedge Overload', score: 0, details: 'Too short to evaluate', ratio: 0 };
+    var hedgeCount = 0;
+    var flagged = [];
+    for (var i = 0; i < HEDGE_WORDS.length; i++) {
+      var re = new RegExp('\\b' + HEDGE_WORDS[i].replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'gi');
+      var m = text.match(re);
+      if (m) {
+        hedgeCount += m.length;
+        flagged.push(HEDGE_WORDS[i] + ' (\u00d7' + m.length + ')');
+      }
+    }
+    var ratio = hedgeCount / wc;
+    var thresh = SENSITIVITY_THRESHOLDS[_config.sensitivity || 'medium'].hedge;
+    var score = ratio > thresh ? Math.min(100, Math.round((ratio / thresh) * 50)) : 0;
+    return { name: 'Hedge Overload', score: score, details: hedgeCount > 0 ? 'Hedge words: ' + flagged.join(', ') + ' (' + Math.round(ratio * 100) + '% of words)' : 'No issues', ratio: ratio };
+  }
+
+  function _checkContradiction(text) {
+    var sentences = _splitSentences(text);
+    var found = [];
+    for (var i = 0; i < sentences.length; i++) {
+      for (var j = i + 1; j < sentences.length; j++) {
+        var a = sentences[i].toLowerCase();
+        var b = sentences[j].toLowerCase();
+        // Check for direct negation patterns
+        var negPairs = [
+          [/\bis\b/, /\bis not\b/], [/\bis\b/, /\bisn't\b/],
+          [/\bcan\b/, /\bcannot\b/], [/\bcan\b/, /\bcan't\b/],
+          [/\bshould\b/, /\bshould not\b/], [/\bshould\b/, /\bshouldn't\b/],
+          [/\bwill\b/, /\bwill not\b/], [/\bwill\b/, /\bwon't\b/],
+          [/\bdoes\b/, /\bdoes not\b/], [/\bdoes\b/, /\bdoesn't\b/]
+        ];
+        for (var p = 0; p < negPairs.length; p++) {
+          if ((negPairs[p][0].test(a) && negPairs[p][1].test(b)) ||
+              (negPairs[p][1].test(a) && negPairs[p][0].test(b))) {
+            // Check for shared subject words
+            var aWords = a.match(/\b\w{4,}\b/g) || [];
+            var bWords = b.match(/\b\w{4,}\b/g) || [];
+            var shared = 0;
+            for (var w = 0; w < aWords.length; w++) {
+              if (bWords.indexOf(aWords[w]) !== -1) shared++;
+            }
+            if (shared >= 1) {
+              found.push({ s1: sentences[i].substring(0, 80), s2: sentences[j].substring(0, 80) });
+            }
+          }
+        }
+      }
+    }
+    var score = found.length > 0 ? Math.min(100, found.length * 40) : 0;
+    return { name: 'Self-Contradiction', score: score, details: found.length > 0 ? found.length + ' potential contradiction(s) found' : 'No issues', contradictions: found };
+  }
+
+  function _checkCodeQuality(text) {
+    var blocks = _extractCodeBlocks(text);
+    if (blocks.length === 0) return { name: 'Code Quality', score: 0, details: 'No code blocks', issues: [] };
+    var issues = [];
+    for (var i = 0; i < blocks.length; i++) {
+      var code = blocks[i];
+      // Check unclosed brackets
+      var opens = (code.match(/[({[]/g) || []).length;
+      var closes = (code.match(/[)}\]]/g) || []).length;
+      if (opens > closes + 1) issues.push('Unclosed brackets in block ' + (i + 1));
+      // Check placeholders
+      for (var p = 0; p < PLACEHOLDER_PATTERNS.length; p++) {
+        if (PLACEHOLDER_PATTERNS[p].test(code)) {
+          issues.push('Placeholder found: ' + PLACEHOLDER_PATTERNS[p].source);
+          break;
+        }
+      }
+      // Check incomplete implementation
+      if (/\.\.\./g.test(code) && !/spread|rest/i.test(code)) {
+        issues.push('Possible incomplete implementation (ellipsis in code)');
+      }
+    }
+    var thresh = SENSITIVITY_THRESHOLDS[_config.sensitivity || 'medium'].codeIssues;
+    var score = issues.length >= thresh ? Math.min(100, issues.length * 30) : (issues.length > 0 ? issues.length * 15 : 0);
+    return { name: 'Code Quality', score: score, details: issues.length > 0 ? issues.join('; ') : 'Code looks clean', issues: issues };
+  }
+
+  function _checkUnsupportedClaims(text) {
+    var claims = [];
+    for (var i = 0; i < CLAIM_PATTERNS.length; i++) {
+      var m = text.match(CLAIM_PATTERNS[i]);
+      if (m) claims.push(m[0]);
+    }
+    // Check if any citation/source is nearby
+    var hasCitation = /\[[\d]+\]|\(source|\(http|references?:|cited|citation/i.test(text);
+    if (hasCitation) {
+      return { name: 'Unsupported Claims', score: 0, details: 'Claims found with citations present', claims: claims };
+    }
+    var thresh = SENSITIVITY_THRESHOLDS[_config.sensitivity || 'medium'].claim;
+    var score = claims.length >= thresh ? Math.min(100, claims.length * 30) : 0;
+    return { name: 'Unsupported Claims', score: score, details: claims.length > 0 ? claims.length + ' claim(s) without citations: ' + claims.join(', ') : 'No issues', claims: claims };
+  }
+
+  function _checkRepetition(text) {
+    var sentences = _splitSentences(text);
+    var seen = {};
+    var dupes = [];
+    for (var i = 0; i < sentences.length; i++) {
+      var norm = sentences[i].toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
+      if (norm.length < 15) continue;
+      if (seen[norm]) {
+        dupes.push(sentences[i].substring(0, 60));
+      } else {
+        seen[norm] = true;
+      }
+    }
+    var thresh = SENSITIVITY_THRESHOLDS[_config.sensitivity || 'medium'].repetition;
+    var score = dupes.length >= thresh ? Math.min(100, dupes.length * 35) : 0;
+    return { name: 'Repetition', score: score, details: dupes.length > 0 ? dupes.length + ' repeated sentence(s)' : 'No issues', duplicates: dupes };
+  }
+
+  function _checkIncomplete(text) {
+    var issues = [];
+    var trimmed = text.trimEnd();
+    // Ends mid-sentence (no terminal punctuation, not a code block)
+    if (trimmed.length > 20 && !/[.!?:)\]}`'"]$/.test(trimmed) && !/```\s*$/.test(trimmed)) {
+      issues.push('Ends without terminal punctuation');
+    }
+    // Unclosed code blocks
+    var codeOpens = (text.match(/```/g) || []).length;
+    if (codeOpens % 2 !== 0) {
+      issues.push('Unclosed code block');
+    }
+    // Trailing ellipsis
+    if (/\.\.\.\s*$/.test(trimmed)) {
+      issues.push('Ends with ellipsis');
+    }
+    // Abrupt list ending
+    if (/\n\s*\d+\.\s*$/.test(trimmed) || /\n\s*[-*]\s*$/.test(trimmed)) {
+      issues.push('Abrupt list ending');
+    }
+    var score = issues.length > 0 ? Math.min(100, issues.length * 40) : 0;
+    return { name: 'Incomplete Response', score: score, details: issues.length > 0 ? issues.join('; ') : 'Response appears complete', issues: issues };
+  }
+
+  /* ── core audit function ── */
+  function auditMessage(text) {
+    if (!text || typeof text !== 'string') return { overall: 0, grade: 'clean', checks: [] };
+    var checks = [
+      _checkHallucination(text),
+      _checkHedgeOverload(text),
+      _checkContradiction(text),
+      _checkCodeQuality(text),
+      _checkUnsupportedClaims(text),
+      _checkRepetition(text),
+      _checkIncomplete(text)
+    ];
+    var maxScore = 0;
+    var totalScore = 0;
+    var issueCount = 0;
+    for (var i = 0; i < checks.length; i++) {
+      totalScore += checks[i].score;
+      if (checks[i].score > maxScore) maxScore = checks[i].score;
+      if (checks[i].score > 0) issueCount++;
+    }
+    var avgScore = Math.round(totalScore / checks.length);
+    var grade = 'clean';
+    if (maxScore >= 60 || issueCount >= 3) grade = 'major';
+    else if (maxScore >= 30 || issueCount >= 2) grade = 'minor';
+    return { overall: avgScore, worst: maxScore, grade: grade, issueCount: issueCount, checks: checks };
+  }
+
+  /* ── UI: inline badges ── */
+  function _addBadgeToMessage(msgEl, audit, idx) {
+    if (msgEl.querySelector('.sra-badge')) return;
+    var badge = document.createElement('span');
+    badge.className = 'sra-badge sra-grade-' + audit.grade;
+    badge.title = 'Response Audit: ' + audit.grade + ' (' + audit.issueCount + ' issue' + (audit.issueCount !== 1 ? 's' : '') + ')';
+    badge.textContent = audit.grade === 'clean' ? '\u2705' : (audit.grade === 'minor' ? '\u26A0\uFE0F' : '\uD83D\uDD34');
+    badge.setAttribute('data-sra-idx', idx);
+    badge.addEventListener('click', function() { _showAuditDetail(idx); });
+    msgEl.style.position = 'relative';
+    msgEl.appendChild(badge);
+  }
+
+  function _showAuditDetail(idx) {
+    var key = 'msg_' + idx;
+    var audit = _audits[key];
+    if (!audit) return;
+    show();
+    _renderAuditDetail(audit, idx);
+  }
+
+  /* ── UI: panel ── */
+  function _createPanel() {
+    if (_panelEl) return;
+    _panelEl = document.createElement('div');
+    _panelEl.id = 'sra-panel';
+    _panelEl.innerHTML = '<div class="sra-header"><span>\uD83D\uDD0D Response Auditor</span><div class="sra-header-controls">' +
+      '<select id="sra-sensitivity"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select>' +
+      '<button id="sra-reaudit" title="Re-audit all">\uD83D\uDD04</button>' +
+      '<button id="sra-close">\u2715</button></div></div>' +
+      '<div id="sra-stats" class="sra-stats"></div>' +
+      '<div id="sra-detail" class="sra-detail"></div>';
+    document.body.appendChild(_panelEl);
+    document.getElementById('sra-close').addEventListener('click', hide);
+    document.getElementById('sra-reaudit').addEventListener('click', auditAll);
+    var sel = document.getElementById('sra-sensitivity');
+    sel.value = _config.sensitivity || 'medium';
+    sel.addEventListener('change', function() {
+      _config.sensitivity = sel.value;
+      _saveConfig();
+      auditAll();
+    });
+  }
+
+  function _renderStats() {
+    var el = document.getElementById('sra-stats');
+    if (!el) return;
+    var keys = Object.keys(_audits);
+    var clean = 0; var minor = 0; var major = 0;
+    for (var i = 0; i < keys.length; i++) {
+      var g = _audits[keys[i]].grade;
+      if (g === 'clean') clean++;
+      else if (g === 'minor') minor++;
+      else major++;
+    }
+    el.innerHTML = '<div class="sra-stat-row">' +
+      '<span class="sra-stat sra-grade-clean">\u2705 ' + clean + ' clean</span>' +
+      '<span class="sra-stat sra-grade-minor">\u26A0\uFE0F ' + minor + ' minor</span>' +
+      '<span class="sra-stat sra-grade-major">\uD83D\uDD34 ' + major + ' major</span>' +
+      '</div>';
+  }
+
+  function _renderAuditDetail(audit, idx) {
+    var el = document.getElementById('sra-detail');
+    if (!el) return;
+    var html = '<h4>Message #' + (idx + 1) + ' \u2014 ' +
+      (audit.grade === 'clean' ? '\u2705 Clean' : (audit.grade === 'minor' ? '\u26A0\uFE0F Minor Issues' : '\uD83D\uDD34 Major Issues')) +
+      '</h4><div class="sra-overall">Overall score: ' + audit.overall + '/100</div>';
+    for (var i = 0; i < audit.checks.length; i++) {
+      var c = audit.checks[i];
+      var barColor = c.score === 0 ? '#2ecc71' : (c.score < 40 ? '#f39c12' : '#e74c3c');
+      html += '<div class="sra-check">' +
+        '<div class="sra-check-name">' + c.name + '</div>' +
+        '<div class="sra-check-bar"><div class="sra-bar-fill" style="width:' + c.score + '%;background:' + barColor + '"></div></div>' +
+        '<div class="sra-check-detail">' + c.details + '</div></div>';
+    }
+    el.innerHTML = html;
+  }
+
+  /* ── UI: floating indicator ── */
+  function _createFloat() {
+    if (_floatEl) return;
+    _floatEl = document.createElement('div');
+    _floatEl.id = 'sra-float';
+    _floatEl.title = 'Response Auditor';
+    _floatEl.textContent = '\uD83D\uDD0D';
+    _floatEl.addEventListener('click', toggle);
+    document.body.appendChild(_floatEl);
+  }
+
+  function _updateFloat() {
+    if (!_floatEl) return;
+    var keys = Object.keys(_audits);
+    var major = 0;
+    var minor = 0;
+    for (var i = 0; i < keys.length; i++) {
+      if (_audits[keys[i]].grade === 'major') major++;
+      else if (_audits[keys[i]].grade === 'minor') minor++;
+    }
+    _floatEl.className = major > 0 ? 'sra-float-major' : (minor > 0 ? 'sra-float-minor' : 'sra-float-clean');
+    _floatEl.title = 'Auditor: ' + keys.length + ' messages (' + major + ' major, ' + minor + ' minor)';
+  }
+
+  /* ── styles ── */
+  function _injectStyles() {
+    if (_styleInjected) return;
+    _styleInjected = true;
+    var css = '#sra-panel{position:fixed;top:0;right:-400px;width:380px;height:100vh;background:#fff;border-left:2px solid #e0e0e0;z-index:10010;transition:right .3s;overflow-y:auto;font-family:system-ui,sans-serif;font-size:14px;box-shadow:-2px 0 12px rgba(0,0,0,.1)}' +
+      '#sra-panel.sra-open{right:0}' +
+      'body.dark-mode #sra-panel{background:#1e1e1e;border-left-color:#333;color:#e0e0e0}' +
+      '.sra-header{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid #e0e0e0;font-weight:600;font-size:15px}' +
+      'body.dark-mode .sra-header{border-bottom-color:#333}' +
+      '.sra-header-controls{display:flex;gap:8px;align-items:center}' +
+      '.sra-header-controls select{padding:2px 6px;border-radius:4px;border:1px solid #ccc;font-size:12px}' +
+      'body.dark-mode .sra-header-controls select{background:#333;color:#e0e0e0;border-color:#555}' +
+      '.sra-header-controls button{background:none;border:none;cursor:pointer;font-size:16px;padding:2px 6px}' +
+      '.sra-stats{padding:12px 16px;border-bottom:1px solid #eee}' +
+      'body.dark-mode .sra-stats{border-bottom-color:#333}' +
+      '.sra-stat-row{display:flex;gap:16px}' +
+      '.sra-stat{font-size:13px;font-weight:500}' +
+      '.sra-detail{padding:16px}' +
+      '.sra-detail h4{margin:0 0 8px}' +
+      '.sra-overall{font-size:13px;color:#666;margin-bottom:12px}' +
+      'body.dark-mode .sra-overall{color:#aaa}' +
+      '.sra-check{margin-bottom:12px}' +
+      '.sra-check-name{font-weight:600;font-size:13px;margin-bottom:4px}' +
+      '.sra-check-bar{height:6px;background:#eee;border-radius:3px;overflow:hidden;margin-bottom:4px}' +
+      'body.dark-mode .sra-check-bar{background:#333}' +
+      '.sra-bar-fill{height:100%;border-radius:3px;transition:width .3s}' +
+      '.sra-check-detail{font-size:12px;color:#777;word-break:break-word}' +
+      'body.dark-mode .sra-check-detail{color:#999}' +
+      '.sra-badge{position:absolute;top:4px;right:4px;cursor:pointer;font-size:14px;z-index:5;opacity:.85;transition:opacity .2s}' +
+      '.sra-badge:hover{opacity:1}' +
+      '#sra-float{position:fixed;bottom:90px;right:18px;width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:18px;z-index:10009;background:#fff;border:2px solid #2ecc71;box-shadow:0 2px 8px rgba(0,0,0,.15);transition:border-color .3s}' +
+      'body.dark-mode #sra-float{background:#2d2d2d}' +
+      '#sra-float.sra-float-minor{border-color:#f39c12}' +
+      '#sra-float.sra-float-major{border-color:#e74c3c}' +
+      '#sra-float.sra-float-clean{border-color:#2ecc71}';
+    var style = document.createElement('style');
+    style.textContent = css;
+    document.head.appendChild(style);
+  }
+
+  /* ── audit all messages ── */
+  function auditAll() {
+    if (!_config.enabled) return;
+    var chatOut = document.getElementById('chat-output');
+    if (!chatOut) return;
+    var messages = chatOut.querySelectorAll('.message');
+    _audits = {};
+    for (var i = 0; i < messages.length; i++) {
+      var msgEl = messages[i];
+      var role = msgEl.getAttribute('data-role') || msgEl.className;
+      if (!/assistant|bot|ai/i.test(role)) continue;
+      var text = msgEl.textContent || '';
+      if (text.trim().length < 5) continue;
+      var audit = auditMessage(text);
+      var key = 'msg_' + i;
+      _audits[key] = audit;
+      _addBadgeToMessage(msgEl, audit, i);
+    }
+    _saveAudits();
+    _updateFloat();
+    _renderStats();
+  }
+
+  /* ── toggle / show / hide ── */
+  function toggle() {
+    if (_visible) hide(); else show();
+  }
+  function show() {
+    if (!_panelEl) _createPanel();
+    _panelEl.classList.add('sra-open');
+    _visible = true;
+    _renderStats();
+  }
+  function hide() {
+    if (_panelEl) _panelEl.classList.remove('sra-open');
+    _visible = false;
+  }
+
+  /* ── init ── */
+  function init() {
+    _loadConfig();
+    if (!_config.enabled) return;
+    _injectStyles();
+    _loadAudits();
+    _createFloat();
+
+    var chatOut = document.getElementById('chat-output');
+    if (chatOut) {
+      _observer = new MutationObserver(function() {
+        var now = Date.now();
+        if (now - _lastEval < EVAL_THROTTLE_MS) return;
+        _lastEval = now;
+        auditAll();
+      });
+      _observer.observe(chatOut, { childList: true, subtree: true });
+    }
+
+    if (typeof KeyboardShortcuts !== 'undefined' && KeyboardShortcuts.register) {
+      KeyboardShortcuts.register('Alt+Shift+Q', 'Response Auditor', toggle);
+    }
+    if (typeof CommandPalette !== 'undefined' && CommandPalette.register) {
+      CommandPalette.register({ id: 'cp:response-auditor', label: 'Response Auditor', icon: '\uD83D\uDD0D', shortcut: 'Alt+Shift+Q', callback: toggle });
+    }
+    if (typeof MessageContextMenu !== 'undefined' && MessageContextMenu.register) {
+      MessageContextMenu.register({
+        label: '\uD83D\uDD0D Audit response',
+        action: function(msgEl) {
+          var idx = 0;
+          var chatOut = document.getElementById('chat-output');
+          if (chatOut) {
+            var msgs = chatOut.querySelectorAll('.message');
+            for (var i = 0; i < msgs.length; i++) {
+              if (msgs[i] === msgEl) { idx = i; break; }
+            }
+          }
+          var text = msgEl ? (msgEl.textContent || '') : '';
+          var audit = auditMessage(text);
+          _audits['msg_' + idx] = audit;
+          _saveAudits();
+          _addBadgeToMessage(msgEl, audit, idx);
+          _showAuditDetail(idx);
+        }
+      });
+    }
+
+    setTimeout(function() { auditAll(); }, 2500);
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  return {
+    toggle: toggle,
+    show: show,
+    hide: hide,
+    close: hide,
+    auditMessage: auditMessage,
+    auditAll: auditAll,
+    getAudit: function(idx) { return _audits['msg_' + idx] || null; },
+    getStats: function() {
+      var keys = Object.keys(_audits);
+      var clean = 0; var minor = 0; var major = 0; var totalScore = 0;
+      for (var i = 0; i < keys.length; i++) {
+        var a = _audits[keys[i]];
+        totalScore += a.overall;
+        if (a.grade === 'clean') clean++;
+        else if (a.grade === 'minor') minor++;
+        else major++;
+      }
+      return { total: keys.length, clean: clean, minor: minor, major: major, avgScore: keys.length > 0 ? Math.round(totalScore / keys.length) : 0 };
+    },
+    isEnabled: function() { return _config.enabled; },
+    setEnabled: function(v) { _config.enabled = !!v; _saveConfig(); },
+    setSensitivity: function(v) {
+      if (['low', 'medium', 'high'].indexOf(v) !== -1) {
+        _config.sensitivity = v;
+        _saveConfig();
+      }
+    }
   };
 })();
