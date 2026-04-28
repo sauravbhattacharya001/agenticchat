@@ -108,6 +108,7 @@
  *   SmartTokenBudgetManager - autonomous token budget intelligence with usage gauge, growth prediction, compression recommendations (Alt+Shift+B)
  *   SmartConversationDigest - autonomous cross-session digest with topic extraction, action items, unresolved questions, sentiment, export (Alt+Shift+J)
  *   SmartSessionInsights  - cross-session analytics dashboard with topic trends, model usage, productivity patterns, proactive recommendations (Alt+Shift+K)
+ *   SmartFactMemory       - autonomous fact/decision/preference/action-item extractor with persistent cross-session knowledge base (Alt+Shift+F)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -42322,5 +42323,465 @@ const SmartAutoContinue = (() => {
     isEnabled: function() { return _enabled; },
     setEnabled: function(v) { _enabled = !!v; _saveConfig(); },
     setAutoMode: function(v) { _autoMode = !!v; _saveConfig(); }
+  };
+})();
+
+/* ============================================================
+ * SmartFactMemory — Autonomous Fact / Decision / Preference / Action-Item Extractor
+ *
+ * Watches incoming assistant messages, extracts discrete knowledge nuggets
+ * using heuristic pattern matching, and stores them in a persistent
+ * cross-session knowledge base.  Users can search, filter, pin, delete,
+ * and export their accumulated knowledge.  The module also surfaces
+ * relevant prior facts when composing new prompts, creating a form of
+ * long-term memory for the chat interface.
+ *
+ * Keyboard shortcut: Alt+Shift+F
+ * ============================================================ */
+const SmartFactMemory = (() => {
+  'use strict';
+
+  /* ── constants ── */
+  var STORAGE_KEY = 'sfm_facts';
+  var CONFIG_KEY  = 'sfm_config';
+  var MAX_FACTS   = 2000;
+  var CATEGORIES  = {
+    fact:       { label: 'Fact',        icon: '\uD83D\uDCCC', color: '#3498db' },
+    decision:   { label: 'Decision',    icon: '\u2696\uFE0F', color: '#9b59b6' },
+    preference: { label: 'Preference',  icon: '\uD83D\uDCA1', color: '#e67e22' },
+    action:     { label: 'Action Item', icon: '\u2705', color: '#27ae60' },
+    definition: { label: 'Definition',  icon: '\uD83D\uDCD6', color: '#16a085' }
+  };
+
+  /* ── extraction patterns ── */
+  var PATTERNS = [
+    // Action items
+    { cat: 'action',     re: /(?:you should|you need to|make sure to|don'?t forget to|remember to|todo:|action[:\s]+item:?)\s*(.{10,120})/gi },
+    { cat: 'action',     re: /(?:^|\n)\s*[-*]\s*\[\s*\]\s+(.{5,120})/gm },
+    // Decisions
+    { cat: 'decision',   re: /(?:I(?:'ve| have)? decided|the decision is|we(?:'ll| will) go with|let'?s go with|chosen approach:?)\s*(.{10,150})/gi },
+    { cat: 'decision',   re: /(?:best option is|recommended approach is|the answer is)\s*(.{10,150})/gi },
+    // Preferences
+    { cat: 'preference', re: /(?:I prefer|my preference is|I like to use|I always use|I usually)\s+(.{8,120})/gi },
+    { cat: 'preference', re: /(?:the (?:best|recommended|preferred) (?:way|approach|method|tool|library) (?:is|to))\s+(.{8,120})/gi },
+    // Definitions
+    { cat: 'definition', re: /(?:\*\*([^*]{3,40})\*\*(?:\s*[-\u2013\u2014:]\s*|\s+is\s+))(.{10,200})/gi, group: 2, label: 1 },
+    { cat: 'definition', re: /([A-Z][a-zA-Z]{2,25})\s+(?:is|refers to|means|stands for)\s+(.{10,200})/g, group: 2, label: 1 },
+    // Facts (broad - run last)
+    { cat: 'fact',       re: /(?:note that|importantly|key (?:point|takeaway)|fun fact|keep in mind|worth noting):?\s*(.{10,200})/gi },
+    { cat: 'fact',       re: /(?:the (?:default|maximum|minimum|limit|port|version|size) (?:is|are|was))\s+(.{5,120})/gi }
+  ];
+
+  /* ── state ── */
+  var _facts   = [];   // [{ id, category, text, label?, source, sessionId, timestamp, pinned }]
+  var _config  = { enabled: true, autoExtract: true, showBadge: true };
+  var _panel   = null;
+  var _visible = false;
+  var _filter  = 'all';
+  var _search  = '';
+  var _badge   = null;
+
+  /* ── persistence ── */
+  function _save() {
+    SafeStorage.setItem(STORAGE_KEY, JSON.stringify(_facts));
+  }
+  function _load() {
+    try { _facts = JSON.parse(SafeStorage.getItem(STORAGE_KEY)) || []; }
+    catch (_e) { _facts = []; }
+  }
+  function _saveConfig() {
+    SafeStorage.setItem(CONFIG_KEY, JSON.stringify(_config));
+  }
+  function _loadConfig() {
+    try {
+      var c = JSON.parse(SafeStorage.getItem(CONFIG_KEY));
+      if (c) { _config.enabled = c.enabled !== false; _config.autoExtract = c.autoExtract !== false; _config.showBadge = c.showBadge !== false; }
+    } catch (_e) {}
+  }
+
+  /* ── extraction engine ── */
+  function _dedupKey(text) {
+    return text.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().slice(0, 80);
+  }
+
+  function extractFacts(text, source, sessionId) {
+    if (!text || typeof text !== 'string') return [];
+    var found = [];
+    var seen = {};
+    for (var i = 0; i < _facts.length; i++) { seen[_dedupKey(_facts[i].text)] = true; }
+
+    for (var p = 0; p < PATTERNS.length; p++) {
+      var pat = PATTERNS[p];
+      var re = new RegExp(pat.re.source, pat.re.flags);
+      var m;
+      while ((m = re.exec(text)) !== null) {
+        var captured = m[pat.group || 1];
+        if (!captured) continue;
+        captured = captured.replace(/\s+/g, ' ').trim();
+        captured = captured.replace(/[.;,!]+$/, '').trim();
+        if (captured.length < 8) continue;
+        var dk = _dedupKey(captured);
+        if (seen[dk]) continue;
+        seen[dk] = true;
+        var entry = {
+          id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+          category: pat.cat,
+          text: captured,
+          label: pat.label ? (m[pat.label] || '').trim() : null,
+          source: source || 'assistant',
+          sessionId: sessionId || (typeof SessionManager !== 'undefined' && SessionManager.currentId ? SessionManager.currentId() : null),
+          timestamp: Date.now(),
+          pinned: false
+        };
+        found.push(entry);
+      }
+    }
+    return found;
+  }
+
+  function addFacts(newFacts) {
+    if (!newFacts || !newFacts.length) return 0;
+    _facts = _facts.concat(newFacts);
+    while (_facts.length > MAX_FACTS) {
+      var idx = -1;
+      for (var i = 0; i < _facts.length; i++) {
+        if (!_facts[i].pinned) { idx = i; break; }
+      }
+      if (idx === -1) break;
+      _facts.splice(idx, 1);
+    }
+    _save();
+    _updateBadge();
+    return newFacts.length;
+  }
+
+  /* ── badge ── */
+  function _updateBadge() {
+    if (!_badge) { _badge = document.getElementById('sfm-badge'); }
+    if (_badge) {
+      _badge.textContent = _facts.length;
+      _badge.style.display = _config.showBadge && _facts.length > 0 ? 'inline-block' : 'none';
+    }
+  }
+
+  /* ── filtered list ── */
+  function _filtered() {
+    var list = _facts;
+    if (_filter !== 'all') {
+      list = list.filter(function(f) { return f.category === _filter; });
+    }
+    if (_search) {
+      var q = _search.toLowerCase();
+      list = list.filter(function(f) {
+        return f.text.toLowerCase().indexOf(q) !== -1 ||
+               (f.label && f.label.toLowerCase().indexOf(q) !== -1);
+      });
+    }
+    list.sort(function(a, b) {
+      if (a.pinned !== b.pinned) return b.pinned ? 1 : -1;
+      return b.timestamp - a.timestamp;
+    });
+    return list;
+  }
+
+  /* ── panel UI ── */
+  function _createPanel() {
+    if (_panel) return;
+    _panel = document.createElement('div');
+    _panel.id = 'sfm-panel';
+    _panel.innerHTML =
+      '<div class="sfm-header">' +
+        '<h3>\uD83E\uDDE0 Fact Memory <span id="sfm-badge" class="sfm-badge">0</span></h3>' +
+        '<div class="sfm-header-actions">' +
+          '<button class="sfm-btn sfm-export" title="Export facts as JSON">\uD83D\uDCE5</button>' +
+          '<button class="sfm-btn sfm-clear" title="Clear all facts">\uD83D\uDDD1\uFE0F</button>' +
+          '<label class="sfm-toggle-label"><input type="checkbox" id="sfm-auto" checked> Auto-extract</label>' +
+          '<button class="sfm-close" title="Close">&times;</button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="sfm-search-row">' +
+        '<input type="text" id="sfm-search" placeholder="Search facts\u2026" autocomplete="off">' +
+      '</div>' +
+      '<div class="sfm-filters" id="sfm-filters"></div>' +
+      '<div class="sfm-stats" id="sfm-stats"></div>' +
+      '<div class="sfm-list" id="sfm-list"></div>';
+
+    var style = document.createElement('style');
+    style.textContent =
+      '#sfm-panel{position:fixed;top:0;right:-420px;width:400px;height:100vh;background:var(--bg-primary,#1e1e2e);' +
+      'border-left:1px solid var(--border-color,#333);z-index:10200;display:flex;flex-direction:column;' +
+      'transition:right .25s ease;font-family:system-ui,sans-serif;color:var(--text-primary,#cdd6f4)}' +
+      '#sfm-panel.open{right:0}' +
+      '.sfm-header{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--border-color,#333)}' +
+      '.sfm-header h3{margin:0;font-size:16px;display:flex;align-items:center;gap:8px}' +
+      '.sfm-header-actions{display:flex;align-items:center;gap:6px}' +
+      '.sfm-badge{background:#3498db;color:#fff;border-radius:10px;padding:1px 7px;font-size:12px;font-weight:600}' +
+      '.sfm-close{background:none;border:none;color:var(--text-primary,#cdd6f4);font-size:22px;cursor:pointer;padding:0 4px}' +
+      '.sfm-btn{background:none;border:1px solid var(--border-color,#444);border-radius:4px;color:var(--text-primary,#cdd6f4);' +
+      'cursor:pointer;padding:3px 8px;font-size:14px}' +
+      '.sfm-btn:hover{background:var(--bg-secondary,#2a2a3e)}' +
+      '.sfm-search-row{padding:8px 16px}' +
+      '#sfm-search{width:100%;padding:6px 10px;border:1px solid var(--border-color,#444);border-radius:6px;' +
+      'background:var(--bg-secondary,#2a2a3e);color:var(--text-primary,#cdd6f4);font-size:13px;box-sizing:border-box}' +
+      '.sfm-filters{display:flex;gap:4px;padding:0 16px 8px;flex-wrap:wrap}' +
+      '.sfm-filter-btn{padding:3px 10px;border-radius:12px;border:1px solid var(--border-color,#444);' +
+      'background:transparent;color:var(--text-secondary,#a6adc8);cursor:pointer;font-size:12px;white-space:nowrap}' +
+      '.sfm-filter-btn.active{background:var(--accent,#3498db);color:#fff;border-color:var(--accent,#3498db)}' +
+      '.sfm-stats{padding:4px 16px;font-size:12px;color:var(--text-secondary,#a6adc8)}' +
+      '.sfm-list{flex:1;overflow-y:auto;padding:8px 16px}' +
+      '.sfm-card{background:var(--bg-secondary,#2a2a3e);border:1px solid var(--border-color,#333);border-radius:8px;' +
+      'padding:10px 12px;margin-bottom:8px;position:relative}' +
+      '.sfm-card.pinned{border-color:#f39c12}' +
+      '.sfm-card-cat{font-size:11px;font-weight:600;text-transform:uppercase;margin-bottom:4px;display:flex;align-items:center;gap:4px}' +
+      '.sfm-card-text{font-size:13px;line-height:1.45}' +
+      '.sfm-card-label{font-weight:700;color:#e0e0ff}' +
+      '.sfm-card-meta{font-size:11px;color:var(--text-secondary,#a6adc8);margin-top:6px;display:flex;justify-content:space-between;align-items:center}' +
+      '.sfm-card-actions{display:flex;gap:4px}' +
+      '.sfm-card-actions button{background:none;border:none;cursor:pointer;font-size:13px;padding:2px 4px;opacity:0.6}' +
+      '.sfm-card-actions button:hover{opacity:1}' +
+      '.sfm-toggle-label{font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer;color:var(--text-secondary,#a6adc8)}' +
+      '.sfm-empty{text-align:center;padding:40px 20px;color:var(--text-secondary,#a6adc8);font-size:13px}';
+    document.head.appendChild(style);
+    document.body.appendChild(_panel);
+
+    _panel.querySelector('.sfm-close').addEventListener('click', hide);
+    _panel.querySelector('.sfm-export').addEventListener('click', _exportFacts);
+    _panel.querySelector('.sfm-clear').addEventListener('click', _clearFacts);
+    var autoEl = _panel.querySelector('#sfm-auto');
+    autoEl.checked = _config.autoExtract;
+    autoEl.addEventListener('change', function() {
+      _config.autoExtract = autoEl.checked;
+      _saveConfig();
+      if (typeof ToastManager !== 'undefined') ToastManager.show('Auto-extract ' + (_config.autoExtract ? 'enabled' : 'disabled'), 'info');
+    });
+    document.getElementById('sfm-search').addEventListener('input', function(e) {
+      _search = e.target.value;
+      _render();
+    });
+  }
+
+  function _render() {
+    if (!_panel) return;
+    _updateBadge();
+
+    var filtersEl = document.getElementById('sfm-filters');
+    var catCounts = { all: _facts.length };
+    var c;
+    for (c in CATEGORIES) catCounts[c] = 0;
+    for (var i = 0; i < _facts.length; i++) { catCounts[_facts[i].category] = (catCounts[_facts[i].category] || 0) + 1; }
+    var fhtml = '<button class="sfm-filter-btn' + (_filter === 'all' ? ' active' : '') + '" data-cat="all">All (' + catCounts.all + ')</button>';
+    for (var cat in CATEGORIES) {
+      fhtml += '<button class="sfm-filter-btn' + (_filter === cat ? ' active' : '') + '" data-cat="' + cat + '">' +
+               CATEGORIES[cat].icon + ' ' + CATEGORIES[cat].label + ' (' + (catCounts[cat] || 0) + ')</button>';
+    }
+    filtersEl.innerHTML = fhtml;
+    filtersEl.querySelectorAll('.sfm-filter-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        _filter = btn.getAttribute('data-cat');
+        _render();
+      });
+    });
+
+    var statsEl = document.getElementById('sfm-stats');
+    var pinCount = _facts.filter(function(f) { return f.pinned; }).length;
+    statsEl.textContent = _facts.length + ' facts stored' + (pinCount ? ' \u00B7 ' + pinCount + ' pinned' : '');
+
+    var listEl = document.getElementById('sfm-list');
+    var items = _filtered();
+    if (items.length === 0) {
+      listEl.innerHTML = '<div class="sfm-empty">' +
+        (_facts.length === 0
+          ? '\uD83E\uDDE0 No facts extracted yet.<br>Chat with an AI and facts will be auto-captured!'
+          : 'No facts match your filter.') +
+        '</div>';
+      return;
+    }
+    var html = '';
+    for (var j = 0; j < items.length; j++) {
+      var f = items[j];
+      var catInfo = CATEGORIES[f.category] || CATEGORIES.fact;
+      var dateStr = new Date(f.timestamp).toLocaleDateString() + ' ' + new Date(f.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      html += '<div class="sfm-card' + (f.pinned ? ' pinned' : '') + '" data-id="' + f.id + '">' +
+        '<div class="sfm-card-cat" style="color:' + catInfo.color + '">' + catInfo.icon + ' ' + catInfo.label + '</div>' +
+        (f.label ? '<div class="sfm-card-label">' + _esc(f.label) + '</div>' : '') +
+        '<div class="sfm-card-text">' + _esc(f.text) + '</div>' +
+        '<div class="sfm-card-meta">' +
+          '<span>' + dateStr + '</span>' +
+          '<div class="sfm-card-actions">' +
+            '<button class="sfm-pin" title="' + (f.pinned ? 'Unpin' : 'Pin') + '">' + (f.pinned ? '\uD83D\uDCCD' : '\uD83D\uDCCC') + '</button>' +
+            '<button class="sfm-copy" title="Copy">\uD83D\uDCCB</button>' +
+            '<button class="sfm-del" title="Delete">\uD83D\uDDD1\uFE0F</button>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    }
+    listEl.innerHTML = html;
+
+    listEl.querySelectorAll('.sfm-pin').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var id = btn.closest('.sfm-card').getAttribute('data-id');
+        _togglePin(id);
+      });
+    });
+    listEl.querySelectorAll('.sfm-copy').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var card = btn.closest('.sfm-card');
+        var text = card.querySelector('.sfm-card-text').textContent;
+        navigator.clipboard.writeText(text).then(function() {
+          if (typeof ToastManager !== 'undefined') ToastManager.show('Copied to clipboard', 'success');
+        });
+      });
+    });
+    listEl.querySelectorAll('.sfm-del').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var id = btn.closest('.sfm-card').getAttribute('data-id');
+        _deleteFact(id);
+      });
+    });
+  }
+
+  function _esc(s) {
+    var d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  function _togglePin(id) {
+    for (var i = 0; i < _facts.length; i++) {
+      if (_facts[i].id === id) { _facts[i].pinned = !_facts[i].pinned; break; }
+    }
+    _save();
+    _render();
+  }
+
+  function _deleteFact(id) {
+    _facts = _facts.filter(function(f) { return f.id !== id; });
+    _save();
+    _render();
+  }
+
+  function _clearFacts() {
+    if (!confirm('Delete all ' + _facts.length + ' stored facts?')) return;
+    _facts = [];
+    _save();
+    _render();
+    if (typeof ToastManager !== 'undefined') ToastManager.show('All facts cleared', 'info');
+  }
+
+  function _exportFacts() {
+    var data = JSON.stringify(_facts, null, 2);
+    var blob = new Blob([data], { type: 'application/json' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'fact-memory-' + new Date().toISOString().slice(0, 10) + '.json';
+    a.click();
+    URL.revokeObjectURL(url);
+    if (typeof ToastManager !== 'undefined') ToastManager.show('Facts exported', 'success');
+  }
+
+  /* ── public API ── */
+  function show() { _createPanel(); _render(); _panel.classList.add('open'); _visible = true; }
+  function hide() { if (_panel) _panel.classList.remove('open'); _visible = false; }
+  function toggle() { _visible ? hide() : show(); }
+
+  function getRelevantFacts(query, maxResults) {
+    if (!query || !_facts.length) return [];
+    var q = query.toLowerCase();
+    var tokens = q.split(/\s+/).filter(function(t) { return t.length > 2; });
+    if (!tokens.length) return [];
+    var scored = [];
+    for (var i = 0; i < _facts.length; i++) {
+      var f = _facts[i];
+      var txt = (f.text + ' ' + (f.label || '')).toLowerCase();
+      var score = 0;
+      for (var t = 0; t < tokens.length; t++) {
+        if (txt.indexOf(tokens[t]) !== -1) score++;
+      }
+      if (f.pinned) score += 0.5;
+      if (score > 0) scored.push({ fact: f, score: score });
+    }
+    scored.sort(function(a, b) { return b.score - a.score; });
+    return scored.slice(0, maxResults || 5).map(function(s) { return s.fact; });
+  }
+
+  /* ── init ── */
+  function init() {
+    _loadConfig();
+    _load();
+    _updateBadge();
+
+    document.addEventListener('keydown', function(e) {
+      if (e.altKey && e.shiftKey && !e.ctrlKey && e.key === 'F') { e.preventDefault(); toggle(); }
+    });
+    if (typeof KeyboardShortcuts !== 'undefined' && KeyboardShortcuts.register) {
+      KeyboardShortcuts.register('Alt+Shift+F', 'Fact Memory \u2014 knowledge base', toggle);
+    }
+    if (typeof CommandPalette !== 'undefined' && CommandPalette.register) {
+      CommandPalette.register({ name: 'factmemory', description: 'Open Fact Memory knowledge base', icon: '\uD83E\uDDE0', action: toggle });
+    }
+    if (typeof SlashCommands !== 'undefined' && SlashCommands.register) {
+      SlashCommands.register('/facts', 'Open fact memory \u2014 extracted knowledge base', toggle);
+    }
+    if (typeof PanelRegistry !== 'undefined' && PanelRegistry.register) {
+      PanelRegistry.register('factmemory', hide);
+    }
+
+    if (typeof ChatOutputObserver !== 'undefined' && ChatOutputObserver.register) {
+      var _debounce = null;
+      ChatOutputObserver.register('smart-fact-memory', function() {
+        if (!_config.enabled || !_config.autoExtract) return;
+        clearTimeout(_debounce);
+        _debounce = setTimeout(function() {
+          var msgs = document.querySelectorAll('.message.assistant .message-text, .message.assistant .markdown-body');
+          if (!msgs.length) return;
+          var lastMsg = msgs[msgs.length - 1];
+          if (!lastMsg || lastMsg.getAttribute('data-sfm-scanned')) return;
+          lastMsg.setAttribute('data-sfm-scanned', '1');
+          var text = lastMsg.textContent || '';
+          var found = extractFacts(text, 'assistant');
+          if (found.length > 0) {
+            addFacts(found);
+            if (_visible) _render();
+            if (typeof ToastManager !== 'undefined' && found.length >= 2) {
+              ToastManager.show('\uD83E\uDDE0 Extracted ' + found.length + ' facts', 'info');
+            }
+          }
+        }, 3000);
+      });
+    }
+
+    if (typeof MessageContextMenu !== 'undefined' && MessageContextMenu.register) {
+      MessageContextMenu.register({
+        label: '\uD83E\uDDE0 Extract facts',
+        action: function(msgEl) {
+          var text = msgEl.textContent || '';
+          var found = extractFacts(text, 'manual');
+          if (found.length > 0) {
+            addFacts(found);
+            if (_visible) _render();
+            if (typeof ToastManager !== 'undefined') ToastManager.show('\uD83E\uDDE0 Extracted ' + found.length + ' fact(s)', 'success');
+          } else {
+            if (typeof ToastManager !== 'undefined') ToastManager.show('No facts detected in this message', 'info');
+          }
+        }
+      });
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  return {
+    toggle: toggle,
+    show: show,
+    hide: hide,
+    close: hide,
+    extractFacts: extractFacts,
+    addFacts: addFacts,
+    getRelevantFacts: getRelevantFacts,
+    facts: function() { return _facts.slice(); },
+    count: function() { return _facts.length; },
+    isEnabled: function() { return _config.enabled; },
+    setEnabled: function(v) { _config.enabled = !!v; _saveConfig(); }
   };
 })();
