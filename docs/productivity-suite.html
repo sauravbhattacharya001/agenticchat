@@ -1,0 +1,956 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Interactive documentation for Agentic Chat's productivity suite — Focus Timer, Conversation Agenda, Streak Tracker, Usage Heatmap, Ambient Sounds, and more.">
+  <title>Productivity Suite — Agentic Chat Docs</title>
+  <style>
+    :root{--bg:#0d1117;--bg-card:#161b22;--bg-code:#1c2128;--text:#e6edf3;--text-muted:#8b949e;--accent:#58a6ff;--accent-hover:#79c0ff;--border:#30363d;--success:#3fb950;--warning:#d29922;--danger:#f85149;--purple:#bc8cff;--orange:#d29922}
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);line-height:1.7}
+    a{color:var(--accent);text-decoration:none}a:hover{color:var(--accent-hover);text-decoration:underline}
+    .container{max-width:960px;margin:0 auto;padding:2rem 1.5rem}
+    nav{position:sticky;top:0;z-index:10;background:var(--bg-card);border-bottom:1px solid var(--border);padding:.75rem 1.5rem;display:flex;align-items:center;gap:2rem}
+    nav .logo{font-weight:700;font-size:1.1rem;color:var(--accent)}
+    nav .links{display:flex;gap:1.5rem}nav .links a{color:var(--text-muted);font-size:.9rem}nav .links a:hover{color:var(--text);text-decoration:none}
+    section{margin-bottom:3rem}
+    h1{font-size:2.2rem;margin-bottom:.5rem}
+    h2{font-size:1.5rem;margin-bottom:1rem;padding-bottom:.5rem;border-bottom:1px solid var(--border)}
+    h3{font-size:1.15rem;margin:1.5rem 0 .75rem;color:var(--accent)}
+    p,ul,ol{margin-bottom:1rem}ul,ol{padding-left:1.5rem}li{margin-bottom:.35rem}
+    code{background:var(--bg-code);padding:.15rem .4rem;border-radius:4px;font-size:.9em;font-family:'SFMono-Regular',Consolas,monospace}
+    pre{background:var(--bg-code);border:1px solid var(--border);border-radius:8px;padding:1rem 1.25rem;overflow-x:auto;margin-bottom:1.5rem}
+    pre code{background:none;padding:0}
+    .card{background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:1.25rem;margin-bottom:1rem}
+    .card h3{margin-top:0;color:var(--text)}
+    table{width:100%;border-collapse:collapse;margin-bottom:1.5rem}
+    th,td{text-align:left;padding:.65rem 1rem;border-bottom:1px solid var(--border)}
+    th{color:var(--text-muted);font-size:.85rem;text-transform:uppercase;letter-spacing:.05em}
+    footer{text-align:center;padding:2rem 0;color:var(--text-muted);font-size:.85rem;border-top:1px solid var(--border)}
+    .badge{display:inline-block;padding:.15rem .5rem;border-radius:12px;font-size:.8rem;font-weight:600}
+    .badge-shortcut{background:var(--bg-code);border:1px solid var(--border);color:var(--text-muted);font-family:monospace}
+    .tag{display:inline-block;padding:.1rem .4rem;border-radius:4px;font-size:.75rem;margin-right:.3rem}
+
+    /* Interactive Demos */
+    .demo-box{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:1.5rem;margin:1.5rem 0}
+    .demo-box h4{font-size:1rem;color:var(--accent);margin-bottom:1rem;display:flex;align-items:center;gap:.5rem}
+    .demo-box h4::before{content:'▸';color:var(--success)}
+    button.demo-btn{background:var(--accent);color:var(--bg);border:none;padding:.5rem 1rem;border-radius:6px;cursor:pointer;font-size:.85rem;font-weight:600;transition:all .2s}
+    button.demo-btn:hover{background:var(--accent-hover);transform:translateY(-1px)}
+    button.demo-btn.danger{background:var(--danger)}
+    button.demo-btn.success{background:var(--success)}
+    button.demo-btn.secondary{background:var(--bg-code);color:var(--text);border:1px solid var(--border)}
+    button.demo-btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
+
+    /* Pomodoro Timer Demo */
+    .pomodoro-display{text-align:center;padding:2rem 0}
+    .pomodoro-time{font-size:4rem;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:.05em}
+    .pomodoro-phase{font-size:.9rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.1em;margin-top:.25rem}
+    .pomodoro-ring{width:200px;height:200px;margin:0 auto;position:relative}
+    .pomodoro-ring svg{width:200px;height:200px;transform:rotate(-90deg)}
+    .pomodoro-ring .ring-bg{fill:none;stroke:var(--border);stroke-width:8}
+    .pomodoro-ring .ring-progress{fill:none;stroke:var(--accent);stroke-width:8;stroke-linecap:round;transition:stroke-dashoffset .5s ease;stroke-dasharray:565.48;stroke-dashoffset:0}
+    .pomodoro-ring .ring-progress.break-mode{stroke:var(--success)}
+    .pomodoro-ring .timer-text{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center}
+    .pomodoro-controls{display:flex;justify-content:center;gap:.75rem;margin-top:1.5rem;flex-wrap:wrap}
+    .pomodoro-settings{display:grid;grid-template-columns:repeat(3,1fr);gap:.75rem;margin-top:1rem}
+    .pomodoro-settings label{display:flex;flex-direction:column;gap:.25rem;font-size:.85rem;color:var(--text-muted)}
+    .pomodoro-settings input{background:var(--bg-code);border:1px solid var(--border);color:var(--text);padding:.4rem;border-radius:4px;text-align:center;width:100%}
+    .session-dots{display:flex;justify-content:center;gap:.5rem;margin-top:.75rem}
+    .session-dot{width:12px;height:12px;border-radius:50%;background:var(--border)}
+    .session-dot.completed{background:var(--accent)}
+    .session-dot.active{background:var(--warning);box-shadow:0 0 8px var(--warning)}
+
+    /* Streak Demo */
+    .streak-display{text-align:center;padding:1.5rem 0}
+    .streak-number{font-size:5rem;font-weight:800;background:linear-gradient(135deg,var(--warning),var(--danger));-webkit-background-clip:text;-webkit-text-fill-color:transparent;line-height:1}
+    .streak-label{color:var(--text-muted);font-size:.9rem;margin-top:.25rem}
+    .milestones{display:flex;flex-wrap:wrap;gap:.75rem;justify-content:center;margin-top:1.5rem}
+    .milestone{background:var(--bg-code);border:1px solid var(--border);border-radius:8px;padding:.75rem 1rem;text-align:center;min-width:90px;transition:all .3s}
+    .milestone.achieved{border-color:var(--warning);background:rgba(210,153,34,.1)}
+    .milestone .ms-emoji{font-size:1.5rem}
+    .milestone .ms-days{font-size:.75rem;color:var(--text-muted)}
+    .milestone .ms-label{font-size:.8rem;font-weight:600}
+    .streak-calendar{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;margin-top:1.5rem;max-width:300px;margin-left:auto;margin-right:auto}
+    .streak-day{aspect-ratio:1;border-radius:4px;background:var(--bg-code);display:flex;align-items:center;justify-content:center;font-size:.7rem;color:var(--text-muted)}
+    .streak-day.active{background:var(--success);color:var(--bg);font-weight:700}
+    .streak-day.today{box-shadow:inset 0 0 0 2px var(--accent)}
+    .streak-day.header{background:none;font-weight:600;font-size:.65rem;color:var(--text-muted)}
+
+    /* Heatmap Demo */
+    .heatmap-grid{display:grid;grid-template-columns:40px repeat(24,1fr);gap:2px;font-size:.7rem}
+    .heatmap-cell{aspect-ratio:1;border-radius:3px;position:relative;cursor:pointer;transition:transform .15s}
+    .heatmap-cell:hover{transform:scale(1.4);z-index:2}
+    .heatmap-label{display:flex;align-items:center;color:var(--text-muted);font-size:.7rem;padding-right:.25rem;justify-content:flex-end}
+    .heatmap-hour{text-align:center;color:var(--text-muted);font-size:.65rem;padding-bottom:.25rem}
+    .heatmap-legend{display:flex;align-items:center;gap:.35rem;margin-top:.75rem;justify-content:flex-end;font-size:.75rem;color:var(--text-muted)}
+    .heatmap-legend-cell{width:14px;height:14px;border-radius:3px}
+    .heatmap-tooltip{position:fixed;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;padding:.35rem .6rem;font-size:.8rem;pointer-events:none;z-index:100;display:none;white-space:nowrap}
+
+    /* Agenda Demo */
+    .agenda-input-row{display:flex;gap:.5rem;margin-bottom:.75rem}
+    .agenda-input{flex:1;background:var(--bg-code);border:1px solid var(--border);color:var(--text);padding:.5rem .75rem;border-radius:6px;font-size:.9rem}
+    .agenda-input::placeholder{color:var(--text-muted)}
+    .agenda-list{list-style:none;padding:0}
+    .agenda-item{display:flex;align-items:center;gap:.75rem;padding:.6rem .75rem;border-radius:6px;transition:background .15s;cursor:pointer}
+    .agenda-item:hover{background:var(--bg-code)}
+    .agenda-check{width:20px;height:20px;border:2px solid var(--border);border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:all .2s;cursor:pointer}
+    .agenda-check.done{background:var(--success);border-color:var(--success)}
+    .agenda-check.done::after{content:'✓';color:var(--bg);font-size:.75rem;font-weight:700}
+    .agenda-text{flex:1;font-size:.9rem}
+    .agenda-text.done{text-decoration:line-through;color:var(--text-muted)}
+    .agenda-delete{color:var(--text-muted);cursor:pointer;font-size:.8rem;opacity:0;transition:opacity .15s}
+    .agenda-item:hover .agenda-delete{opacity:1}
+    .agenda-delete:hover{color:var(--danger)}
+    .agenda-progress{height:4px;background:var(--bg-code);border-radius:2px;margin-top:.75rem;overflow:hidden}
+    .agenda-progress-bar{height:100%;background:linear-gradient(90deg,var(--accent),var(--success));border-radius:2px;transition:width .4s ease}
+    .agenda-stats{display:flex;justify-content:space-between;font-size:.8rem;color:var(--text-muted);margin-top:.35rem}
+
+    /* Ambient Sounds */
+    .sound-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:.75rem}
+    .sound-card{background:var(--bg-code);border:1px solid var(--border);border-radius:10px;padding:1rem;text-align:center;cursor:pointer;transition:all .25s;user-select:none}
+    .sound-card:hover{border-color:var(--accent);transform:translateY(-2px)}
+    .sound-card.active{border-color:var(--success);background:rgba(63,185,80,.08)}
+    .sound-icon{font-size:2rem;margin-bottom:.5rem}
+    .sound-name{font-size:.85rem;font-weight:600;margin-bottom:.5rem}
+    .sound-slider{width:100%;accent-color:var(--accent);cursor:pointer}
+
+    /* Command Palette Demo */
+    .palette-overlay{background:rgba(0,0,0,.5);border-radius:12px;padding:1rem;margin:1rem 0}
+    .palette-input{width:100%;background:var(--bg);border:2px solid var(--accent);color:var(--text);padding:.75rem 1rem;border-radius:8px;font-size:1rem;outline:none}
+    .palette-input::placeholder{color:var(--text-muted)}
+    .palette-results{margin-top:.5rem;max-height:250px;overflow-y:auto}
+    .palette-item{display:flex;align-items:center;gap:.75rem;padding:.6rem .75rem;border-radius:6px;cursor:pointer;transition:background .1s}
+    .palette-item:hover,.palette-item.selected{background:var(--bg-card)}
+    .palette-item .pi-icon{font-size:1.1rem;width:28px;text-align:center;flex-shrink:0}
+    .palette-item .pi-label{font-size:.9rem}
+    .palette-item .pi-shortcut{margin-left:auto;font-size:.75rem;color:var(--text-muted);font-family:monospace}
+    .highlight{color:var(--accent);font-weight:700}
+  </style>
+</head>
+<body>
+  <nav>
+    <span class="logo">🤖 Agentic Chat</span>
+    <div class="links">
+      <a href="index.html">Docs Home</a>
+      <a href="smart-intelligence.html">Smart Intelligence</a>
+      <a href="https://github.com/sauravbhattacharya001/agenticchat">GitHub</a>
+    </div>
+  </nav>
+
+  <div class="container">
+    <h1>⚡ Productivity Suite</h1>
+    <p style="color:var(--text-muted);font-size:1.1rem;margin-bottom:2rem">
+      Interactive deep-dive into the modules that help you stay focused, track progress, and work efficiently inside Agentic Chat.
+    </p>
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- FOCUS TIMER -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <section id="focus-timer">
+      <h2>🍅 Focus Timer (Pomodoro)</h2>
+      <p>
+        A full Pomodoro timer built into the chat interface. Cycles through <strong>work → short break → work → … → long break</strong> automatically.
+        Configurable durations, audio cues, and session counting help you maintain deep focus while chatting with AI.
+      </p>
+      <p>Shortcut: <span class="badge badge-shortcut">Alt+P</span></p>
+
+      <div class="demo-box">
+        <h4>Interactive Demo — Try It</h4>
+
+        <div class="pomodoro-ring" id="pomo-ring">
+          <svg viewBox="0 0 200 200">
+            <circle class="ring-bg" cx="100" cy="100" r="90"/>
+            <circle class="ring-progress" id="pomo-progress" cx="100" cy="100" r="90"/>
+          </svg>
+          <div class="timer-text">
+            <div class="pomodoro-time" id="pomo-time">25:00</div>
+            <div class="pomodoro-phase" id="pomo-phase">Work</div>
+          </div>
+        </div>
+
+        <div class="session-dots" id="pomo-dots"></div>
+
+        <div class="pomodoro-controls">
+          <button class="demo-btn success" id="pomo-start">▶ Start</button>
+          <button class="demo-btn secondary" id="pomo-pause" disabled>⏸ Pause</button>
+          <button class="demo-btn danger" id="pomo-reset">↻ Reset</button>
+          <button class="demo-btn secondary" id="pomo-skip">⏭ Skip</button>
+        </div>
+
+        <div class="pomodoro-settings">
+          <label>Work (min) <input type="number" id="pomo-work" value="25" min="1" max="120"></label>
+          <label>Short Break <input type="number" id="pomo-short" value="5" min="1" max="30"></label>
+          <label>Long Break <input type="number" id="pomo-long" value="15" min="1" max="60"></label>
+        </div>
+      </div>
+
+      <h3>How It Works</h3>
+      <table>
+        <tr><th>Phase</th><th>Default Duration</th><th>Ring Color</th></tr>
+        <tr><td>Work</td><td>25 minutes</td><td style="color:var(--accent)">Blue</td></tr>
+        <tr><td>Short Break</td><td>5 minutes</td><td style="color:var(--success)">Green</td></tr>
+        <tr><td>Long Break (every 4 sessions)</td><td>15 minutes</td><td style="color:var(--success)">Green</td></tr>
+      </table>
+
+      <h3>API</h3>
+      <pre><code>FocusTimer.toggle()       // Open/close the panel (Alt+P)
+FocusTimer.start()        // Start the current phase
+FocusTimer.pause()        // Pause the countdown
+FocusTimer.reset()        // Reset to idle state
+FocusTimer.skip()         // Skip to next phase
+FocusTimer.getState()     // → 'idle' | 'work' | 'short-break' | 'long-break'
+FocusTimer.configure({    // Update durations (minutes)
+  work: 50,
+  short: 10,
+  long: 20,
+  longAfter: 4            // Long break after N work sessions
+})</code></pre>
+
+      <h3>Persistence</h3>
+      <p>Timer state (current phase, remaining time, sessions completed) is saved to <code>localStorage</code> under the key <code>ac_focus_timer</code>. If you close the tab mid-session, the timer resumes approximately where you left off, accounting for elapsed wall-clock time.</p>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- CONVERSATION AGENDA -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <section id="conversation-agenda">
+      <h2>📋 Conversation Agenda</h2>
+      <p>
+        Set goals <em>before</em> you start chatting. The agenda panel tracks per-session objectives with a visual progress bar — so you know when you've accomplished what you set out to do.
+      </p>
+      <p>Up to <strong>50 goals</strong> per session, <strong>200 characters</strong> each.</p>
+
+      <div class="demo-box">
+        <h4>Interactive Demo — Build Your Agenda</h4>
+        <div class="agenda-input-row">
+          <input class="agenda-input" id="agenda-input" type="text" placeholder="Add a goal… (e.g., 'Debug the API auth flow')" maxlength="200">
+          <button class="demo-btn" id="agenda-add">+ Add</button>
+        </div>
+        <ul class="agenda-list" id="agenda-list"></ul>
+        <div class="agenda-progress"><div class="agenda-progress-bar" id="agenda-bar" style="width:0%"></div></div>
+        <div class="agenda-stats">
+          <span id="agenda-count">0 / 0 complete</span>
+          <span id="agenda-pct">0%</span>
+        </div>
+      </div>
+
+      <h3>API</h3>
+      <pre><code>ConversationAgenda.toggle()         // Open/close panel
+ConversationAgenda.add('Fix CORS')  // Add a goal programmatically
+ConversationAgenda.list()           // → [{ id, text, done, createdAt }]
+ConversationAgenda.progress()       // → { total, done, pct }</code></pre>
+
+      <h3>Design Decisions</h3>
+      <ul>
+        <li>Goals are scoped to the <strong>current session</strong> — switching sessions loads that session's agenda</li>
+        <li>Completed goals sort to the bottom automatically</li>
+        <li>Progress bar uses a gradient from <span style="color:var(--accent)">blue</span> → <span style="color:var(--success)">green</span> as completion increases</li>
+        <li>Storage key: <code>ac-agenda</code> (namespaced by session ID internally)</li>
+      </ul>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- STREAK TRACKER -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <section id="streak-tracker">
+      <h2>🔥 Streak Tracker</h2>
+      <p>
+        Gamification for consistent AI usage. The tracker counts consecutive days of activity and awards milestone badges. Encourages building a daily habit of productive AI conversations.
+      </p>
+
+      <div class="demo-box">
+        <h4>Interactive Demo — Streak Visualization</h4>
+        <div class="streak-display">
+          <div class="streak-number" id="streak-count">0</div>
+          <div class="streak-label">day streak</div>
+        </div>
+
+        <div class="milestones" id="streak-milestones"></div>
+
+        <div style="margin-top:1.5rem">
+          <div style="display:flex;justify-content:center;gap:.5rem;margin-bottom:.5rem">
+            <span style="font-size:.8rem;color:var(--text-muted)">Click days to toggle activity:</span>
+          </div>
+          <div class="streak-calendar" id="streak-calendar"></div>
+        </div>
+
+        <div class="pomodoro-controls" style="margin-top:1rem">
+          <button class="demo-btn" id="streak-random">🎲 Randomize</button>
+          <button class="demo-btn secondary" id="streak-clear">Clear All</button>
+          <button class="demo-btn success" id="streak-perfect">Perfect Month</button>
+        </div>
+      </div>
+
+      <h3>Milestones</h3>
+      <table>
+        <tr><th>Days</th><th>Badge</th><th>Title</th></tr>
+        <tr><td>3</td><td>🌱</td><td>Seedling</td></tr>
+        <tr><td>7</td><td>🔥</td><td>On Fire</td></tr>
+        <tr><td>14</td><td>⚡</td><td>Unstoppable</td></tr>
+        <tr><td>30</td><td>🏆</td><td>Champion</td></tr>
+        <tr><td>60</td><td>💎</td><td>Diamond</td></tr>
+        <tr><td>100</td><td>👑</td><td>Legend</td></tr>
+        <tr><td>365</td><td>🌟</td><td>Transcendent</td></tr>
+      </table>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- USAGE HEATMAP -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <section id="usage-heatmap">
+      <h2>📊 Usage Heatmap</h2>
+      <p>
+        A GitHub-style <strong>7×24 activity heatmap</strong> showing when you're most active across all sessions. Rows are days of the week, columns are hours — hover any cell for exact counts.
+      </p>
+
+      <div class="demo-box">
+        <h4>Interactive Demo — Weekly Activity Pattern</h4>
+        <div style="overflow-x:auto">
+          <div class="heatmap-grid" id="heatmap-grid"></div>
+        </div>
+        <div class="heatmap-legend">
+          <span>Less</span>
+          <div class="heatmap-legend-cell" style="background:#161b22"></div>
+          <div class="heatmap-legend-cell" style="background:#0e4429"></div>
+          <div class="heatmap-legend-cell" style="background:#006d32"></div>
+          <div class="heatmap-legend-cell" style="background:#26a641"></div>
+          <div class="heatmap-legend-cell" style="background:#39d353"></div>
+          <span>More</span>
+        </div>
+        <div class="pomodoro-controls" style="margin-top:1rem">
+          <button class="demo-btn" id="heatmap-random">🎲 Randomize</button>
+          <button class="demo-btn secondary" id="heatmap-night-owl">🦉 Night Owl</button>
+          <button class="demo-btn secondary" id="heatmap-early-bird">🐦 Early Bird</button>
+          <button class="demo-btn secondary" id="heatmap-weekday">💼 Weekday Warrior</button>
+        </div>
+        <div class="heatmap-tooltip" id="heatmap-tooltip"></div>
+      </div>
+
+      <h3>Data Collection</h3>
+      <p>The heatmap aggregates message timestamps from <strong>all saved sessions</strong>. Each time you send a message, the current hour and day-of-week are incremented in a 7×24 matrix stored in memory. The module reads session data on-demand rather than maintaining a separate persistent counter.</p>
+
+      <h3>API</h3>
+      <pre><code>UsageHeatmap.toggle()   // Open/close the heatmap overlay
+UsageHeatmap.show()     // Show the overlay
+UsageHeatmap.hide()     // Hide the overlay</code></pre>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- AMBIENT SOUNDS -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <section id="ambient-sounds">
+      <h2>🎵 Ambient Sound Player</h2>
+      <p>
+        Procedurally generated ambient soundscapes via the <strong>Web Audio API</strong> — no audio files needed. Each sound is synthesized in real-time using oscillators, noise generators, and filters. Mix multiple sounds at custom volumes.
+      </p>
+      <p>Shortcut: <span class="badge badge-shortcut">Alt+A</span></p>
+
+      <div class="demo-box">
+        <h4>Interactive Demo — Sound Mixer (Visual Only)</h4>
+        <p style="font-size:.85rem;color:var(--text-muted);margin-bottom:1rem">Click sounds to toggle, adjust sliders to mix. (No actual audio — demonstrates the UI pattern.)</p>
+        <div class="sound-grid" id="sound-grid"></div>
+      </div>
+
+      <h3>Sound Generation Techniques</h3>
+      <table>
+        <tr><th>Sound</th><th>Method</th><th>Parameters</th></tr>
+        <tr><td>🌧 Rain</td><td>Filtered white noise + random droplet impulses</td><td>Bandpass 200–2000 Hz, density modulation</td></tr>
+        <tr><td>☕ Café</td><td>Brown noise + layered low-frequency murmur</td><td>Lowpass 800 Hz, occasional clink impulses</td></tr>
+        <tr><td>🔥 Fire</td><td>Filtered noise with crackling envelope</td><td>Bandpass 100–1500 Hz, random amplitude spikes</td></tr>
+        <tr><td>💨 Wind</td><td>Modulated filtered noise</td><td>LFO on filter cutoff (0.1–0.5 Hz sweep)</td></tr>
+        <tr><td>🏞 Stream</td><td>White noise + resonant bandpass</td><td>Multiple resonant peaks, gentle modulation</td></tr>
+        <tr><td>📻 White Noise</td><td>Raw white noise buffer</td><td>Flat spectrum, gain control only</td></tr>
+      </table>
+
+      <h3>Architecture</h3>
+      <p>Each sound creates its own <code>GainNode</code> connected to a shared <code>masterGain</code> node. Toggling a sound creates or destroys its node chain. Volume sliders map to individual gain values (0.0–1.0). AudioContext is created lazily on first user interaction to comply with browser autoplay policies.</p>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- COMMAND PALETTE -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <section id="command-palette">
+      <h2>⌨️ Command Palette</h2>
+      <p>
+        A VS Code-style universal command launcher. Press <span class="badge badge-shortcut">Ctrl+Shift+P</span> to open a fuzzy-search overlay that provides instant access to every feature in the app.
+      </p>
+
+      <div class="demo-box">
+        <h4>Interactive Demo — Fuzzy Search</h4>
+        <div class="palette-overlay">
+          <input class="palette-input" id="palette-input" type="text" placeholder="Type a command… (try 'focus', 'export', 'theme')">
+          <div class="palette-results" id="palette-results"></div>
+        </div>
+      </div>
+
+      <h3>Fuzzy Matching Algorithm</h3>
+      <p>The palette uses a <strong>character-by-character subsequence match</strong> with scoring bonuses for:</p>
+      <ul>
+        <li><strong>Consecutive matches</strong> — characters in sequence score higher</li>
+        <li><strong>Word-boundary matches</strong> — matching the first letter after a space/separator gets a bonus</li>
+        <li><strong>Case-exact matches</strong> — matching the exact case adds a small bonus</li>
+      </ul>
+      <p>Results are sorted by fuzzy score descending. The selected item is highlighted and navigable with <span class="badge badge-shortcut">↑</span>/<span class="badge badge-shortcut">↓</span> arrows and executed with <span class="badge badge-shortcut">Enter</span>.</p>
+
+      <h3>Registering Commands</h3>
+      <pre><code>// Any module can register commands at init time:
+CommandPalette.register({
+  id: 'my-feature-toggle',
+  label: 'Toggle My Feature',
+  icon: '🔧',
+  shortcut: 'Alt+M',
+  action: () => MyFeature.toggle()
+});
+
+// Commands support categories for grouping:
+CommandPalette.register({
+  id: 'export-json',
+  label: 'Export Conversation as JSON',
+  icon: '📥',
+  category: 'Export',
+  action: () => HistoryPanel.exportJSON()
+});</code></pre>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- CONVERSATION TIMER -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <section id="conversation-timer">
+      <h2>⏱ Conversation Timer</h2>
+      <p>
+        Tracks <strong>active time</strong> spent in each conversation. Auto-pauses after 2 minutes of inactivity (no keypresses, no scrolling) and resumes when you interact again. Shortcut: <span class="badge badge-shortcut">Alt+T</span>
+      </p>
+
+      <h3>How Active Time Differs from Wall-Clock Time</h3>
+      <div class="card">
+        <p>If you open a chat at 2:00 PM, chat actively until 2:15 PM, step away for 30 minutes, then return and chat for 10 more minutes — the wall clock says 55 minutes, but the <strong>Conversation Timer reports 25 minutes</strong> of active time.</p>
+      </div>
+
+      <h3>Features</h3>
+      <ul>
+        <li><strong>Auto-pause:</strong> 120-second idle timeout (configurable)</li>
+        <li><strong>Per-session tracking:</strong> Each session has its own accumulated time</li>
+        <li><strong>Time log dashboard:</strong> View historical active time across all sessions</li>
+        <li><strong>Persistence:</strong> Stored in <code>ac_conversation_timer</code> via SafeStorage</li>
+      </ul>
+
+      <h3>API</h3>
+      <pre><code>ConversationTimer.toggle()       // Open/close dashboard (Alt+T)
+ConversationTimer.getElapsed()   // → milliseconds of active time this session
+ConversationTimer.isRunning()    // → boolean
+ConversationTimer.reset()        // Zero out current session timer</code></pre>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- DRAFT RECOVERY -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <section id="draft-recovery">
+      <h2>💾 Draft Recovery</h2>
+      <p>
+        Never lose an unsent message again. <code>DraftRecovery</code> auto-saves the chat input to <code>localStorage</code> every 500ms (debounced). When you reload or switch sessions, your unsent text is restored automatically with a toast notification.
+      </p>
+
+      <h3>How It Works</h3>
+      <ol>
+        <li>On every input event, a 500ms debounce timer starts</li>
+        <li>When the timer fires, the current input text is saved to <code>agenticchat_drafts</code> keyed by session ID</li>
+        <li>On page load or session switch, any saved draft for the active session is restored into the input field</li>
+        <li>Successfully sending a message clears the draft for that session</li>
+      </ol>
+
+      <h3>API</h3>
+      <pre><code>DraftRecovery.save()        // Force-save current input immediately
+DraftRecovery.restore()     // Restore draft for current session
+DraftRecovery.clear()       // Clear draft for current session
+DraftRecovery.hasDraft()    // → boolean</code></pre>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- KEYBOARD SHORTCUTS REFERENCE -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <section id="shortcuts-reference">
+      <h2>⌨️ Productivity Shortcuts Reference</h2>
+      <table>
+        <tr><th>Shortcut</th><th>Action</th><th>Module</th></tr>
+        <tr><td><code>Alt+P</code></td><td>Toggle Focus Timer</td><td>FocusTimer</td></tr>
+        <tr><td><code>Alt+T</code></td><td>Toggle Conversation Timer</td><td>ConversationTimer</td></tr>
+        <tr><td><code>Alt+A</code></td><td>Toggle Ambient Sounds</td><td>AmbientSoundPlayer</td></tr>
+        <tr><td><code>Ctrl+Shift+P</code></td><td>Open Command Palette</td><td>CommandPalette</td></tr>
+        <tr><td><code>Ctrl+Shift+F</code></td><td>Toggle Focus Mode (zen)</td><td>FocusMode</td></tr>
+        <tr><td><code>↑</code> / <code>↓</code></td><td>Navigate input history</td><td>InputHistory</td></tr>
+        <tr><td><code>Ctrl+K</code></td><td>Quick Switcher (fuzzy session search)</td><td>QuickSwitcher</td></tr>
+        <tr><td><code>Ctrl+Shift+V</code></td><td>Clipboard History panel</td><td>ClipboardHistory</td></tr>
+        <tr><td><code>Ctrl+Shift+E</code></td><td>Text Expander settings</td><td>TextExpander</td></tr>
+        <tr><td><code>Alt+Q</code></td><td>Message Scheduler</td><td>MessageScheduler</td></tr>
+      </table>
+    </section>
+
+  </div>
+
+  <footer>
+    <p>Agentic Chat Documentation · <a href="https://github.com/sauravbhattacharya001/agenticchat">GitHub</a></p>
+  </footer>
+
+  <script>
+  /* ════════════════════════════════════════════════════════════
+   * Pomodoro Timer Demo
+   * ════════════════════════════════════════════════════════════ */
+  (() => {
+    const CIRCUMFERENCE = 2 * Math.PI * 90;
+    const progress = document.getElementById('pomo-progress');
+    const timeEl = document.getElementById('pomo-time');
+    const phaseEl = document.getElementById('pomo-phase');
+    const dotsEl = document.getElementById('pomo-dots');
+    progress.style.strokeDasharray = CIRCUMFERENCE;
+    progress.style.strokeDashoffset = '0';
+
+    let state = 'idle', remaining = 0, total = 0, interval = null, sessions = 0;
+    const longAfter = 4;
+
+    function getDurations() {
+      return {
+        work: (parseInt(document.getElementById('pomo-work').value) || 25) * 60,
+        short: (parseInt(document.getElementById('pomo-short').value) || 5) * 60,
+        long: (parseInt(document.getElementById('pomo-long').value) || 15) * 60
+      };
+    }
+
+    function fmt(s) {
+      const m = Math.floor(s / 60), sec = s % 60;
+      return String(m).padStart(2, '0') + ':' + String(sec).padStart(2, '0');
+    }
+
+    function render() {
+      timeEl.textContent = fmt(remaining);
+      const label = state === 'idle' ? 'Ready' : state === 'work' ? 'Work' : state === 'short-break' ? 'Short Break' : 'Long Break';
+      phaseEl.textContent = label;
+      const pct = total > 0 ? (total - remaining) / total : 0;
+      progress.style.strokeDashoffset = CIRCUMFERENCE * (1 - pct);
+      const isBreak = state.includes('break');
+      progress.classList.toggle('break-mode', isBreak);
+      // dots
+      let dots = '';
+      for (let i = 0; i < longAfter; i++) {
+        const cls = i < sessions % longAfter ? 'session-dot completed' : (i === sessions % longAfter && state === 'work' ? 'session-dot active' : 'session-dot');
+        dots += `<div class="${cls}"></div>`;
+      }
+      dotsEl.innerHTML = dots;
+      // button states
+      document.getElementById('pomo-start').disabled = (state !== 'idle' && interval !== null);
+      document.getElementById('pomo-pause').disabled = (interval === null);
+    }
+
+    function tick() {
+      if (remaining <= 0) { advance(); return; }
+      remaining--;
+      render();
+    }
+
+    function advance() {
+      clearInterval(interval); interval = null;
+      if (state === 'work') {
+        sessions++;
+        state = (sessions % longAfter === 0) ? 'long-break' : 'short-break';
+      } else {
+        state = 'work';
+      }
+      const d = getDurations();
+      total = remaining = state === 'work' ? d.work : state === 'short-break' ? d.short : d.long;
+      render();
+      interval = setInterval(tick, 1000);
+    }
+
+    function start() {
+      if (state === 'idle') {
+        state = 'work';
+        const d = getDurations();
+        total = remaining = d.work;
+      }
+      if (interval) return;
+      interval = setInterval(tick, 1000);
+      render();
+    }
+
+    function pause() { clearInterval(interval); interval = null; render(); }
+    function reset() { clearInterval(interval); interval = null; state = 'idle'; sessions = 0; const d = getDurations(); remaining = d.work; total = d.work; render(); }
+    function skip() { remaining = 0; tick(); }
+
+    document.getElementById('pomo-start').onclick = start;
+    document.getElementById('pomo-pause').onclick = pause;
+    document.getElementById('pomo-reset').onclick = reset;
+    document.getElementById('pomo-skip').onclick = skip;
+
+    // init
+    const d = getDurations();
+    remaining = d.work; total = d.work;
+    render();
+  })();
+
+  /* ════════════════════════════════════════════════════════════
+   * Agenda Demo
+   * ════════════════════════════════════════════════════════════ */
+  (() => {
+    const list = document.getElementById('agenda-list');
+    const input = document.getElementById('agenda-input');
+    const bar = document.getElementById('agenda-bar');
+    const countEl = document.getElementById('agenda-count');
+    const pctEl = document.getElementById('agenda-pct');
+    let goals = [];
+
+    function render() {
+      const sorted = [...goals].sort((a, b) => a.done - b.done);
+      list.innerHTML = sorted.map(g => `
+        <li class="agenda-item" data-id="${g.id}">
+          <div class="agenda-check ${g.done ? 'done' : ''}" data-action="toggle" data-id="${g.id}"></div>
+          <span class="agenda-text ${g.done ? 'done' : ''}">${esc(g.text)}</span>
+          <span class="agenda-delete" data-action="delete" data-id="${g.id}">✕</span>
+        </li>`).join('');
+      const done = goals.filter(g => g.done).length;
+      const pct = goals.length ? Math.round(done / goals.length * 100) : 0;
+      bar.style.width = pct + '%';
+      countEl.textContent = `${done} / ${goals.length} complete`;
+      pctEl.textContent = pct + '%';
+    }
+
+    function esc(s) { return s.replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+    function add() {
+      const t = input.value.trim();
+      if (!t || goals.length >= 50) return;
+      goals.push({ id: Date.now(), text: t.slice(0, 200), done: false });
+      input.value = '';
+      render();
+    }
+
+    document.getElementById('agenda-add').onclick = add;
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') add(); });
+
+    list.addEventListener('click', e => {
+      const el = e.target;
+      const id = Number(el.dataset.id);
+      if (el.dataset.action === 'toggle') {
+        const g = goals.find(g => g.id === id);
+        if (g) g.done = !g.done;
+        render();
+      } else if (el.dataset.action === 'delete') {
+        goals = goals.filter(g => g.id !== id);
+        render();
+      }
+    });
+
+    // Seed with examples
+    goals = [
+      { id: 1, text: 'Debug API authentication flow', done: true },
+      { id: 2, text: 'Write unit tests for SessionManager', done: true },
+      { id: 3, text: 'Review PR #42 — cost dashboard refactor', done: false },
+      { id: 4, text: 'Profile rendering performance on large conversations', done: false }
+    ];
+    render();
+  })();
+
+  /* ════════════════════════════════════════════════════════════
+   * Streak Tracker Demo
+   * ════════════════════════════════════════════════════════════ */
+  (() => {
+    const MILESTONES = [
+      { days: 3, emoji: '🌱', label: 'Seedling' },
+      { days: 7, emoji: '🔥', label: 'On Fire' },
+      { days: 14, emoji: '⚡', label: 'Unstoppable' },
+      { days: 30, emoji: '🏆', label: 'Champion' },
+      { days: 60, emoji: '💎', label: 'Diamond' },
+      { days: 100, emoji: '👑', label: 'Legend' },
+      { days: 365, emoji: '🌟', label: 'Transcendent' }
+    ];
+    const DAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+    const cal = document.getElementById('streak-calendar');
+    const msEl = document.getElementById('streak-milestones');
+    const countEl = document.getElementById('streak-count');
+
+    // 28-day calendar (4 weeks)
+    let active = new Array(28).fill(false);
+    const today = new Date();
+    const todayIndex = 27; // last cell = today
+
+    function render() {
+      // Calendar
+      let html = DAYS.map(d => `<div class="streak-day header">${d}</div>`).join('');
+      for (let i = 0; i < 28; i++) {
+        const d = new Date(today);
+        d.setDate(d.getDate() - (27 - i));
+        const cls = ['streak-day'];
+        if (active[i]) cls.push('active');
+        if (i === todayIndex) cls.push('today');
+        html += `<div class="${cls.join(' ')}" data-idx="${i}">${d.getDate()}</div>`;
+      }
+      cal.innerHTML = html;
+
+      // Streak count (consecutive from today backward)
+      let streak = 0;
+      for (let i = todayIndex; i >= 0; i--) {
+        if (active[i]) streak++; else break;
+      }
+      countEl.textContent = streak;
+
+      // Milestones
+      msEl.innerHTML = MILESTONES.map(m => {
+        const achieved = streak >= m.days;
+        return `<div class="milestone ${achieved ? 'achieved' : ''}">
+          <div class="ms-emoji">${m.emoji}</div>
+          <div class="ms-label">${m.label}</div>
+          <div class="ms-days">${m.days}d</div>
+        </div>`;
+      }).join('');
+    }
+
+    cal.addEventListener('click', e => {
+      const idx = e.target.dataset.idx;
+      if (idx !== undefined) {
+        active[Number(idx)] = !active[Number(idx)];
+        render();
+      }
+    });
+
+    document.getElementById('streak-random').onclick = () => {
+      active = active.map(() => Math.random() > 0.3);
+      render();
+    };
+    document.getElementById('streak-clear').onclick = () => {
+      active.fill(false);
+      render();
+    };
+    document.getElementById('streak-perfect').onclick = () => {
+      active.fill(true);
+      render();
+    };
+
+    // Seed with a 5-day streak
+    for (let i = todayIndex; i >= todayIndex - 4; i--) active[i] = true;
+    active[todayIndex - 8] = true; active[todayIndex - 9] = true;
+    active[todayIndex - 12] = true;
+    render();
+  })();
+
+  /* ════════════════════════════════════════════════════════════
+   * Heatmap Demo
+   * ════════════════════════════════════════════════════════════ */
+  (() => {
+    const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const grid = document.getElementById('heatmap-grid');
+    const tooltip = document.getElementById('heatmap-tooltip');
+    let data = Array.from({ length: 7 }, () => new Array(24).fill(0));
+
+    const COLORS = ['#161b22', '#0e4429', '#006d32', '#26a641', '#39d353'];
+    function color(v, max) {
+      if (v === 0) return COLORS[0];
+      const idx = Math.min(4, Math.ceil(v / Math.max(max, 1) * 4));
+      return COLORS[idx];
+    }
+
+    function render() {
+      const max = Math.max(...data.flat(), 1);
+      let html = '<div class="heatmap-label"></div>';
+      for (let h = 0; h < 24; h++) {
+        html += `<div class="heatmap-hour">${h % 6 === 0 ? (h === 0 ? '12a' : h < 12 ? h + 'a' : h === 12 ? '12p' : (h-12) + 'p') : ''}</div>`;
+      }
+      for (let d = 0; d < 7; d++) {
+        html += `<div class="heatmap-label">${DAYS[d]}</div>`;
+        for (let h = 0; h < 24; h++) {
+          const v = data[d][h];
+          html += `<div class="heatmap-cell" data-d="${d}" data-h="${h}" style="background:${color(v, max)}" title="${DAYS[d]} ${h}:00 — ${v} messages"></div>`;
+        }
+      }
+      grid.innerHTML = html;
+    }
+
+    grid.addEventListener('mousemove', e => {
+      const cell = e.target;
+      if (cell.dataset.d !== undefined) {
+        const d = Number(cell.dataset.d), h = Number(cell.dataset.h);
+        tooltip.textContent = `${DAYS[d]} ${String(h).padStart(2, '0')}:00 — ${data[d][h]} messages`;
+        tooltip.style.display = 'block';
+        tooltip.style.left = (e.clientX + 12) + 'px';
+        tooltip.style.top = (e.clientY - 30) + 'px';
+      }
+    });
+    grid.addEventListener('mouseleave', () => { tooltip.style.display = 'none'; });
+
+    function randomize() {
+      data = Array.from({ length: 7 }, () => Array.from({ length: 24 }, () => Math.floor(Math.random() * 30)));
+      render();
+    }
+    function nightOwl() {
+      data = Array.from({ length: 7 }, () => Array.from({ length: 24 }, (_, h) => {
+        if (h >= 20 || h <= 3) return 10 + Math.floor(Math.random() * 20);
+        if (h >= 14) return Math.floor(Math.random() * 8);
+        return Math.floor(Math.random() * 2);
+      }));
+      render();
+    }
+    function earlyBird() {
+      data = Array.from({ length: 7 }, () => Array.from({ length: 24 }, (_, h) => {
+        if (h >= 5 && h <= 10) return 10 + Math.floor(Math.random() * 20);
+        if (h >= 11 && h <= 16) return Math.floor(Math.random() * 10);
+        return Math.floor(Math.random() * 2);
+      }));
+      render();
+    }
+    function weekday() {
+      data = Array.from({ length: 7 }, (_, d) => Array.from({ length: 24 }, (_, h) => {
+        const isWeekday = d >= 1 && d <= 5;
+        const isWorkHours = h >= 9 && h <= 17;
+        if (isWeekday && isWorkHours) return 8 + Math.floor(Math.random() * 22);
+        if (isWeekday) return Math.floor(Math.random() * 5);
+        return Math.floor(Math.random() * 3);
+      }));
+      render();
+    }
+
+    document.getElementById('heatmap-random').onclick = randomize;
+    document.getElementById('heatmap-night-owl').onclick = nightOwl;
+    document.getElementById('heatmap-early-bird').onclick = earlyBird;
+    document.getElementById('heatmap-weekday').onclick = weekday;
+
+    randomize();
+  })();
+
+  /* ════════════════════════════════════════════════════════════
+   * Ambient Sound Mixer Demo
+   * ════════════════════════════════════════════════════════════ */
+  (() => {
+    const SOUNDS = [
+      { id: 'rain', icon: '🌧', name: 'Rain' },
+      { id: 'cafe', icon: '☕', name: 'Café' },
+      { id: 'fire', icon: '🔥', name: 'Fireplace' },
+      { id: 'wind', icon: '💨', name: 'Wind' },
+      { id: 'stream', icon: '🏞', name: 'Stream' },
+      { id: 'whitenoise', icon: '📻', name: 'White Noise' }
+    ];
+    const grid = document.getElementById('sound-grid');
+    const state = {};
+
+    function render() {
+      grid.innerHTML = SOUNDS.map(s => {
+        const active = state[s.id]?.active;
+        const vol = state[s.id]?.volume ?? 50;
+        return `<div class="sound-card ${active ? 'active' : ''}" data-id="${s.id}">
+          <div class="sound-icon">${s.icon}</div>
+          <div class="sound-name">${s.name}</div>
+          <input type="range" class="sound-slider" data-id="${s.id}" min="0" max="100" value="${vol}" ${active ? '' : 'style="opacity:.3"'}>
+        </div>`;
+      }).join('');
+    }
+
+    grid.addEventListener('click', e => {
+      const card = e.target.closest('.sound-card');
+      if (!card || e.target.type === 'range') return;
+      const id = card.dataset.id;
+      if (!state[id]) state[id] = { active: false, volume: 50 };
+      state[id].active = !state[id].active;
+      render();
+    });
+    grid.addEventListener('input', e => {
+      if (e.target.type === 'range') {
+        const id = e.target.dataset.id;
+        if (!state[id]) state[id] = { active: true, volume: 50 };
+        state[id].volume = Number(e.target.value);
+      }
+    });
+
+    render();
+  })();
+
+  /* ════════════════════════════════════════════════════════════
+   * Command Palette Demo
+   * ════════════════════════════════════════════════════════════ */
+  (() => {
+    const COMMANDS = [
+      { icon: '🍅', label: 'Toggle Focus Timer', shortcut: 'Alt+P', cat: 'Productivity' },
+      { icon: '⏱', label: 'Toggle Conversation Timer', shortcut: 'Alt+T', cat: 'Productivity' },
+      { icon: '🎵', label: 'Toggle Ambient Sounds', shortcut: 'Alt+A', cat: 'Productivity' },
+      { icon: '📋', label: 'Toggle Conversation Agenda', shortcut: '', cat: 'Productivity' },
+      { icon: '🔥', label: 'View Streak', shortcut: '', cat: 'Productivity' },
+      { icon: '🌓', label: 'Toggle Theme', shortcut: '', cat: 'Appearance' },
+      { icon: '📊', label: 'Usage Heatmap', shortcut: '', cat: 'Analytics' },
+      { icon: '💰', label: 'Cost Dashboard', shortcut: '', cat: 'Analytics' },
+      { icon: '😊', label: 'Sentiment Analysis', shortcut: 'Ctrl+Shift+M', cat: 'Analytics' },
+      { icon: '📥', label: 'Export as JSON', shortcut: '', cat: 'Export' },
+      { icon: '📄', label: 'Export as Markdown', shortcut: '', cat: 'Export' },
+      { icon: '🔍', label: 'Search Messages', shortcut: 'Ctrl+F', cat: 'Search' },
+      { icon: '💬', label: 'Quick Switcher', shortcut: 'Ctrl+K', cat: 'Navigation' },
+      { icon: '📌', label: 'View Pinned Messages', shortcut: '', cat: 'Navigation' },
+      { icon: '🔖', label: 'View Bookmarks', shortcut: '', cat: 'Navigation' },
+      { icon: '🎤', label: 'Start Voice Input', shortcut: '', cat: 'Input' },
+      { icon: '✨', label: 'Enhance Prompt', shortcut: 'Alt+E', cat: 'AI' },
+      { icon: '🧠', label: 'Smart Fact Memory', shortcut: 'Alt+Shift+F', cat: 'AI' },
+      { icon: '🔮', label: 'Model Advisor', shortcut: 'Alt+Shift+A', cat: 'AI' },
+      { icon: '🎴', label: 'Generate Flashcards', shortcut: '', cat: 'Tools' },
+      { icon: '📷', label: 'Screenshot Conversation', shortcut: 'Ctrl+Shift+I', cat: 'Tools' },
+      { icon: '🗒', label: 'Open Scratchpad', shortcut: '', cat: 'Tools' }
+    ];
+
+    const input = document.getElementById('palette-input');
+    const results = document.getElementById('palette-results');
+    let selected = 0;
+
+    function fuzzy(query, text) {
+      const q = query.toLowerCase(), t = text.toLowerCase();
+      let qi = 0, score = 0, consecutive = 0;
+      for (let ti = 0; ti < t.length && qi < q.length; ti++) {
+        if (t[ti] === q[qi]) {
+          qi++;
+          consecutive++;
+          score += consecutive + (ti === 0 || t[ti - 1] === ' ' ? 5 : 0);
+        } else {
+          consecutive = 0;
+        }
+      }
+      return qi === q.length ? score : -1;
+    }
+
+    function highlightMatch(text, query) {
+      if (!query) return text;
+      const q = query.toLowerCase(), t = text.toLowerCase();
+      let result = '', qi = 0;
+      for (let i = 0; i < text.length; i++) {
+        if (qi < q.length && t[i] === q[qi]) {
+          result += `<span class="highlight">${text[i]}</span>`;
+          qi++;
+        } else {
+          result += text[i];
+        }
+      }
+      return result;
+    }
+
+    function render() {
+      const q = input.value.trim();
+      let filtered = COMMANDS;
+      if (q) {
+        filtered = COMMANDS
+          .map(c => ({ ...c, score: fuzzy(q, c.label + ' ' + c.cat) }))
+          .filter(c => c.score > 0)
+          .sort((a, b) => b.score - a.score);
+      }
+      selected = Math.min(selected, Math.max(0, filtered.length - 1));
+      results.innerHTML = filtered.slice(0, 12).map((c, i) =>
+        `<div class="palette-item ${i === selected ? 'selected' : ''}">
+          <span class="pi-icon">${c.icon}</span>
+          <span class="pi-label">${highlightMatch(c.label, q)}</span>
+          ${c.shortcut ? `<span class="pi-shortcut">${c.shortcut}</span>` : ''}
+        </div>`
+      ).join('') || '<div style="padding:1rem;color:var(--text-muted);text-align:center">No matching commands</div>';
+    }
+
+    input.addEventListener('input', () => { selected = 0; render(); });
+    input.addEventListener('keydown', e => {
+      if (e.key === 'ArrowDown') { selected++; render(); e.preventDefault(); }
+      else if (e.key === 'ArrowUp') { selected = Math.max(0, selected - 1); render(); e.preventDefault(); }
+    });
+
+    render();
+  })();
+  </script>
+</body>
+</html>

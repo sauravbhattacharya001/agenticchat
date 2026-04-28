@@ -1,0 +1,869 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Interactive documentation for Agentic Chat's Smart Intelligence modules — Fact Memory, Token Budget Manager, Session Insights, Model Advisor, Sentiment Analysis, and Contradiction Detector.">
+  <title>Smart Intelligence — Agentic Chat Docs</title>
+  <style>
+    :root{--bg:#0d1117;--bg-card:#161b22;--bg-code:#1c2128;--text:#e6edf3;--text-muted:#8b949e;--accent:#58a6ff;--accent-hover:#79c0ff;--border:#30363d;--success:#3fb950;--warning:#d29922;--danger:#f85149;--purple:#bc8cff;--orange:#d29922;--teal:#39d2c0}
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);line-height:1.7}
+    a{color:var(--accent);text-decoration:none}a:hover{color:var(--accent-hover);text-decoration:underline}
+    .container{max-width:960px;margin:0 auto;padding:2rem 1.5rem}
+    nav{position:sticky;top:0;z-index:10;background:var(--bg-card);border-bottom:1px solid var(--border);padding:.75rem 1.5rem;display:flex;align-items:center;gap:2rem}
+    nav .logo{font-weight:700;font-size:1.1rem;color:var(--accent)}
+    nav .links{display:flex;gap:1.5rem}nav .links a{color:var(--text-muted);font-size:.9rem}nav .links a:hover{color:var(--text);text-decoration:none}
+    section{margin-bottom:3rem}
+    h1{font-size:2.2rem;margin-bottom:.5rem}
+    h2{font-size:1.5rem;margin-bottom:1rem;padding-bottom:.5rem;border-bottom:1px solid var(--border)}
+    h3{font-size:1.15rem;margin:1.5rem 0 .75rem;color:var(--accent)}
+    p,ul,ol{margin-bottom:1rem}ul,ol{padding-left:1.5rem}li{margin-bottom:.35rem}
+    code{background:var(--bg-code);padding:.15rem .4rem;border-radius:4px;font-size:.9em;font-family:'SFMono-Regular',Consolas,monospace}
+    pre{background:var(--bg-code);border:1px solid var(--border);border-radius:8px;padding:1rem 1.25rem;overflow-x:auto;margin-bottom:1.5rem}
+    pre code{background:none;padding:0}
+    .card{background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:1.25rem;margin-bottom:1rem}
+    table{width:100%;border-collapse:collapse;margin-bottom:1.5rem}
+    th,td{text-align:left;padding:.65rem 1rem;border-bottom:1px solid var(--border)}
+    th{color:var(--text-muted);font-size:.85rem;text-transform:uppercase;letter-spacing:.05em}
+    footer{text-align:center;padding:2rem 0;color:var(--text-muted);font-size:.85rem;border-top:1px solid var(--border)}
+    .badge{display:inline-block;padding:.15rem .5rem;border-radius:12px;font-size:.8rem;font-weight:600}
+    .badge-shortcut{background:var(--bg-code);border:1px solid var(--border);color:var(--text-muted);font-family:monospace}
+
+    /* Demo shared */
+    .demo-box{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;padding:1.5rem;margin:1.5rem 0}
+    .demo-box h4{font-size:1rem;color:var(--accent);margin-bottom:1rem;display:flex;align-items:center;gap:.5rem}
+    .demo-box h4::before{content:'▸';color:var(--success)}
+    button.demo-btn{background:var(--accent);color:var(--bg);border:none;padding:.5rem 1rem;border-radius:6px;cursor:pointer;font-size:.85rem;font-weight:600;transition:all .2s}
+    button.demo-btn:hover{background:var(--accent-hover);transform:translateY(-1px)}
+    button.demo-btn.danger{background:var(--danger)}
+    button.demo-btn.success{background:var(--success)}
+    button.demo-btn.secondary{background:var(--bg-code);color:var(--text);border:1px solid var(--border)}
+
+    /* Fact Memory */
+    .fact-input-area{margin-bottom:1rem}
+    .fact-input-area textarea{width:100%;background:var(--bg-code);border:1px solid var(--border);color:var(--text);padding:.75rem;border-radius:8px;font-size:.9rem;resize:vertical;min-height:80px;font-family:inherit}
+    .fact-input-area textarea::placeholder{color:var(--text-muted)}
+    .fact-list{list-style:none;padding:0;margin-top:1rem}
+    .fact-item{display:flex;align-items:flex-start;gap:.75rem;padding:.75rem;border-radius:8px;margin-bottom:.5rem;background:var(--bg-code);border-left:3px solid var(--border);animation:fadeIn .3s ease}
+    .fact-item[data-cat="fact"]{border-left-color:#3498db}
+    .fact-item[data-cat="decision"]{border-left-color:#9b59b6}
+    .fact-item[data-cat="preference"]{border-left-color:#e67e22}
+    .fact-item[data-cat="action"]{border-left-color:#27ae60}
+    .fact-item[data-cat="definition"]{border-left-color:#16a085}
+    .fact-icon{font-size:1.1rem;flex-shrink:0;margin-top:.1rem}
+    .fact-content{flex:1}
+    .fact-cat{font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:.15rem}
+    .fact-text{font-size:.9rem}
+    .fact-filters{display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:1rem}
+    .fact-filter{background:var(--bg-code);border:1px solid var(--border);color:var(--text-muted);padding:.25rem .6rem;border-radius:12px;font-size:.8rem;cursor:pointer;transition:all .2s}
+    .fact-filter:hover,.fact-filter.active{border-color:var(--accent);color:var(--accent)}
+    .fact-stats{display:flex;gap:1.5rem;margin-top:1rem;flex-wrap:wrap}
+    .fact-stat{text-align:center}
+    .fact-stat-num{font-size:1.8rem;font-weight:700;line-height:1}
+    .fact-stat-label{font-size:.75rem;color:var(--text-muted);margin-top:.2rem}
+    @keyframes fadeIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:none}}
+
+    /* Token Budget */
+    .budget-gauge{position:relative;width:220px;height:110px;margin:0 auto 1.5rem;overflow:hidden}
+    .budget-gauge svg{width:220px;height:110px}
+    .gauge-bg{fill:none;stroke:var(--border);stroke-width:14;stroke-linecap:round}
+    .gauge-fill{fill:none;stroke-width:14;stroke-linecap:round;transition:stroke-dashoffset .8s ease,stroke .3s}
+    .gauge-text{position:absolute;bottom:5px;left:50%;transform:translateX(-50%);text-align:center}
+    .gauge-pct{font-size:2rem;font-weight:700}
+    .gauge-label{font-size:.8rem;color:var(--text-muted)}
+    .budget-breakdown{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.75rem;margin:1rem 0}
+    .budget-item{background:var(--bg-code);border-radius:8px;padding:.75rem;text-align:center}
+    .budget-item-bar{height:4px;background:var(--border);border-radius:2px;margin-top:.5rem;overflow:hidden}
+    .budget-item-fill{height:100%;border-radius:2px;transition:width .5s ease}
+    .budget-item-label{font-size:.8rem;color:var(--text-muted)}
+    .budget-item-value{font-size:1.1rem;font-weight:600;margin-top:.15rem}
+    .budget-recs{list-style:none;padding:0;margin:1rem 0}
+    .budget-rec{display:flex;align-items:flex-start;gap:.5rem;padding:.5rem .75rem;border-radius:6px;margin-bottom:.35rem;background:var(--bg-code);font-size:.9rem}
+    .budget-rec .rec-icon{flex-shrink:0;font-size:1rem}
+
+    /* Model Advisor */
+    .advisor-input{width:100%;background:var(--bg-code);border:1px solid var(--border);color:var(--text);padding:.75rem;border-radius:8px;font-size:.9rem;font-family:inherit}
+    .advisor-input::placeholder{color:var(--text-muted)}
+    .advisor-result{margin-top:1rem;display:none}
+    .advisor-card{background:var(--bg-code);border:1px solid var(--border);border-radius:12px;padding:1.5rem;text-align:center}
+    .advisor-model{font-size:1.3rem;font-weight:700;margin-bottom:.25rem}
+    .advisor-task{font-size:.9rem;color:var(--text-muted);margin-bottom:.75rem}
+    .advisor-conf{display:inline-block;padding:.3rem .8rem;border-radius:12px;font-size:.85rem;font-weight:600}
+    .advisor-scores{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:.5rem;margin-top:1rem;text-align:left}
+    .score-item{background:var(--bg-card);border-radius:6px;padding:.5rem .75rem}
+    .score-label{font-size:.75rem;color:var(--text-muted)}
+    .score-bar{height:6px;background:var(--border);border-radius:3px;margin-top:.35rem;overflow:hidden}
+    .score-fill{height:100%;border-radius:3px;transition:width .6s ease}
+
+    /* Sentiment Timeline */
+    .sentiment-timeline{display:flex;align-items:flex-end;gap:3px;height:120px;padding:0 .5rem;margin:1rem 0}
+    .sent-bar{flex:1;min-width:8px;border-radius:3px 3px 0 0;transition:height .4s ease,background .3s;cursor:pointer;position:relative}
+    .sent-bar:hover{opacity:.8}
+    .sent-label{text-align:center;font-size:.7rem;color:var(--text-muted);margin-top:.25rem}
+    .sentiment-legend{display:flex;justify-content:center;gap:1.5rem;margin-top:.75rem;font-size:.85rem}
+    .sentiment-legend span{display:flex;align-items:center;gap:.35rem}
+    .legend-dot{width:10px;height:10px;border-radius:50%}
+
+    /* Digest */
+    .digest-section{background:var(--bg-code);border-radius:8px;padding:1rem;margin-bottom:.75rem}
+    .digest-section h5{font-size:.9rem;color:var(--accent);margin-bottom:.5rem;display:flex;align-items:center;gap:.35rem}
+    .digest-section ul{list-style:none;padding:0;margin:0}
+    .digest-section li{padding:.3rem 0;font-size:.9rem;display:flex;align-items:flex-start;gap:.35rem}
+    .digest-section li::before{content:'•';color:var(--text-muted);flex-shrink:0}
+    .digest-tag{display:inline-block;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;padding:.1rem .35rem;font-size:.75rem;margin-right:.25rem}
+  </style>
+</head>
+<body>
+  <nav>
+    <span class="logo">🤖 Agentic Chat</span>
+    <div class="links">
+      <a href="index.html">Docs Home</a>
+      <a href="productivity-suite.html">Productivity Suite</a>
+      <a href="https://github.com/sauravbhattacharya001/agenticchat">GitHub</a>
+    </div>
+  </nav>
+
+  <div class="container">
+    <h1>🧠 Smart Intelligence</h1>
+    <p style="color:var(--text-muted);font-size:1.1rem;margin-bottom:2rem">
+      Interactive deep-dive into the autonomous intelligence modules that learn from your conversations, track budgets, detect patterns, and provide proactive recommendations.
+    </p>
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- SMART FACT MEMORY -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <section id="fact-memory">
+      <h2>📌 Smart Fact Memory</h2>
+      <p>
+        An autonomous knowledge extractor that scans every AI response for <strong>facts, decisions, preferences, action items, and definitions</strong> — building a persistent cross-session knowledge base you can search and reference later. Shortcut: <span class="badge badge-shortcut">Alt+Shift+F</span>
+      </p>
+
+      <div class="demo-box">
+        <h4>Interactive Demo — Paste Text to Extract Facts</h4>
+        <div class="fact-input-area">
+          <textarea id="fact-input" placeholder="Paste or type a message to extract facts from…&#10;&#10;Example: &quot;Note that PostgreSQL's default port is 5432. I prefer using TypeScript over JavaScript. TODO: migrate the auth service to JWT tokens. **ACID** — Atomicity, Consistency, Isolation, Durability. The decision is to use Redis for session caching.&quot;"></textarea>
+          <div style="display:flex;gap:.5rem;margin-top:.5rem">
+            <button class="demo-btn" id="fact-extract">🔍 Extract Facts</button>
+            <button class="demo-btn secondary" id="fact-sample">📝 Load Sample</button>
+            <button class="demo-btn secondary" id="fact-clear">Clear</button>
+          </div>
+        </div>
+
+        <div class="fact-filters" id="fact-filters">
+          <span class="fact-filter active" data-cat="all">All</span>
+          <span class="fact-filter" data-cat="fact">📌 Facts</span>
+          <span class="fact-filter" data-cat="decision">⚖️ Decisions</span>
+          <span class="fact-filter" data-cat="preference">💡 Preferences</span>
+          <span class="fact-filter" data-cat="action">✅ Actions</span>
+          <span class="fact-filter" data-cat="definition">📖 Definitions</span>
+        </div>
+
+        <ul class="fact-list" id="fact-list"></ul>
+
+        <div class="fact-stats" id="fact-stats"></div>
+      </div>
+
+      <h3>Extraction Patterns</h3>
+      <p>The module uses <strong>12 regex patterns</strong> organized by category to identify knowledge worth remembering:</p>
+      <table>
+        <tr><th>Category</th><th>Trigger Phrases</th><th>Example</th></tr>
+        <tr><td>✅ Action</td><td><code>you should</code>, <code>remember to</code>, <code>TODO:</code>, <code>- [ ]</code></td><td>"Remember to update the API docs before release"</td></tr>
+        <tr><td>⚖️ Decision</td><td><code>I've decided</code>, <code>let's go with</code>, <code>chosen approach</code></td><td>"Let's go with PostgreSQL for the main database"</td></tr>
+        <tr><td>💡 Preference</td><td><code>I prefer</code>, <code>I always use</code>, <code>best way to</code></td><td>"I prefer using async/await over raw promises"</td></tr>
+        <tr><td>📖 Definition</td><td><code>**Term** — ...</code>, <code>X means</code>, <code>X refers to</code></td><td>"**SSR** — Server-Side Rendering"</td></tr>
+        <tr><td>📌 Fact</td><td><code>note that</code>, <code>key takeaway</code>, <code>the default is</code></td><td>"Note that the maximum payload size is 10MB"</td></tr>
+      </table>
+
+      <h3>API</h3>
+      <pre><code>SmartFactMemory.toggle()              // Open/close panel (Alt+Shift+F)
+SmartFactMemory.extractFacts(text)    // → [{ category, text, label? }]
+SmartFactMemory.addFacts(factsArray)  // Persist extracted facts
+SmartFactMemory.getRelevantFacts(query) // TF-IDF search across stored facts
+SmartFactMemory.facts()               // → all stored facts (copy)
+SmartFactMemory.count()               // → number of stored facts
+SmartFactMemory.isEnabled()           // → boolean
+SmartFactMemory.setEnabled(bool)      // Enable/disable auto-extraction</code></pre>
+
+      <h3>Storage & Limits</h3>
+      <ul>
+        <li>Facts stored in <code>sfm_facts</code> via SafeStorage (respects Incognito Mode)</li>
+        <li>Maximum <strong>2,000 facts</strong> — oldest evicted when limit reached</li>
+        <li>Each fact records: category, text, optional label, source session ID, timestamp, pinned state</li>
+        <li>Deduplication via normalized text comparison prevents storing the same fact twice</li>
+      </ul>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- TOKEN BUDGET MANAGER -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <section id="token-budget">
+      <h2>📊 Smart Token Budget Manager</h2>
+      <p>
+        Autonomous token intelligence that monitors context window usage, predicts when you'll hit the limit, and recommends compression strategies. Shortcut: <span class="badge badge-shortcut">Alt+Shift+B</span>
+      </p>
+
+      <div class="demo-box">
+        <h4>Interactive Demo — Token Budget Gauge</h4>
+
+        <div class="budget-gauge">
+          <svg viewBox="0 0 220 110">
+            <path class="gauge-bg" d="M 20 100 A 90 90 0 0 1 200 100"/>
+            <path class="gauge-fill" id="gauge-fill" d="M 20 100 A 90 90 0 0 1 200 100"/>
+          </svg>
+          <div class="gauge-text">
+            <div class="gauge-pct" id="gauge-pct">0%</div>
+            <div class="gauge-label">context used</div>
+          </div>
+        </div>
+
+        <div class="budget-breakdown" id="budget-breakdown"></div>
+
+        <div style="display:flex;gap:.5rem;justify-content:center;flex-wrap:wrap;margin:1rem 0">
+          <button class="demo-btn secondary" id="budget-low">Light Use (20%)</button>
+          <button class="demo-btn" id="budget-mid">Moderate (55%)</button>
+          <button class="demo-btn danger" id="budget-high">Heavy (85%)</button>
+          <button class="demo-btn" style="background:var(--purple)" id="budget-critical">Critical (95%)</button>
+        </div>
+
+        <h5 style="font-size:.9rem;color:var(--accent);margin:1rem 0 .5rem">💡 Recommendations</h5>
+        <ul class="budget-recs" id="budget-recs"></ul>
+      </div>
+
+      <h3>Budget Analysis</h3>
+      <p>The module computes a comprehensive snapshot of token usage:</p>
+      <table>
+        <tr><th>Metric</th><th>Description</th></tr>
+        <tr><td><code>totalTokens</code></td><td>Estimated tokens across all messages in context</td></tr>
+        <tr><td><code>maxTokens</code></td><td>Model's context window limit (e.g., 128K for GPT-4o)</td></tr>
+        <tr><td><code>usagePct</code></td><td>Percentage of context consumed</td></tr>
+        <tr><td><code>breakdown</code></td><td>Per-role token counts (system, user, assistant)</td></tr>
+        <tr><td><code>avgTokensPerExchange</code></td><td>Average tokens per user↔assistant exchange</td></tr>
+        <tr><td><code>exchangesUntilFull</code></td><td>Predicted exchanges remaining before hitting limit</td></tr>
+        <tr><td><code>codePct</code></td><td>Percentage of tokens that are code blocks</td></tr>
+        <tr><td><code>recommendations</code></td><td>Contextual compression suggestions</td></tr>
+      </table>
+
+      <h3>Compression Recommendations</h3>
+      <p>Based on usage patterns, the module suggests actions like:</p>
+      <ul>
+        <li><strong>Summarize old messages</strong> — when context is >70% full with many exchanges</li>
+        <li><strong>Extract code to snippets</strong> — when code blocks consume >30% of context</li>
+        <li><strong>Start a new session</strong> — when context is >90% full</li>
+        <li><strong>Use a larger-context model</strong> — when you frequently hit limits</li>
+      </ul>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- SMART MODEL ADVISOR -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <section id="model-advisor">
+      <h2>🔮 Smart Model Advisor</h2>
+      <p>
+        Analyzes your prompt <em>before</em> you send it and recommends the optimal model based on task complexity, code content, creativity needs, and cost sensitivity. Shortcut: <span class="badge badge-shortcut">Alt+Shift+A</span>
+      </p>
+
+      <div class="demo-box">
+        <h4>Interactive Demo — Task Analysis</h4>
+        <textarea class="advisor-input" id="advisor-input" rows="3" placeholder="Type a prompt to analyze… (try 'Write a haiku about recursion' or 'Debug this segfault in my C++ memory allocator')"></textarea>
+        <div style="margin-top:.5rem;display:flex;gap:.5rem;flex-wrap:wrap">
+          <button class="demo-btn" id="advisor-analyze">🔮 Analyze</button>
+          <button class="demo-btn secondary" id="advisor-creative">Creative prompt</button>
+          <button class="demo-btn secondary" id="advisor-code">Code prompt</button>
+          <button class="demo-btn secondary" id="advisor-simple">Simple prompt</button>
+        </div>
+
+        <div class="advisor-result" id="advisor-result">
+          <div class="advisor-card">
+            <div id="advisor-icon" style="font-size:2rem;margin-bottom:.5rem"></div>
+            <div class="advisor-model" id="advisor-model"></div>
+            <div class="advisor-task" id="advisor-task"></div>
+            <div class="advisor-conf" id="advisor-conf"></div>
+            <div class="advisor-scores" id="advisor-scores"></div>
+          </div>
+        </div>
+      </div>
+
+      <h3>Task Profiles</h3>
+      <table>
+        <tr><th>Profile</th><th>Recommended Model</th><th>Signals</th></tr>
+        <tr><td>🧑‍💻 Code Generation</td><td>GPT-4o</td><td>Code keywords, backticks, programming language names</td></tr>
+        <tr><td>🎨 Creative Writing</td><td>GPT-4o</td><td>Story, poem, creative, imagine, write (longer output)</td></tr>
+        <tr><td>📊 Analysis</td><td>GPT-4o</td><td>Analyze, compare, evaluate, pros/cons, trade-offs</td></tr>
+        <tr><td>💬 Quick Chat</td><td>GPT-4o-mini</td><td>Short questions, simple facts, greetings</td></tr>
+        <tr><td>📝 Summarization</td><td>GPT-4o-mini</td><td>Summarize, TL;DR, key points, brief</td></tr>
+        <tr><td>🔧 Debug/Fix</td><td>GPT-4o</td><td>Bug, error, fix, stack trace, segfault, exception</td></tr>
+      </table>
+
+      <h3>Scoring Algorithm</h3>
+      <p>Each prompt is scored across four dimensions (0–100):</p>
+      <ul>
+        <li><strong>Complexity</strong> — word count, sentence structure, technical terminology density</li>
+        <li><strong>Code Content</strong> — presence of code blocks, language keywords, syntax patterns</li>
+        <li><strong>Creativity</strong> — creative writing signals, open-ended phrasing, imagination cues</li>
+        <li><strong>Specificity</strong> — concrete details, constraints, format requirements</li>
+      </ul>
+      <p>The highest-scoring task profile determines the recommendation. Confidence is computed from how clearly one profile dominates the others.</p>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- CONVERSATION SENTIMENT -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <section id="sentiment">
+      <h2>😊 Conversation Sentiment</h2>
+      <p>
+        Heuristic sentiment analysis that tracks the emotional tone of your conversation over time. Each message is scored as positive, negative, or neutral using a built-in word lexicon. Shortcut: <span class="badge badge-shortcut">Ctrl+Shift+M</span>
+      </p>
+
+      <div class="demo-box">
+        <h4>Interactive Demo — Mood Timeline</h4>
+        <div class="sentiment-timeline" id="sent-timeline"></div>
+        <div class="sentiment-legend">
+          <span><div class="legend-dot" style="background:var(--success)"></div> Positive</span>
+          <span><div class="legend-dot" style="background:var(--text-muted)"></div> Neutral</span>
+          <span><div class="legend-dot" style="background:var(--danger)"></div> Negative</span>
+        </div>
+        <div style="display:flex;gap:.5rem;justify-content:center;margin-top:1rem;flex-wrap:wrap">
+          <button class="demo-btn success" id="sent-happy">😊 Happy Chat</button>
+          <button class="demo-btn" id="sent-mixed">🎭 Mixed Mood</button>
+          <button class="demo-btn danger" id="sent-debug">😤 Debug Session</button>
+          <button class="demo-btn secondary" id="sent-random">🎲 Random</button>
+        </div>
+      </div>
+
+      <h3>Lexicon-Based Scoring</h3>
+      <p>The module maintains two word sets:</p>
+      <div class="card">
+        <p><strong>Positive words (60+):</strong> good, great, excellent, amazing, wonderful, fantastic, awesome, love, happy, joy, perfect, brilliant, beautiful, helpful, thank, appreciate, solved, works, success, progress, …</p>
+        <p style="margin-bottom:0"><strong>Negative words (60+):</strong> bad, terrible, awful, horrible, broken, error, fail, crash, bug, frustrating, confused, wrong, problem, issue, stuck, slow, hate, annoying, difficult, mess, …</p>
+      </div>
+      <p>Each message's score = <code>(positive_count − negative_count) / total_scored_words</code>, normalized to [-1, +1]. Messages with no scored words default to neutral (0).</p>
+
+      <h3>Mood Shift Detection</h3>
+      <p>The <code>ConversationMoodRing</code> (the companion module) watches for <strong>sudden sentiment shifts</strong> — e.g., a conversation that was positive suddenly turning negative. When detected, it surfaces an alert suggesting a break, rephrasing, or model switch.</p>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- SMART CONVERSATION DIGEST -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <section id="digest">
+      <h2>📋 Smart Conversation Digest</h2>
+      <p>
+        Generates a cross-session digest that extracts <strong>topics, action items, unresolved questions, and sentiment</strong> from all recent sessions. Perfect for reviewing what you've been working on. Shortcut: <span class="badge badge-shortcut">Alt+Shift+J</span>
+      </p>
+
+      <div class="demo-box">
+        <h4>Sample Digest Output</h4>
+
+        <div class="digest-section">
+          <h5>🏷 Topics Discussed</h5>
+          <div>
+            <span class="digest-tag">Authentication</span>
+            <span class="digest-tag">PostgreSQL</span>
+            <span class="digest-tag">React Hooks</span>
+            <span class="digest-tag">CI/CD Pipeline</span>
+            <span class="digest-tag">Docker Networking</span>
+            <span class="digest-tag">TypeScript Generics</span>
+          </div>
+        </div>
+
+        <div class="digest-section">
+          <h5>✅ Action Items</h5>
+          <ul>
+            <li>Migrate auth service from session cookies to JWT tokens</li>
+            <li>Add connection pooling to database layer (PgBouncer)</li>
+            <li>Write integration tests for the new webhook handler</li>
+            <li>Update API docs to reflect v3 breaking changes</li>
+          </ul>
+        </div>
+
+        <div class="digest-section">
+          <h5>❓ Unresolved Questions</h5>
+          <ul>
+            <li>Should we use Redis or Memcached for session storage?</li>
+            <li>What's the optimal batch size for the ETL pipeline?</li>
+            <li>Is server-side rendering worth the added complexity?</li>
+          </ul>
+        </div>
+
+        <div class="digest-section">
+          <h5>📊 Session Sentiment Summary</h5>
+          <ul>
+            <li><strong>Auth Refactor</strong> — 😊 Positive (problem solved successfully)</li>
+            <li><strong>Docker Debug</strong> — 😤 Negative→Positive (struggled then found fix)</li>
+            <li><strong>React Components</strong> — 😐 Neutral (exploratory discussion)</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3>How It Works</h3>
+      <ol>
+        <li>Reads all sessions stored in SafeStorage (respects Incognito Mode — excluded sessions are skipped)</li>
+        <li>Extracts topics using TF-IDF keyword scoring from <code>TextAnalytics</code></li>
+        <li>Identifies action items via regex patterns (same as SmartFactMemory's action category)</li>
+        <li>Detects questions by scanning for sentences ending with <code>?</code> that lack clear answers in subsequent messages</li>
+        <li>Computes per-session sentiment using the <code>ConversationSentiment</code> lexicon</li>
+      </ol>
+
+      <h3>Export Formats</h3>
+      <p>The digest can be exported as <strong>Markdown</strong> or <strong>JSON</strong> for sharing with teammates or pasting into project docs.</p>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- SESSION INSIGHTS -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <section id="session-insights">
+      <h2>📈 Smart Session Insights</h2>
+      <p>
+        A cross-session analytics dashboard with <strong>topic trends, model usage patterns, productivity metrics, and proactive recommendations</strong>. Shortcut: <span class="badge badge-shortcut">Alt+Shift+K</span>
+      </p>
+
+      <h3>Dashboard Sections</h3>
+      <div class="card">
+        <h3 style="color:var(--text)">📊 Topic Trends</h3>
+        <p>Word cloud and frequency chart showing what you've been discussing most over the past 7/30/90 days. Identifies emerging topics (increasing frequency) and fading ones.</p>
+      </div>
+      <div class="card">
+        <h3 style="color:var(--text)">🤖 Model Usage</h3>
+        <p>Breakdown of which models you've used and for what task types. Surfaces opportunities to use cheaper models for simple tasks.</p>
+      </div>
+      <div class="card">
+        <h3 style="color:var(--text)">⏱ Productivity Patterns</h3>
+        <p>Average session length, messages per session, time-of-day patterns, and completion rates (agenda goals checked off vs. total).</p>
+      </div>
+      <div class="card">
+        <h3 style="color:var(--text)">💡 Proactive Recommendations</h3>
+        <p>Suggestions based on your patterns: "You often debug late at night — consider GPT-4o for complex debugging", "Your TypeScript sessions average 2x longer than Python — try splitting into subtasks", etc.</p>
+      </div>
+
+      <h3>Data Sources</h3>
+      <p>Session Insights aggregates data from multiple modules:</p>
+      <ul>
+        <li><code>SessionManager</code> — session metadata, timestamps, message counts</li>
+        <li><code>ConversationTimer</code> — active time per session</li>
+        <li><code>CostDashboard</code> — model usage and API spend</li>
+        <li><code>ConversationSentiment</code> — mood trends over time</li>
+        <li><code>ConversationAgenda</code> — goal completion rates</li>
+        <li><code>ResponseRating</code> — user satisfaction signals</li>
+      </ul>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- SMART COST DASHBOARD -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <section id="cost-dashboard">
+      <h2>💰 Cost Dashboard</h2>
+      <p>
+        Persistent API spend tracker with <strong>budget alerts, per-model breakdowns, and daily/weekly/monthly views</strong>. Every API call logs its token usage and estimated cost.
+      </p>
+
+      <h3>Features</h3>
+      <ul>
+        <li><strong>Real-time tracking:</strong> Every API request records input tokens, output tokens, model, and computed cost</li>
+        <li><strong>Budget alerts:</strong> Set a monthly budget — get warned at 80% and blocked at 100% (configurable)</li>
+        <li><strong>Per-model breakdown:</strong> See which models cost the most and optimize accordingly</li>
+        <li><strong>Time filters:</strong> Today, this week, this month, all time</li>
+        <li><strong>Export:</strong> CSV export for expense tracking or analysis</li>
+      </ul>
+
+      <h3>Pricing Data</h3>
+      <p>Pricing is maintained in <code>ChatConfig</code> and updated with each model release. Current rates (per 1M tokens):</p>
+      <table>
+        <tr><th>Model</th><th>Input</th><th>Output</th></tr>
+        <tr><td>GPT-4o</td><td>$2.50</td><td>$10.00</td></tr>
+        <tr><td>GPT-4o-mini</td><td>$0.15</td><td>$0.60</td></tr>
+        <tr><td>GPT-4 Turbo</td><td>$10.00</td><td>$30.00</td></tr>
+        <tr><td>GPT-3.5 Turbo</td><td>$0.50</td><td>$1.50</td></tr>
+      </table>
+
+      <h3>Storage</h3>
+      <p>Cost entries stored in <code>agenticchat_cost_log</code> with a cap of <strong>5,000 entries</strong>. Older entries are evicted FIFO. Budget settings in <code>agenticchat_cost_budget</code>. Running totals cached in <code>agenticchat_cost_totals</code> for fast dashboard rendering without iterating all entries.</p>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- ARCHITECTURE OVERVIEW -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <section id="architecture">
+      <h2>🏗 Intelligence Module Architecture</h2>
+      <p>All Smart* modules follow the same architectural pattern:</p>
+
+      <pre><code>const SmartModule = (() => {
+  // 1. Constants & storage keys
+  const STORAGE_KEY = 'sm_module_data';
+
+  // 2. Private state
+  let _data = [];
+  let _panel = null;
+  let _visible = false;
+
+  // 3. SafeStorage persistence (respects IncognitoMode)
+  function _save() { SafeStorage.setItem(STORAGE_KEY, JSON.stringify(_data)); }
+  function _load() { _data = JSON.parse(SafeStorage.getItem(STORAGE_KEY)) || []; }
+
+  // 4. Processing logic (pattern matching, scoring, analysis)
+  function _analyze(input) { /* ... */ }
+
+  // 5. UI rendering (dynamic DOM, no framework)
+  function _renderPanel() { /* ... */ }
+
+  // 6. Public API (revealing module pattern)
+  return {
+    toggle: () => { _visible = !_visible; _visible ? _show() : _hide(); },
+    show: _show,
+    hide: _hide,
+    // Module-specific methods...
+  };
+})();</code></pre>
+
+      <h3>Cross-Module Communication</h3>
+      <p>Intelligence modules communicate through direct function calls rather than events:</p>
+      <ul>
+        <li><code>SmartFactMemory</code> uses <code>TextAnalytics.tokenise()</code> for text preprocessing</li>
+        <li><code>SmartSessionInsights</code> reads from <code>SessionManager</code>, <code>ConversationTimer</code>, <code>CostDashboard</code>, and <code>ConversationSentiment</code></li>
+        <li><code>SmartTokenBudgetManager</code> uses <code>ConversationManager.getHistory()</code> and <code>ChatConfig</code> for model limits</li>
+        <li>All modules route through <code>SafeStorage</code> — ensuring Incognito Mode suppresses persistence globally</li>
+      </ul>
+    </section>
+
+  </div>
+
+  <footer>
+    <p>Agentic Chat Documentation · <a href="https://github.com/sauravbhattacharya001/agenticchat">GitHub</a></p>
+  </footer>
+
+  <script>
+  /* ════════════════════════════════════════════════════════════
+   * Fact Memory Demo
+   * ════════════════════════════════════════════════════════════ */
+  (() => {
+    const CATEGORIES = {
+      fact: { label: 'Fact', icon: '📌', color: '#3498db' },
+      decision: { label: 'Decision', icon: '⚖️', color: '#9b59b6' },
+      preference: { label: 'Preference', icon: '💡', color: '#e67e22' },
+      action: { label: 'Action Item', icon: '✅', color: '#27ae60' },
+      definition: { label: 'Definition', icon: '📖', color: '#16a085' }
+    };
+    const PATTERNS = [
+      { cat: 'action', re: /(?:you should|you need to|make sure to|don'?t forget to|remember to|todo:|action[:\s]+item:?)\s*(.{10,120})/gi },
+      { cat: 'action', re: /(?:^|\n)\s*[-*]\s*\[\s*\]\s+(.{5,120})/gm },
+      { cat: 'decision', re: /(?:I(?:'ve| have)? decided|the decision is|we(?:'ll| will) go with|let'?s go with|chosen approach:?)\s*(.{10,150})/gi },
+      { cat: 'decision', re: /(?:best option is|recommended approach is|the answer is)\s*(.{10,150})/gi },
+      { cat: 'preference', re: /(?:I prefer|my preference is|I like to use|I always use|I usually)\s+(.{8,120})/gi },
+      { cat: 'preference', re: /(?:the (?:best|recommended|preferred) (?:way|approach|method|tool|library) (?:is|to))\s+(.{8,120})/gi },
+      { cat: 'definition', re: /\*\*([^*]{3,40})\*\*(?:\s*[-–—:]\s*|\s+is\s+)(.{10,200})/gi, group: 2, label: 1 },
+      { cat: 'definition', re: /([A-Z][a-zA-Z]{2,25})\s+(?:is|refers to|means|stands for)\s+(.{10,200})/g, group: 2, label: 1 },
+      { cat: 'fact', re: /(?:note that|importantly|key (?:point|takeaway)|fun fact|keep in mind|worth noting):?\s*(.{10,200})/gi },
+      { cat: 'fact', re: /(?:the (?:default|maximum|minimum|limit|port|version|size) (?:is|are|was))\s+(.{5,120})/gi }
+    ];
+
+    let facts = [];
+    let filter = 'all';
+    const listEl = document.getElementById('fact-list');
+    const statsEl = document.getElementById('fact-stats');
+
+    function extract(text) {
+      const results = [];
+      const seen = new Set();
+      for (const p of PATTERNS) {
+        const re = new RegExp(p.re.source, p.re.flags);
+        let m;
+        while ((m = re.exec(text)) !== null) {
+          const t = (m[p.group || 1] || '').trim();
+          const key = t.toLowerCase().replace(/\s+/g, ' ');
+          if (t.length >= 5 && !seen.has(key)) {
+            seen.add(key);
+            results.push({ cat: p.cat, text: t, label: p.label ? (m[p.label] || '').trim() : null });
+          }
+        }
+      }
+      return results;
+    }
+
+    function esc(s) { return s.replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+    function render() {
+      const visible = filter === 'all' ? facts : facts.filter(f => f.cat === filter);
+      listEl.innerHTML = visible.map(f => {
+        const c = CATEGORIES[f.cat];
+        return `<li class="fact-item" data-cat="${f.cat}">
+          <span class="fact-icon">${c.icon}</span>
+          <div class="fact-content">
+            <div class="fact-cat">${c.label}${f.label ? ' — ' + esc(f.label) : ''}</div>
+            <div class="fact-text">${esc(f.text)}</div>
+          </div>
+        </li>`;
+      }).join('') || '<li style="padding:1rem;color:var(--text-muted);text-align:center">No facts extracted yet. Paste text above and click Extract.</li>';
+
+      // Stats
+      const counts = {};
+      for (const f of facts) counts[f.cat] = (counts[f.cat] || 0) + 1;
+      statsEl.innerHTML = Object.entries(CATEGORIES).map(([k, v]) => {
+        const n = counts[k] || 0;
+        return `<div class="fact-stat">
+          <div class="fact-stat-num" style="color:${v.color}">${n}</div>
+          <div class="fact-stat-label">${v.icon} ${v.label}s</div>
+        </div>`;
+      }).join('');
+
+      // Filter buttons
+      document.querySelectorAll('.fact-filter').forEach(el => {
+        el.classList.toggle('active', el.dataset.cat === filter);
+      });
+    }
+
+    document.getElementById('fact-extract').onclick = () => {
+      const text = document.getElementById('fact-input').value;
+      if (!text.trim()) return;
+      const newFacts = extract(text);
+      facts = [...facts, ...newFacts];
+      render();
+    };
+
+    document.getElementById('fact-sample').onclick = () => {
+      document.getElementById('fact-input').value = `Note that PostgreSQL's default port is 5432. The maximum connection pool size is 100.
+
+I prefer using TypeScript over JavaScript for large codebases. I always use Prettier for formatting.
+
+The decision is to use Redis for session caching instead of Memcached. Let's go with JWT tokens for the auth service.
+
+TODO: migrate the auth service to JWT tokens before next sprint.
+- [ ] Write integration tests for webhook handler
+Remember to update the API docs for v3 breaking changes.
+
+**ACID** — Atomicity, Consistency, Isolation, Durability — the four guarantees of database transactions.
+**SSR** refers to Server-Side Rendering, where HTML is generated on the server before being sent to the client.
+
+Key takeaway: always validate user input on the server side, never trust client-side validation alone.`;
+    };
+
+    document.getElementById('fact-clear').onclick = () => {
+      facts = [];
+      document.getElementById('fact-input').value = '';
+      render();
+    };
+
+    document.getElementById('fact-filters').addEventListener('click', e => {
+      if (e.target.classList.contains('fact-filter')) {
+        filter = e.target.dataset.cat;
+        render();
+      }
+    });
+
+    render();
+  })();
+
+  /* ════════════════════════════════════════════════════════════
+   * Token Budget Demo
+   * ════════════════════════════════════════════════════════════ */
+  (() => {
+    const ARC_LENGTH = Math.PI * 90; // half circle
+    const fillEl = document.getElementById('gauge-fill');
+    const pctEl = document.getElementById('gauge-pct');
+    const breakdownEl = document.getElementById('budget-breakdown');
+    const recsEl = document.getElementById('budget-recs');
+    fillEl.style.strokeDasharray = ARC_LENGTH;
+    fillEl.style.strokeDashoffset = ARC_LENGTH;
+
+    function setGauge(pct, breakdown, recs) {
+      const offset = ARC_LENGTH * (1 - pct / 100);
+      fillEl.style.strokeDashoffset = offset;
+      fillEl.style.stroke = pct > 90 ? 'var(--danger)' : pct > 70 ? 'var(--warning)' : 'var(--accent)';
+      pctEl.textContent = pct + '%';
+      pctEl.style.color = pct > 90 ? 'var(--danger)' : pct > 70 ? 'var(--warning)' : 'var(--text)';
+
+      breakdownEl.innerHTML = breakdown.map(b => `
+        <div class="budget-item">
+          <div class="budget-item-label">${b.label}</div>
+          <div class="budget-item-value">${b.value}</div>
+          <div class="budget-item-bar"><div class="budget-item-fill" style="width:${b.pct}%;background:${b.color}"></div></div>
+        </div>`).join('');
+
+      recsEl.innerHTML = recs.map(r => `
+        <li class="budget-rec"><span class="rec-icon">${r.icon}</span> ${r.text}</li>`).join('');
+    }
+
+    const presets = {
+      low: {
+        pct: 20,
+        breakdown: [
+          { label: 'System', value: '2.1K', pct: 10, color: 'var(--purple)' },
+          { label: 'User', value: '8.4K', pct: 35, color: 'var(--accent)' },
+          { label: 'Assistant', value: '14.2K', pct: 55, color: 'var(--success)' },
+          { label: 'Code', value: '3.1K', pct: 12, color: 'var(--orange)' }
+        ],
+        recs: [
+          { icon: '✅', text: 'Context usage is healthy — plenty of room for a long conversation.' },
+          { icon: '💡', text: 'Tip: You could switch to GPT-4o-mini for simple follow-ups to save costs.' }
+        ]
+      },
+      mid: {
+        pct: 55,
+        breakdown: [
+          { label: 'System', value: '2.1K', pct: 3, color: 'var(--purple)' },
+          { label: 'User', value: '24.8K', pct: 36, color: 'var(--accent)' },
+          { label: 'Assistant', value: '38.6K', pct: 56, color: 'var(--success)' },
+          { label: 'Code', value: '18.2K', pct: 26, color: 'var(--orange)' }
+        ],
+        recs: [
+          { icon: '⚠️', text: 'Over 50% of context used — ~12 exchanges remaining at current rate.' },
+          { icon: '✂️', text: 'Code blocks are 26% of context. Consider saving snippets and removing them from history.' },
+          { icon: '📋', text: 'Summarize older messages to reclaim context space.' }
+        ]
+      },
+      high: {
+        pct: 85,
+        breakdown: [
+          { label: 'System', value: '2.1K', pct: 2, color: 'var(--purple)' },
+          { label: 'User', value: '42.3K', pct: 39, color: 'var(--accent)' },
+          { label: 'Assistant', value: '58.1K', pct: 54, color: 'var(--success)' },
+          { label: 'Code', value: '31.4K', pct: 29, color: 'var(--orange)' }
+        ],
+        recs: [
+          { icon: '🔴', text: 'Context is 85% full — only ~4 exchanges remaining before truncation.' },
+          { icon: '✂️', text: 'Extract code to Snippet Library immediately — 29% of context is code blocks.' },
+          { icon: '📝', text: 'Run the Summarizer to compress old messages before continuing.' },
+          { icon: '💡', text: 'Consider starting a new session and referencing this one.' }
+        ]
+      },
+      critical: {
+        pct: 95,
+        breakdown: [
+          { label: 'System', value: '2.1K', pct: 2, color: 'var(--purple)' },
+          { label: 'User', value: '51.2K', pct: 42, color: 'var(--accent)' },
+          { label: 'Assistant', value: '65.8K', pct: 54, color: 'var(--success)' },
+          { label: 'Code', value: '38.7K', pct: 32, color: 'var(--orange)' }
+        ],
+        recs: [
+          { icon: '🚨', text: 'CRITICAL: Context is 95% full. Messages will be truncated on the next exchange.' },
+          { icon: '🆕', text: 'Start a new session immediately. Save important context to Fact Memory first.' },
+          { icon: '📋', text: 'Use Conversation Digest to extract all action items before session reset.' },
+          { icon: '🔮', text: 'Consider upgrading to a model with a larger context window.' }
+        ]
+      }
+    };
+
+    document.getElementById('budget-low').onclick = () => setGauge(presets.low.pct, presets.low.breakdown, presets.low.recs);
+    document.getElementById('budget-mid').onclick = () => setGauge(presets.mid.pct, presets.mid.breakdown, presets.mid.recs);
+    document.getElementById('budget-high').onclick = () => setGauge(presets.high.pct, presets.high.breakdown, presets.high.recs);
+    document.getElementById('budget-critical').onclick = () => setGauge(presets.critical.pct, presets.critical.breakdown, presets.critical.recs);
+
+    setGauge(presets.mid.pct, presets.mid.breakdown, presets.mid.recs);
+  })();
+
+  /* ════════════════════════════════════════════════════════════
+   * Model Advisor Demo
+   * ════════════════════════════════════════════════════════════ */
+  (() => {
+    const PROFILES = [
+      { task: 'code', label: 'Code Generation', icon: '🧑‍💻', model: 'GPT-4o', keywords: /\b(code|function|class|implement|build|create|write a? ?(?:script|program|api|server|component)|debug|fix|refactor|typescript|python|javascript|rust|sql|html|css)\b/i },
+      { task: 'creative', label: 'Creative Writing', icon: '🎨', model: 'GPT-4o', keywords: /\b(story|poem|haiku|creative|imagine|fiction|write (?:a|an|me)|song|lyrics|dialogue|narrative|metaphor|character)\b/i },
+      { task: 'analysis', label: 'Analysis', icon: '📊', model: 'GPT-4o', keywords: /\b(analyze|compare|evaluate|pros.?cons|trade.?offs?|review|assess|benchmark|audit|explain (?:why|how|the difference))\b/i },
+      { task: 'debug', label: 'Debug / Fix', icon: '🔧', model: 'GPT-4o', keywords: /\b(bug|error|exception|stack ?trace|segfault|crash|not working|broken|fails?|fix (?:this|the|my)|troubleshoot|diagnose)\b/i },
+      { task: 'summarize', label: 'Summarization', icon: '📝', model: 'GPT-4o-mini', keywords: /\b(summarize|summary|tl;?dr|key points|brief|condense|shorten|recap|overview)\b/i },
+      { task: 'chat', label: 'Quick Chat', icon: '💬', model: 'GPT-4o-mini', keywords: /\b(hi|hello|hey|thanks|what is|who is|when did|how do I|tell me about)\b/i }
+    ];
+
+    function analyze(text) {
+      const scores = {};
+      let maxScore = 0, best = PROFILES[PROFILES.length - 1];
+      for (const p of PROFILES) {
+        const matches = (text.match(p.keywords) || []).length;
+        const wordBonus = text.split(/\s+/).length > 30 ? 10 : 0;
+        const codeBonus = (text.match(/```/g) || []).length * 15;
+        const s = matches * 20 + (p.task === 'code' ? codeBonus : 0) + (p.task === 'analysis' ? wordBonus : 0);
+        scores[p.task] = Math.min(100, s);
+        if (s > maxScore) { maxScore = s; best = p; }
+      }
+      // Default to chat if nothing matches
+      if (maxScore === 0) { scores.chat = 60; best = PROFILES.find(p => p.task === 'chat'); }
+      const confidence = maxScore > 40 ? 'High' : maxScore > 15 ? 'Medium' : 'Low';
+      return { best, scores, confidence };
+    }
+
+    function show(result) {
+      const el = document.getElementById('advisor-result');
+      el.style.display = 'block';
+      document.getElementById('advisor-icon').textContent = result.best.icon;
+      document.getElementById('advisor-model').textContent = result.best.model;
+      document.getElementById('advisor-task').textContent = result.best.label;
+      const conf = document.getElementById('advisor-conf');
+      conf.textContent = result.confidence + ' confidence';
+      conf.style.background = result.confidence === 'High' ? 'rgba(63,185,80,.15)' : result.confidence === 'Medium' ? 'rgba(210,153,34,.15)' : 'rgba(248,81,73,.15)';
+      conf.style.color = result.confidence === 'High' ? 'var(--success)' : result.confidence === 'Medium' ? 'var(--warning)' : 'var(--danger)';
+
+      const colors = { code: 'var(--accent)', creative: 'var(--purple)', analysis: 'var(--teal)', debug: 'var(--danger)', summarize: 'var(--warning)', chat: 'var(--text-muted)' };
+      document.getElementById('advisor-scores').innerHTML = Object.entries(result.scores)
+        .sort((a, b) => b[1] - a[1])
+        .map(([k, v]) => `
+          <div class="score-item">
+            <div class="score-label">${PROFILES.find(p => p.task === k)?.icon || ''} ${k}</div>
+            <div class="score-bar"><div class="score-fill" style="width:${v}%;background:${colors[k] || 'var(--accent)'}"></div></div>
+          </div>`).join('');
+    }
+
+    document.getElementById('advisor-analyze').onclick = () => {
+      const text = document.getElementById('advisor-input').value;
+      if (text.trim()) show(analyze(text));
+    };
+    document.getElementById('advisor-creative').onclick = () => {
+      document.getElementById('advisor-input').value = 'Write a haiku about recursion and the beauty of self-referential code';
+      show(analyze(document.getElementById('advisor-input').value));
+    };
+    document.getElementById('advisor-code').onclick = () => {
+      document.getElementById('advisor-input').value = 'Implement a TypeScript function that takes a binary tree and returns the longest path between any two leaf nodes. Use depth-first search with memoization.';
+      show(analyze(document.getElementById('advisor-input').value));
+    };
+    document.getElementById('advisor-simple').onclick = () => {
+      document.getElementById('advisor-input').value = 'What is the capital of France?';
+      show(analyze(document.getElementById('advisor-input').value));
+    };
+  })();
+
+  /* ════════════════════════════════════════════════════════════
+   * Sentiment Timeline Demo
+   * ════════════════════════════════════════════════════════════ */
+  (() => {
+    const tl = document.getElementById('sent-timeline');
+    const HEIGHT = 120;
+
+    function render(values) {
+      const max = Math.max(...values.map(Math.abs), 0.5);
+      tl.innerHTML = values.map((v, i) => {
+        const h = Math.max(8, Math.abs(v) / max * HEIGHT * 0.85);
+        const color = v > 0.15 ? 'var(--success)' : v < -0.15 ? 'var(--danger)' : 'var(--text-muted)';
+        return `<div class="sent-bar" style="height:${h}px;background:${color}" title="Message ${i + 1}: ${v.toFixed(2)}"></div>`;
+      }).join('');
+    }
+
+    function happy() {
+      const v = Array.from({ length: 30 }, (_, i) => 0.3 + Math.random() * 0.5 + i * 0.01);
+      render(v);
+    }
+    function mixed() {
+      const v = Array.from({ length: 30 }, () => (Math.random() - 0.5) * 1.5);
+      render(v);
+    }
+    function debug() {
+      const v = Array.from({ length: 30 }, (_, i) => {
+        if (i < 10) return -0.2 - Math.random() * 0.6;
+        if (i < 15) return -0.5 - Math.random() * 0.4;
+        if (i < 22) return -0.1 + Math.random() * 0.3;
+        return 0.3 + Math.random() * 0.5; // found the fix!
+      });
+      render(v);
+    }
+    function random() {
+      const v = Array.from({ length: 30 }, () => (Math.random() - 0.5) * 2);
+      render(v);
+    }
+
+    document.getElementById('sent-happy').onclick = happy;
+    document.getElementById('sent-mixed').onclick = mixed;
+    document.getElementById('sent-debug').onclick = debug;
+    document.getElementById('sent-random').onclick = random;
+
+    mixed();
+  })();
+  </script>
+</body>
+</html>
