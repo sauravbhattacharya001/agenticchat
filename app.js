@@ -108,7 +108,8 @@
  *   SmartTokenBudgetManager - autonomous token budget intelligence with usage gauge, growth prediction, compression recommendations (Alt+Shift+B)
  *   SmartConversationDigest - autonomous cross-session digest with topic extraction, action items, unresolved questions, sentiment, export (Alt+Shift+J)
  *   SmartSessionInsights  - cross-session analytics dashboard with topic trends, model usage, productivity patterns, proactive recommendations (Alt+Shift+K)
- *   SmartFactMemory       - autonomous fact/decision/preference/action-item extractor with persistent cross-session knowledge base (Alt+Shift+F)
+ *   SmartFactMemory       - autonomous fact/decision/preference/action-item extractor with persistent cros
+ *   SmartContextWatchdog   - autonomous real-time context health monitor with token pressure, topic drift, stale context detection, proactive recommendations, and floating health indicator (Alt+Shift+W)s-session knowledge base (Alt+Shift+F)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -42906,5 +42907,390 @@ const SmartFactMemory = (() => {
     count: function() { return _facts.length; },
     isEnabled: function() { return _config.enabled; },
     setEnabled: function(v) { _config.enabled = !!v; _saveConfig(); }
+  };
+})();
+
+/* ============================================================
+ * SmartContextWatchdog — Autonomous Real-Time Context Health Monitor
+ *
+ * Monitors conversation context health in real time: token pressure
+ * (proximity to context window limit), topic drift (cosine similarity
+ * between recent messages and conversation start), stale context
+ * detection, and proactive recommendations (summarize, fork, trim,
+ * switch model).  A floating health indicator stays visible; click
+ * to expand the full diagnostic panel.
+ *
+ * Keyboard shortcut: Alt+Shift+W
+ * ============================================================ */
+var SmartContextWatchdog = (function () {
+  'use strict';
+
+  /* ── constants ── */
+  var STORAGE_KEY = 'scw_state';
+  var CONFIG_KEY  = 'scw_config';
+  var EVAL_THROTTLE_MS = 3000;
+  var MAX_HISTORY_PTS  = 60;
+
+  var MODEL_DEFAULTS = {
+    'gpt-4o': 128000, 'gpt-4o-mini': 128000, 'gpt-4-turbo': 128000,
+    'gpt-4': 8192, 'gpt-3.5-turbo': 16385
+  };
+
+  var THRESHOLDS = { low: 0.60, med: 0.80, high: 0.95 };
+  var DRIFT_THRESHOLD = 0.65;
+  var STALE_RATIO = 0.6;
+
+  /* ── state ── */
+  var _panelEl = null;
+  var _floatEl = null;
+  var _visible = false;
+  var _health  = { score: 100, tokenPressure: 0, drift: 0, staleness: 0, density: 0 };
+  var _recommendations = [];
+  var _history = [];
+  var _config = { enabled: true, alertsEnabled: true, floatVisible: true };
+  var _lastEval = 0;
+  var _observer = null;
+  var _styleInjected = false;
+
+  /* ── helpers ── */
+  function _estimateTokens(text) { return Math.ceil((text || '').length / 4); }
+
+  function _getModelMax() {
+    if (typeof ChatConfig !== 'undefined' && ChatConfig.models) {
+      var sel = typeof ModelSelector !== 'undefined' && ModelSelector.current ? ModelSelector.current() : null;
+      if (sel && ChatConfig.models[sel] && ChatConfig.models[sel].maxTokens) return ChatConfig.models[sel].maxTokens;
+      var keys = Object.keys(ChatConfig.models);
+      for (var i = 0; i < keys.length; i++) {
+        if (ChatConfig.models[keys[i]].maxTokens) return ChatConfig.models[keys[i]].maxTokens;
+      }
+    }
+    return MODEL_DEFAULTS['gpt-4o'] || 128000;
+  }
+
+  function _getHistory() {
+    if (typeof ConversationManager !== 'undefined' && ConversationManager.getHistory) return ConversationManager.getHistory();
+    return [];
+  }
+
+  function _loadConfig() {
+    if (typeof SafeStorage !== 'undefined' && SafeStorage.getJSON) {
+      var c = SafeStorage.getJSON(CONFIG_KEY, null);
+      if (c) _config = c;
+    }
+  }
+  function _saveConfig() {
+    if (typeof SafeStorage !== 'undefined' && SafeStorage.trySetJSON) SafeStorage.trySetJSON(CONFIG_KEY, _config);
+  }
+  function _loadHistory() {
+    if (typeof SafeStorage !== 'undefined' && SafeStorage.getJSON) {
+      _history = SafeStorage.getJSON(STORAGE_KEY, []);
+    }
+  }
+  function _saveHistory() {
+    if (typeof SafeStorage !== 'undefined' && SafeStorage.trySetJSON) SafeStorage.trySetJSON(STORAGE_KEY, _history);
+  }
+
+  /* ── evaluation engine ── */
+  function evaluate() {
+    var now = Date.now();
+    if (now - _lastEval < EVAL_THROTTLE_MS) return _health;
+    _lastEval = now;
+
+    var hist = _getHistory();
+    var maxTokens = _getModelMax();
+
+    // 1. Token pressure
+    var totalTokens = 0;
+    for (var i = 0; i < hist.length; i++) {
+      totalTokens += _estimateTokens(hist[i].content || '');
+    }
+    var pressure = maxTokens > 0 ? totalTokens / maxTokens : 0;
+    _health.tokenPressure = Math.min(pressure, 1);
+
+    // 2. Topic drift (compare first 3 messages vs last 3)
+    _health.drift = 0;
+    if (hist.length >= 6 && typeof TextAnalytics !== 'undefined' && TextAnalytics.tfidf && TextAnalytics.cosineSim) {
+      var earlyText = '';
+      var lateText = '';
+      for (var e = 0; e < Math.min(3, hist.length); e++) earlyText += ' ' + (hist[e].content || '');
+      for (var l = Math.max(0, hist.length - 3); l < hist.length; l++) lateText += ' ' + (hist[l].content || '');
+      try {
+        var earlyVec = TextAnalytics.tfidf(earlyText);
+        var lateVec  = TextAnalytics.tfidf(lateText);
+        var sim = TextAnalytics.cosineSim(earlyVec, lateVec);
+        _health.drift = Math.max(0, 1 - sim);
+      } catch(ex) { _health.drift = 0; }
+    }
+
+    // 3. Stale context
+    var effectiveWindow = maxTokens * 0.75;
+    var runningTokens = 0;
+    var staleCount = 0;
+    for (var s = hist.length - 1; s >= 0; s--) {
+      runningTokens += _estimateTokens(hist[s].content || '');
+      if (runningTokens > effectiveWindow) staleCount++;
+    }
+    _health.staleness = hist.length > 0 ? staleCount / hist.length : 0;
+
+    // 4. Message density (messages per 1K token budget — higher = more granular conversation)
+    _health.density = maxTokens > 0 ? Math.min(1, (hist.length / (maxTokens / 1000)) * 10) : 0;
+
+    // 5. Composite score
+    var score = 100;
+    score -= _health.tokenPressure * 40;
+    score -= _health.drift * 25;
+    score -= _health.staleness * 25;
+    score -= _health.density * 10;
+    _health.score = Math.max(0, Math.min(100, Math.round(score)));
+
+    // 6. Recommendations
+    _recommendations = [];
+    if (_health.tokenPressure > THRESHOLDS.high) {
+      _recommendations.push({ priority: 1, icon: '\uD83D\uDEA8', text: 'Context window nearly full! Summarize or start a new session.', action: 'summarize' });
+    } else if (_health.tokenPressure > THRESHOLDS.med) {
+      _recommendations.push({ priority: 2, icon: '\u26A0\uFE0F', text: 'Token pressure rising — consider summarizing the conversation.', action: 'summarize' });
+    } else if (_health.tokenPressure > THRESHOLDS.low) {
+      _recommendations.push({ priority: 3, icon: '\uD83D\uDCA1', text: 'Context is filling up. Keep an eye on message length.', action: null });
+    }
+    if (_health.drift > DRIFT_THRESHOLD) {
+      _recommendations.push({ priority: 2, icon: '\uD83C\uDFAF', text: 'Conversation has drifted from the original topic. Consider forking.', action: 'fork' });
+    }
+    if (_health.staleness > STALE_RATIO) {
+      _recommendations.push({ priority: 2, icon: '\uD83E\uDDF9', text: 'Early messages are beyond the effective context window.', action: 'trim' });
+    }
+    if (_health.tokenPressure > THRESHOLDS.med && _getModelMax() < 128000) {
+      _recommendations.push({ priority: 3, icon: '\uD83D\uDD04', text: 'Switch to a larger context model (e.g. GPT-4o 128K).', action: 'switch' });
+    }
+    _recommendations.sort(function(a, b) { return a.priority - b.priority; });
+
+    // Record history
+    _history.push({ t: now, s: _health.score });
+    if (_history.length > MAX_HISTORY_PTS) _history = _history.slice(-MAX_HISTORY_PTS);
+    _saveHistory();
+
+    // Alert on urgent
+    if (_config.alertsEnabled && _recommendations.length > 0 && _recommendations[0].priority === 1) {
+      if (typeof ToastManager !== 'undefined' && ToastManager.show) {
+        ToastManager.show('\uD83D\uDC41\uFE0F Context Watchdog: ' + _recommendations[0].text, 'warning');
+      }
+    }
+
+    _updateFloat();
+    if (_visible) _renderPanel();
+    return _health;
+  }
+
+  /* ── floating indicator ── */
+  function _createFloat() {
+    if (_floatEl) return;
+    _floatEl = document.createElement('div');
+    _floatEl.className = 'scw-float';
+    _floatEl.title = 'Context Health (Alt+Shift+W)';
+    _floatEl.addEventListener('click', function() { toggle(); });
+    document.body.appendChild(_floatEl);
+    _updateFloat();
+  }
+
+  function _updateFloat() {
+    if (!_floatEl) return;
+    var s = _health.score;
+    var color = s > 70 ? '#27ae60' : s > 40 ? '#f39c12' : '#e74c3c';
+    _floatEl.style.background = color;
+    _floatEl.textContent = s;
+    _floatEl.style.display = _config.floatVisible ? 'flex' : 'none';
+    if (_recommendations.length > 0 && _recommendations[0].priority <= 2) {
+      _floatEl.classList.add('scw-pulse');
+    } else {
+      _floatEl.classList.remove('scw-pulse');
+    }
+  }
+
+  /* ── panel ── */
+  function _createPanel() {
+    if (_panelEl) return;
+    _panelEl = document.createElement('div');
+    _panelEl.className = 'scw-panel';
+    _panelEl.innerHTML = '<div class="scw-panel-header"><span>\uD83D\uDC41\uFE0F Context Watchdog</span><button class="scw-close">\u2715</button></div><div class="scw-panel-body"></div>';
+    document.body.appendChild(_panelEl);
+    _panelEl.querySelector('.scw-close').addEventListener('click', hide);
+  }
+
+  function _renderPanel() {
+    if (!_panelEl) _createPanel();
+    var body = _panelEl.querySelector('.scw-panel-body');
+    if (!body) return;
+
+    var s = _health.score;
+    var scoreColor = s > 70 ? '#27ae60' : s > 40 ? '#f39c12' : '#e74c3c';
+    var scoreLabel = s > 70 ? 'Healthy' : s > 40 ? 'Caution' : 'Critical';
+
+    var html = '';
+    // Score gauge
+    html += '<div class="scw-gauge-wrap">';
+    html += '<svg viewBox="0 0 120 120" class="scw-gauge"><circle cx="60" cy="60" r="52" fill="none" stroke="#333" stroke-width="8" opacity="0.2"/>';
+    var circumference = 2 * Math.PI * 52;
+    var offset = circumference * (1 - s / 100);
+    html += '<circle cx="60" cy="60" r="52" fill="none" stroke="' + scoreColor + '" stroke-width="8" stroke-dasharray="' + circumference + '" stroke-dashoffset="' + offset + '" stroke-linecap="round" transform="rotate(-90 60 60)" style="transition:stroke-dashoffset 0.6s ease"/>';
+    html += '<text x="60" y="55" text-anchor="middle" fill="' + scoreColor + '" font-size="28" font-weight="bold">' + s + '</text>';
+    html += '<text x="60" y="75" text-anchor="middle" fill="#999" font-size="12">' + scoreLabel + '</text>';
+    html += '</svg></div>';
+
+    // Indicator cards
+    var cards = [
+      { label: 'Token Pressure', value: Math.round(_health.tokenPressure * 100) + '%', icon: '\uD83D\uDCCA', color: _health.tokenPressure > 0.8 ? '#e74c3c' : _health.tokenPressure > 0.6 ? '#f39c12' : '#27ae60' },
+      { label: 'Topic Drift', value: Math.round(_health.drift * 100) + '%', icon: '\uD83C\uDFAF', color: _health.drift > 0.65 ? '#e74c3c' : _health.drift > 0.4 ? '#f39c12' : '#27ae60' },
+      { label: 'Stale Context', value: Math.round(_health.staleness * 100) + '%', icon: '\uD83E\uDDF9', color: _health.staleness > 0.6 ? '#e74c3c' : _health.staleness > 0.3 ? '#f39c12' : '#27ae60' },
+      { label: 'Msg Density', value: Math.round(_health.density * 100) + '%', icon: '\uD83D\uDCDD', color: _health.density > 0.8 ? '#f39c12' : '#27ae60' }
+    ];
+    html += '<div class="scw-cards">';
+    for (var c = 0; c < cards.length; c++) {
+      html += '<div class="scw-card"><div class="scw-card-icon">' + cards[c].icon + '</div>';
+      html += '<div class="scw-card-val" style="color:' + cards[c].color + '">' + cards[c].value + '</div>';
+      html += '<div class="scw-card-lbl">' + cards[c].label + '</div></div>';
+    }
+    html += '</div>';
+
+    // Recommendations
+    if (_recommendations.length > 0) {
+      html += '<div class="scw-recs-title">Recommendations</div>';
+      for (var r = 0; r < _recommendations.length; r++) {
+        var rec = _recommendations[r];
+        html += '<div class="scw-rec scw-rec-p' + rec.priority + '">';
+        html += '<span class="scw-rec-icon">' + rec.icon + '</span>';
+        html += '<span class="scw-rec-text">' + rec.text + '</span>';
+        html += '</div>';
+      }
+    } else {
+      html += '<div class="scw-recs-empty">\u2705 No issues detected</div>';
+    }
+
+    // Sparkline
+    if (_history.length > 1) {
+      html += '<div class="scw-spark-title">Health Trend</div>';
+      html += '<svg class="scw-sparkline" viewBox="0 0 300 50" preserveAspectRatio="none">';
+      var pts = [];
+      var step = 300 / Math.max(1, _history.length - 1);
+      for (var h = 0; h < _history.length; h++) {
+        var x = Math.round(h * step);
+        var y = Math.round(50 - (_history[h].s / 100) * 48);
+        pts.push(x + ',' + y);
+      }
+      var lastPt = _history[_history.length - 1];
+      var sparkColor = lastPt.s > 70 ? '#27ae60' : lastPt.s > 40 ? '#f39c12' : '#e74c3c';
+      html += '<polyline points="' + pts.join(' ') + '" fill="none" stroke="' + sparkColor + '" stroke-width="2"/>';
+      html += '</svg>';
+    }
+
+    body.innerHTML = html;
+  }
+
+  /* ── toggle / show / hide ── */
+  function show() {
+    evaluate();
+    _createPanel();
+    _panelEl.classList.add('scw-open');
+    _visible = true;
+    _renderPanel();
+  }
+  function hide() {
+    if (_panelEl) _panelEl.classList.remove('scw-open');
+    _visible = false;
+  }
+  function toggle() {
+    if (_visible) hide(); else show();
+  }
+
+  /* ── CSS injection ── */
+  function _injectStyles() {
+    if (_styleInjected) return;
+    _styleInjected = true;
+    var css = document.createElement('style');
+    css.textContent = [
+      '.scw-float{position:fixed;bottom:80px;right:20px;width:44px;height:44px;border-radius:50%;color:#fff;font-weight:bold;font-size:15px;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:10001;box-shadow:0 2px 10px rgba(0,0,0,.3);transition:background .4s,transform .2s;user-select:none}',
+      '.scw-float:hover{transform:scale(1.12)}',
+      '@keyframes scw-glow{0%,100%{box-shadow:0 2px 10px rgba(0,0,0,.3)}50%{box-shadow:0 0 18px 4px rgba(231,76,60,.5)}}',
+      '.scw-pulse{animation:scw-glow 1.8s ease-in-out infinite}',
+      '.scw-panel{position:fixed;top:0;right:-380px;width:360px;height:100%;background:#1e1e2e;color:#cdd6f4;z-index:10002;box-shadow:-4px 0 24px rgba(0,0,0,.4);transition:right .3s ease;overflow-y:auto;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}',
+      '.scw-open{right:0}',
+      '.scw-panel-header{display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-bottom:1px solid #313244;font-size:16px;font-weight:600}',
+      '.scw-close{background:none;border:none;color:#999;font-size:20px;cursor:pointer;padding:4px 8px}',
+      '.scw-close:hover{color:#fff}',
+      '.scw-panel-body{padding:16px 18px}',
+      '.scw-gauge-wrap{display:flex;justify-content:center;margin-bottom:16px}',
+      '.scw-gauge{width:130px;height:130px}',
+      '.scw-cards{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px}',
+      '.scw-card{background:#313244;border-radius:10px;padding:12px;text-align:center}',
+      '.scw-card-icon{font-size:22px;margin-bottom:4px}',
+      '.scw-card-val{font-size:20px;font-weight:bold}',
+      '.scw-card-lbl{font-size:11px;color:#999;margin-top:2px}',
+      '.scw-recs-title,.scw-spark-title{font-size:13px;font-weight:600;color:#a6adc8;margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px}',
+      '.scw-rec{display:flex;align-items:flex-start;gap:8px;padding:10px;background:#313244;border-radius:8px;margin-bottom:8px;font-size:13px;line-height:1.4}',
+      '.scw-rec-p1{border-left:3px solid #e74c3c}',
+      '.scw-rec-p2{border-left:3px solid #f39c12}',
+      '.scw-rec-p3{border-left:3px solid #3498db}',
+      '.scw-rec-icon{flex-shrink:0;font-size:16px}',
+      '.scw-recs-empty{color:#a6adc8;font-size:13px;padding:10px;text-align:center}',
+      '.scw-sparkline{width:100%;height:50px;margin-top:4px;margin-bottom:12px}',
+      'body:not(.dark-mode) .scw-panel{background:#f8f9fa;color:#333}',
+      'body:not(.dark-mode) .scw-card,body:not(.dark-mode) .scw-rec{background:#e9ecef}',
+      'body:not(.dark-mode) .scw-recs-title,body:not(.dark-mode) .scw-spark-title{color:#666}',
+      'body:not(.dark-mode) .scw-panel-header{border-bottom-color:#dee2e6}'
+    ].join('\n');
+    document.head.appendChild(css);
+  }
+
+  /* ── init ── */
+  function init() {
+    _loadConfig();
+    if (!_config.enabled) return;
+    _injectStyles();
+    _loadHistory();
+    _createFloat();
+
+    // Auto-evaluate on new messages via MutationObserver
+    var chatOut = document.getElementById('chat-output');
+    if (chatOut) {
+      _observer = new MutationObserver(function() { evaluate(); });
+      _observer.observe(chatOut, { childList: true, subtree: true });
+    }
+
+    // Keyboard shortcut
+    if (typeof KeyboardShortcuts !== 'undefined' && KeyboardShortcuts.register) {
+      KeyboardShortcuts.register('Alt+Shift+W', 'Context Watchdog', toggle);
+    }
+
+    // Command palette
+    if (typeof CommandPalette !== 'undefined' && CommandPalette.register) {
+      CommandPalette.register({ id: 'cp:watchdog', label: 'Context Watchdog', icon: '\uD83D\uDC41\uFE0F', shortcut: 'Alt+Shift+W', callback: toggle });
+    }
+
+    // Context menu
+    if (typeof MessageContextMenu !== 'undefined' && MessageContextMenu.register) {
+      MessageContextMenu.register({
+        label: '\uD83D\uDC41\uFE0F Context health',
+        action: function() { show(); }
+      });
+    }
+
+    // Initial evaluation
+    setTimeout(function() { evaluate(); }, 2000);
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  return {
+    toggle: toggle,
+    show: show,
+    hide: hide,
+    close: hide,
+    evaluate: evaluate,
+    health: function() { return Object.assign({}, _health); },
+    score: function() { return _health.score; },
+    recommendations: function() { return _recommendations.slice(); },
+    history: function() { return _history.slice(); },
+    isEnabled: function() { return _config.enabled; },
+    setEnabled: function(v) { _config.enabled = !!v; _saveConfig(); },
+    setAlertsEnabled: function(v) { _config.alertsEnabled = !!v; _saveConfig(); },
+    setFloatVisible: function(v) { _config.floatVisible = !!v; _saveConfig(); _updateFloat(); }
   };
 })();
