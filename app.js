@@ -16810,9 +16810,18 @@ const MessageEditor = (() => {
  * @module MessageScheduler
  * @returns {{ init: Function, toggle: Function, schedule: Function }}
  */
-//  MessageScheduler - schedule prompts to send at a specific time
-// ═══════════════════════════════════════════════════════════════════════
-
+/**
+ * MessageScheduler — schedule prompts to send at a specific time.
+ *
+ * Allows users to compose messages and schedule them for future delivery.
+ * Scheduled items are persisted in SafeStorage and survive page reloads.
+ * A timer-based dispatcher checks for due items and fires them via a
+ * registered send callback. Includes a panel UI for viewing, editing,
+ * and cancelling scheduled messages, plus a history log of sent items.
+ *
+ * @namespace MessageScheduler
+ * @returns {{ schedule: Function, cancel: Function, getAll: Function, getPending: Function, getHistory: Function, onSend: Function, toggle: Function, init: Function }}
+ */
 const MessageScheduler = (() => {
   'use strict';
 
@@ -28623,9 +28632,17 @@ const EmojiPicker = (() => {
  * @module PdfExport
  * @returns {{ toggle: Function, exportToPdf: Function }}
  */
-//  NotificationSound - play a subtle chime when AI responds while tab is hidden
-// ═══════════════════════════════════════════════════════════════════════
-
+/**
+ * PdfExport — export the current conversation as a formatted PDF document.
+ *
+ * Dynamically loads the jsPDF library and renders each message (user and
+ * assistant) with role-based styling, timestamps, word-wrapped text, and
+ * page breaks. Supports configurable margins, font sizes, and metadata.
+ * Triggered from the export menu or keyboard shortcut.
+ *
+ * @namespace PdfExport
+ * @returns {{ toggle: Function }}
+ */
 const PdfExport = (() => {
   'use strict';
 
@@ -28823,9 +28840,19 @@ const NotificationSound = (() => {
  * @module ConversationExport
  * @returns {{ toggle: Function, exportAs: Function }}
  */
-// ============================================================
-// Conversation Export — export chat as Markdown/Text/HTML/JSON
-// ============================================================
+/**
+ * ConversationExport — export the active conversation in multiple formats.
+ *
+ * Provides Markdown, plain text, HTML, and JSON export of the current
+ * chat session. Each format preserves message roles, timestamps, and
+ * code blocks. Exports are triggered from a dropdown menu with a
+ * copy-to-clipboard fallback when the File System Access API is
+ * unavailable. Includes a flash animation on the toolbar button for
+ * visual feedback.
+ *
+ * @namespace ConversationExport
+ * @returns {{ toggle: Function }}
+ */
 const ConversationExport = (() => {
   'use strict';
 
@@ -29229,9 +29256,18 @@ const MoodTracker = (function () {
  * @module MessageHighlighter
  * @returns {{ toggle: Function, isActive: Function, getHighlights: Function }}
  */
-//  MessageHighlighter - select text in messages and highlight with colors
-// ═══════════════════════════════════════════════════════════════════════
-
+/**
+ * MessageHighlighter — select text in messages and highlight with colours.
+ *
+ * Lets users select any text span inside a chat message and apply a
+ * persistent colour highlight. Highlights are stored per-session in
+ * SafeStorage and re-applied on page load. A floating toolbar provides
+ * colour selection, count badge, and a clear-all action. Supports
+ * multiple highlights per message with different colours.
+ *
+ * @namespace MessageHighlighter
+ * @returns {{ toggle: Function, show: Function, hide: Function }}
+ */
 const MessageHighlighter = (() => {
   'use strict';
 
@@ -29488,9 +29524,17 @@ const MessageHighlighter = (() => {
 // ============================================================
 // Module: AutoSaveDraft
 // Automatically saves the current chat input to localStorage so
-// unsent messages survive page refreshes and accidental tab closes.
-// Restores the draft on page load and clears it after sending.
-// ============================================================
+/**
+ * AutoSaveDraft — persist unsent input text across page refreshes.
+ *
+ * Continuously saves the current chat input to SafeStorage on every
+ * keystroke (debounced). On page load the draft is restored so users
+ * never lose a half-written message due to accidental navigation or
+ * tab closure. The draft is cleared immediately after a successful send.
+ *
+ * @namespace AutoSaveDraft
+ * @returns {{ init: Function }}
+ */
 var AutoSaveDraft = (function () {
   'use strict';
 
@@ -29544,9 +29588,18 @@ var AutoSaveDraft = (function () {
 // Module: ScrollLock
 // Prevents auto-scroll when the user is reading earlier messages.
 // Shows a floating "Jump to bottom" pill when locked, with an
-// unread-count badge. Auto-unlocks when user scrolls to bottom.
-// Toggle: Alt+J or click the floating pill.
-// ============================================================
+/**
+ * ScrollLock — freeze the chat viewport to prevent auto-scroll on new messages.
+ *
+ * When locked, incoming assistant messages no longer force the viewport
+ * to the bottom, allowing users to read earlier messages undisturbed.
+ * A floating pill shows the unread-message count and lets users jump
+ * to the bottom when ready. Auto-unlocks when the user scrolls to the
+ * bottom manually. Toggle via Alt+J or the floating pill button.
+ *
+ * @namespace ScrollLock
+ * @returns {{ lock: Function, unlock: Function, jumpToBottom: Function, isLocked: Function }}
+ */
 var ScrollLock = (function () {
   'use strict';
 
@@ -30150,9 +30203,19 @@ const IncognitoMode = (() => {
 // Module: MessageReply
 // Reply-to / quote a specific message. Adds a ↩️ button on each
 // message. Clicking it shows a reply preview bar above the chat
-// input, and the quoted context is prepended to the sent message
-// so the AI understands what the user is referring to.
-// ============================================================
+/**
+ * MessageReply — reply-to-message threading for chat conversations.
+ *
+ * Allows users to select a specific message and compose a reply that
+ * quotes the original text. The quoted context is prepended to the
+ * sent message so the AI understands which message the user is
+ * referring to. Displays a reply preview banner above the input area
+ * with a cancel button. Supports keyboard shortcut (Alt+R) and
+ * right-click context menu integration.
+ *
+ * @namespace MessageReply
+ * @returns {{ startReply: Function, consumeReply: Function, cancelReply: Function }}
+ */
 var MessageReply = (function () {
   'use strict';
 
@@ -31336,9 +31399,18 @@ const AmbientSoundPlayer = (() => {
 // ============================================================
 // Module: StickyNotesBoard
 // Visual draggable sticky notes canvas for brainstorming.
-// Notes are persisted per session in localStorage.
-// Toggle: Alt+N or click the sticky notes button.
-// ============================================================
+/**
+ * StickyNotesBoard — draggable sticky notes overlay for each chat session.
+ *
+ * Provides a floating board of coloured sticky notes that users can create,
+ * edit, move, resize, and delete. Notes are persisted per-session in
+ * SafeStorage so they survive page reloads. Each note has a random pastel
+ * colour and supports free-form text. Toggle the board via Alt+N or the
+ * toolbar button.
+ *
+ * @namespace StickyNotesBoard
+ * @returns {{ show: Function, hide: Function, toggle: Function }}
+ */
 var StickyNotesBoard = (function () {
   'use strict';
 
@@ -34765,9 +34837,19 @@ const SmartModelAdvisor = (function () {
  * @module SmartContextSidebar
  * @returns {{ toggle: Function, refresh: Function }}
  */
-// ============================================================
-// Smart Context Sidebar — proactive intelligence panel
-// ============================================================
+/**
+ * SmartContextSidebar — proactive intelligence panel for the active conversation.
+ *
+ * Analyses the conversation in real-time to surface contextually relevant
+ * information: related earlier messages, detected entities (people, places,
+ * tech), active topics, follow-up suggestions, and conversation statistics
+ * (message count, word count, code block ratio). Auto-refreshes via a
+ * MutationObserver on the chat output. Clicking a related message scrolls
+ * to it; clicking a follow-up inserts it into the input.
+ *
+ * @namespace SmartContextSidebar
+ * @returns {{ show: Function, hide: Function, toggle: Function, scrollTo: Function, insertFollowup: Function }}
+ */
 const SmartContextSidebar = (() => {
   'use strict';
   const STORAGE_KEY = 'smart_context_sidebar_state';
