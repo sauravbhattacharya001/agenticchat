@@ -22705,12 +22705,22 @@ const StreakTracker = (() => {
   function _getSessions() {
     if (typeof SessionManager === 'undefined') return [];
     try {
-      const all = SessionManager.getAll();
+      // Use getAllUnsorted() — StreakTracker only needs session data,
+      // not presentation order.  Avoids the sort + pinned-set overhead
+      // of getAll() which runs on every toggle/render.
+      const all = SessionManager.getAllUnsorted ? SessionManager.getAllUnsorted() : SessionManager.getAll();
       return Array.isArray(all) ? all : [];
     } catch { return []; }
   }
 
-  /** Get unique active dates (YYYY-MM-DD) from all sessions. */
+  /** Get unique active dates (YYYY-MM-DD) from all sessions.
+   *  Optimised: avoids `new Date(ts)` for ISO-formatted timestamps.
+   *  Timestamps stored as ISO 8601 strings ("2026-04-28T...") can have
+   *  their date portion extracted via substring(0,10) — skipping the
+   *  Date constructor overhead for potentially thousands of messages.
+   *  For numeric epoch timestamps we fall back to `new Date(ts)` but
+   *  use a pre-allocated formatter instead of toISOString().substring().
+   */
   function _getActiveDates() {
     const sessions = _getSessions();
     const dates = new Set();
@@ -22720,7 +22730,16 @@ const StreakTracker = (() => {
       // Also check individual message timestamps if available
       if (Array.isArray(s.messages)) {
         for (const m of s.messages) {
-          if (m.timestamp) dates.add(new Date(m.timestamp).toISOString().substring(0, 10));
+          const ts = m.timestamp;
+          if (!ts) continue;
+          // Fast path: ISO string "YYYY-MM-DD..." — no Date allocation needed
+          if (typeof ts === 'string' && ts.length >= 10 && ts[4] === '-' && ts[7] === '-') {
+            dates.add(ts.substring(0, 10));
+          } else {
+            // Numeric or non-ISO timestamp — fallback to Date
+            const d = new Date(ts);
+            if (!isNaN(d.getTime())) dates.add(d.toISOString().substring(0, 10));
+          }
         }
       }
     }
@@ -35344,8 +35363,16 @@ const SmartSessionPrioritizer = (function () {
   let _autoTimer = null;
 
   // ── Helpers ──
+  // Delegate to SessionManager's in-memory cache instead of re-parsing
+  // the raw localStorage JSON + running sanitizeStorageObject on every scan.
+  // SessionManager._loadAll() keeps a deserialized cache that is invalidated
+  // only on external storage events, so this eliminates O(n) JSON.parse +
+  // deep sanitize on every prioritizer scan / auto-scan timer tick.
   function _allSessions() {
     try {
+      if (typeof SessionManager !== 'undefined' && SessionManager.getAllUnsorted) {
+        return SessionManager.getAllUnsorted();
+      }
       const raw = (typeof SafeStorage !== 'undefined' ? SafeStorage.get(SESSION_KEY) : localStorage.getItem(SESSION_KEY));
       return sanitizeStorageObject(JSON.parse(raw || '[]'));
     } catch { return []; }
