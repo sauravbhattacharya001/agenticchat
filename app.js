@@ -13701,6 +13701,18 @@ const AutoTagger = (() => {
   };
 })();
 
+/**
+ * DataBackup — full application state backup and restore.
+ *
+ * Creates versioned, integrity-checked JSON snapshots of all localStorage
+ * keys used by Agentic Chat (sessions, bookmarks, themes, cost logs, etc.).
+ * Supports export as downloadable .json files and import with version
+ * migration, key-level selective restore, and SHA-256 checksum verification
+ * to detect corrupted or tampered backup files.
+ *
+ * @module DataBackup
+ * @returns {{ createBackup: Function, restoreBackup: Function, toggle: Function }}
+ */
 // ── Data Backup & Restore ───────────────────────────────────────────
 const DataBackup = (() => {
   const FORMAT_VERSION = 1;
@@ -14740,6 +14752,18 @@ const ConversationMerge = (() => {
 })();
 
 
+/**
+ * ConversationReplay — cinematic message-by-message playback of a conversation.
+ *
+ * Renders a transport-bar UI (play / pause / stop / speed) and replays the
+ * current session's messages in sequence with role-based timing delays.
+ * Supports 0.5×–4× speed, pause/resume, and auto-scrolls the chat output
+ * during playback. Useful for reviewing long conversations or demoing a
+ * chat flow without re-sending prompts.
+ *
+ * @module ConversationReplay
+ * @returns {{ toggle: Function, isPlaying: Function }}
+ */
 // 🎬 Conversation Replay ─────────────────────────────────────────────────────
 const ConversationReplay = (() => {
   'use strict';
@@ -16773,6 +16797,19 @@ const MessageEditor = (() => {
 
 
 // ═══════════════════════════════════════════════════════════════════════
+/**
+ * MessageScheduler — time-delayed prompt delivery.
+ *
+ * Lets users schedule messages to be sent at a future date/time.
+ * Scheduled items are persisted in SafeStorage and survive page reloads.
+ * On load, the module arms a setTimeout chain for the next pending item;
+ * when it fires, the prompt is sent via the registered callback and the
+ * item is removed. Provides a panel UI to view, cancel, and manage the
+ * queue.
+ *
+ * @module MessageScheduler
+ * @returns {{ init: Function, toggle: Function, schedule: Function }}
+ */
 //  MessageScheduler - schedule prompts to send at a specific time
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -28137,6 +28174,17 @@ const WordCloudGenerator = (() => {
   return { open, close, toggle, init };
 })();
 
+/**
+ * TypingIndicatorBubble — animated "AI is thinking" indicator.
+ *
+ * Shows a three-dot bounce animation with a randomly selected label
+ * (e.g. "Generating response…") inside #chat-output while waiting for
+ * the API response. Accessible via role="status" and aria-label.
+ * Automatically removed when the response arrives or on manual hide().
+ *
+ * @module TypingIndicatorBubble
+ * @returns {{ show: Function, hide: Function, isVisible: Function }}
+ */
 // ── Pin Board ──────────────────────────────────────────────────
 const TypingIndicatorBubble = (() => {
   let _el = null;
@@ -28187,6 +28235,18 @@ const TypingIndicatorBubble = (() => {
   return { show, hide, isVisible };
 })();
 
+/**
+ * PinBoard — persistent cross-session message pin collection.
+ *
+ * Allows users to pin any message (user or assistant) to a global board
+ * that persists across sessions. Each pin records role, content (truncated
+ * to 5 KB), optional notes, tags, and the originating session name.
+ * Provides a slide-out panel with search, tag filtering, copy-to-clipboard,
+ * and CSV/JSON export. Pins are stored in SafeStorage under a dedicated key.
+ *
+ * @module PinBoard
+ * @returns {{ pinMessage: Function, unpinMessage: Function, toggle: Function, getPins: Function }}
+ */
 const PinBoard = (() => {
   const STORAGE_KEY = 'agenticchat_pinboard';
   let isOpen = false;
@@ -28537,6 +28597,17 @@ const EmojiPicker = (() => {
 })();
 
 // ═══════════════════════════════════════════════════════════════════════
+/**
+ * PdfExport — browser-native conversation-to-PDF export.
+ *
+ * Generates a styled HTML document from the current conversation and opens
+ * it in a print window for the user to save as PDF. No external libraries
+ * required — uses the browser's built-in print-to-PDF. Includes session
+ * title, timestamp, role-based message styling, and page-break handling.
+ *
+ * @module PdfExport
+ * @returns {{ toggle: Function, exportToPdf: Function }}
+ */
 //  NotificationSound - play a subtle chime when AI responds while tab is hidden
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -28632,6 +28703,18 @@ const PdfExport = (() => {
   return { toggle, exportToPdf };
 })();
 
+/**
+ * NotificationSound — audible chime for background AI responses.
+ *
+ * Synthesizes a pleasant two-tone ascending chime (C5 → E5) using the
+ * Web Audio API when the AI finishes responding while the browser tab is
+ * hidden. No external sound files needed. Togglable via toolbar button
+ * with state persisted in SafeStorage. Respects the user-gesture
+ * requirement for AudioContext activation.
+ *
+ * @module NotificationSound
+ * @returns {{ play: Function, toggle: Function, isEnabled: Function }}
+ */
 const NotificationSound = (() => {
   'use strict';
 
@@ -28713,6 +28796,18 @@ const NotificationSound = (() => {
   return { notifyIfHidden, toggle, isEnabled };
 })();
 
+/**
+ * ConversationExport — multi-format conversation exporter.
+ *
+ * Exports the current chat as Markdown, plain text, HTML, or JSON.
+ * Reads messages from the DOM (#blackbox .message elements), converts
+ * them to the selected format with role labels and timestamps, and
+ * triggers a file download via Blob URL. Each format includes a header
+ * with session title and export timestamp.
+ *
+ * @module ConversationExport
+ * @returns {{ toggle: Function, exportAs: Function }}
+ */
 // ============================================================
 // Conversation Export — export chat as Markdown/Text/HTML/JSON
 // ============================================================
@@ -29106,6 +29201,19 @@ const MoodTracker = (function () {
 
 
 // ═══════════════════════════════════════════════════════════════════════
+/**
+ * MessageHighlighter — in-message text highlighting with color palette.
+ *
+ * When activated, selecting text inside a chat message pops up a color
+ * picker (Yellow, Green, Blue, Pink, Orange). Chosen highlights are
+ * persisted per-session in SafeStorage and re-applied on session load.
+ * Supports removing individual highlights, bulk clear per session, and
+ * cycling through highlight colors. Uses CSS custom properties for theme
+ * compatibility.
+ *
+ * @module MessageHighlighter
+ * @returns {{ toggle: Function, isActive: Function, getHighlights: Function }}
+ */
 //  MessageHighlighter - select text in messages and highlight with colors
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -34627,6 +34735,21 @@ const SmartModelAdvisor = (function () {
   return { toggle: toggle, show: show, hide: hide, analyze: analyzeConversation, onNewMessage: onNewMessage };
 })();
 
+/**
+ * SmartContextSidebar — proactive context-aware intelligence panel.
+ *
+ * Monitors the conversation in real time and presents a side panel with:
+ * - Extracted entities (URLs, code languages, file paths, numbers)
+ * - Topic-specific follow-up suggestions (API, database, CSS, etc.)
+ * - Conversation statistics (message count, word count, duration)
+ * - Contextual quick actions based on detected content patterns
+ *
+ * Uses a MutationObserver on #chat-output to stay current without polling.
+ * Panel visibility state is persisted in SafeStorage.
+ *
+ * @module SmartContextSidebar
+ * @returns {{ toggle: Function, refresh: Function }}
+ */
 // ============================================================
 // Smart Context Sidebar — proactive intelligence panel
 // ============================================================
