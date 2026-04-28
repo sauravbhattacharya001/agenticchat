@@ -4382,7 +4382,6 @@ const VoiceInput = (() => {
   let interimTranscript = '';
   let _onResult = null;
   let _onStateChange = null;
-  let _autoSend = false;
 
   const LANG_STORAGE_KEY = 'agenticchat_voice_lang';
   const DEFAULT_LANG = 'en-US';
@@ -5825,7 +5824,6 @@ const SessionNotes = (() => {
 const CrossTabSync = (() => {
   const SESSION_STORAGE_KEY = 'agenticchat_sessions';
   const ACTIVE_STORAGE_KEY = 'agenticchat_active_session';
-  const TAB_ID_KEY = 'agenticchat_tab_id';
   const WRITE_STAMP_KEY = 'agenticchat_last_writer';
 
   const tabId = crypto.randomUUID();
@@ -24960,9 +24958,7 @@ const ConversationFlashcards = (() => {
   /* ---- helpers ---- */
   const _escHtml = _escapeHtml;
 
-  function _css(obj) {
-    return Object.keys(obj).map(function(k) { return k + ':' + obj[k]; }).join(';');
-  }
+
 
   /* ---- UI ---- */
   function _createPanel() {
@@ -25786,8 +25782,6 @@ const MessageContextMenu = (() => {
   }
 
   /* ---- toast ---- */
-
-  var _toastTimer = null;
   function _toast(msg) {
     ToastManager.show(msg, { id: 'ctx-menu-toast', className: 'msg-context-toast', durationMs: 2000 });
   }
@@ -35342,7 +35336,6 @@ const SmartSessionPrioritizer = (function () {
 
   const URGENCY_RE = /\b(urgent|asap|deadline|important|critical|immediately|time.?sensitive|high.?priority)\b/i;
   const ACTION_RE  = /\b(todo|action item|next step|follow.?up|deliverable|must do|need to|should do|don'?t forget)\b/i;
-  const QUESTION_RE = /\?[\s]*$/;
 
   let _visible = false;
   let _scores = {};
@@ -37644,7 +37637,6 @@ var SmartQuestionTracker = (function() {
   var _questions = []; // {id, text, askedBy, askedAt, msgIndex, answered, answeredAt, confidence}
   var _visible = false;
   var _observer = null;
-  var _nudgeTimer = null;
   var _nextId = 1;
 
   /* ---- question detection patterns ---- */
@@ -41556,10 +41548,7 @@ const SmartSessionInsights = (() => {
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   }
 
-  function _daysAgo(n) {
-    const d = new Date(); d.setDate(d.getDate() - n);
-    return d.getTime();
-  }
+
 
   /* ── analysis engine ── */
   function analyze() {
