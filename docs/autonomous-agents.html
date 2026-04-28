@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Interactive documentation for Agentic Chat's autonomous intelligence modules — Drift Detector, Knowledge Map, Conversation Coach, Deadline Tracker, Response Critic, Voice Chat Mode, and more.">
+  <title>Autonomous Agents — Agentic Chat Docs</title>
+  <style>
+    :root{--bg:#0d1117;--bg-card:#161b22;--bg-code:#1c2128;--text:#e6edf3;--text-muted:#8b949e;--accent:#58a6ff;--accent-hover:#79c0ff;--border:#30363d;--success:#3fb950;--warning:#d29922;--danger:#f85149;--purple:#bc8cff;--orange:#d29922;--teal:#39d2c0}
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);line-height:1.7}
+    a{color:var(--accent);text-decoration:none}a:hover{color:var(--accent-hover);text-decoration:underline}
+    .container{max-width:960px;margin:0 auto;padding:2rem 1.5rem}
+    nav{position:sticky;top:0;z-index:10;background:var(--bg-card);border-bottom:1px solid var(--border);padding:.75rem 1.5rem;display:flex;align-items:center;gap:2rem}
+    nav .logo{font-weight:700;font-size:1.1rem;color:var(--accent)}
+    nav .links{display:flex;gap:1.5rem}nav .links a{color:var(--text-muted);font-size:.9rem}nav .links a:hover{color:var(--text);text-decoration:none}
+    section{margin-bottom:3rem}
+    h1{font-size:2.2rem;margin-bottom:.5rem}
+    h2{font-size:1.5rem;margin-bottom:1rem;padding-bottom:.5rem;border-bottom:1px solid var(--border)}
+    h3{font-size:1.15rem;margin:1.5rem 0 .75rem;color:var(--accent)}
+    p{margin-bottom:1rem}
+    code{background:var(--bg-code);padding:.15em .4em;border-radius:4px;font-size:.9em}
+    pre{background:var(--bg-code);padding:1rem;border-radius:8px;overflow-x:auto;margin-bottom:1.5rem;border:1px solid var(--border)}
+    pre code{background:none;padding:0}
+    .card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:1.25rem;margin-bottom:2rem}
+    .card{background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:1.25rem;transition:border-color .2s,transform .15s}
+    .card:hover{border-color:var(--accent);transform:translateY(-2px)}
+    .card h3{margin:0 0 .5rem;color:var(--text)}
+    .card p{color:var(--text-muted);font-size:.9rem;margin:0}
+    .badge{display:inline-block;padding:.15em .6em;border-radius:12px;font-size:.75rem;font-weight:600;margin-right:.4rem}
+    .badge-auto{background:rgba(59,130,246,.15);color:#60a5fa}
+    .badge-shortcut{background:rgba(139,92,246,.15);color:var(--purple)}
+    .badge-canvas{background:rgba(34,197,94,.15);color:var(--success)}
+    .badge-voice{background:rgba(249,115,22,.15);color:var(--orange)}
+    .shortcut{display:inline-block;background:var(--bg-code);border:1px solid var(--border);border-radius:4px;padding:.1em .5em;font-size:.8rem;font-family:monospace;margin:0 .1em}
+    table{width:100%;border-collapse:collapse;margin-bottom:1.5rem}
+    th,td{text-align:left;padding:.6rem .8rem;border-bottom:1px solid var(--border)}
+    th{color:var(--text-muted);font-weight:600;font-size:.85rem;text-transform:uppercase;letter-spacing:.05em}
+    .feature-list{list-style:none;padding:0}
+    .feature-list li{padding:.5rem 0;border-bottom:1px solid var(--border);display:flex;align-items:baseline;gap:.6rem}
+    .feature-list li:last-child{border-bottom:none}
+    .feature-list .icon{font-size:1.1rem;flex-shrink:0}
+    .demo-box{background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:1.5rem;margin-bottom:1.5rem}
+    .demo-btn{background:var(--accent);color:#fff;border:none;padding:.5rem 1rem;border-radius:6px;cursor:pointer;font-size:.85rem;transition:background .2s}
+    .demo-btn:hover{background:var(--accent-hover)}
+    .demo-btn.secondary{background:var(--border);color:var(--text)}
+    .demo-btn.danger{background:var(--danger);color:#fff}
+    .demo-btn.success{background:var(--success);color:#000}
+    .toc{background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:1.5rem 2rem;margin-bottom:2.5rem}
+    .toc h3{margin:0 0 .75rem;color:var(--text);font-size:1rem}
+    .toc ol{padding-left:1.5rem;columns:2;column-gap:2rem}
+    .toc li{margin-bottom:.35rem;font-size:.9rem}
+    @media(max-width:600px){.toc ol{columns:1}.card-grid{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+
+<nav>
+  <span class="logo">📡 Agentic Chat Docs</span>
+  <div class="links">
+    <a href="index.html">Home</a>
+    <a href="productivity-suite.html">Productivity</a>
+    <a href="smart-intelligence.html">Intelligence</a>
+    <a href="autonomous-agents.html" style="color:var(--text);font-weight:600">Autonomous</a>
+  </div>
+</nav>
+
+<div class="container">
+  <h1>🤖 Autonomous Agents</h1>
+  <p style="color:var(--text-muted);font-size:1.1rem;margin-bottom:2rem">
+    19 proactive modules that monitor, analyse, and act on conversations without explicit user commands.
+    They detect drift, track deadlines, critique responses, build knowledge graphs, and more — making the chat
+    genuinely agentic rather than purely reactive.
+  </p>
+
+  <div class="toc">
+    <h3>On This Page</h3>
+    <ol>
+      <li><a href="#drift-detector">Conversation Drift Detector</a></li>
+      <li><a href="#momentum">Conversation Momentum</a></li>
+      <li><a href="#coach">Conversation Coach</a></li>
+      <li><a href="#brancher">Conversation Brancher</a></li>
+      <li><a href="#compass">Conversation Compass</a></li>
+      <li><a href="#stash">Conversation Stash</a></li>
+      <li><a href="#screenshot">Conversation Screenshot</a></li>
+      <li><a href="#context-sidebar">Smart Context Sidebar</a></li>
+      <li><a href="#session-prioritizer">Smart Session Prioritizer</a></li>
+      <li><a href="#knowledge-map">Smart Knowledge Map</a></li>
+      <li><a href="#deadline-tracker">Smart Deadline Tracker</a></li>
+      <li><a href="#response-critic">Smart Response Critic</a></li>
+      <li><a href="#planner">Smart Conversation Planner</a></li>
+      <li><a href="#input-predictor">Smart Input Predictor</a></li>
+      <li><a href="#replay">Smart Conversation Replay</a></li>
+      <li><a href="#auto-continue">Smart Auto-Continue</a></li>
+      <li><a href="#voice-chat">Voice Chat Mode</a></li>
+      <li><a href="#prompt-enhancer">Prompt Enhancer</a></li>
+      <li><a href="#session-linker">Session Linker</a></li>
+    </ol>
+  </div>
+
+  <!-- ===== Conversation Drift Detector ===== -->
+  <section id="drift-detector">
+    <h2>🧭 Conversation Drift Detector</h2>
+    <p><span class="badge badge-auto">Autonomous</span><span class="badge badge-shortcut">Alt+Shift+D</span></p>
+    <p>
+      Monitors topic coherence throughout a conversation by comparing TF-IDF cosine similarity
+      between the opening anchor messages and a sliding recent window. When similarity drops
+      below the alert threshold (default <code>0.35</code>), the detector fires a toast notification
+      and suggests refocusing prompts.
+    </p>
+    <h3>How It Works</h3>
+    <ul class="feature-list">
+      <li><span class="icon">📌</span><span>The first 4 messages form the <strong>anchor topic</strong> — their TF-IDF vector is cached once and never recomputed</span></li>
+      <li><span class="icon">🔍</span><span>The most recent 6 messages form the <strong>comparison window</strong>, re-tokenised each check</span></li>
+      <li><span class="icon">📐</span><span>Cosine similarity between anchor and window vectors gives a <strong>drift score</strong> (0 = total drift, 1 = on-topic)</span></li>
+      <li><span class="icon">🔔</span><span>When score < threshold, a non-intrusive alert with <strong>refocus suggestions</strong> appears</span></li>
+    </ul>
+    <h3>Configuration</h3>
+    <table>
+      <tr><th>Parameter</th><th>Default</th><th>Description</th></tr>
+      <tr><td><code>alertThreshold</code></td><td>0.35</td><td>Cosine similarity below this triggers a drift alert</td></tr>
+      <tr><td><code>windowSize</code></td><td>6</td><td>Number of recent messages in the comparison window</td></tr>
+      <tr><td><code>anchorSize</code></td><td>4</td><td>Number of opening messages forming the anchor topic</td></tr>
+      <tr><td><code>autoAlertEnabled</code></td><td>true</td><td>Whether proactive toast alerts fire automatically</td></tr>
+    </table>
+    <h3>API</h3>
+    <pre><code>ConversationDriftDetector.toggle()           // open/close panel
+ConversationDriftDetector.analyzeMessage()    // check latest message for drift
+ConversationDriftDetector.analyzeConversation() // full conversation drift report</code></pre>
+  </section>
+
+  <!-- ===== Conversation Momentum ===== -->
+  <section id="momentum">
+    <h2>🚀 Conversation Momentum</h2>
+    <p><span class="badge badge-auto">Autonomous</span></p>
+    <p>
+      Tracks engagement velocity in real-time with a 0–100 momentum score. The score rises with
+      rapid, substantive exchanges and decays during idle periods. When momentum enters a
+      "flow state" (sustained high score), the tracker celebrates; when it drops critically low,
+      it nudges the user to re-engage.
+    </p>
+    <h3>Scoring Signals</h3>
+    <ul class="feature-list">
+      <li><span class="icon">⬆️</span><span><strong>Message velocity:</strong> fast back-and-forth increases momentum</span></li>
+      <li><span class="icon">⬇️</span><span><strong>Idle decay:</strong> score decays over time when no messages are sent</span></li>
+      <li><span class="icon">🔥</span><span><strong>Flow detection:</strong> sustained score &gt; 75 triggers "flow state" recognition</span></li>
+      <li><span class="icon">⚠️</span><span><strong>Low alert:</strong> score &lt; 20 triggers a gentle re-engagement suggestion</span></li>
+    </ul>
+    <h3>Tracked Statistics</h3>
+    <table>
+      <tr><th>Metric</th><th>Description</th></tr>
+      <tr><td>Peak Score</td><td>Highest momentum reached in the session</td></tr>
+      <tr><td>Flow Count</td><td>Number of flow-state episodes detected</td></tr>
+      <tr><td>Total Messages</td><td>Messages sent since session start</td></tr>
+      <tr><td>Active Time</td><td>Cumulative time the user has been actively engaged</td></tr>
+    </table>
+    <h3>API</h3>
+    <pre><code>ConversationMomentum.toggle()  // open/close momentum panel
+ConversationMomentum.show()
+ConversationMomentum.hide()</code></pre>
+  </section>
+
+  <!-- ===== Conversation Coach ===== -->
+  <section id="coach">
+    <h2>🎓 Conversation Coach</h2>
+    <p><span class="badge badge-auto">Autonomous</span><span class="badge badge-shortcut">Alt+Shift+H</span></p>
+    <p>
+      Monitors user messages for common prompt anti-patterns and delivers non-intrusive coaching
+      tips in real-time. Maintains a quality score, tracks improvement streaks, and provides
+      periodic health summaries. Think of it as a writing coach that helps you get better AI responses.
+    </p>
+    <h3>Anti-Patterns Detected</h3>
+    <ul class="feature-list">
+      <li><span class="icon">❌</span><span>Vague prompts lacking specificity or context</span></li>
+      <li><span class="icon">❌</span><span>Overly broad requests without constraints</span></li>
+      <li><span class="icon">❌</span><span>Missing format expectations (code, list, essay, etc.)</span></li>
+      <li><span class="icon">❌</span><span>No role/persona specification when one would help</span></li>
+    </ul>
+    <h3>Coaching Mechanics</h3>
+    <table>
+      <tr><th>Parameter</th><th>Value</th><th>Description</th></tr>
+      <tr><td>Tip cooldown</td><td>3 messages</td><td>Minimum messages between coaching tips</td></tr>
+      <tr><td>Dismiss memory</td><td>10 messages</td><td>Won't repeat the same tip type for this many messages</td></tr>
+      <tr><td>Auto-dismiss</td><td>8 seconds</td><td>Tips disappear automatically after this duration</td></tr>
+      <tr><td>Health interval</td><td>10 messages</td><td>Messages between health summary reports</td></tr>
+    </table>
+    <h3>Dashboard Metrics</h3>
+    <p>The dashboard (<span class="shortcut">Alt+Shift+H</span>) shows: total messages analysed, good prompt percentage, current streak, best streak, average prompt length, and quality score distribution.</p>
+  </section>
+
+  <!-- ===== Conversation Brancher ===== -->
+  <section id="brancher">
+    <h2>🌳 Conversation Brancher</h2>
+    <p><span class="badge badge-auto">Autonomous</span><span class="badge badge-shortcut">Alt+Shift+B</span></p>
+    <p>
+      An autonomous intelligence layer built on top of <code>ConversationFork</code>. Tracks parent–child
+      branch relationships, renders a visual branch tree, detects topic drift and proactively suggests
+      forking, and offers side-by-side branch comparison.
+    </p>
+    <h3>Features</h3>
+    <ul class="feature-list">
+      <li><span class="icon">🗂️</span><span><strong>Branch tree:</strong> visual hierarchy of all conversation branches with parent/child links</span></li>
+      <li><span class="icon">🔀</span><span><strong>Drift-based fork suggestions:</strong> checks every 10 messages; if topic shifted, suggests creating a branch</span></li>
+      <li><span class="icon">⚖️</span><span><strong>Side-by-side comparison:</strong> compare two branches to see how conversations diverged</span></li>
+      <li><span class="icon">💾</span><span><strong>Persistent tree:</strong> branch metadata stored in SafeStorage with in-memory cache for O(1) lookups</span></li>
+    </ul>
+    <h3>API</h3>
+    <pre><code>ConversationBrancher.toggle()       // open/close branch panel
+ConversationBrancher.recordBranch() // manually record a branch event
+ConversationBrancher.checkDrift()   // trigger a drift check now
+ConversationBrancher.onMessageAdded() // hook called on each new message</code></pre>
+  </section>
+
+  <!-- ===== Conversation Compass ===== -->
+  <section id="compass">
+    <h2>🧭 Conversation Compass</h2>
+    <p><span class="badge badge-auto">Autonomous</span><span class="badge badge-shortcut">Alt+Shift+N</span><span class="badge badge-canvas">Canvas</span></p>
+    <p>
+      A topic trajectory tracker that visualises where the conversation has been and where it's heading.
+      Features an animated Canvas compass rose with a heading needle, a topic waypoint timeline, and
+      proactive course-correction suggestions when drift or stagnation is detected.
+    </p>
+    <h3>Visualisation Components</h3>
+    <ul class="feature-list">
+      <li><span class="icon">🎯</span><span><strong>Compass rose:</strong> animated Canvas 2D compass with a needle pointing toward the current topic vector</span></li>
+      <li><span class="icon">📍</span><span><strong>Topic waypoints:</strong> timeline showing each major topic shift as a labelled waypoint</span></li>
+      <li><span class="icon">📊</span><span><strong>Heading detection:</strong> TF-IDF cosine similarity across sliding windows determines direction</span></li>
+      <li><span class="icon">🔄</span><span><strong>Auto-monitor:</strong> optional toast alerts when drift or stagnation is detected</span></li>
+    </ul>
+    <h3>Access</h3>
+    <p>Keyboard: <span class="shortcut">Alt+Shift+N</span> &nbsp;|&nbsp; Slash: <code>/compass</code> &nbsp;|&nbsp; Command Palette: <em>"compass"</em></p>
+  </section>
+
+  <!-- ===== Conversation Stash ===== -->
+  <section id="stash">
+    <h2>📦 Conversation Stash</h2>
+    <p><span class="badge badge-shortcut">Ctrl+Shift+Z</span></p>
+    <p>
+      Git-stash-style save/restore for conversations. Stash the current conversation to a LIFO stack,
+      clear the chat, and start fresh. Pop the stash to restore a previous state. Supports multiple
+      stash entries (up to 20) with descriptions and timestamps.
+    </p>
+    <h3>Workflow</h3>
+    <pre><code>// Stash current conversation (saves to stack, clears chat)
+ConversationStash.push("WIP: debugging auth flow")
+
+// Start a new conversation...
+
+// Restore previous state
+ConversationStash.pop()   // restores most recent stash</code></pre>
+    <h3>API</h3>
+    <pre><code>ConversationStash.toggle()  // open/close stash panel
+ConversationStash.show()
+ConversationStash.hide()</code></pre>
+  </section>
+
+  <!-- ===== Conversation Screenshot ===== -->
+  <section id="screenshot">
+    <h2>📸 Conversation Screenshot</h2>
+    <p><span class="badge badge-shortcut">Ctrl+Shift+I</span><span class="badge badge-canvas">Canvas</span></p>
+    <p>
+      Renders the current conversation (or selected messages) as a beautiful PNG image using
+      the Canvas 2D API. No external dependencies. Users can choose a theme, include/exclude
+      system messages, add a watermark, and download or copy the image to clipboard.
+    </p>
+    <h3>Theme Options</h3>
+    <table>
+      <tr><th>Theme</th><th>Background</th><th>User Bubble</th><th>Assistant Bubble</th></tr>
+      <tr><td>Dark</td><td><code>#1a1a2e</code></td><td>Navy with blue border</td><td>Dark blue with green border</td></tr>
+      <tr><td>Light</td><td><code>#f8fafc</code></td><td>Blue tint with blue border</td><td>Green tint with green border</td></tr>
+      <tr><td>Gradient</td><td colspan="3">Custom gradient backgrounds for a polished look</td></tr>
+    </table>
+    <h3>Output Options</h3>
+    <ul class="feature-list">
+      <li><span class="icon">💾</span><span><strong>Download:</strong> saves as PNG file to disk</span></li>
+      <li><span class="icon">📋</span><span><strong>Clipboard:</strong> copies image directly to clipboard for pasting</span></li>
+      <li><span class="icon">🔒</span><span><strong>Watermark:</strong> optional branding text in the corner</span></li>
+    </ul>
+  </section>
+
+  <!-- ===== Smart Context Sidebar ===== -->
+  <section id="context-sidebar">
+    <h2>🧩 Smart Context Sidebar</h2>
+    <p><span class="badge badge-auto">Autonomous</span><span class="badge badge-shortcut">Alt+Shift+I</span></p>
+    <p>
+      A proactive intelligence panel that automatically extracts and displays contextual information
+      from the conversation: detected entities (URLs, code languages, file paths, numbers),
+      topic-specific follow-up suggestions, conversation statistics, and contextual quick actions.
+    </p>
+    <h3>Entity Extraction</h3>
+    <ul class="feature-list">
+      <li><span class="icon">🔗</span><span>URLs and links mentioned in the conversation</span></li>
+      <li><span class="icon">💻</span><span>Programming languages detected from code blocks</span></li>
+      <li><span class="icon">📁</span><span>File paths referenced in messages</span></li>
+      <li><span class="icon">🔢</span><span>Notable numbers, versions, and measurements</span></li>
+    </ul>
+    <h3>Topic-Aware Follow-ups</h3>
+    <p>The sidebar detects the current topic and offers relevant follow-up prompts. Supported domains include:</p>
+    <div class="card-grid">
+      <div class="card"><h3>API</h3><p>"How do I authenticate?" · "What are the rate limits?" · "Show error handling"</p></div>
+      <div class="card"><h3>Database</h3><p>"How do I handle migrations?" · "What about indexing?" · "Show a query example"</p></div>
+      <div class="card"><h3>Security</h3><p>"What are the vulnerabilities?" · "How do I sanitize input?" · "What about CORS?"</p></div>
+      <div class="card"><h3>Performance</h3><p>"Where are the bottlenecks?" · "Can you add caching?" · "What about lazy loading?"</p></div>
+    </div>
+    <p>Also supports: CSS, JavaScript, Python, React — each with tailored suggestions.</p>
+    <h3>Implementation</h3>
+    <p>Uses a <code>MutationObserver</code> on <code>#chat-output</code> to stay current without polling. Panel visibility state is persisted in SafeStorage.</p>
+  </section>
+
+  <!-- ===== Smart Session Prioritizer ===== -->
+  <section id="session-prioritizer">
+    <h2>📊 Smart Session Prioritizer</h2>
+    <p><span class="badge badge-auto">Autonomous</span><span class="badge badge-shortcut">Alt+Shift+P</span></p>
+    <p>
+      Scans all saved sessions and ranks them by importance using a weighted scoring system.
+      Dashboard overlay with priority queue, filters, and click-to-switch. Helps you decide
+      which conversation to return to next.
+    </p>
+    <h3>Scoring Weights</h3>
+    <table>
+      <tr><th>Signal</th><th>Weight</th><th>Description</th></tr>
+      <tr><td>Unresolved Questions</td><td>30</td><td>Questions in the conversation that haven't been answered</td></tr>
+      <tr><td>Action Items</td><td>25</td><td>Detected TODO/action items that remain open</td></tr>
+      <tr><td>Urgency Signals</td><td>20</td><td>Words like "urgent", "ASAP", "deadline", "critical"</td></tr>
+      <tr><td>Recency</td><td>15</td><td>More recently active sessions score higher</td></tr>
+      <tr><td>Length Bonus</td><td>5</td><td>Longer, more invested conversations get a small boost</td></tr>
+      <tr><td>Staleness Penalty</td><td>−10</td><td>Sessions untouched for a long time get deprioritised</td></tr>
+    </table>
+  </section>
+
+  <!-- ===== Smart Knowledge Map ===== -->
+  <section id="knowledge-map">
+    <h2>🕸️ Smart Knowledge Map</h2>
+    <p><span class="badge badge-auto">Autonomous</span><span class="badge badge-shortcut">Alt+Shift+K</span><span class="badge badge-canvas">Canvas</span></p>
+    <p>
+      An autonomous knowledge graph that extracts entities, concepts, and relationships from
+      conversation messages and renders them as an interactive force-directed Canvas graph.
+      Fully heuristic — no API calls required.
+    </p>
+    <h3>Entity Extraction Heuristics</h3>
+    <ul class="feature-list">
+      <li><span class="icon">🏷️</span><span>Capitalised multi-word phrases (proper nouns)</span></li>
+      <li><span class="icon">💻</span><span>Code/tech terms: backtick-wrapped, camelCase, PascalCase, UPPER_CASE</span></li>
+      <li><span class="icon">💬</span><span>Quoted terms from the conversation</span></li>
+      <li><span class="icon">📊</span><span>Frequent non-stopword terms via TextAnalytics TF-IDF</span></li>
+      <li><span class="icon">🔗</span><span>Co-occurrence within same message creates relationship edges</span></li>
+    </ul>
+    <h3>Interaction</h3>
+    <p>
+      The graph supports <strong>drag to reposition nodes</strong>, <strong>scroll to zoom</strong>,
+      <strong>click to select</strong> and highlight connections, and a <strong>search filter</strong>
+      to find specific entities. Nodes are colour-coded by category and sized by mention frequency.
+    </p>
+    <h3>Access</h3>
+    <p>Keyboard: <span class="shortcut">Alt+Shift+K</span> &nbsp;|&nbsp; Slash: <code>/knowledgemap</code> &nbsp;|&nbsp; Command Palette: <em>"knowledge map"</em></p>
+  </section>
+
+  <!-- ===== Smart Deadline Tracker ===== -->
+  <section id="deadline-tracker">
+    <h2>⏰ Smart Deadline Tracker</h2>
+    <p><span class="badge badge-auto">Autonomous</span><span class="badge badge-shortcut">Alt+D</span></p>
+    <p>
+      Autonomously scans conversation messages for dates, deadlines, and time references.
+      Displays an interactive panel with sorted deadlines, live countdown timers, colour-coded
+      urgency indicators, and proactive toast alerts when deadlines approach.
+    </p>
+    <h3>Detection Capabilities</h3>
+    <ul class="feature-list">
+      <li><span class="icon">📅</span><span>Explicit dates: "by March 15", "due Friday", "deadline: 2025-04-01"</span></li>
+      <li><span class="icon">⏳</span><span>Relative references: "in 2 hours", "by end of day", "next Monday"</span></li>
+      <li><span class="icon">🏷️</span><span>Context extraction: attaches the surrounding sentence as a label</span></li>
+      <li><span class="icon">🔔</span><span>Proactive alerts: toast notification when a deadline is approaching</span></li>
+    </ul>
+    <h3>Panel Features</h3>
+    <p>
+      Deadlines are sorted by urgency. Each entry shows a live countdown, the original message snippet,
+      and colour-coding: <span style="color:var(--success)">green</span> (plenty of time),
+      <span style="color:var(--warning)">yellow</span> (approaching),
+      <span style="color:var(--danger)">red</span> (imminent or overdue).
+      Deadlines can be dismissed or snoozed individually.
+    </p>
+  </section>
+
+  <!-- ===== Smart Response Critic ===== -->
+  <section id="response-critic">
+    <h2>🔍 Smart Response Critic</h2>
+    <p><span class="badge badge-auto">Autonomous</span><span class="badge badge-shortcut">Alt+Shift+Q</span></p>
+    <p>
+      Analyses AI response quality using heuristic pattern matching. Scores each response on
+      specificity, actionability, and confidence. Highlights hedging language, detects lack of
+      concrete examples, and suggests when to push for better answers.
+    </p>
+    <h3>Analysis Dimensions</h3>
+    <table>
+      <tr><th>Dimension</th><th>What It Measures</th><th>Detection Method</th></tr>
+      <tr><td>Hedging</td><td>Uncertain language ("probably", "might be", "I think")</td><td>Regex pattern matching against 17 hedging phrases</td></tr>
+      <tr><td>Specificity</td><td>Concrete data: percentages, proper nouns, code blocks, URLs</td><td>Regex for numbers, capitalised phrases, backtick blocks, links</td></tr>
+      <tr><td>Actionability</td><td>Step-by-step instructions, commands, code examples</td><td>Pattern matching for numbered steps, code, shell commands, action verbs</td></tr>
+    </table>
+    <h3>API</h3>
+    <pre><code>SmartResponseCritic.toggle()            // open/close critic panel
+SmartResponseCritic.analyze(msgIndex)   // analyse a specific response</code></pre>
+  </section>
+
+  <!-- ===== Smart Conversation Planner ===== -->
+  <section id="planner">
+    <h2>🗺️ Smart Conversation Planner</h2>
+    <p><span class="badge badge-auto">Autonomous</span></p>
+    <p>
+      Goal-oriented conversation planning with milestone tracking. Provides pre-built plan templates
+      for common workflows, automatically detects when milestones are reached based on message content,
+      and shows a progress bar toward the conversation goal.
+    </p>
+    <h3>Built-in Plan Templates</h3>
+    <div class="card-grid">
+      <div class="card">
+        <h3>🔬 Research Topic</h3>
+        <p>Define scope → Gather background → Deep dive → Specific aspects → Synthesise findings</p>
+      </div>
+      <div class="card">
+        <h3>🐛 Debug Problem</h3>
+        <p>Describe error → Reproduce → Diagnose → Identify root cause → Implement fix → Verify</p>
+      </div>
+      <div class="card">
+        <h3>📝 Write Content</h3>
+        <p>Define audience → Outline structure → Draft sections → Review → Polish</p>
+      </div>
+      <div class="card">
+        <h3>🏗️ Build Feature</h3>
+        <p>Requirements → Architecture → Implementation → Testing → Deployment</p>
+      </div>
+    </div>
+    <h3>Milestone Detection</h3>
+    <p>
+      Each milestone has associated keywords. When messages contain those keywords, the milestone is
+      automatically marked as reached. The planner shows a visual progress indicator and suggests
+      the next logical step.
+    </p>
+  </section>
+
+  <!-- ===== Smart Input Predictor ===== -->
+  <section id="input-predictor">
+    <h2>⌨️ Smart Input Predictor</h2>
+    <p><span class="badge badge-auto">Autonomous</span></p>
+    <p>
+      Learns from your typing patterns and offers ghost-text autocomplete suggestions.
+      As you type (after 3+ characters), the predictor shows a faded continuation based on
+      previously accepted phrases. Press <span class="shortcut">Tab</span> to accept.
+    </p>
+    <h3>How It Learns</h3>
+    <ul class="feature-list">
+      <li><span class="icon">📝</span><span>Records sent messages and builds a phrase frequency map (up to 50 phrases)</span></li>
+      <li><span class="icon">🔍</span><span>Matches current input prefix against learned phrases with <code>startsWith</code></span></li>
+      <li><span class="icon">👻</span><span>Shows ghost text inline in the input field, styled with reduced opacity</span></li>
+      <li><span class="icon">📊</span><span>Tracks acceptance rate: suggestions shown vs. suggestions accepted</span></li>
+    </ul>
+    <h3>Configuration</h3>
+    <table>
+      <tr><th>Setting</th><th>Default</th><th>Description</th></tr>
+      <tr><td>Max learned phrases</td><td>50</td><td>FIFO eviction when limit reached</td></tr>
+      <tr><td>Debounce</td><td>300ms</td><td>Wait time after keystroke before showing suggestion</td></tr>
+      <tr><td>Min characters</td><td>3</td><td>Minimum input length to trigger predictions</td></tr>
+    </table>
+  </section>
+
+  <!-- ===== Smart Conversation Replay ===== -->
+  <section id="replay">
+    <h2>🎬 Smart Conversation Replay</h2>
+    <p><span class="badge badge-shortcut">Alt+Shift+Y</span></p>
+    <p>
+      Replays the current conversation message-by-message with typing animation. Perfect for
+      demos, presentations, and code reviews. Supports variable playback speed.
+    </p>
+    <h3>Playback Controls</h3>
+    <table>
+      <tr><th>Control</th><th>Description</th></tr>
+      <tr><td>Play / Pause</td><td>Start or pause the replay</td></tr>
+      <tr><td>Speed</td><td>Cycle through 0.5×, 1×, 2×, 4× playback speed</td></tr>
+      <tr><td>Skip</td><td>Jump to next message immediately</td></tr>
+      <tr><td>Stop</td><td>End replay and return to normal view</td></tr>
+    </table>
+    <p>
+      Messages are rendered one at a time with a character-by-character typing animation,
+      preserving code blocks and formatting. HTML is escaped for safety.
+    </p>
+  </section>
+
+  <!-- ===== Smart Auto-Continue ===== -->
+  <section id="auto-continue">
+    <h2>🔄 Smart Auto-Continue</h2>
+    <p><span class="badge badge-auto">Autonomous</span><span class="badge badge-shortcut">Alt+Shift+U</span></p>
+    <p>
+      Detects truncated AI responses and either prompts the user or automatically sends a
+      continuation request, merging the result seamlessly into the original response.
+      Eliminates the manual "please continue" workflow.
+    </p>
+    <h3>Truncation Detection Signals</h3>
+    <ul class="feature-list">
+      <li><span class="icon">🔓</span><span>Unclosed code blocks (opening <code>```</code> without a matching close)</span></li>
+      <li><span class="icon">✂️</span><span>Mid-sentence cutoffs (ends without terminal punctuation)</span></li>
+      <li><span class="icon">💬</span><span>Explicit continuation markers ("continued in next message", "...")</span></li>
+    </ul>
+    <h3>Modes</h3>
+    <table>
+      <tr><th>Mode</th><th>Behaviour</th></tr>
+      <tr><td>Manual (default)</td><td>Shows a prompt asking the user to confirm continuation</td></tr>
+      <tr><td>Automatic</td><td>Immediately sends a continuation request without user input</td></tr>
+    </table>
+    <h3>Safety</h3>
+    <p>
+      A <strong>max chain limit of 5</strong> prevents infinite continuation loops. Statistics
+      (detected, continued, merged) are tracked and visible in the panel. A re-entrancy guard
+      prevents concurrent detection during an active continuation.
+    </p>
+  </section>
+
+  <!-- ===== Voice Chat Mode ===== -->
+  <section id="voice-chat">
+    <h2>🎙️ Voice Chat Mode</h2>
+    <p><span class="badge badge-voice">Voice</span><span class="badge badge-shortcut">Alt+V</span></p>
+    <p>
+      A hands-free conversational loop that creates a phone-call-like experience. Chains
+      voice input → auto-send → wait for response → text-to-speech → auto-listen in a
+      continuous cycle. Toggle with <span class="shortcut">Alt+V</span> or the floating mic button.
+    </p>
+    <h3>Loop Phases</h3>
+    <ol>
+      <li><strong>Listening</strong> — VoiceInput captures speech and auto-fills the chat input</li>
+      <li><strong>Sending</strong> — Message is automatically submitted via ChatController</li>
+      <li><strong>Waiting</strong> — Waits for the AI response to complete</li>
+      <li><strong>Speaking</strong> — ReadAloud speaks the assistant's reply</li>
+      <li><strong>Loop</strong> — When speech ends, auto-listen begins again</li>
+    </ol>
+    <h3>Requirements</h3>
+    <p>
+      Requires both <code>VoiceInput</code> (Web Speech API) and <code>ReadAloud</code>
+      (Speech Synthesis API) to be available in the browser. A floating overlay shows the
+      current phase, and users can pause/resume the loop or exit entirely.
+    </p>
+  </section>
+
+  <!-- ===== Prompt Enhancer ===== -->
+  <section id="prompt-enhancer">
+    <h2>✨ Prompt Enhancer</h2>
+    <p><span class="badge badge-shortcut">Alt+E</span></p>
+    <p>
+      Sends your draft prompt to the AI with instructions to improve it, showing the result
+      in a panel with multiple enhancement modes and a diff view. Use it, discard it, or
+      tweak the mode.
+    </p>
+    <h3>Enhancement Modes</h3>
+    <table>
+      <tr><th>Mode</th><th>Goal</th></tr>
+      <tr><td>🔍 Clarity</td><td>Remove ambiguity, make the prompt clearer and more specific</td></tr>
+      <tr><td>📋 Detail</td><td>Add specificity, context, constraints, and format expectations</td></tr>
+      <tr><td>✂️ Concise</td><td>Shorter and more direct without losing meaning</td></tr>
+      <tr><td>🧑‍🔬 Expert</td><td>Rewrite as a domain expert would phrase it, with precise terminology</td></tr>
+      <tr><td>🎨 Creative</td><td>More creative, open-ended, encouraging novel approaches</td></tr>
+    </table>
+    <h3>Workflow</h3>
+    <p>
+      Type a prompt → press <span class="shortcut">Alt+E</span> → pick a mode → preview the enhanced version →
+      see a diff of changes → click "Use" to replace or "Discard" to keep the original.
+      An abort controller cancels in-flight API requests when switching modes.
+    </p>
+  </section>
+
+  <!-- ===== Session Linker ===== -->
+  <section id="session-linker">
+    <h2>🔗 Session Linker</h2>
+    <p><span class="badge badge-auto">Autonomous</span><span class="badge badge-shortcut">Alt+L</span></p>
+    <p>
+      Discovers related sessions by computing TF-IDF cosine similarity across all saved conversations.
+      Shows a floating "Related Sessions" panel with ranked links and shared-topic badges. Proactively
+      surfaces connections the user might otherwise miss.
+    </p>
+    <h3>Algorithm</h3>
+    <ul class="feature-list">
+      <li><span class="icon">📄</span><span>Extracts all user + assistant text from each session's messages</span></li>
+      <li><span class="icon">📊</span><span>Builds a TF-IDF index across all sessions (cached for 30 seconds)</span></li>
+      <li><span class="icon">📐</span><span>Computes cosine similarity between the current session and all others</span></li>
+      <li><span class="icon">🏅</span><span>Ranks results; filters below <code>MIN_SIMILARITY = 0.08</code>; shows top 8</span></li>
+    </ul>
+    <h3>API</h3>
+    <pre><code>SessionLinker.toggle()               // open/close related sessions panel
+SessionLinker.show()
+SessionLinker.hide()
+SessionLinker.analyzeMessage()       // re-analyse after new message
+SessionLinker.analyzeConversation()  // full session similarity report</code></pre>
+  </section>
+
+  <!-- ===== Summary ===== -->
+  <section id="quick-reference">
+    <h2>⌨️ Keyboard Shortcut Reference</h2>
+    <table>
+      <tr><th>Shortcut</th><th>Module</th></tr>
+      <tr><td><span class="shortcut">Alt+Shift+D</span></td><td>Drift Detector</td></tr>
+      <tr><td><span class="shortcut">Alt+Shift+H</span></td><td>Conversation Coach</td></tr>
+      <tr><td><span class="shortcut">Alt+Shift+B</span></td><td>Conversation Brancher</td></tr>
+      <tr><td><span class="shortcut">Alt+Shift+N</span></td><td>Conversation Compass</td></tr>
+      <tr><td><span class="shortcut">Alt+Shift+I</span></td><td>Smart Context Sidebar</td></tr>
+      <tr><td><span class="shortcut">Alt+Shift+P</span></td><td>Session Prioritizer</td></tr>
+      <tr><td><span class="shortcut">Alt+Shift+K</span></td><td>Knowledge Map</td></tr>
+      <tr><td><span class="shortcut">Alt+D</span></td><td>Deadline Tracker</td></tr>
+      <tr><td><span class="shortcut">Alt+Shift+Q</span></td><td>Response Critic</td></tr>
+      <tr><td><span class="shortcut">Alt+Shift+Y</span></td><td>Conversation Replay</td></tr>
+      <tr><td><span class="shortcut">Alt+Shift+U</span></td><td>Auto-Continue</td></tr>
+      <tr><td><span class="shortcut">Alt+V</span></td><td>Voice Chat Mode</td></tr>
+      <tr><td><span class="shortcut">Alt+E</span></td><td>Prompt Enhancer</td></tr>
+      <tr><td><span class="shortcut">Alt+L</span></td><td>Session Linker</td></tr>
+      <tr><td><span class="shortcut">Ctrl+Shift+Z</span></td><td>Conversation Stash</td></tr>
+      <tr><td><span class="shortcut">Ctrl+Shift+I</span></td><td>Conversation Screenshot</td></tr>
+    </table>
+  </section>
+
+</div>
+
+<footer style="text-align:center;padding:2rem;color:var(--text-muted);font-size:.85rem;border-top:1px solid var(--border)">
+  Agentic Chat Documentation · <a href="index.html">Home</a> · <a href="productivity-suite.html">Productivity</a> · <a href="smart-intelligence.html">Intelligence</a> · <a href="autonomous-agents.html">Autonomous</a>
+</footer>
+
+</body>
+</html>
