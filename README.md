@@ -14,7 +14,7 @@
 [![GitHub last commit](https://img.shields.io/github/last-commit/sauravbhattacharya001/agenticchat)](https://github.com/sauravbhattacharya001/agenticchat/commits/main)
 [![codecov](https://codecov.io/gh/sauravbhattacharya001/agenticchat/graph/badge.svg)](https://codecov.io/gh/sauravbhattacharya001/agenticchat)
 
-A lightweight, zero-dependency chat interface that sends your prompts to GPT-4o, extracts the JavaScript it writes, and executes it in a sandboxed iframe — all from a single HTML file. Packed with **94 modules** covering everything from conversation management to ambient soundscapes.
+A lightweight, zero-dependency chat interface that sends your prompts to GPT-4o, extracts the JavaScript it writes, and executes it in a sandboxed iframe — all from a single HTML file. Packed with **149 IIFE modules** (85+ named) covering everything from conversation management to ambient soundscapes — backed by **64 test suites** with **2,370+ test cases**.
 
 [**Live Demo**](https://sauravbhattacharya001.github.io/agenticchat/) · [**Report Bug**](https://github.com/sauravbhattacharya001/agenticchat/issues) · [**Request Feature**](https://github.com/sauravbhattacharya001/agenticchat/issues)
 
@@ -134,6 +134,20 @@ A lightweight, zero-dependency chat interface that sends your prompts to GPT-4o,
 - **Tone Adjuster** — Rewrite assistant messages in different tones (formal, casual, concise, ELI5)
 - **Word Cloud Generator** — Interactive word frequency cloud from conversation with 5 color schemes, PNG download (`Alt+W`)
 - **Zero Dependencies** — Single HTML file + CSS + JS. No build tools, no npm, no bundler. Just open and go.
+
+### Intelligence & Context
+- **Smart Context Sidebar** — AI-powered context panel showing relevant conversation snippets and session links
+- **Smart Model Advisor** — Recommends optimal model based on prompt complexity and cost
+- **Smart Session Prioritizer** — Ranks sessions by recency, engagement, and unfinished work
+- **Smart Auto Continue** — Detects truncated responses and automatically continues generation
+- **Prompt Chain Runner** — Multi-step prompt chains with variable substitution and conditional logic
+- **Split View** — Side-by-side dual conversation panes for parallel work
+- **Model Compare Panel** — Compare responses from multiple models simultaneously
+- **Context Window Meter** — Real-time token budget visualization with overflow warnings
+- **Conversation Export** — Export conversations to Markdown, JSON, or plain text
+- **PDF Export** — Render and download conversations as formatted PDF documents
+- **Conversation Brancher** — Advanced branch management with visual tree navigation
+- **OpenAI Client** — Centralized API client with streaming, retry, and token counting
 - **Input Guardrails** — Character limit (50K chars), token estimate warnings (~80K threshold), real-time counter
 
 ## 🚀 Getting Started
@@ -183,10 +197,10 @@ User Prompt  →  GPT-4o (system prompt: reply with JS only)
 
 ### Modules
 
-The codebase is organized into **94 IIFE modules** in `app.js`, each using the revealing-module pattern:
+The codebase is organized into **149 IIFE modules** in `app.js` (~44,000 lines), each using the revealing-module pattern:
 
 <details>
-<summary><strong>Core (8 modules)</strong></summary>
+<summary><strong>Core (9 modules)</strong></summary>
 
 | Module | Purpose |
 |--------|---------|
@@ -198,11 +212,12 @@ The codebase is organized into **94 IIFE modules** in `app.js`, each using the r
 | `ApiKeyManager` | OpenAI + per-service key storage, substitution, validation |
 | `UIController` | All DOM manipulation — button states, modals, output |
 | `ChatController` | Orchestrates send flow: input → API → code extraction → sandbox |
+| `OpenAIClient` | Centralized API client with streaming, retry, and token counting |
 
 </details>
 
 <details>
-<summary><strong>Features (86 modules)</strong></summary>
+<summary><strong>Features (140 modules)</strong></summary>
 
 | Module | Purpose |
 |--------|---------|
@@ -295,6 +310,19 @@ The codebase is organized into **94 IIFE modules** in `app.js`, each using the r
 | `ConversationMoodRing` | Real-time sentiment monitor with mood shifts and alerts (`Alt+M`) |
 | `OfflineManager` | Service worker registration and offline capability management |
 | `ConversationSessions` | Extended session lifecycle and state management |
+| `SmartContextSidebar` | AI-powered context panel with relevant snippets and links |
+| `SmartModelAdvisor` | Recommends optimal model based on prompt complexity |
+| `SmartSessionPrioritizer` | Ranks sessions by recency, engagement, and unfinished work |
+| `SmartAutoContinue` | Detects truncated responses and auto-continues generation |
+| `SmartScroll` | Intelligent scroll behavior with momentum and snap points |
+| `PromptChainRunner` | Multi-step prompt chains with variable substitution |
+| `SplitView` | Side-by-side dual conversation panes |
+| `ModelComparePanel` | Compare responses from multiple models simultaneously |
+| `ContextWindowMeter` | Real-time token budget visualization |
+| `ConversationExport` | Export conversations to Markdown, JSON, or plain text |
+| `PdfExport` | Render and download conversations as formatted PDF |
+| `ConversationBrancher` | Advanced branch management with visual tree navigation |
+| `MessageDiffViewer` | Enhanced diff viewer with syntax highlighting |
 
 </details>
 
@@ -328,14 +356,14 @@ The app executes AI-generated code, so security is a first-class concern:
 | **Offline** | Service Worker with cache-first strategy |
 | **Hosting** | GitHub Pages |
 | **CI/CD** | GitHub Actions (build, test, lint, CodeQL, Docker, Pages deploy) |
-| **Testing** | Jest + jsdom (60+ test suites) |
+| **Testing** | Jest + jsdom (64 test suites, 2,370+ test cases) |
 
 ## 📁 Project Structure
 
 ```
 agenticchat/
 ├── index.html              # Single-page UI with CSP headers
-├── app.js                  # All application logic (94 modular IIFEs, ~30K lines)
+├── app.js                  # All application logic (149 modular IIFEs, ~44K lines)
 ├── sw.js                   # Service worker for offline support
 ├── style.css               # Responsive dark-theme styling
 ├── package.json            # npm metadata + test scripts
@@ -404,6 +432,15 @@ agenticchat/
 │   ├── typing-speed.test.js      # TypingSpeedMonitor tests
 │   ├── usageHeatmap.test.js      # UsageHeatmap tests
 │   └── word-cloud.test.js        # Word cloud tests
+│   ├── conversation-memory.test.js  # Conversation memory tests
+│   ├── prompt-chains.test.js     # PromptChainRunner tests
+│   ├── response-auditor.test.js  # Response auditor tests
+│   ├── scratchpad.test.js        # Scratchpad tests
+│   ├── smart-fact-memory.test.js # Smart fact memory tests
+│   ├── smart-scroll.test.js      # SmartScroll tests
+│   ├── smart-session-prioritizer.test.js # SmartSessionPrioritizer tests
+│   ├── split-view.test.js        # SplitView tests
+│   └── stamp-sw.test.js          # Service worker stamping tests
 └── .github/
     ├── copilot-instructions.md    # Copilot coding agent context
     ├── copilot-setup-steps.yml    # Copilot agent setup workflow
@@ -534,9 +571,9 @@ Contributions are welcome! Here's how:
 ### Guidelines
 
 - This is a **single-file app** — keep it that way unless there's a compelling reason to split
-- All 94 modules live in `app.js` as revealing-module IIFEs
+- All 149 modules live in `app.js` as revealing-module IIFEs
 - Security is paramount — any change that touches the sandbox must be reviewed carefully
-- Run `npm test` to ensure all 60+ test suites pass before submitting
+- Run `npm test` to ensure all 64 test suites (2,370+ tests) pass before submitting
 - Test with various prompt types (simple questions, API calls, error cases)
 
 ## 📄 License
