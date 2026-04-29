@@ -43938,3 +43938,740 @@ var SmartResponseAuditor = (function () {
     }
   };
 })();
+
+
+/* ============================================================
+ * SmartPromptCoach — Autonomous Prompting Pattern Analyzer & Coach
+ *
+ * Monitors user prompting behavior across the session, identifies
+ * anti-patterns (vague questions, missing context, repeated
+ * reformulations, prompt tunneling, over-delegation, instruction
+ * overload), and proactively offers coaching tips to improve
+ * AI interaction skills.  Tracks improvement over time and adapts
+ * advice based on which patterns recur.
+ *
+ * Features:
+ *   - 8 anti-pattern detectors with per-message scoring
+ *   - Cumulative skill profile with radar visualization
+ *   - Proactive coaching tips via inline badges and toast alerts
+ *   - Session-over-session improvement tracking
+ *   - Exportable coaching report
+ *   - Adaptive advice: recurring issues get escalated tips
+ *
+ * Keyboard shortcut: Alt+Shift+O
+ * Slash command: /promptcoach
+ * ============================================================ */
+const SmartPromptCoach = (() => {
+  'use strict';
+
+  /* ── constants ── */
+  const STORAGE_KEY = 'spc_state';
+  const CONFIG_KEY  = 'spc_config';
+  const MAX_HISTORY = 200;
+  const EVAL_DEBOUNCE_MS = 1500;
+
+  /* ── anti-pattern definitions ── */
+  const PATTERNS = {
+    vague: {
+      label: 'Vague Question',
+      icon: '\uD83C\uDF2B\uFE0F',
+      desc: 'Question lacks specificity or context',
+      tips: [
+        'Add concrete details: what technology, what version, what error?',
+        'Include a specific example of what you want',
+        'Describe the expected vs actual behavior',
+        'Mention your environment (OS, language version, framework)'
+      ]
+    },
+    noContext: {
+      label: 'Missing Context',
+      icon: '\uD83D\uDCCB',
+      desc: 'Prompt doesn\'t provide enough background',
+      tips: [
+        'Share relevant code snippets or file structure',
+        'Mention what you\'ve already tried',
+        'Describe the broader goal, not just the immediate task',
+        'Include constraints (performance, compatibility, etc.)'
+      ]
+    },
+    reformulation: {
+      label: 'Repeated Reformulation',
+      icon: '\uD83D\uDD04',
+      desc: 'Asking the same question in different words',
+      tips: [
+        'Instead of rephrasing, explain what was wrong with the previous answer',
+        'Quote the specific part that didn\'t help and say why',
+        'Try breaking the question into smaller, specific sub-questions',
+        'Provide an example of what a good answer would look like'
+      ]
+    },
+    tunnel: {
+      label: 'Prompt Tunneling',
+      icon: '\uD83D\uDD73\uFE0F',
+      desc: 'Fixating on one approach without exploring alternatives',
+      tips: [
+        'Ask "What are alternative approaches?" before going deeper',
+        'Step back and describe the higher-level problem',
+        'Ask the AI to compare pros/cons of different solutions',
+        'Try: "Am I approaching this the right way?"'
+      ]
+    },
+    overDelegation: {
+      label: 'Over-Delegation',
+      icon: '\uD83C\uDFAF',
+      desc: 'Asking the AI to do too much in one prompt',
+      tips: [
+        'Break complex requests into 2-3 focused prompts',
+        'Handle one concern at a time, then build up',
+        'Ask for an outline first, then expand each section',
+        'Separate "design" prompts from "implement" prompts'
+      ]
+    },
+    instructionOverload: {
+      label: 'Instruction Overload',
+      icon: '\uD83D\uDCDA',
+      desc: 'Too many constraints or requirements in one prompt',
+      tips: [
+        'Prioritize: which 2-3 requirements matter most?',
+        'Send constraints in order of importance',
+        'Use numbered lists for clarity',
+        'State the must-haves vs nice-to-haves explicitly'
+      ]
+    },
+    yesNo: {
+      label: 'Yes/No Question',
+      icon: '\u2753',
+      desc: 'Closed question that limits the AI\'s helpfulness',
+      tips: [
+        'Rephrase as "How does X work?" instead of "Does X work?"',
+        'Ask "What are the trade-offs of X?" instead of "Is X good?"',
+        'Follow up yes/no questions with "Why?" or "How?"',
+        'Ask for examples or scenarios instead of binary answers'
+      ]
+    },
+    noGoal: {
+      label: 'Unclear Goal',
+      icon: '\uD83C\uDFAF',
+      desc: 'Prompt doesn\'t state what success looks like',
+      tips: [
+        'Start with: "I want to achieve X by doing Y"',
+        'Describe the end result you\'re looking for',
+        'Include acceptance criteria or definition of done',
+        'Mention who the output is for (audience/use case)'
+      ]
+    }
+  };
+
+  const SKILL_DIMENSIONS = ['clarity', 'specificity', 'context', 'structure', 'iteration', 'scope'];
+
+  /* ── state ── */
+  let _config = { enabled: true, alertsEnabled: true, badgesEnabled: true };
+  let _analyses = [];
+  let _skillProfile = {};
+  let _patternCounts = {};
+  let _sessionHistory = [];
+  let _panel = null;
+  let _visible = false;
+  let _debounceTimer = null;
+  let _styleInjected = false;
+
+  /* ── persistence ── */
+  function _load() {
+    try {
+      const raw = SafeStorage.get(STORAGE_KEY);
+      if (raw) {
+        const d = (typeof sanitizeStorageObject === 'function') ? sanitizeStorageObject(JSON.parse(raw)) : JSON.parse(raw);
+        if (d) {
+          _skillProfile = d.skillProfile || {};
+          _patternCounts = d.patternCounts || {};
+          _sessionHistory = Array.isArray(d.sessionHistory) ? d.sessionHistory.slice(-50) : [];
+        }
+      }
+    } catch (_) {}
+  }
+
+  function _save() {
+    try {
+      SafeStorage.trySet(STORAGE_KEY, JSON.stringify({
+        skillProfile: _skillProfile,
+        patternCounts: _patternCounts,
+        sessionHistory: _sessionHistory.slice(-50)
+      }));
+    } catch (_) {}
+  }
+
+  function _loadConfig() {
+    try {
+      const raw = SafeStorage.get(CONFIG_KEY);
+      if (raw) {
+        const c = (typeof sanitizeStorageObject === 'function') ? sanitizeStorageObject(JSON.parse(raw)) : JSON.parse(raw);
+        if (c) _config = Object.assign(_config, c);
+      }
+    } catch (_) {}
+  }
+
+  function _saveConfig() {
+    try { SafeStorage.trySet(CONFIG_KEY, JSON.stringify(_config)); } catch (_) {}
+  }
+
+  /* ── analysis engine ── */
+  function _wordCount(text) {
+    return (text.match(/\b\w+\b/g) || []).length;
+  }
+
+  function _hasCodeBlock(text) {
+    return /```[\s\S]*?```/.test(text);
+  }
+
+  function _getConversationMessages() {
+    if (typeof ConversationManager !== 'undefined' && ConversationManager.getHistory) {
+      return ConversationManager.getHistory();
+    }
+    return [];
+  }
+
+  function analyzePrompt(text, conversationHistory) {
+    if (!text || typeof text !== 'string') return null;
+    const wc = _wordCount(text);
+    const issues = [];
+    let clarityScore = 100;
+    let specificityScore = 100;
+    let contextScore = 100;
+    let structureScore = 100;
+    let iterationScore = 100;
+    let scopeScore = 100;
+
+    /* 1. Vague detection */
+    const vagueIndicators = [
+      /^(?:help|fix|explain|tell me|show me|how|what|why|can you)\b/i,
+      /\b(?:this|that|it|the thing|stuff|something)\b/i
+    ];
+    const specificIndicators = [
+      /\b\d+\b/,
+      /```/,
+      /\b(?:error|exception|stack trace|log|output)\b/i,
+      /\b(?:version|v\d|python|java|node|react|typescript|rust|go)\b/i,
+      /\b\w+\.\w+/
+    ];
+    let vagueHits = 0;
+    let specificHits = 0;
+    for (const p of vagueIndicators) { if (p.test(text)) vagueHits++; }
+    for (const p of specificIndicators) { if (p.test(text)) specificHits++; }
+    if (wc < 8 && vagueHits > 0 && specificHits === 0) {
+      issues.push({ pattern: 'vague', severity: 'high', detail: 'Very short prompt with no specific details' });
+      clarityScore -= 40;
+      specificityScore -= 50;
+    } else if (wc < 15 && vagueHits > 0 && specificHits === 0) {
+      issues.push({ pattern: 'vague', severity: 'medium', detail: 'Short prompt \u2014 consider adding specifics' });
+      clarityScore -= 20;
+      specificityScore -= 25;
+    }
+
+    /* 2. Missing context */
+    const contextSignals = [
+      /\b(?:I'm|I am|my|we're|our|currently)\b/i,
+      /\b(?:using|running|on|with|version)\b/i,
+      /\b(?:tried|attempted|already|before)\b/i,
+      _hasCodeBlock(text)
+    ];
+    let ctxHits = 0;
+    for (const s of contextSignals) {
+      if (typeof s === 'boolean' ? s : s.test(text)) ctxHits++;
+    }
+    if (wc > 5 && ctxHits === 0 && !_hasCodeBlock(text)) {
+      issues.push({ pattern: 'noContext', severity: 'medium', detail: 'No background context provided' });
+      contextScore -= 35;
+    }
+
+    /* 3. Reformulation detection */
+    if (conversationHistory && conversationHistory.length >= 3) {
+      const recentUserMsgs = [];
+      for (let i = conversationHistory.length - 1; i >= 0 && recentUserMsgs.length < 3; i--) {
+        if (conversationHistory[i].role === 'user') recentUserMsgs.push(conversationHistory[i].content);
+      }
+      if (recentUserMsgs.length >= 2) {
+        const currentWords = new Set(text.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(w => w.length > 3));
+        for (let r = 1; r < recentUserMsgs.length; r++) {
+          const prevWords = new Set(recentUserMsgs[r].toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(w => w.length > 3));
+          let overlap = 0;
+          for (const w of currentWords) { if (prevWords.has(w)) overlap++; }
+          const similarity = currentWords.size > 0 ? overlap / currentWords.size : 0;
+          if (similarity > 0.65) {
+            issues.push({ pattern: 'reformulation', severity: 'high', detail: 'Very similar to a recent prompt (' + Math.round(similarity * 100) + '% overlap)' });
+            iterationScore -= 40;
+            break;
+          } else if (similarity > 0.45) {
+            issues.push({ pattern: 'reformulation', severity: 'medium', detail: 'Somewhat similar to a recent prompt (' + Math.round(similarity * 100) + '% overlap)' });
+            iterationScore -= 20;
+            break;
+          }
+        }
+      }
+    }
+
+    /* 4. Prompt tunneling */
+    if (conversationHistory && conversationHistory.length >= 6) {
+      const recentUser = conversationHistory.filter(m => m.role === 'user').slice(-4);
+      if (recentUser.length >= 3) {
+        const topics = recentUser.map(m => {
+          return new Set((m.content || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(w => w.length > 3));
+        });
+        let pairwiseOverlaps = 0;
+        let pairs = 0;
+        for (let a = 0; a < topics.length; a++) {
+          for (let b = a + 1; b < topics.length; b++) {
+            let ov = 0;
+            for (const w of topics[a]) { if (topics[b].has(w)) ov++; }
+            const sim = topics[a].size > 0 ? ov / topics[a].size : 0;
+            if (sim > 0.5) pairwiseOverlaps++;
+            pairs++;
+          }
+        }
+        if (pairs > 0 && pairwiseOverlaps / pairs > 0.6) {
+          issues.push({ pattern: 'tunnel', severity: 'medium', detail: 'Last ' + recentUser.length + ' prompts are very similar \u2014 consider a different angle' });
+          iterationScore -= 25;
+        }
+      }
+    }
+
+    /* 5. Over-delegation */
+    const taskIndicators = (text.match(/\b(?:and also|and then|plus|additionally|moreover|furthermore|as well as|along with)\b/gi) || []).length;
+    const imperatives = (text.match(/\b(?:create|build|write|implement|design|add|include|make|generate|set up|configure|deploy)\b/gi) || []).length;
+    if (imperatives >= 5 || (imperatives >= 3 && taskIndicators >= 2)) {
+      issues.push({ pattern: 'overDelegation', severity: 'high', detail: imperatives + ' action verbs and ' + taskIndicators + ' conjunction indicators' });
+      scopeScore -= 35;
+      structureScore -= 20;
+    } else if (imperatives >= 3 && wc > 60) {
+      issues.push({ pattern: 'overDelegation', severity: 'low', detail: 'Multiple tasks in one prompt' });
+      scopeScore -= 15;
+    }
+
+    /* 6. Instruction overload */
+    const bulletPoints = (text.match(/(?:^|\n)\s*[-*\u2022]\s/gm) || []).length;
+    const numberedItems = (text.match(/(?:^|\n)\s*\d+[.)]\s/gm) || []).length;
+    const constraints = (text.match(/\b(?:must|should|need to|has to|required|ensure|make sure|don't|do not|avoid|never)\b/gi) || []).length;
+    if (constraints >= 6 || (bulletPoints + numberedItems >= 8 && constraints >= 3)) {
+      issues.push({ pattern: 'instructionOverload', severity: 'medium', detail: constraints + ' constraints, ' + (bulletPoints + numberedItems) + ' list items' });
+      structureScore -= 25;
+      clarityScore -= 15;
+    }
+
+    /* 7. Yes/No questions */
+    const yesNoPatterns = [
+      /^(?:is|are|was|were|do|does|did|can|could|should|would|will|has|have|had)\s+/i,
+      /^(?:isn't|aren't|wasn't|weren't|don't|doesn't|didn't|can't|couldn't|shouldn't|wouldn't|won't)\s+/i
+    ];
+    const isYesNo = yesNoPatterns.some(p => p.test(text.trim())) && text.trim().endsWith('?') && wc < 20;
+    if (isYesNo) {
+      issues.push({ pattern: 'yesNo', severity: 'low', detail: 'Closed question \u2014 rephrase as open-ended for richer answers' });
+      clarityScore -= 15;
+    }
+
+    /* 8. Unclear goal */
+    const goalSignals = [
+      /\b(?:I want|goal is|trying to|need to|aim|objective|purpose)\b/i,
+      /\b(?:so that|in order to|because|for the purpose of)\b/i,
+      /\b(?:result|output|outcome|deliverable|end up with)\b/i
+    ];
+    let goalHits = 0;
+    for (const g of goalSignals) { if (g.test(text)) goalHits++; }
+    if (wc > 15 && goalHits === 0 && imperatives >= 2) {
+      issues.push({ pattern: 'noGoal', severity: 'low', detail: 'Multiple actions requested but no stated goal' });
+      clarityScore -= 10;
+    }
+
+    /* ── compute overall score ── */
+    const dimensions = {
+      clarity: Math.max(0, Math.min(100, clarityScore)),
+      specificity: Math.max(0, Math.min(100, specificityScore)),
+      context: Math.max(0, Math.min(100, contextScore)),
+      structure: Math.max(0, Math.min(100, structureScore)),
+      iteration: Math.max(0, Math.min(100, iterationScore)),
+      scope: Math.max(0, Math.min(100, scopeScore))
+    };
+    const overall = Math.round(Object.values(dimensions).reduce((a, b) => a + b, 0) / 6);
+    const grade = overall >= 85 ? 'excellent' : overall >= 70 ? 'good' : overall >= 50 ? 'fair' : 'needs-work';
+
+    return { text: text.substring(0, 200), wordCount: wc, issues, dimensions, overall, grade, timestamp: Date.now() };
+  }
+
+  /* ── coaching tips ── */
+  function _getTopTip(analysis) {
+    if (!analysis || !analysis.issues.length) return null;
+    const sorted = analysis.issues.slice().sort((a, b) => {
+      const sev = { high: 3, medium: 2, low: 1 };
+      return (sev[b.severity] || 0) - (sev[a.severity] || 0);
+    });
+    const top = sorted[0];
+    const patDef = PATTERNS[top.pattern];
+    if (!patDef) return null;
+    const count = _patternCounts[top.pattern] || 0;
+    const tipIdx = count % patDef.tips.length;
+    return { pattern: top.pattern, icon: patDef.icon, label: patDef.label, severity: top.severity, detail: top.detail, tip: patDef.tips[tipIdx] };
+  }
+
+  /* ── skill profile update ── */
+  function _updateSkillProfile(analysis) {
+    if (!analysis) return;
+    for (const dim of SKILL_DIMENSIONS) {
+      if (!_skillProfile[dim]) _skillProfile[dim] = { total: 0, count: 0 };
+      _skillProfile[dim].total += analysis.dimensions[dim] || 0;
+      _skillProfile[dim].count++;
+    }
+    for (const issue of analysis.issues) {
+      _patternCounts[issue.pattern] = (_patternCounts[issue.pattern] || 0) + 1;
+    }
+    _save();
+  }
+
+  /* ── toast notification ── */
+  function _showCoachingToast(tip) {
+    if (!_config.alertsEnabled || !tip) return;
+    if (typeof ToastManager !== 'undefined' && ToastManager.show) {
+      ToastManager.show(tip.icon + ' Prompt Coach: ' + tip.tip, 'info');
+    }
+  }
+
+  /* ── hook into chat flow ── */
+  function _onUserMessage() {
+    if (!_config.enabled) return;
+    const history = _getConversationMessages();
+    if (history.length === 0) return;
+    let lastUser = null;
+    for (let i = history.length - 1; i >= 0; i--) {
+      if (history[i].role === 'user') { lastUser = history[i]; break; }
+    }
+    if (!lastUser) return;
+
+    const analysis = analyzePrompt(lastUser.content, history);
+    if (!analysis) return;
+
+    _analyses.push(analysis);
+    if (_analyses.length > MAX_HISTORY) _analyses.shift();
+    _updateSkillProfile(analysis);
+
+    if (analysis.grade !== 'excellent') {
+      const tip = _getTopTip(analysis);
+      if (tip && tip.severity !== 'low') {
+        _showCoachingToast(tip);
+      }
+    }
+
+    if (_config.badgesEnabled) {
+      _addBadgeToLatestUserMsg(analysis);
+    }
+
+    if (_visible) _render();
+  }
+
+  /* ── inline badges ── */
+  function _addBadgeToLatestUserMsg(analysis) {
+    const chatOut = document.getElementById('chat-output');
+    if (!chatOut) return;
+    const userMsgs = chatOut.querySelectorAll('.message.user, .user-message, [data-role="user"]');
+    if (userMsgs.length === 0) return;
+    const lastMsg = userMsgs[userMsgs.length - 1];
+    if (lastMsg.querySelector('.spc-badge')) return;
+
+    const badge = document.createElement('span');
+    badge.className = 'spc-badge spc-grade-' + analysis.grade;
+    const gradeEmoji = { excellent: '\uD83C\uDF1F', good: '\u2705', fair: '\u26A1', 'needs-work': '\uD83D\uDCA1' };
+    badge.textContent = gradeEmoji[analysis.grade] || '\uD83D\uDCA1';
+    badge.title = 'Prompt score: ' + analysis.overall + '/100 (' + analysis.grade + ')';
+    badge.addEventListener('click', function(e) { e.stopPropagation(); show(); });
+    lastMsg.style.position = 'relative';
+    lastMsg.appendChild(badge);
+  }
+
+  /* ── panel rendering ── */
+  function _createPanel() {
+    if (_panel) return;
+    _panel = document.createElement('div');
+    _panel.id = 'spc-panel';
+    document.body.appendChild(_panel);
+  }
+
+  function _escHtml(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  function _render() {
+    if (!_panel) return;
+    const avgScore = _analyses.length > 0
+      ? Math.round(_analyses.reduce((s, a) => s + a.overall, 0) / _analyses.length) : 0;
+    const issueCount = _analyses.reduce((s, a) => s + a.issues.length, 0);
+
+    let html = '';
+    html += '<div class="spc-header"><span>\uD83C\uDF93 Prompt Coach</span>';
+    html += '<div class="spc-header-actions">';
+    html += '<button class="spc-btn-sm spc-export" title="Export report">\uD83D\uDCE5</button>';
+    html += '<button class="spc-btn-sm spc-close" title="Close">\u2715</button>';
+    html += '</div></div>';
+
+    html += '<div class="spc-overview">';
+    html += '<div class="spc-score-circle">';
+    const scoreColor = avgScore >= 85 ? '#27ae60' : avgScore >= 70 ? '#f39c12' : avgScore >= 50 ? '#e67e22' : '#e74c3c';
+    html += '<svg viewBox="0 0 100 100" class="spc-ring"><circle cx="50" cy="50" r="42" fill="none" stroke="#333" stroke-width="6" opacity="0.2"/>';
+    const circ = 2 * Math.PI * 42;
+    const offset = circ * (1 - avgScore / 100);
+    html += '<circle cx="50" cy="50" r="42" fill="none" stroke="' + scoreColor + '" stroke-width="6" stroke-dasharray="' + circ + '" stroke-dashoffset="' + offset + '" stroke-linecap="round" transform="rotate(-90 50 50)"/>';
+    html += '<text x="50" y="47" text-anchor="middle" fill="' + scoreColor + '" font-size="22" font-weight="bold">' + avgScore + '</text>';
+    html += '<text x="50" y="63" text-anchor="middle" fill="#999" font-size="9">avg score</text>';
+    html += '</svg></div>';
+    html += '<div class="spc-overview-stats">';
+    html += '<div class="spc-stat-item"><span class="spc-stat-num">' + _analyses.length + '</span><span class="spc-stat-lbl">Prompts</span></div>';
+    html += '<div class="spc-stat-item"><span class="spc-stat-num">' + issueCount + '</span><span class="spc-stat-lbl">Issues</span></div>';
+    const excellentCount = _analyses.filter(a => a.grade === 'excellent').length;
+    const excellentPct = _analyses.length > 0 ? Math.round(excellentCount / _analyses.length * 100) : 0;
+    html += '<div class="spc-stat-item"><span class="spc-stat-num">' + excellentPct + '%</span><span class="spc-stat-lbl">Excellent</span></div>';
+    html += '</div></div>';
+
+    html += '<div class="spc-section"><div class="spc-section-title">\uD83D\uDCCA Skill Profile</div>';
+    html += '<div class="spc-skills">';
+    for (const dim of SKILL_DIMENSIONS) {
+      const sp = _skillProfile[dim];
+      const avg = sp && sp.count > 0 ? Math.round(sp.total / sp.count) : 50;
+      const barColor = avg >= 80 ? '#27ae60' : avg >= 60 ? '#f39c12' : '#e74c3c';
+      html += '<div class="spc-skill-row">';
+      html += '<span class="spc-skill-name">' + dim.charAt(0).toUpperCase() + dim.slice(1) + '</span>';
+      html += '<div class="spc-skill-bar"><div class="spc-skill-fill" style="width:' + avg + '%;background:' + barColor + '"></div></div>';
+      html += '<span class="spc-skill-val">' + avg + '</span>';
+      html += '</div>';
+    }
+    html += '</div></div>';
+
+    const sortedPatterns = Object.entries(_patternCounts).sort((a, b) => b[1] - a[1]);
+    if (sortedPatterns.length > 0) {
+      html += '<div class="spc-section"><div class="spc-section-title">\u26A0\uFE0F Common Anti-Patterns</div>';
+      for (const [key, count] of sortedPatterns.slice(0, 5)) {
+        const p = PATTERNS[key];
+        if (!p) continue;
+        html += '<div class="spc-pattern-row">';
+        html += '<span class="spc-pattern-icon">' + p.icon + '</span>';
+        html += '<div class="spc-pattern-info"><div class="spc-pattern-name">' + p.label + '</div>';
+        html += '<div class="spc-pattern-desc">' + p.desc + '</div></div>';
+        html += '<span class="spc-pattern-count">' + count + '\u00D7</span>';
+        html += '</div>';
+      }
+      html += '</div>';
+    }
+
+    if (_analyses.length > 0) {
+      html += '<div class="spc-section"><div class="spc-section-title">\uD83D\uDCDD Recent Prompts</div>';
+      const recent = _analyses.slice(-8).reverse();
+      for (const a of recent) {
+        const gradeEmoji = { excellent: '\uD83C\uDF1F', good: '\u2705', fair: '\u26A1', 'needs-work': '\uD83D\uDCA1' };
+        html += '<div class="spc-recent-item">';
+        html += '<span class="spc-recent-grade">' + (gradeEmoji[a.grade] || '\uD83D\uDCA1') + '</span>';
+        html += '<div class="spc-recent-text">' + _escHtml(a.text) + '</div>';
+        html += '<span class="spc-recent-score" style="color:' + (a.overall >= 70 ? '#27ae60' : '#e74c3c') + '">' + a.overall + '</span>';
+        html += '</div>';
+        if (a.issues.length > 0) {
+          html += '<div class="spc-recent-issues">';
+          for (const iss of a.issues) {
+            const p = PATTERNS[iss.pattern];
+            html += '<span class="spc-issue-chip spc-sev-' + iss.severity + '">' + (p ? p.icon : '\u2022') + ' ' + iss.detail + '</span>';
+          }
+          html += '</div>';
+        }
+      }
+      html += '</div>';
+    }
+
+    html += '<div class="spc-section spc-settings">';
+    html += '<label class="spc-toggle"><input type="checkbox" id="spc-enabled"' + (_config.enabled ? ' checked' : '') + '> Enable coaching</label>';
+    html += '<label class="spc-toggle"><input type="checkbox" id="spc-alerts"' + (_config.alertsEnabled ? ' checked' : '') + '> Toast alerts</label>';
+    html += '<label class="spc-toggle"><input type="checkbox" id="spc-badges"' + (_config.badgesEnabled ? ' checked' : '') + '> Inline badges</label>';
+    html += '<button class="spc-reset-btn" id="spc-reset">Reset all data</button>';
+    html += '</div>';
+
+    _panel.innerHTML = html;
+
+    _panel.querySelector('.spc-close').addEventListener('click', hide);
+    _panel.querySelector('.spc-export').addEventListener('click', _exportReport);
+    var enabledEl = _panel.querySelector('#spc-enabled');
+    if (enabledEl) enabledEl.addEventListener('change', function() { _config.enabled = this.checked; _saveConfig(); });
+    var alertsEl = _panel.querySelector('#spc-alerts');
+    if (alertsEl) alertsEl.addEventListener('change', function() { _config.alertsEnabled = this.checked; _saveConfig(); });
+    var badgesEl = _panel.querySelector('#spc-badges');
+    if (badgesEl) badgesEl.addEventListener('change', function() { _config.badgesEnabled = this.checked; _saveConfig(); });
+    var resetEl = _panel.querySelector('#spc-reset');
+    if (resetEl) resetEl.addEventListener('click', function() {
+      if (confirm('Reset all coaching data?')) {
+        _analyses = [];
+        _skillProfile = {};
+        _patternCounts = {};
+        _sessionHistory = [];
+        _save();
+        _render();
+      }
+    });
+  }
+
+  function _exportReport() {
+    let report = '# Prompt Coach Report\n';
+    report += '**Date:** ' + new Date().toISOString().slice(0, 10) + '\n';
+    report += '**Prompts Analyzed:** ' + _analyses.length + '\n\n';
+    report += '## Skill Profile\n';
+    for (const dim of SKILL_DIMENSIONS) {
+      const sp = _skillProfile[dim];
+      const avg = sp && sp.count > 0 ? Math.round(sp.total / sp.count) : 50;
+      report += '- **' + dim.charAt(0).toUpperCase() + dim.slice(1) + ':** ' + avg + '/100\n';
+    }
+    report += '\n## Common Issues\n';
+    for (const [key, count] of Object.entries(_patternCounts).sort((a, b) => b[1] - a[1])) {
+      const p = PATTERNS[key];
+      if (p) report += '- ' + p.icon + ' **' + p.label + '** \u2014 ' + count + ' occurrences\n';
+    }
+    report += '\n## Tips for Improvement\n';
+    for (const [key] of Object.entries(_patternCounts).sort((a, b) => b[1] - a[1]).slice(0, 3)) {
+      const p = PATTERNS[key];
+      if (p) {
+        report += '\n### ' + p.icon + ' ' + p.label + '\n';
+        for (const tip of p.tips) report += '- ' + tip + '\n';
+      }
+    }
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(report).then(function() {
+        if (typeof ToastManager !== 'undefined') ToastManager.show('\uD83D\uDCCB Coaching report copied to clipboard', 'success');
+      });
+    }
+  }
+
+  /* ── show / hide / toggle ── */
+  function show() {
+    _createPanel();
+    _render();
+    _panel.classList.add('spc-open');
+    _visible = true;
+    if (typeof PanelRegistry !== 'undefined' && PanelRegistry.closeAllExcept) {
+      PanelRegistry.closeAllExcept('prompt-coach');
+    }
+  }
+
+  function hide() {
+    if (_panel) _panel.classList.remove('spc-open');
+    _visible = false;
+  }
+
+  function toggle() { _visible ? hide() : show(); }
+
+  /* ── styles ── */
+  function _injectStyles() {
+    if (_styleInjected) return;
+    _styleInjected = true;
+    var css = document.createElement('style');
+    css.textContent = [
+      '#spc-panel{position:fixed;top:0;right:-440px;width:420px;height:100vh;background:var(--bg-primary,#1a1a2e);color:var(--text-primary,#cdd6f4);z-index:10200;transition:right .3s ease;overflow-y:auto;border-left:2px solid var(--accent,#4a9eff);box-shadow:-4px 0 20px rgba(0,0,0,.4);font-family:system-ui,sans-serif;display:flex;flex-direction:column}',
+      '#spc-panel.spc-open{right:0}',
+      '.spc-header{display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid rgba(255,255,255,.1);font-size:16px;font-weight:600}',
+      '.spc-header-actions{display:flex;gap:6px}',
+      '.spc-btn-sm{background:none;border:1px solid rgba(255,255,255,.15);border-radius:4px;color:inherit;cursor:pointer;padding:3px 8px;font-size:14px}',
+      '.spc-btn-sm:hover{background:rgba(255,255,255,.1)}',
+      '.spc-overview{display:flex;align-items:center;gap:16px;padding:16px 18px;border-bottom:1px solid rgba(255,255,255,.06)}',
+      '.spc-score-circle{flex-shrink:0}',
+      '.spc-ring{width:90px;height:90px}',
+      '.spc-overview-stats{display:flex;flex-direction:column;gap:6px}',
+      '.spc-stat-item{display:flex;align-items:baseline;gap:6px}',
+      '.spc-stat-num{font-size:20px;font-weight:700}',
+      '.spc-stat-lbl{font-size:12px;color:#888}',
+      '.spc-section{padding:14px 18px;border-bottom:1px solid rgba(255,255,255,.06)}',
+      '.spc-section-title{font-size:13px;font-weight:600;margin-bottom:10px;color:#a6adc8;text-transform:uppercase;letter-spacing:.5px}',
+      '.spc-skills{display:flex;flex-direction:column;gap:6px}',
+      '.spc-skill-row{display:flex;align-items:center;gap:8px}',
+      '.spc-skill-name{width:80px;font-size:12px;color:#a6adc8}',
+      '.spc-skill-bar{flex:1;height:8px;background:rgba(255,255,255,.08);border-radius:4px;overflow:hidden}',
+      '.spc-skill-fill{height:100%;border-radius:4px;transition:width .4s ease}',
+      '.spc-skill-val{width:30px;text-align:right;font-size:12px;font-weight:600}',
+      '.spc-pattern-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04)}',
+      '.spc-pattern-icon{font-size:18px;flex-shrink:0}',
+      '.spc-pattern-info{flex:1}',
+      '.spc-pattern-name{font-size:13px;font-weight:600}',
+      '.spc-pattern-desc{font-size:11px;color:#888}',
+      '.spc-pattern-count{font-size:14px;font-weight:700;color:#f39c12}',
+      '.spc-recent-item{display:flex;align-items:center;gap:8px;padding:6px 0}',
+      '.spc-recent-grade{font-size:16px;flex-shrink:0}',
+      '.spc-recent-text{flex:1;font-size:12px;color:#a6adc8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:250px}',
+      '.spc-recent-score{font-size:13px;font-weight:700;flex-shrink:0}',
+      '.spc-recent-issues{padding:2px 0 8px 28px;display:flex;flex-wrap:wrap;gap:4px}',
+      '.spc-issue-chip{font-size:11px;padding:2px 8px;border-radius:10px;background:rgba(255,255,255,.06)}',
+      '.spc-sev-high{border-left:2px solid #e74c3c}',
+      '.spc-sev-medium{border-left:2px solid #f39c12}',
+      '.spc-sev-low{border-left:2px solid #3498db}',
+      '.spc-settings{display:flex;flex-direction:column;gap:8px}',
+      '.spc-toggle{font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer;color:#a6adc8}',
+      '.spc-reset-btn{background:#e74c3c;color:#fff;border:none;border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;margin-top:8px;align-self:flex-start}',
+      '.spc-reset-btn:hover{background:#c0392b}',
+      '.spc-badge{position:absolute;top:4px;right:4px;cursor:pointer;font-size:13px;z-index:5;opacity:.8;transition:opacity .2s}',
+      '.spc-badge:hover{opacity:1}',
+      'body:not(.dark-mode) #spc-panel{background:#f8f9fa;color:#333;border-left-color:#2196F3}',
+      'body:not(.dark-mode) .spc-section{border-bottom-color:#e0e0e0}',
+      'body:not(.dark-mode) .spc-header{border-bottom-color:#e0e0e0}'
+    ].join('\n');
+    document.head.appendChild(css);
+  }
+
+  /* ── init ── */
+  function init() {
+    _loadConfig();
+    _load();
+    _injectStyles();
+
+    document.addEventListener('keydown', function(e) {
+      if (e.altKey && e.shiftKey && !e.ctrlKey && e.key === 'O') {
+        e.preventDefault();
+        toggle();
+      }
+    });
+
+    if (typeof KeyboardShortcuts !== 'undefined' && KeyboardShortcuts.register) {
+      KeyboardShortcuts.register('Alt+Shift+O', 'Prompt Coach', toggle);
+    }
+    if (typeof CommandPalette !== 'undefined' && CommandPalette.register) {
+      CommandPalette.register({ name: 'promptcoach', description: 'Autonomous prompting pattern analyzer and coach', icon: '\uD83C\uDF93', action: toggle });
+    }
+    if (typeof SlashCommands !== 'undefined' && SlashCommands.register) {
+      SlashCommands.register('/promptcoach', 'Open prompt coaching dashboard', toggle);
+    }
+    if (typeof PanelRegistry !== 'undefined' && PanelRegistry.register) {
+      PanelRegistry.register('prompt-coach', { close: hide });
+    }
+
+    var chatOut = document.getElementById('chat-output');
+    if (chatOut) {
+      var _obs = new MutationObserver(function() {
+        if (!_config.enabled) return;
+        clearTimeout(_debounceTimer);
+        _debounceTimer = setTimeout(_onUserMessage, EVAL_DEBOUNCE_MS);
+      });
+      _obs.observe(chatOut, { childList: true, subtree: true });
+    }
+
+    var toolbar = document.querySelector('.toolbar');
+    if (toolbar) {
+      var btn = document.createElement('button');
+      btn.id = 'prompt-coach-btn';
+      btn.className = 'btn-secondary';
+      btn.title = 'Prompt Coach \u2014 improve your AI interaction skills (Alt+Shift+O)';
+      btn.textContent = '\uD83C\uDF93';
+      btn.addEventListener('click', toggle);
+      toolbar.appendChild(btn);
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  return {
+    toggle: toggle,
+    show: show,
+    hide: hide,
+    analyze: analyzePrompt,
+    getSkillProfile: function() { return Object.assign({}, _skillProfile); },
+    getPatternCounts: function() { return Object.assign({}, _patternCounts); },
+    getAnalyses: function() { return _analyses.slice(); },
+    isEnabled: function() { return _config.enabled; },
+    setEnabled: function(v) { _config.enabled = !!v; _saveConfig(); }
+  };
+})();
