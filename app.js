@@ -711,6 +711,92 @@ function _escapeHtml(str) {
   return String(str).replace(_HTML_ESCAPE_RE, ch => _HTML_ESCAPE_MAP[ch]);
 }
 
+/* ---------- Shared Text Analysis Utilities ---------- */
+/**
+ * Common NLP helpers used by SmartContextSidebar, ConversationMemory,
+ * SmartContradictionDetector, SmartConversationCompass, and
+ * SmartSessionInsights.  Previously each module carried its own
+ * copy of tokenize / stop-words / jaccard / cosineSim / tf.
+ */
+const TextAnalysisUtils = (() => {
+  'use strict';
+
+  const STOP_WORDS = new Set(
+    'the a an is are was were be been being have has had do does did will would ' +
+    'shall should may might can could i you he she it we they me him her us them ' +
+    'my your his its our their this that these those am not no or and but if then ' +
+    'else when where what which who whom how all each every both few more most ' +
+    'other some such too very just also about above after again against at before ' +
+    'below between by down during for from in into of off on out over through to ' +
+    'under until up with new only own same much like get got one use used using ' +
+    'make want know think any nor yet so as than'.split(/\s+/)
+  );
+
+  /**
+   * Tokenize text into lowercase alpha-numeric words.
+   * @param {string} text
+   * @param {object} [opts]
+   * @param {number} [opts.minLength=2]  Minimum word length to keep.
+   * @param {boolean} [opts.stopWords=false]  If true, filter out common English stop words.
+   * @returns {string[]}
+   */
+  function tokenize(text, opts) {
+    const min = (opts && opts.minLength != null) ? opts.minLength : 2;
+    const useStop = opts && opts.stopWords;
+    return (text || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter(function (w) { return w.length > min && (!useStop || !STOP_WORDS.has(w)); });
+  }
+
+  /**
+   * Jaccard similarity between two strings or Sets.
+   * @param {string|Set} a
+   * @param {string|Set} b
+   * @returns {number} 0–1
+   */
+  function jaccard(a, b) {
+    const sa = a instanceof Set ? a : new Set((a || '').toLowerCase().split(/\s+/));
+    const sb = b instanceof Set ? b : new Set((b || '').toLowerCase().split(/\s+/));
+    if (sa.size === 0 && sb.size === 0) return 1;
+    let inter = 0;
+    sa.forEach(function (w) { if (sb.has(w)) inter++; });
+    const union = sa.size + sb.size - inter;
+    return union === 0 ? 1 : inter / union;
+  }
+
+  /**
+   * Term-frequency map from a token array.
+   * @param {string[]} tokens
+   * @returns {Object<string, number>}
+   */
+  function tf(tokens) {
+    const m = {};
+    for (let i = 0; i < tokens.length; i++) m[tokens[i]] = (m[tokens[i]] || 0) + 1;
+    const len = tokens.length || 1;
+    const keys = Object.keys(m);
+    for (let k = 0; k < keys.length; k++) m[keys[k]] /= len;
+    return m;
+  }
+
+  /**
+   * Cosine similarity between two term-frequency maps.
+   * @param {Object<string, number>} a
+   * @param {Object<string, number>} b
+   * @returns {number} 0–1
+   */
+  function cosineSim(a, b) {
+    let dot = 0, na = 0, nb = 0;
+    const all = new Set([...Object.keys(a), ...Object.keys(b)]);
+    for (const k of all) {
+      const va = a[k] || 0, vb = b[k] || 0;
+      dot += va * vb; na += va * va; nb += vb * vb;
+    }
+    return (na && nb) ? dot / Math.sqrt(na * nb) : 0;
+  }
+
+  return { STOP_WORDS, tokenize, jaccard, tf, cosineSim };
+})();
+
 /* ---------- Shared Overlay Factory ---------- */
 /**
  * Create a modal overlay + panel pair with click-outside-to-close.
@@ -34907,7 +34993,7 @@ const SmartContextSidebar = (() => {
   }
 
   function _tokenize(text) {
-    return text.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(w => w.length > 3);
+    return TextAnalysisUtils.tokenize(text, { minLength: 3 });
   }
 
   // Cache tokenized forms per message text to avoid re-tokenizing the entire
@@ -35711,7 +35797,7 @@ var ConversationMemory = (function () {
   /* ---- Helpers ---- */
 
   function _tokenize(text) {
-    return (text || '').toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(function (w) { return w.length > 2; });
+    return TextAnalysisUtils.tokenize(text);
   }
 
   function _wordOverlap(a, b) {
@@ -36254,12 +36340,7 @@ const ConversationCoach = (() => {
   }
 
   function _jaccard(a, b) {
-    var sa = new Set(a.toLowerCase().split(/\s+/));
-    var sb = new Set(b.toLowerCase().split(/\s+/));
-    var inter = 0;
-    sa.forEach(function (w) { if (sb.has(w)) inter++; });
-    var union = sa.size + sb.size - inter;
-    return union === 0 ? 0 : inter / union;
+    return TextAnalysisUtils.jaccard(a, b);
   }
 
   function _isTypeDismissed(type) {
@@ -37318,7 +37399,7 @@ var SmartContradictionDetector = (function () {
   }
 
   function _tokenize(text) {
-    return (text || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(function(w) { return w.length > 1; });
+    return TextAnalysisUtils.tokenize(text, { minLength: 1 });
   }
   /**
    * Jaccard similarity between two token arrays using Sets.
@@ -38517,11 +38598,7 @@ const ConversationBrancher = (() => {
 
   /** Jaccard similarity between two keyword sets. */
   function _jaccard(setA, setB) {
-    if (setA.size === 0 && setB.size === 0) return 1;
-    let intersection = 0;
-    setA.forEach(function(w) { if (setB.has(w)) intersection++; });
-    const union = setA.size + setB.size - intersection;
-    return union === 0 ? 1 : intersection / union;
+    return TextAnalysisUtils.jaccard(setA, setB);
   }
 
   /** Check topic drift in current conversation. Returns { drifted, similarity, splitIndex }. */
@@ -41275,29 +41352,19 @@ const SmartConversationCompass = (() => {
   /* ── helpers ── */
   const _esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
-  /* ── topic extraction (reuse TF-IDF idea) ── */
-  const STOP = new Set('the a an is are was were be been being have has had do does did will would shall should may might can could i you he she it we they me him her us them my your his its our their this that these those am not no or and but if then else when where what which who whom how all each every both few more most other some such too very just also about above after again against at before below between by down during for from in into of off on out over through to under until up with'.split(' '));
+  /* ── topic extraction — delegates to shared TextAnalysisUtils ── */
+  const STOP = TextAnalysisUtils.STOP_WORDS;
 
   function _tokenize(text) {
-    return (text || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 2 && !STOP.has(w));
+    return TextAnalysisUtils.tokenize(text, { stopWords: true });
   }
 
   function _tf(tokens) {
-    const m = {};
-    for (const t of tokens) m[t] = (m[t] || 0) + 1;
-    const len = tokens.length || 1;
-    for (const k of Object.keys(m)) m[k] /= len;
-    return m;
+    return TextAnalysisUtils.tf(tokens);
   }
 
   function _cosineSim(a, b) {
-    let dot = 0, na = 0, nb = 0;
-    const all = new Set([...Object.keys(a), ...Object.keys(b)]);
-    for (const k of all) {
-      const va = a[k] || 0, vb = b[k] || 0;
-      dot += va * vb; na += va * va; nb += vb * vb;
-    }
-    return (na && nb) ? dot / (Math.sqrt(na) * Math.sqrt(nb)) : 0;
+    return TextAnalysisUtils.cosineSim(a, b);
   }
 
   function _topTerms(tf, n) {
@@ -41628,8 +41695,8 @@ const SmartSessionInsights = (() => {
   let _autoTimer = null;
   let _activeTab = 'overview';
 
-  /* ── helpers ── */
-  const STOP = new Set(['the','a','an','is','are','was','were','be','been','being','have','has','had','do','does','did','will','would','shall','should','may','might','can','could','i','you','he','she','it','we','they','me','him','her','us','them','my','your','his','its','our','their','this','that','these','those','and','but','or','nor','for','yet','so','in','on','at','to','of','by','with','from','as','if','then','than','no','not','very','just','also','about','up','out','what','which','who','when','where','how','all','each','any','some','into','over','after','before','between','under','above','more','most','other','new','such','only','own','same','too','much','like','get','got','one','use','used','using','make','want','know','think','would','could','should']);
+  /* ── helpers — delegates to shared TextAnalysisUtils ── */
+  const STOP = TextAnalysisUtils.STOP_WORDS;
 
   function _allSessions() {
     const sessions = [];
@@ -41650,7 +41717,7 @@ const SmartSessionInsights = (() => {
   }
 
   function _tokenize(text) {
-    return (text || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 2 && !STOP.has(w));
+    return TextAnalysisUtils.tokenize(text, { stopWords: true });
   }
 
   function _dayKey(ts) {
