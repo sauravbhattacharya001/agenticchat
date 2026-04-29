@@ -44742,3 +44742,929 @@ const SmartPromptCoach = (() => {
     setEnabled: function(v) { _config.enabled = !!v; _saveConfig(); }
   };
 })();
+/* ============================================================
+ * SmartConversationOracle — Autonomous Predictive Conversation Engine
+ *
+ * Analyzes conversation trajectory, forecasts likely next questions,
+ * detects dead-end topics, identifies unexplored tangents, and
+ * suggests productive conversation pivots.
+ *
+ * Engines:
+ *   1. Trajectory Analyzer  — topic progression, direction, velocity
+ *   2. Dead-End Detector    — repetition, diminishing returns, circling
+ *   3. Question Predictor   — forecast next questions with confidence
+ *   4. Tangent Spotter      — mentioned-but-unexplored angles
+ *   5. Pivot Recommender    — escape dead ends with productive pivots
+ *
+ * Keyboard shortcut: Alt+Shift+K
+ * Slash command: /oracle
+ * ============================================================ */
+const SmartConversationOracle = (() => {
+  'use strict';
+
+  /* ── constants ── */
+  const STORAGE_KEY = 'sco_state';
+  const CONFIG_KEY  = 'sco_config';
+  const DEBOUNCE_MS = 2000;
+  const MAX_TOPICS  = 50;
+  const MAX_DEAD_ENDS = 30;
+  const MAX_PREDICTIONS = 5;
+  const MAX_TANGENTS = 20;
+
+  const STOPWORDS = new Set([
+    'the','a','an','is','are','was','were','be','been','being','have','has','had',
+    'do','does','did','will','would','shall','should','can','could','may','might',
+    'must','i','you','he','she','it','we','they','me','him','her','us','them',
+    'my','your','his','its','our','their','this','that','these','those','what',
+    'which','who','whom','when','where','why','how','all','each','every','both',
+    'few','more','most','other','some','such','no','not','only','same','so',
+    'than','too','very','just','but','and','or','if','then','else','for','from',
+    'in','on','at','to','of','with','by','about','into','through','during',
+    'before','after','above','below','between','out','off','over','under','up',
+    'down','again','further','once','here','there','any','also','like','get',
+    'got','make','made','know','think','want','need','use','used','using','try',
+    'one','two','way','much','many','well','back','even','still','new','now',
+    'let','sure','thing','things','really','right','going','something','work',
+    'works','code','please','thanks','thank','yes','yeah','ok','okay','could',
+    'would','help','question','im','dont','doesnt','ive','cant','thats','its'
+  ]);
+
+  const FRUSTRATION_PATTERNS = [
+    /\bagain\b/i, /\balready\b/i, /\bstill\b/i, /\bnot what i/i,
+    /\bbut i said\b/i, /\bi already (said|told|mentioned|explained)/i,
+    /\bthat'?s not (what|right)/i, /\byou'?re (not|missing|ignoring)/i,
+    /\bi (said|asked|meant)/i, /\bno,?\s+(i|that|what)/i,
+    /\bwhy (can'?t|won'?t|doesn'?t|isn'?t)/i, /\bthis (doesn'?t|isn'?t) (work|right|correct)/i
+  ];
+
+  const QUESTION_TEMPLATES = [
+    'How do I {verb} {topic}?',
+    'What about {topic}?',
+    'Can you explain {topic} in more detail?',
+    'What are the alternatives to {topic}?',
+    'How does {topic} compare to {related}?',
+    'What are common issues with {topic}?',
+    'Is there a better way to handle {topic}?',
+    'What happens if {topic} fails?',
+    'Can you show an example of {topic}?',
+    'What are best practices for {topic}?'
+  ];
+
+  const DIRECTION_LABELS = {
+    deepening:  { icon: '⬇️', label: 'Deepening', desc: 'Going deeper into the current topic' },
+    broadening: { icon: '↔️', label: 'Broadening', desc: 'Exploring new related topics' },
+    circling:   { icon: '🔄', label: 'Circling',   desc: 'Returning to previously covered ground' },
+    drifting:   { icon: '🌊', label: 'Drifting',   desc: 'Topics shifting without clear connection' },
+    focused:    { icon: '🎯', label: 'Focused',    desc: 'Staying on a single topic' }
+  };
+
+  /* ── state ── */
+  var _state = _defaultState();
+  var _config = { enabled: true, autoAnalyze: true, showToasts: true };
+  var _panel = null;
+  var _visible = false;
+  var _debounceTimer = null;
+  var _activeTab = 'trajectory';
+  var _lastMessageCount = 0;
+
+  function _defaultState() {
+    return {
+      topics: [],
+      trajectory: { direction: 'focused', velocity: 0, pattern: [] },
+      deadEnds: [],
+      predictions: [],
+      tangents: [],
+      sessionHistory: [],
+      messageCache: []
+    };
+  }
+
+  /* ── persistence ── */
+  function _save() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(_state)); } catch(e) {}
+  }
+  function _load() {
+    try {
+      var d = JSON.parse(localStorage.getItem(STORAGE_KEY));
+      if (d && typeof d === 'object') {
+        _state = Object.assign(_defaultState(), d);
+      }
+    } catch(e) {}
+  }
+  function _saveConfig() {
+    try { localStorage.setItem(CONFIG_KEY, JSON.stringify(_config)); } catch(e) {}
+  }
+  function _loadConfig() {
+    try {
+      var d = JSON.parse(localStorage.getItem(CONFIG_KEY));
+      if (d && typeof d === 'object') _config = Object.assign(_config, d);
+    } catch(e) {}
+  }
+
+  /* ── NLP helpers ── */
+  function _tokenize(text) {
+    return (text || '').toLowerCase()
+      .replace(/[^a-z0-9\s'-]/g, ' ')
+      .split(/\s+/)
+      .filter(function(w) { return w.length > 2 && !STOPWORDS.has(w); });
+  }
+
+  function _extractBigrams(tokens) {
+    var bigrams = [];
+    for (var i = 0; i < tokens.length - 1; i++) {
+      bigrams.push(tokens[i] + ' ' + tokens[i + 1]);
+    }
+    return bigrams;
+  }
+
+  function _termFrequency(tokens) {
+    var freq = {};
+    tokens.forEach(function(t) { freq[t] = (freq[t] || 0) + 1; });
+    return freq;
+  }
+
+  function _cosineSimilarity(a, b) {
+    var freqA = typeof a === 'string' ? _termFrequency(_tokenize(a)) : a;
+    var freqB = typeof b === 'string' ? _termFrequency(_tokenize(b)) : b;
+    var keys = new Set(Object.keys(freqA).concat(Object.keys(freqB)));
+    var dot = 0, magA = 0, magB = 0;
+    keys.forEach(function(k) {
+      var va = freqA[k] || 0, vb = freqB[k] || 0;
+      dot += va * vb;
+      magA += va * va;
+      magB += vb * vb;
+    });
+    var denom = Math.sqrt(magA) * Math.sqrt(magB);
+    return denom === 0 ? 0 : dot / denom;
+  }
+
+  function _detectFrustration(text) {
+    var score = 0;
+    FRUSTRATION_PATTERNS.forEach(function(p) { if (p.test(text)) score++; });
+    return score;
+  }
+
+  /* ── Engine 1: Trajectory Analyzer ── */
+  function _extractTopics(messages) {
+    var allTokens = [];
+    var allBigrams = [];
+    messages.forEach(function(m) {
+      var tk = _tokenize(m.text);
+      allTokens = allTokens.concat(tk);
+      allBigrams = allBigrams.concat(_extractBigrams(tk));
+    });
+
+    var uniFreq = _termFrequency(allTokens);
+    var biFreq  = _termFrequency(allBigrams);
+
+    // Score bigrams higher, merge with unigrams
+    var candidates = {};
+    Object.keys(biFreq).forEach(function(b) {
+      if (biFreq[b] >= 2) candidates[b] = biFreq[b] * 2;
+    });
+    Object.keys(uniFreq).forEach(function(u) {
+      if (uniFreq[u] >= 3 && !_isSubsumedByBigram(u, candidates)) {
+        candidates[u] = uniFreq[u];
+      }
+    });
+
+    var sorted = Object.keys(candidates).sort(function(a, b) {
+      return candidates[b] - candidates[a];
+    });
+
+    return sorted.slice(0, MAX_TOPICS).map(function(label) {
+      var keywords = label.split(' ');
+      var firstMsg = null, lastMsg = null, count = 0;
+      messages.forEach(function(m, idx) {
+        var lower = m.text.toLowerCase();
+        if (keywords.some(function(k) { return lower.indexOf(k) !== -1; })) {
+          if (firstMsg === null) firstMsg = idx;
+          lastMsg = idx;
+          count++;
+        }
+      });
+      return {
+        label: label,
+        keywords: keywords,
+        firstSeen: firstMsg || 0,
+        lastSeen: lastMsg || 0,
+        messageCount: count,
+        depth: Math.min(10, count)
+      };
+    });
+  }
+
+  function _isSubsumedByBigram(uni, bigramMap) {
+    return Object.keys(bigramMap).some(function(b) {
+      return b.indexOf(uni) !== -1;
+    });
+  }
+
+  function _analyzeDirection(topics, messages) {
+    if (messages.length < 3) return { direction: 'focused', velocity: 0, pattern: [] };
+
+    var windowSize = Math.min(6, Math.floor(messages.length / 2)) || 3;
+    var recent = messages.slice(-windowSize);
+    var earlier = messages.slice(-windowSize * 2, -windowSize);
+    if (earlier.length === 0) earlier = messages.slice(0, windowSize);
+
+    var recentTokens = [];
+    recent.forEach(function(m) { recentTokens = recentTokens.concat(_tokenize(m.text)); });
+    var earlierTokens = [];
+    earlier.forEach(function(m) { earlierTokens = earlierTokens.concat(_tokenize(m.text)); });
+
+    var recentFreq = _termFrequency(recentTokens);
+    var earlierFreq = _termFrequency(earlierTokens);
+
+    var similarity = _cosineSimilarity(recentFreq, earlierFreq);
+    var recentUnique = Object.keys(recentFreq).filter(function(k) { return !earlierFreq[k]; }).length;
+    var totalRecent = Object.keys(recentFreq).length;
+    var noveltyRatio = totalRecent > 0 ? recentUnique / totalRecent : 0;
+
+    // Check for specific topic deepening
+    var recentTopicDepth = 0;
+    topics.forEach(function(t) {
+      if (t.lastSeen >= messages.length - windowSize) {
+        recentTopicDepth += t.depth;
+      }
+    });
+
+    var direction;
+    if (similarity > 0.7 && noveltyRatio < 0.3) {
+      direction = recentTopicDepth > 5 ? 'deepening' : 'circling';
+    } else if (similarity > 0.4 && noveltyRatio > 0.4) {
+      direction = 'broadening';
+    } else if (similarity < 0.3) {
+      direction = 'drifting';
+    } else {
+      direction = 'focused';
+    }
+
+    // Velocity: how fast topics shift (0-10)
+    var velocity = Math.round(noveltyRatio * 10);
+
+    var pattern = (_state.trajectory.pattern || []).slice(-20);
+    pattern.push(direction);
+
+    return { direction: direction, velocity: velocity, pattern: pattern };
+  }
+
+  /* ── Engine 2: Dead-End Detector ── */
+  function _detectDeadEnds(messages, topics) {
+    var deadEnds = [];
+    var userMessages = messages.filter(function(m) { return m.role === 'user'; });
+    var assistantMessages = messages.filter(function(m) { return m.role === 'assistant'; });
+
+    // Check for rephrased questions (high cosine similarity between user messages)
+    for (var i = 1; i < userMessages.length; i++) {
+      for (var j = Math.max(0, i - 3); j < i; j++) {
+        var sim = _cosineSimilarity(userMessages[i].text, userMessages[j].text);
+        if (sim > 0.7) {
+          var topicLabel = _findTopicForMessage(userMessages[i].text, topics);
+          deadEnds.push({
+            topicLabel: topicLabel || 'Repeated question',
+            severity: sim > 0.85 ? 'high' : 'medium',
+            reason: 'Question appears to be a rephrasing of an earlier question (similarity: ' + Math.round(sim * 100) + '%)',
+            suggestedPivot: 'Try asking from a different angle or provide more specific context',
+            detectedAt: Date.now()
+          });
+          break;
+        }
+      }
+    }
+
+    // Check for diminishing response lengths
+    if (assistantMessages.length >= 3) {
+      var recentLengths = assistantMessages.slice(-4).map(function(m) { return m.text.length; });
+      var decreasing = true;
+      for (var k = 1; k < recentLengths.length; k++) {
+        if (recentLengths[k] >= recentLengths[k - 1] * 0.8) { decreasing = false; break; }
+      }
+      if (decreasing && recentLengths[recentLengths.length - 1] < recentLengths[0] * 0.4) {
+        deadEnds.push({
+          topicLabel: 'Diminishing responses',
+          severity: 'medium',
+          reason: 'AI responses are getting progressively shorter, suggesting the topic may be exhausted',
+          suggestedPivot: 'Consider asking a more specific question or switching to a related topic',
+          detectedAt: Date.now()
+        });
+      }
+    }
+
+    // Check for frustration signals
+    var recentFrustration = 0;
+    userMessages.slice(-3).forEach(function(m) {
+      recentFrustration += _detectFrustration(m.text);
+    });
+    if (recentFrustration >= 3) {
+      deadEnds.push({
+        topicLabel: 'Communication breakdown',
+        severity: 'high',
+        reason: 'Multiple frustration signals detected — the conversation may be stuck',
+        suggestedPivot: 'Try restating your goal clearly, or break the problem into smaller steps',
+        detectedAt: Date.now()
+      });
+    }
+
+    // Check for circular topic patterns
+    var pattern = _state.trajectory.pattern || [];
+    var circleCount = 0;
+    for (var p = Math.max(0, pattern.length - 5); p < pattern.length; p++) {
+      if (pattern[p] === 'circling') circleCount++;
+    }
+    if (circleCount >= 3) {
+      deadEnds.push({
+        topicLabel: 'Circular conversation',
+        severity: 'high',
+        reason: 'Conversation keeps returning to the same ground without making progress',
+        suggestedPivot: 'Try a completely different approach or ask for a step-by-step breakdown',
+        detectedAt: Date.now()
+      });
+    }
+
+    return deadEnds.slice(0, MAX_DEAD_ENDS);
+  }
+
+  function _findTopicForMessage(text, topics) {
+    var lower = text.toLowerCase();
+    var best = null, bestScore = 0;
+    topics.forEach(function(t) {
+      var matches = t.keywords.filter(function(k) { return lower.indexOf(k) !== -1; }).length;
+      if (matches > bestScore) { bestScore = matches; best = t.label; }
+    });
+    return best;
+  }
+
+  /* ── Engine 3: Question Predictor ── */
+  function _predictQuestions(messages, topics) {
+    if (messages.length < 2 || topics.length === 0) return [];
+
+    var recentTopics = topics.filter(function(t) {
+      return t.lastSeen >= messages.length - 4;
+    }).slice(0, 3);
+
+    if (recentTopics.length === 0) recentTopics = topics.slice(0, 2);
+
+    var predictions = [];
+    var usedTemplates = new Set();
+
+    recentTopics.forEach(function(topic) {
+      var templatePool = QUESTION_TEMPLATES.filter(function(_, idx) { return !usedTemplates.has(idx); });
+
+      // Pick 2 templates per topic
+      for (var i = 0; i < Math.min(2, templatePool.length); i++) {
+        var tIdx = Math.floor(Math.abs(_simpleHash(topic.label + i)) % templatePool.length);
+        var template = templatePool[tIdx];
+        var originalIdx = QUESTION_TEMPLATES.indexOf(template);
+        if (usedTemplates.has(originalIdx)) continue;
+        usedTemplates.add(originalIdx);
+
+        var question = template
+          .replace('{topic}', topic.label)
+          .replace('{verb}', _pickVerb(topic.label))
+          .replace('{related}', _findRelatedTopic(topic, topics));
+
+        var confidence = Math.max(20, Math.min(95,
+          40 + topic.messageCount * 5 + (topic.lastSeen >= messages.length - 2 ? 20 : 0)
+        ));
+
+        predictions.push({
+          question: question,
+          confidence: confidence,
+          reasoning: 'Based on recent discussion of "' + topic.label + '"'
+        });
+      }
+    });
+
+    // Sort by confidence
+    predictions.sort(function(a, b) { return b.confidence - a.confidence; });
+    return predictions.slice(0, MAX_PREDICTIONS);
+  }
+
+  function _simpleHash(str) {
+    var hash = 0;
+    for (var i = 0; i < str.length; i++) {
+      hash = ((hash << 5) - hash) + str.charCodeAt(i);
+      hash |= 0;
+    }
+    return hash;
+  }
+
+  function _pickVerb(topic) {
+    var verbs = ['implement', 'configure', 'optimize', 'debug', 'test', 'use', 'set up', 'handle'];
+    return verbs[Math.abs(_simpleHash(topic)) % verbs.length];
+  }
+
+  function _findRelatedTopic(current, topics) {
+    for (var i = 0; i < topics.length; i++) {
+      if (topics[i].label !== current.label) return topics[i].label;
+    }
+    return 'alternatives';
+  }
+
+  /* ── Engine 4: Tangent Spotter ── */
+  function _spotTangents(messages, topics) {
+    // Find terms mentioned once or twice but never explored
+    var allTokens = [];
+    messages.forEach(function(m) { allTokens = allTokens.concat(_tokenize(m.text)); });
+    var freq = _termFrequency(allTokens);
+
+    var topicKeywords = new Set();
+    topics.forEach(function(t) { t.keywords.forEach(function(k) { topicKeywords.add(k); }); });
+
+    var tangents = [];
+    Object.keys(freq).forEach(function(term) {
+      if (freq[term] >= 1 && freq[term] <= 2 && !topicKeywords.has(term) && term.length > 4) {
+        tangents.push({
+          label: term,
+          relevance: Math.round(30 + Math.random() * 40),
+          source: 'Mentioned briefly but not explored',
+          explored: false
+        });
+      }
+    });
+
+    // Also look for topic-adjacent terms via bigrams
+    var bigrams = [];
+    messages.forEach(function(m) { bigrams = bigrams.concat(_extractBigrams(_tokenize(m.text))); });
+    var biFreq = _termFrequency(bigrams);
+    Object.keys(biFreq).forEach(function(b) {
+      if (biFreq[b] === 1) {
+        var parts = b.split(' ');
+        var hasTopicWord = parts.some(function(p) { return topicKeywords.has(p); });
+        if (hasTopicWord) {
+          tangents.push({
+            label: b,
+            relevance: Math.round(50 + Math.random() * 30),
+            source: 'Related to current topics but unexplored',
+            explored: false
+          });
+        }
+      }
+    });
+
+    tangents.sort(function(a, b) { return b.relevance - a.relevance; });
+    return tangents.slice(0, MAX_TANGENTS);
+  }
+
+  /* ── Master analyze ── */
+  function _getMessages() {
+    var chatOut = document.getElementById('chat-output');
+    if (!chatOut) return [];
+    var msgs = [];
+    var divs = chatOut.querySelectorAll('.message');
+    divs.forEach(function(d) {
+      var role = d.classList.contains('user-message') ? 'user' : 'assistant';
+      var text = d.textContent || '';
+      msgs.push({ role: role, text: text });
+    });
+    return msgs;
+  }
+
+  function analyze() {
+    var messages = _getMessages();
+    if (messages.length < 2) return _state;
+
+    _state.messageCache = messages.map(function(m) { return { role: m.role, text: m.text.substring(0, 500) }; });
+    _state.topics = _extractTopics(messages);
+    _state.trajectory = _analyzeDirection(_state.topics, messages);
+    _state.deadEnds = _detectDeadEnds(messages, _state.topics);
+    _state.predictions = _predictQuestions(messages, _state.topics);
+    _state.tangents = _spotTangents(messages, _state.topics);
+
+    _state.sessionHistory.push({
+      timestamp: Date.now(),
+      topicCount: _state.topics.length,
+      deadEndCount: _state.deadEnds.length
+    });
+    if (_state.sessionHistory.length > 100) {
+      _state.sessionHistory = _state.sessionHistory.slice(-100);
+    }
+
+    _save();
+
+    if (_visible) _renderPanel();
+
+    // Toast for dead ends
+    if (_config.showToasts && _state.deadEnds.length > 0) {
+      var highSeverity = _state.deadEnds.filter(function(d) { return d.severity === 'high'; });
+      if (highSeverity.length > 0) {
+        _showToast('🔮 Dead end detected: ' + highSeverity[0].reason);
+      }
+    }
+
+    return _state;
+  }
+
+  function _onNewMessage() {
+    var messages = _getMessages();
+    if (messages.length !== _lastMessageCount) {
+      _lastMessageCount = messages.length;
+      if (_config.autoAnalyze && _config.enabled) {
+        analyze();
+      }
+    }
+  }
+
+  /* ── Toast ── */
+  function _showToast(msg) {
+    var existing = document.getElementById('sco-toast');
+    if (existing) existing.remove();
+    var toast = document.createElement('div');
+    toast.id = 'sco-toast';
+    toast.className = 'sco-toast';
+    toast.textContent = msg;
+    document.body.appendChild(toast);
+    setTimeout(function() { toast.classList.add('sco-toast-show'); }, 50);
+    setTimeout(function() {
+      toast.classList.remove('sco-toast-show');
+      setTimeout(function() { toast.remove(); }, 300);
+    }, 4000);
+  }
+
+  /* ── UI ── */
+  function _createPanel() {
+    if (_panel) return;
+    _panel = document.createElement('div');
+    _panel.id = 'oracle-panel';
+    _panel.className = 'sco-panel';
+    document.body.appendChild(_panel);
+  }
+
+  function _renderPanel() {
+    if (!_panel) return;
+
+    var dir = DIRECTION_LABELS[_state.trajectory.direction] || DIRECTION_LABELS.focused;
+
+    var html = '<div class="sco-header">'
+      + '<span class="sco-title">\uD83D\uDD2E Conversation Oracle</span>'
+      + '<div class="sco-header-actions">'
+      + '<button class="sco-settings-btn" title="Settings">\u2699\uFE0F</button>'
+      + '<button class="sco-close-btn" title="Close">\u2715</button>'
+      + '</div></div>';
+
+    // Tabs
+    html += '<div class="sco-tabs">';
+    ['trajectory','predictions','deadends','tangents'].forEach(function(tab) {
+      var labels = { trajectory: '\uD83D\uDCC8 Trajectory', predictions: '\uD83D\uDD2E Predictions', deadends: '\u26A0\uFE0F Dead Ends', tangents: '\uD83C\uDF3F Tangents' };
+      var badge = '';
+      if (tab === 'deadends' && _state.deadEnds.length > 0) badge = ' <span class="sco-tab-badge">' + _state.deadEnds.length + '</span>';
+      html += '<button class="sco-tab' + (_activeTab === tab ? ' sco-tab-active' : '') + '" data-tab="' + tab + '">' + labels[tab] + badge + '</button>';
+    });
+    html += '</div>';
+
+    // Content
+    html += '<div class="sco-content">';
+
+    if (_activeTab === 'trajectory') {
+      html += '<div class="sco-direction-card">'
+        + '<div class="sco-direction-icon">' + dir.icon + '</div>'
+        + '<div class="sco-direction-info">'
+        + '<div class="sco-direction-label">' + dir.label + '</div>'
+        + '<div class="sco-direction-desc">' + dir.desc + '</div>'
+        + '</div>'
+        + '<div class="sco-velocity" title="Topic velocity">'
+        + '<span class="sco-velocity-label">Velocity</span>'
+        + '<span class="sco-velocity-val">' + _state.trajectory.velocity + '/10</span>'
+        + '</div></div>';
+
+      // Topic flow
+      html += '<div class="sco-section-title">Topic Flow (' + _state.topics.length + ' topics)</div>';
+      if (_state.topics.length === 0) {
+        html += '<div class="sco-empty">Not enough conversation data yet</div>';
+      } else {
+        _state.topics.slice(0, 12).forEach(function(t, idx) {
+          var barWidth = Math.min(100, t.messageCount * 15);
+          html += '<div class="sco-topic-row">'
+            + '<span class="sco-topic-num">' + (idx + 1) + '</span>'
+            + '<div class="sco-topic-info">'
+            + '<div class="sco-topic-label">' + _escHtml(t.label) + '</div>'
+            + '<div class="sco-topic-bar"><div class="sco-topic-fill" style="width:' + barWidth + '%"></div></div>'
+            + '</div>'
+            + '<span class="sco-topic-count">' + t.messageCount + ' msgs</span>'
+            + '</div>';
+        });
+      }
+
+      // Direction history mini
+      var pattern = _state.trajectory.pattern.slice(-10);
+      if (pattern.length > 0) {
+        html += '<div class="sco-section-title">Recent Direction Pattern</div>';
+        html += '<div class="sco-pattern-flow">';
+        pattern.forEach(function(d) {
+          var info = DIRECTION_LABELS[d] || DIRECTION_LABELS.focused;
+          html += '<span class="sco-pattern-dot" title="' + info.label + '">' + info.icon + '</span>';
+        });
+        html += '</div>';
+      }
+
+    } else if (_activeTab === 'predictions') {
+      html += '<div class="sco-section-title">Predicted Next Questions</div>';
+      if (_state.predictions.length === 0) {
+        html += '<div class="sco-empty">Need more conversation data to generate predictions</div>';
+      } else {
+        _state.predictions.forEach(function(p) {
+          var confColor = p.confidence > 70 ? '#2ecc71' : p.confidence > 45 ? '#f39c12' : '#888';
+          html += '<div class="sco-prediction-row" data-question="' + _escAttr(p.question) + '">'
+            + '<div class="sco-prediction-conf" style="color:' + confColor + '">' + p.confidence + '%</div>'
+            + '<div class="sco-prediction-info">'
+            + '<div class="sco-prediction-q">' + _escHtml(p.question) + '</div>'
+            + '<div class="sco-prediction-reason">' + _escHtml(p.reasoning) + '</div>'
+            + '</div>'
+            + '<button class="sco-insert-btn" title="Insert into chat input">\u2192</button>'
+            + '</div>';
+        });
+      }
+
+    } else if (_activeTab === 'deadends') {
+      html += '<div class="sco-section-title">Detected Dead Ends</div>';
+      if (_state.deadEnds.length === 0) {
+        html += '<div class="sco-empty">\u2705 No dead ends detected — conversation is flowing well!</div>';
+      } else {
+        _state.deadEnds.forEach(function(d) {
+          var sevIcon = d.severity === 'high' ? '\uD83D\uDD34' : d.severity === 'medium' ? '\uD83D\uDFE1' : '\uD83D\uDFE2';
+          html += '<div class="sco-deadend-row sco-sev-' + d.severity + '">'
+            + '<div class="sco-deadend-header">'
+            + '<span class="sco-deadend-sev">' + sevIcon + '</span>'
+            + '<span class="sco-deadend-topic">' + _escHtml(d.topicLabel) + '</span>'
+            + '</div>'
+            + '<div class="sco-deadend-reason">' + _escHtml(d.reason) + '</div>'
+            + '<div class="sco-deadend-pivot">\uD83D\uDCA1 ' + _escHtml(d.suggestedPivot) + '</div>'
+            + '</div>';
+        });
+      }
+
+    } else if (_activeTab === 'tangents') {
+      html += '<div class="sco-section-title">Unexplored Angles</div>';
+      if (_state.tangents.length === 0) {
+        html += '<div class="sco-empty">No tangents spotted yet</div>';
+      } else {
+        _state.tangents.slice(0, 10).forEach(function(t) {
+          var relColor = t.relevance > 60 ? '#2ecc71' : t.relevance > 35 ? '#f39c12' : '#888';
+          html += '<div class="sco-tangent-row" data-tangent="' + _escAttr(t.label) + '">'
+            + '<div class="sco-tangent-rel" style="color:' + relColor + '">' + t.relevance + '%</div>'
+            + '<div class="sco-tangent-info">'
+            + '<div class="sco-tangent-label">' + _escHtml(t.label) + '</div>'
+            + '<div class="sco-tangent-source">' + _escHtml(t.source) + '</div>'
+            + '</div>'
+            + '<button class="sco-explore-btn" title="Explore this angle">\uD83D\uDD0D</button>'
+            + '</div>';
+        });
+      }
+    }
+
+    html += '</div>'; // end content
+
+    // Footer
+    html += '<div class="sco-footer">'
+      + '<button class="sco-refresh-btn">\uD83D\uDD04 Re-analyze</button>'
+      + '<button class="sco-reset-btn">\uD83D\uDDD1\uFE0F Reset</button>'
+      + '</div>';
+
+    _panel.innerHTML = html;
+    _bindPanelEvents();
+  }
+
+  function _escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function _escAttr(s) { return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+
+  function _bindPanelEvents() {
+    if (!_panel) return;
+
+    _panel.querySelectorAll('.sco-tab').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        _activeTab = btn.getAttribute('data-tab');
+        _renderPanel();
+      });
+    });
+
+    var closeBtn = _panel.querySelector('.sco-close-btn');
+    if (closeBtn) closeBtn.addEventListener('click', hide);
+
+    var refreshBtn = _panel.querySelector('.sco-refresh-btn');
+    if (refreshBtn) refreshBtn.addEventListener('click', function() { analyze(); });
+
+    var resetBtn = _panel.querySelector('.sco-reset-btn');
+    if (resetBtn) resetBtn.addEventListener('click', function() {
+      _state = _defaultState();
+      _save();
+      _renderPanel();
+    });
+
+    // Insert prediction into chat
+    _panel.querySelectorAll('.sco-prediction-row').forEach(function(row) {
+      var insertBtn = row.querySelector('.sco-insert-btn');
+      if (insertBtn) {
+        insertBtn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          var q = row.getAttribute('data-question');
+          var input = document.getElementById('chat-input');
+          if (input && q) { input.value = q; input.focus(); }
+        });
+      }
+    });
+
+    // Explore tangent
+    _panel.querySelectorAll('.sco-tangent-row').forEach(function(row) {
+      var exploreBtn = row.querySelector('.sco-explore-btn');
+      if (exploreBtn) {
+        exploreBtn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          var t = row.getAttribute('data-tangent');
+          var input = document.getElementById('chat-input');
+          if (input && t) { input.value = 'Tell me more about ' + t; input.focus(); }
+        });
+      }
+    });
+
+    // Settings toggle
+    var settingsBtn = _panel.querySelector('.sco-settings-btn');
+    if (settingsBtn) {
+      settingsBtn.addEventListener('click', function() {
+        _config.showToasts = !_config.showToasts;
+        _saveConfig();
+        _showToast('Toasts ' + (_config.showToasts ? 'enabled' : 'disabled'));
+      });
+    }
+  }
+
+  /* ── show/hide/toggle ── */
+  function show() {
+    _createPanel();
+    analyze();
+    _panel.classList.add('sco-panel-visible');
+    _visible = true;
+  }
+
+  function hide() {
+    if (_panel) _panel.classList.remove('sco-panel-visible');
+    _visible = false;
+    if (typeof PanelRegistry !== 'undefined' && PanelRegistry.closedExternally) {
+      PanelRegistry.closedExternally('conversation-oracle');
+    }
+  }
+
+  function toggle() {
+    if (typeof PanelRegistry !== 'undefined' && PanelRegistry.request) {
+      if (_visible) { hide(); return; }
+      PanelRegistry.request('conversation-oracle', show, hide);
+      return;
+    }
+    _visible ? hide() : show();
+  }
+
+  /* ── styles ── */
+  function _injectStyles() {
+    var css = document.createElement('style');
+    css.textContent = [
+      '#oracle-panel{position:fixed;top:0;right:-400px;width:380px;height:100vh;background:#1e1e2e;color:#cdd6f4;border-left:2px solid #7c3aed;z-index:10100;transition:right .3s ease;display:flex;flex-direction:column;font-family:system-ui,-apple-system,sans-serif;overflow:hidden}',
+      '#oracle-panel.sco-panel-visible{right:0}',
+      '.sco-header{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid rgba(255,255,255,.08)}',
+      '.sco-title{font-size:16px;font-weight:700}',
+      '.sco-header-actions{display:flex;gap:6px}',
+      '.sco-header-actions button{background:none;border:none;color:#a6adc8;cursor:pointer;font-size:14px;padding:4px 6px;border-radius:4px}',
+      '.sco-header-actions button:hover{background:rgba(255,255,255,.08)}',
+      '.sco-tabs{display:flex;border-bottom:1px solid rgba(255,255,255,.08);padding:0 8px}',
+      '.sco-tab{background:none;border:none;color:#888;padding:10px 10px;cursor:pointer;font-size:11px;border-bottom:2px solid transparent;transition:all .2s;white-space:nowrap}',
+      '.sco-tab:hover{color:#cdd6f4}',
+      '.sco-tab-active{color:#7c3aed;border-bottom-color:#7c3aed}',
+      '.sco-tab-badge{background:#e74c3c;color:#fff;font-size:10px;padding:1px 5px;border-radius:8px;margin-left:4px}',
+      '.sco-content{flex:1;overflow-y:auto;padding:12px 16px}',
+      '.sco-section-title{font-size:12px;font-weight:700;color:#a6adc8;text-transform:uppercase;letter-spacing:.5px;margin:12px 0 8px;padding-bottom:4px;border-bottom:1px solid rgba(255,255,255,.04)}',
+      '.sco-empty{color:#666;font-size:13px;text-align:center;padding:24px 0}',
+      '.sco-direction-card{display:flex;align-items:center;gap:12px;padding:14px;background:rgba(124,58,237,.1);border-radius:10px;border:1px solid rgba(124,58,237,.2)}',
+      '.sco-direction-icon{font-size:28px}',
+      '.sco-direction-info{flex:1}',
+      '.sco-direction-label{font-size:16px;font-weight:700}',
+      '.sco-direction-desc{font-size:12px;color:#a6adc8;margin-top:2px}',
+      '.sco-velocity{text-align:center}',
+      '.sco-velocity-label{display:block;font-size:10px;color:#888;text-transform:uppercase}',
+      '.sco-velocity-val{font-size:18px;font-weight:700;color:#7c3aed}',
+      '.sco-topic-row{display:flex;align-items:center;gap:8px;padding:6px 0}',
+      '.sco-topic-num{width:20px;text-align:center;font-size:11px;color:#666;font-weight:700}',
+      '.sco-topic-info{flex:1}',
+      '.sco-topic-label{font-size:13px;font-weight:500;margin-bottom:3px}',
+      '.sco-topic-bar{height:4px;background:rgba(255,255,255,.06);border-radius:2px;overflow:hidden}',
+      '.sco-topic-fill{height:100%;background:linear-gradient(90deg,#7c3aed,#a855f7);border-radius:2px;transition:width .4s ease}',
+      '.sco-topic-count{font-size:11px;color:#888;white-space:nowrap}',
+      '.sco-pattern-flow{display:flex;gap:4px;flex-wrap:wrap;padding:4px 0}',
+      '.sco-pattern-dot{font-size:18px}',
+      '.sco-prediction-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.04);cursor:pointer}',
+      '.sco-prediction-row:hover{background:rgba(255,255,255,.02);border-radius:6px}',
+      '.sco-prediction-conf{font-size:14px;font-weight:700;width:40px;text-align:center;flex-shrink:0}',
+      '.sco-prediction-info{flex:1}',
+      '.sco-prediction-q{font-size:13px;font-weight:500}',
+      '.sco-prediction-reason{font-size:11px;color:#888;margin-top:2px}',
+      '.sco-insert-btn{background:rgba(124,58,237,.2);border:none;color:#a855f7;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:14px}',
+      '.sco-insert-btn:hover{background:rgba(124,58,237,.4)}',
+      '.sco-deadend-row{padding:10px;margin-bottom:8px;border-radius:8px;background:rgba(255,255,255,.03)}',
+      '.sco-sev-high{border-left:3px solid #e74c3c}',
+      '.sco-sev-medium{border-left:3px solid #f39c12}',
+      '.sco-sev-low{border-left:3px solid #2ecc71}',
+      '.sco-deadend-header{display:flex;align-items:center;gap:6px;margin-bottom:4px}',
+      '.sco-deadend-sev{font-size:14px}',
+      '.sco-deadend-topic{font-size:13px;font-weight:600}',
+      '.sco-deadend-reason{font-size:12px;color:#a6adc8;margin-bottom:6px}',
+      '.sco-deadend-pivot{font-size:12px;color:#2ecc71;padding:6px 8px;background:rgba(46,204,113,.08);border-radius:6px}',
+      '.sco-tangent-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04)}',
+      '.sco-tangent-rel{font-size:14px;font-weight:700;width:40px;text-align:center;flex-shrink:0}',
+      '.sco-tangent-info{flex:1}',
+      '.sco-tangent-label{font-size:13px;font-weight:500}',
+      '.sco-tangent-source{font-size:11px;color:#888;margin-top:2px}',
+      '.sco-explore-btn{background:rgba(124,58,237,.2);border:none;color:#a855f7;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:14px}',
+      '.sco-explore-btn:hover{background:rgba(124,58,237,.4)}',
+      '.sco-footer{display:flex;gap:8px;padding:12px 16px;border-top:1px solid rgba(255,255,255,.08)}',
+      '.sco-refresh-btn,.sco-reset-btn{flex:1;padding:8px;border:none;border-radius:6px;cursor:pointer;font-size:12px}',
+      '.sco-refresh-btn{background:rgba(124,58,237,.2);color:#a855f7}',
+      '.sco-refresh-btn:hover{background:rgba(124,58,237,.3)}',
+      '.sco-reset-btn{background:rgba(231,76,60,.15);color:#e74c3c}',
+      '.sco-reset-btn:hover{background:rgba(231,76,60,.25)}',
+      '.sco-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);background:#7c3aed;color:#fff;padding:10px 20px;border-radius:8px;font-size:13px;opacity:0;transition:all .3s ease;z-index:10200;max-width:400px;text-align:center;pointer-events:none}',
+      '.sco-toast-show{opacity:1;transform:translateX(-50%) translateY(0)}',
+      'body:not(.dark-mode) #oracle-panel{background:#f8f9fa;color:#333;border-left-color:#7c3aed}',
+      'body:not(.dark-mode) .sco-header{border-bottom-color:#e0e0e0}',
+      'body:not(.dark-mode) .sco-tabs{border-bottom-color:#e0e0e0}',
+      'body:not(.dark-mode) .sco-tab{color:#666}',
+      'body:not(.dark-mode) .sco-tab-active{color:#7c3aed}',
+      'body:not(.dark-mode) .sco-direction-card{background:rgba(124,58,237,.06);border-color:rgba(124,58,237,.15)}',
+      'body:not(.dark-mode) .sco-footer{border-top-color:#e0e0e0}',
+      'body:not(.dark-mode) .sco-deadend-row{background:rgba(0,0,0,.02)}',
+      'body:not(.dark-mode) .sco-toast{background:#7c3aed}'
+    ].join('\n');
+    document.head.appendChild(css);
+  }
+
+  /* ── init ── */
+  function init() {
+    _loadConfig();
+    _load();
+    _injectStyles();
+
+    document.addEventListener('keydown', function(e) {
+      if (e.altKey && e.shiftKey && !e.ctrlKey && e.key === 'K') {
+        e.preventDefault();
+        toggle();
+      }
+    });
+
+    if (typeof KeyboardShortcuts !== 'undefined' && KeyboardShortcuts.register) {
+      KeyboardShortcuts.register('Alt+Shift+K', 'Conversation Oracle', toggle);
+    }
+    if (typeof CommandPalette !== 'undefined' && CommandPalette.register) {
+      CommandPalette.register({ name: 'oracle', description: 'Conversation Oracle — predictive navigation and dead-end detection', icon: '\uD83D\uDD2E', action: toggle });
+    }
+    if (typeof SlashCommands !== 'undefined' && SlashCommands.register) {
+      SlashCommands.register('/oracle', 'Open conversation oracle dashboard', toggle);
+    }
+    if (typeof PanelRegistry !== 'undefined' && PanelRegistry.register) {
+      PanelRegistry.register('conversation-oracle', { close: hide });
+    }
+
+    var chatOut = document.getElementById('chat-output');
+    if (chatOut) {
+      var _obs = new MutationObserver(function() {
+        if (!_config.enabled) return;
+        clearTimeout(_debounceTimer);
+        _debounceTimer = setTimeout(_onNewMessage, DEBOUNCE_MS);
+      });
+      _obs.observe(chatOut, { childList: true, subtree: true });
+    }
+
+    var toolbar = document.querySelector('.toolbar');
+    if (toolbar) {
+      var btn = document.createElement('button');
+      btn.id = 'oracle-btn';
+      btn.className = 'btn-secondary';
+      btn.title = 'Conversation Oracle \u2014 predictive navigation and dead-end detection (Alt+Shift+K)';
+      btn.textContent = '\uD83D\uDD2E';
+      btn.addEventListener('click', toggle);
+      toolbar.appendChild(btn);
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  return {
+    toggle: toggle,
+    show: show,
+    hide: hide,
+    analyze: analyze,
+    getState: function() { return JSON.parse(JSON.stringify(_state)); },
+    getTopics: function() { return _state.topics.slice(); },
+    getDeadEnds: function() { return _state.deadEnds.slice(); },
+    getPredictions: function() { return _state.predictions.slice(); },
+    getTangents: function() { return _state.tangents.slice(); },
+    getTrajectory: function() { return Object.assign({}, _state.trajectory); },
+    isEnabled: function() { return _config.enabled; },
+    setEnabled: function(v) { _config.enabled = !!v; _saveConfig(); },
+    _extractTopics: _extractTopics,
+    _analyzeDirection: _analyzeDirection,
+    _detectDeadEnds: _detectDeadEnds,
+    _predictQuestions: _predictQuestions,
+    _spotTangents: _spotTangents,
+    _cosineSimilarity: _cosineSimilarity,
+    _tokenize: _tokenize,
+    _detectFrustration: _detectFrustration,
+    _defaultState: _defaultState
+  };
+})();
