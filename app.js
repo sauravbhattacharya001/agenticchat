@@ -44850,16 +44850,37 @@ const SmartConversationOracle = (() => {
   function _cosineSimilarity(a, b) {
     var freqA = typeof a === 'string' ? _termFrequency(_tokenize(a)) : a;
     var freqB = typeof b === 'string' ? _termFrequency(_tokenize(b)) : b;
-    var keys = new Set(Object.keys(freqA).concat(Object.keys(freqB)));
+    var keysA = Object.keys(freqA);
+    var keysB = Object.keys(freqB);
+    // Iterate the smaller map for dot product; only overlapping keys contribute
     var dot = 0, magA = 0, magB = 0;
-    keys.forEach(function(k) {
-      var va = freqA[k] || 0, vb = freqB[k] || 0;
-      dot += va * vb;
+    var i;
+    for (i = 0; i < keysA.length; i++) {
+      var va = freqA[keysA[i]];
       magA += va * va;
-      magB += vb * vb;
-    });
-    var denom = Math.sqrt(magA) * Math.sqrt(magB);
+      var vb = freqB[keysA[i]];
+      if (vb) dot += va * vb;
+    }
+    for (i = 0; i < keysB.length; i++) {
+      var vb2 = freqB[keysB[i]];
+      magB += vb2 * vb2;
+    }
+    var denom = Math.sqrt(magA * magB);
     return denom === 0 ? 0 : dot / denom;
+  }
+
+  /**
+   * Pre-computes token arrays and term-frequency maps for an array of messages.
+   * Returns { tokens: string[][], freqs: Object[] } indexed by message position.
+   */
+  function _precomputeTokenData(messages) {
+    var tokens = new Array(messages.length);
+    var freqs = new Array(messages.length);
+    for (var i = 0; i < messages.length; i++) {
+      tokens[i] = _tokenize(messages[i].text);
+      freqs[i] = _termFrequency(tokens[i]);
+    }
+    return { tokens: tokens, freqs: freqs };
   }
 
   function _detectFrustration(text) {
@@ -44869,14 +44890,15 @@ const SmartConversationOracle = (() => {
   }
 
   /* ── Engine 1: Trajectory Analyzer ── */
-  function _extractTopics(messages) {
+  function _extractTopics(messages, precomputed) {
     var allTokens = [];
     var allBigrams = [];
-    messages.forEach(function(m) {
-      var tk = _tokenize(m.text);
+    var tkArrays = precomputed ? precomputed.tokens : null;
+    for (var mi = 0; mi < messages.length; mi++) {
+      var tk = tkArrays ? tkArrays[mi] : _tokenize(messages[mi].text);
       allTokens = allTokens.concat(tk);
       allBigrams = allBigrams.concat(_extractBigrams(tk));
-    });
+    }
 
     var uniFreq = _termFrequency(allTokens);
     var biFreq  = _termFrequency(allBigrams);
@@ -44924,18 +44946,25 @@ const SmartConversationOracle = (() => {
     });
   }
 
-  function _analyzeDirection(topics, messages) {
+  function _analyzeDirection(topics, messages, precomputed) {
     if (messages.length < 3) return { direction: 'focused', velocity: 0, pattern: [] };
 
     var windowSize = Math.min(6, Math.floor(messages.length / 2)) || 3;
-    var recent = messages.slice(-windowSize);
-    var earlier = messages.slice(-windowSize * 2, -windowSize);
-    if (earlier.length === 0) earlier = messages.slice(0, windowSize);
+    var startRecent = messages.length - windowSize;
+    var startEarlier = Math.max(0, messages.length - windowSize * 2);
+    var endEarlier = messages.length - windowSize;
+    if (startEarlier === endEarlier) { startEarlier = 0; endEarlier = windowSize; }
 
+    // Aggregate pre-computed tokens instead of re-tokenizing
+    var tkArrays = precomputed ? precomputed.tokens : null;
     var recentTokens = [];
-    recent.forEach(function(m) { recentTokens = recentTokens.concat(_tokenize(m.text)); });
+    for (var ri = startRecent; ri < messages.length; ri++) {
+      recentTokens = recentTokens.concat(tkArrays ? tkArrays[ri] : _tokenize(messages[ri].text));
+    }
     var earlierTokens = [];
-    earlier.forEach(function(m) { earlierTokens = earlierTokens.concat(_tokenize(m.text)); });
+    for (var ei = startEarlier; ei < endEarlier; ei++) {
+      earlierTokens = earlierTokens.concat(tkArrays ? tkArrays[ei] : _tokenize(messages[ei].text));
+    }
 
     var recentFreq = _termFrequency(recentTokens);
     var earlierFreq = _termFrequency(earlierTokens);
@@ -44974,17 +45003,26 @@ const SmartConversationOracle = (() => {
   }
 
   /* ── Engine 2: Dead-End Detector ── */
-  function _detectDeadEnds(messages, topics) {
+  function _detectDeadEnds(messages, topics, precomputed) {
     var deadEnds = [];
-    var userMessages = messages.filter(function(m) { return m.role === 'user'; });
-    var assistantMessages = messages.filter(function(m) { return m.role === 'assistant'; });
+    var userIndices = [];
+    var assistantMessages = [];
+    for (var mi = 0; mi < messages.length; mi++) {
+      if (messages[mi].role === 'user') userIndices.push(mi);
+      else assistantMessages.push(messages[mi]);
+    }
 
-    // Check for rephrased questions (high cosine similarity between user messages)
-    for (var i = 1; i < userMessages.length; i++) {
+    // Pre-fetch term frequencies for user messages from precomputed data
+    var userFreqs = precomputed
+      ? userIndices.map(function(idx) { return precomputed.freqs[idx]; })
+      : userIndices.map(function(idx) { return _termFrequency(_tokenize(messages[idx].text)); });
+
+    // Check for rephrased questions using pre-computed freq maps (no re-tokenization)
+    for (var i = 1; i < userIndices.length; i++) {
       for (var j = Math.max(0, i - 3); j < i; j++) {
-        var sim = _cosineSimilarity(userMessages[i].text, userMessages[j].text);
+        var sim = _cosineSimilarity(userFreqs[i], userFreqs[j]);
         if (sim > 0.7) {
-          var topicLabel = _findTopicForMessage(userMessages[i].text, topics);
+          var topicLabel = _findTopicForMessage(messages[userIndices[i]].text, topics);
           deadEnds.push({
             topicLabel: topicLabel || 'Repeated question',
             severity: sim > 0.85 ? 'high' : 'medium',
@@ -45017,9 +45055,10 @@ const SmartConversationOracle = (() => {
 
     // Check for frustration signals
     var recentFrustration = 0;
-    userMessages.slice(-3).forEach(function(m) {
-      recentFrustration += _detectFrustration(m.text);
-    });
+    var lastThreeUsers = userIndices.slice(-3);
+    for (var fi = 0; fi < lastThreeUsers.length; fi++) {
+      recentFrustration += _detectFrustration(messages[lastThreeUsers[fi]].text);
+    }
     if (recentFrustration >= 3) {
       deadEnds.push({
         topicLabel: 'Communication breakdown',
@@ -45127,10 +45166,17 @@ const SmartConversationOracle = (() => {
   }
 
   /* ── Engine 4: Tangent Spotter ── */
-  function _spotTangents(messages, topics) {
+  function _spotTangents(messages, topics, precomputed) {
     // Find terms mentioned once or twice but never explored
+    // Reuse pre-computed tokens instead of re-tokenizing all messages
+    var tkArrays = precomputed ? precomputed.tokens : null;
     var allTokens = [];
-    messages.forEach(function(m) { allTokens = allTokens.concat(_tokenize(m.text)); });
+    var bigrams = [];
+    for (var mi = 0; mi < messages.length; mi++) {
+      var tk = tkArrays ? tkArrays[mi] : _tokenize(messages[mi].text);
+      allTokens = allTokens.concat(tk);
+      bigrams = bigrams.concat(_extractBigrams(tk));
+    }
     var freq = _termFrequency(allTokens);
 
     var topicKeywords = new Set();
@@ -45149,8 +45195,6 @@ const SmartConversationOracle = (() => {
     });
 
     // Also look for topic-adjacent terms via bigrams
-    var bigrams = [];
-    messages.forEach(function(m) { bigrams = bigrams.concat(_extractBigrams(_tokenize(m.text))); });
     var biFreq = _termFrequency(bigrams);
     Object.keys(biFreq).forEach(function(b) {
       if (biFreq[b] === 1) {
@@ -45189,12 +45233,15 @@ const SmartConversationOracle = (() => {
     var messages = _getMessages();
     if (messages.length < 2) return _state;
 
+    // Pre-compute tokens and term frequencies once for all engines
+    var precomputed = _precomputeTokenData(messages);
+
     _state.messageCache = messages.map(function(m) { return { role: m.role, text: m.text.substring(0, 500) }; });
-    _state.topics = _extractTopics(messages);
-    _state.trajectory = _analyzeDirection(_state.topics, messages);
-    _state.deadEnds = _detectDeadEnds(messages, _state.topics);
+    _state.topics = _extractTopics(messages, precomputed);
+    _state.trajectory = _analyzeDirection(_state.topics, messages, precomputed);
+    _state.deadEnds = _detectDeadEnds(messages, _state.topics, precomputed);
     _state.predictions = _predictQuestions(messages, _state.topics);
-    _state.tangents = _spotTangents(messages, _state.topics);
+    _state.tangents = _spotTangents(messages, _state.topics, precomputed);
 
     _state.sessionHistory.push({
       timestamp: Date.now(),
