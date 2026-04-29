@@ -40663,11 +40663,9 @@ var SmartConversationDigest = (function () {
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
   }
 
-  /* simple NLP helpers */
-  var STOP = new Set(['the','a','an','is','are','was','were','be','been','being','have','has','had','do','does','did','will','would','shall','should','may','might','can','could','i','you','he','she','it','we','they','me','him','her','us','them','my','your','his','its','our','their','this','that','these','those','and','but','or','nor','for','yet','so','in','on','at','to','of','by','with','from','as','if','then','than','no','not','very','just','also','about','up','out','what','which','who','when','where','how','all','each','any','some','into','over','after','before','between','under','above','more','most','other','new','such','only','own','same','too','very','much']);
-
+  /* NLP helpers — delegate to shared TextAnalysisUtils to avoid duplicate stopword sets */
   function tokenize(text) {
-    return (text || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(function (w) { return w.length > 2 && !STOP.has(w); });
+    return TextAnalysisUtils.tokenize(text, { stopWords: true });
   }
 
   function topWords(messages, n) {
@@ -44735,22 +44733,18 @@ const SmartConversationOracle = (() => {
   const MAX_PREDICTIONS = 5;
   const MAX_TANGENTS = 20;
 
+  // Extend shared stopwords with conversation-specific terms to avoid
+  // duplicating the base set from TextAnalysisUtils.
   const STOPWORDS = new Set([
-    'the','a','an','is','are','was','were','be','been','being','have','has','had',
-    'do','does','did','will','would','shall','should','can','could','may','might',
-    'must','i','you','he','she','it','we','they','me','him','her','us','them',
-    'my','your','his','its','our','their','this','that','these','those','what',
-    'which','who','whom','when','where','why','how','all','each','every','both',
-    'few','more','most','other','some','such','no','not','only','same','so',
-    'than','too','very','just','but','and','or','if','then','else','for','from',
-    'in','on','at','to','of','with','by','about','into','through','during',
-    'before','after','above','below','between','out','off','over','under','up',
-    'down','again','further','once','here','there','any','also','like','get',
-    'got','make','made','know','think','want','need','use','used','using','try',
-    'one','two','way','much','many','well','back','even','still','new','now',
-    'let','sure','thing','things','really','right','going','something','work',
-    'works','code','please','thanks','thank','yes','yeah','ok','okay','could',
-    'would','help','question','im','dont','doesnt','ive','cant','thats','its'
+    ...TextAnalysisUtils.STOP_WORDS,
+    'must','whom','why','every','both','few','else','into','through','during',
+    'before','after','below','between','off','down','again','further','once',
+    'here','there','also','like','get','got','make','made','know','think',
+    'want','need','use','used','using','try','one','two','way','much','many',
+    'well','back','even','still','now','let','sure','thing','things','really',
+    'right','going','something','work','works','code','please','thanks','thank',
+    'yes','yeah','ok','okay','help','question','im','dont','doesnt','ive',
+    'cant','thats'
   ]);
 
   const FRUSTRATION_PATTERNS = [
