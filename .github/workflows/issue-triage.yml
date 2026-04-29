@@ -1,0 +1,142 @@
+name: Issue Auto-Triage
+
+on:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  issues: write
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Triage issue by content
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const title = (issue.title || '').toLowerCase();
+            const body = (issue.body || '').toLowerCase();
+            const text = `${title} ${body}`;
+            const existing = issue.labels.map(l => l.name);
+            const toAdd = [];
+
+            // ── Category labels ──────────────────────────────
+            const rules = [
+              {
+                label: 'bug',
+                patterns: [/\bbug\b/, /\bcrash/, /\bbroken\b/, /\berror\b/, /\bfail/,
+                           /\bnot working\b/, /\bunexpected\b/, /\bregression\b/]
+              },
+              {
+                label: 'enhancement',
+                patterns: [/\bfeature\b/, /\brequest\b/, /\benhance/, /\bimprove/,
+                           /\badd support\b/, /\bwould be nice\b/, /\bproposal\b/]
+              },
+              {
+                label: 'performance',
+                patterns: [/\bperformance\b/, /\bslow\b/, /\bmemory leak\b/, /\blag/,
+                           /\bfreeze/, /\bhigh cpu\b/, /\bhigh memory\b/, /\boptimiz/]
+              },
+              {
+                label: 'security',
+                patterns: [/\bsecurity\b/, /\bvulnerab/, /\bxss\b/, /\binjection\b/,
+                           /\bcve-\d+/, /\bcsrf\b/, /\bauth\b.*\bbypass/,
+                           /\bprototype pollution\b/, /\bescap/]
+              },
+              {
+                label: 'documentation',
+                patterns: [/\bdoc(s|umentation)\b/, /\breadme\b/, /\btypo\b/,
+                           /\bmissing.*doc/, /\bexample\b.*\bmissing/]
+              },
+              {
+                label: 'question',
+                patterns: [/\bhow (do|can|to)\b/, /\bis (it|there) possible\b/,
+                           /\bquestion\b/, /\bhelp\b.*\bneeded/]
+              }
+            ];
+
+            for (const rule of rules) {
+              if (existing.includes(rule.label)) continue;
+              if (rule.patterns.some(p => p.test(text))) {
+                toAdd.push(rule.label);
+              }
+            }
+
+            // ── Area labels (module/component detection) ─────
+            const areas = [
+              { label: 'area:ui',       patterns: [/\bui\b/, /\bcss\b/, /\bstyle/, /\blayout/,
+                                                   /\btheme/, /\bdark mode\b/, /\bsidebar\b/,
+                                                   /\bmodal\b/, /\brender/] },
+              { label: 'area:chat',     patterns: [/\bchat\b/, /\bmessage/, /\bconversation/,
+                                                   /\bhistory\b/, /\bexport\b/] },
+              { label: 'area:ai',       patterns: [/\bai\b/, /\bmodel\b/, /\bgpt/, /\bclaude/,
+                                                   /\bllm\b/, /\bprompt/, /\btoken/,
+                                                   /\bcontext window\b/] },
+              { label: 'area:storage',  patterns: [/\bstorage\b/, /\blocalstorage\b/,
+                                                   /\bindexeddb\b/, /\bsave/, /\bpersist/,
+                                                   /\bdata loss\b/, /\bcache\b/] },
+              { label: 'area:network',  patterns: [/\bnetwork\b/, /\bapi\b/, /\bfetch\b/,
+                                                   /\btimeout\b/, /\bcors\b/, /\bwebsocket/,
+                                                   /\boffline\b/, /\bservice worker\b/] },
+              { label: 'area:testing',  patterns: [/\btest/, /\bjest\b/, /\bcoverage\b/,
+                                                   /\bci\b.*\bfail/] }
+            ];
+
+            for (const area of areas) {
+              if (existing.includes(area.label)) continue;
+              if (area.patterns.some(p => p.test(text))) {
+                toAdd.push(area.label);
+              }
+            }
+
+            // ── Priority heuristic ──────────────────────────
+            const highPriority = [
+              /\bdata loss\b/, /\bsecurity\b/, /\bcrash/, /\bblocking\b/,
+              /\bcritical\b/, /\bsevere\b/, /\burgent\b/
+            ];
+            if (!existing.includes('priority:high') &&
+                highPriority.some(p => p.test(text))) {
+              toAdd.push('priority:high');
+            }
+
+            if (toAdd.length === 0) {
+              console.log('No labels to add — issue content did not match any rules.');
+              return;
+            }
+
+            // Ensure labels exist before applying
+            const repoLabels = await github.paginate(
+              github.rest.issues.listLabelsForRepo,
+              { owner: context.repo.owner, repo: context.repo.repo, per_page: 100 }
+            );
+            const repoLabelNames = new Set(repoLabels.map(l => l.name));
+
+            const colors = {
+              'bug': 'd73a4a', 'enhancement': 'a2eeef', 'performance': 'f9d0c4',
+              'security': 'e11d48', 'documentation': '0075ca', 'question': 'd876e3',
+              'area:ui': 'bfd4f2', 'area:chat': 'c5def5', 'area:ai': 'f5e6ff',
+              'area:storage': 'fef2c0', 'area:network': 'fbca04',
+              'area:testing': 'e4e669', 'priority:high': 'b60205'
+            };
+
+            for (const name of toAdd) {
+              if (!repoLabelNames.has(name)) {
+                await github.rest.issues.createLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name,
+                  color: colors[name] || 'ededed'
+                });
+              }
+            }
+
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number,
+              labels: toAdd
+            });
+
+            console.log(`Applied labels: ${toAdd.join(', ')}`);
