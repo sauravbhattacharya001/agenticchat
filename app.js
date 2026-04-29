@@ -548,11 +548,13 @@ Always \`return\` the final value.
 
 /* ---------- Shared Utilities ---------- */
 
-/** Format an ISO timestamp as relative time (e.g. "2h ago", "3d ago"). */
-function formatRelativeTime(isoString) {
-  let now = Date.now();
-  const then = new Date(isoString).getTime();
-  let diff = now - then;
+/**
+ * Format a timestamp as relative time (e.g. "2h ago", "3d ago").
+ * Accepts either an ISO string or a numeric epoch-ms timestamp.
+ */
+function formatRelativeTime(tsOrIso) {
+  const then = typeof tsOrIso === 'number' ? tsOrIso : new Date(tsOrIso).getTime();
+  const diff = Date.now() - then;
   const mins = Math.floor(diff / 60000);
   if (mins < 1) return 'just now';
   if (mins < 60) return mins + 'm ago';
@@ -560,7 +562,7 @@ function formatRelativeTime(isoString) {
   if (hours < 24) return hours + 'h ago';
   const days = Math.floor(hours / 24);
   if (days < 30) return days + 'd ago';
-  return new Date(isoString).toLocaleDateString();
+  return new Date(then).toLocaleDateString();
 }
 
 /**
@@ -23194,13 +23196,7 @@ const DraftRecovery = (() => {
   }
 
   /** Format age as human-readable relative time. */
-  function _formatAge(ts) {
-    const diff = Date.now() - ts;
-    if (diff < 60000) return 'just now';
-    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
-    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
-    return `${Math.floor(diff / 86400000)}d ago`;
-  }
+  function _formatAge(ts) { return formatRelativeTime(ts); }
 
   /** Debounced save handler for input events. */
   function _onInput() {
@@ -31958,15 +31954,7 @@ const ConversationStash = (() => {
 
   /* ---- Panel UI ---- */
 
-  function _formatTime(iso) {
-    var d = new Date(iso);
-    var now = Date.now();
-    var diff = now - d.getTime();
-    if (diff < 60000) return 'just now';
-    if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
-    if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
-    return Math.floor(diff / 86400000) + 'd ago';
-  }
+  function _formatTime(iso) { return formatRelativeTime(iso); }
 
   function _createPanel() {
     var panel = document.createElement('div');
@@ -36442,11 +36430,7 @@ const ConversationCoach = (() => {
   function hide() { if (_dashEl) _dashEl.style.display = 'none'; }
   function setEnabled(v) { _enabled = !!v; _save(); }
 
-  function _escHtml(s) {
-    var d = document.createElement('div');
-    d.appendChild(document.createTextNode(s));
-    return d.innerHTML;
-  }
+  function _escHtml(s) { return _escapeHtml(s); }
 
   // ---- init ----
   document.addEventListener('DOMContentLoaded', function () {
@@ -38026,14 +38010,8 @@ var SmartQuestionTracker = (function() {
     }).join('');
   }
 
-  function _escHtml(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
-  function _timeAgo(ts) {
-    var s = Math.floor((Date.now() - ts) / 1000);
-    if (s < 60) return 'just now';
-    if (s < 3600) return Math.floor(s/60) + 'm ago';
-    if (s < 86400) return Math.floor(s/3600) + 'h ago';
-    return Math.floor(s/86400) + 'd ago';
-  }
+  function _escHtml(s) { return _escapeHtml(s); }
+  function _timeAgo(ts) { return formatRelativeTime(ts); }
 
   function show() {
     _injectStyles();
@@ -39587,13 +39565,7 @@ const SmartConversationPlanner = (() => {
     });
   }
 
-  function _timeAgo(ts) {
-    var s = Math.floor((Date.now() - ts) / 1000);
-    if (s < 60) return 'just now';
-    if (s < 3600) return Math.floor(s / 60) + 'm ago';
-    if (s < 86400) return Math.floor(s / 3600) + 'h ago';
-    return Math.floor(s / 86400) + 'd ago';
-  }
+  function _timeAgo(ts) { return formatRelativeTime(ts); }
 
   /* ── Show / Hide / Toggle ─── */
   function show() {
@@ -41020,11 +40992,7 @@ var ConversationBranching = (function () {
     return 'br_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   }
 
-  function _escHtml(s) {
-    var d = document.createElement('div');
-    d.textContent = s;
-    return d.innerHTML;
-  }
+  function _escHtml(s) { return _escapeHtml(s); }
 
   function _truncate(s, n) {
     return s.length > n ? s.substring(0, n - 3) + '...' : s;
@@ -44458,11 +44426,7 @@ const SmartPromptCoach = (() => {
     document.body.appendChild(_panel);
   }
 
-  function _escHtml(s) {
-    const d = document.createElement('div');
-    d.textContent = s;
-    return d.innerHTML;
-  }
+  function _escHtml(s) { return _escapeHtml(s); }
 
   function _render() {
     if (!_panel) return;
@@ -45425,7 +45389,7 @@ const SmartConversationOracle = (() => {
     _bindPanelEvents();
   }
 
-  function _escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function _escHtml(s) { return _escapeHtml(s); }
   function _escAttr(s) { return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
   function _bindPanelEvents() {
