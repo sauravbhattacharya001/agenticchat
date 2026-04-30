@@ -2,7 +2,7 @@
 
 # 🤖 Agentic Chat
 
-**Turn natural language into executable code — right in your browser.**
+**Turn natural language into executable code - right in your browser.**
 
 [![Azure Static Web Apps CI/CD](https://github.com/sauravbhattacharya001/agenticchat/actions/workflows/azure-static-web-apps-gray-forest-0f6217910.yml/badge.svg)](https://github.com/sauravbhattacharya001/agenticchat/actions/workflows/azure-static-web-apps-gray-forest-0f6217910.yml)
 [![CodeQL](https://github.com/sauravbhattacharya001/agenticchat/actions/workflows/codeql.yml/badge.svg)](https://github.com/sauravbhattacharya001/agenticchat/actions/workflows/codeql.yml)
@@ -14,7 +14,7 @@
 [![GitHub last commit](https://img.shields.io/github/last-commit/sauravbhattacharya001/agenticchat)](https://github.com/sauravbhattacharya001/agenticchat/commits/main)
 [![codecov](https://codecov.io/gh/sauravbhattacharya001/agenticchat/graph/badge.svg)](https://codecov.io/gh/sauravbhattacharya001/agenticchat)
 
-A lightweight, zero-dependency chat interface that sends your prompts to GPT-4o, extracts the JavaScript it writes, and executes it in a sandboxed iframe — all from a single HTML file. Packed with **149 IIFE modules** (85+ named) covering everything from conversation management to ambient soundscapes — backed by **64 test suites** with **2,370+ test cases**.
+A lightweight, zero-dependency chat interface that sends your prompts to GPT-4o, extracts the JavaScript it writes, and executes it in a sandboxed iframe - all from a single HTML file. Packed with **165+ IIFE modules** covering everything from conversation management to autonomous cognitive monitoring - backed by **70 test suites** with **2,740+ test cases**.
 
 [**Live Demo**](https://sauravbhattacharya001.github.io/agenticchat/) · [**Report Bug**](https://github.com/sauravbhattacharya001/agenticchat/issues) · [**Request Feature**](https://github.com/sauravbhattacharya001/agenticchat/issues)
 
@@ -25,130 +25,148 @@ A lightweight, zero-dependency chat interface that sends your prompts to GPT-4o,
 ## ✨ Features
 
 ### Core
-- **Natural Language → Code** — Ask a question or describe a task in plain English; GPT-4o returns JavaScript that gets executed automatically
-- **Sandboxed Execution** — Generated code runs in an `<iframe sandbox="allow-scripts">` with no access to the parent page's DOM, cookies, localStorage, or variables
-- **Content Security Policy** — The sandbox iframe enforces `default-src 'none'; connect-src https:` so code can call external APIs but nothing else
-- **Nonce Validation** — Each execution gets a `crypto.randomUUID()` nonce to prevent stale or replayed postMessage events
-- **Multi-Model Support** — Switch between GPT-4o, GPT-4o-mini, GPT-4-turbo, and more via the model selector
-- **API Key Management** — Detects `YOUR_API_KEY` placeholders in generated code and prompts for credentials per domain; keys are cached per session
-- **Text Analytics** — Shared NLP utilities (stopwords, tokenise, TF-IDF, cosine similarity) powering search, linking, and tagging features
+- **Natural Language → Code** - Ask a question or describe a task in plain English; GPT-4o returns JavaScript that gets executed automatically
+- **Sandboxed Execution** - Generated code runs in an `<iframe sandbox="allow-scripts">` with no access to the parent page's DOM, cookies, localStorage, or variables
+- **Content Security Policy** - The sandbox iframe enforces `default-src 'none'; connect-src https:` so code can call external APIs but nothing else
+- **Nonce Validation** - Each execution gets a `crypto.randomUUID()` nonce to prevent stale or replayed postMessage events
+- **Multi-Model Support** - Switch between GPT-4o, GPT-4o-mini, GPT-4-turbo, and more via the model selector
+- **API Key Management** - Detects `YOUR_API_KEY` placeholders in generated code and prompts for credentials per domain; keys are cached per session
+- **Text Analytics** - Shared NLP utilities (stopwords, tokenise, TF-IDF, cosine similarity) powering search, linking, and tagging features
 
 ### Conversation Management
-- **Conversation History** — Maintains a sliding window of up to 20 message pairs with automatic trimming and token-count warnings
-- **Multi-Session** — Create, switch between, rename, and delete multiple conversation sessions with auto-save
-- **Cross-Tab Sync** — Detects concurrent edits across browser tabs via BroadcastChannel
-- **Conversation Fork** — Branch conversations from any message into new sessions
-- **Chapters** — Insert named section dividers with a table-of-contents sidebar
-- **Tags** — Colored tag labels on sessions with filtering and management
-- **Auto-Tagger** — Heuristic topic detection and automatic tag suggestions
-- **Session Notes** — Per-session notes/memos with inline editing
-- **Session Templates** — Save/load reusable session setups (persona, model, tags, starters)
-- **Session Archive** — Archive/unarchive sessions to declutter the sessions panel
-- **Session Calendar** — Visual month calendar to browse sessions by date (`Alt+C`)
-- **Session Linker** — TF-IDF cosine similarity discovers related sessions (`Alt+L`)
-- **Conversation Stash** — Git-stash-style save/restore of conversation state (`Ctrl+Shift+Z`)
-- **Conversation Merge** — Combine 2+ sessions into one merged conversation with chronological interleaving
-- **Conversation Replay** — Message-by-message playback with transport controls (play/pause/speed)
+- **Conversation History** - Maintains a sliding window of up to 20 message pairs with automatic trimming and token-count warnings
+- **Multi-Session** - Create, switch between, rename, and delete multiple conversation sessions with auto-save
+- **Cross-Tab Sync** - Detects concurrent edits across browser tabs via BroadcastChannel
+- **Conversation Fork** - Branch conversations from any message into new sessions
+- **Chapters** - Insert named section dividers with a table-of-contents sidebar
+- **Tags** - Colored tag labels on sessions with filtering and management
+- **Auto-Tagger** - Heuristic topic detection and automatic tag suggestions
+- **Session Notes** - Per-session notes/memos with inline editing
+- **Session Templates** - Save/load reusable session setups (persona, model, tags, starters)
+- **Session Archive** - Archive/unarchive sessions to declutter the sessions panel
+- **Session Calendar** - Visual month calendar to browse sessions by date (`Alt+C`)
+- **Session Linker** - TF-IDF cosine similarity discovers related sessions (`Alt+L`)
+- **Conversation Stash** - Git-stash-style save/restore of conversation state (`Ctrl+Shift+Z`)
+- **Conversation Merge** - Combine 2+ sessions into one merged conversation with chronological interleaving
+- **Conversation Replay** - Message-by-message playback with transport controls (play/pause/speed)
 
 ### Search & Navigation
-- **Message Search** — Full-text search across conversation messages with highlighting
-- **Global Session Search** — Search across all saved sessions at once
-- **Conversation Timeline** — Visual minimap sidebar for conversation navigation
-- **Bookmarks & Pinning** — Bookmark messages for quick reference; pin important ones to a floating bar
-- **Slash Commands** — `/`-triggered command dropdown with autocomplete and keyboard navigation
-- **Quick Switcher** — VS Code-style fuzzy session switcher (`Ctrl+K`)
-- **Command Palette** — Universal command launcher (`Ctrl+Shift+P`)
+- **Message Search** - Full-text search across conversation messages with highlighting
+- **Global Session Search** - Search across all saved sessions at once
+- **Conversation Timeline** - Visual minimap sidebar for conversation navigation
+- **Bookmarks & Pinning** - Bookmark messages for quick reference; pin important ones to a floating bar
+- **Slash Commands** - `/`-triggered command dropdown with autocomplete and keyboard navigation
+- **Quick Switcher** - VS Code-style fuzzy session switcher (`Ctrl+K`)
+- **Command Palette** - Universal command launcher (`Ctrl+Shift+P`)
 
 ### Productivity
-- **Prompt Templates** — Built-in library of categorized prompt templates with search filtering
-- **Prompt Library** — User-created prompt snippets with folders, search, usage tracking, import/export
-- **Prompt Enhancer** — AI-powered prompt improvement with 5 enhancement modes (`Alt+E`)
-- **Prompt A/B Tester** — Compare two model responses side-by-side with voting and history
-- **Snippet Library** — Save, tag, search, rename, and re-run generated code snippets
-- **Quick Replies** — Contextual follow-up suggestion chips after AI responses
-- **Formatting Toolbar** — Markdown formatting buttons above the chat input
-- **Scratchpad** — Persistent notepad panel with copy/insert/download actions
-- **Sticky Notes Board** — Visual draggable sticky notes canvas for brainstorming (`Alt+N`)
-- **Input History** — Navigate previous prompts with ↑/↓ arrow keys
-- **File Drop Zone** — Drag-and-drop file inclusion (text-based files, 100 KB limit)
-- **Focus Mode** — Distraction-free zen mode (`Ctrl+Shift+F`)
-- **Focus Timer** — Pomodoro-style focus timer with work/break cycles (`Alt+P`)
-- **Text Expander** — Shorthand triggers that auto-expand inline (`Ctrl+Shift+E`)
-- **Smart Paste** — Intelligent paste formatting — auto-detects JSON, code, CSV, SQL, URLs, stack traces
-- **Clipboard History** — Tracks copied text from chat with searchable panel (`Ctrl+Shift+V`)
-- **Auto-Save Draft** — Auto-persist unsent chat input across page refreshes
-- **Draft Recovery** — Auto-save/restore unsent message drafts per session
-- **Scroll Lock** — Suppress auto-scroll when reading history, floating jump-to-bottom pill
-- **Conversation Agenda** — Per-session goal checklist with progress tracking
-- **Conversation Flashcards** — Extract Q&A pairs as study flashcards with flip animation
+- **Prompt Templates** - Built-in library of categorized prompt templates with search filtering
+- **Prompt Library** - User-created prompt snippets with folders, search, usage tracking, import/export
+- **Prompt Enhancer** - AI-powered prompt improvement with 5 enhancement modes (`Alt+E`)
+- **Prompt A/B Tester** - Compare two model responses side-by-side with voting and history
+- **Snippet Library** - Save, tag, search, rename, and re-run generated code snippets
+- **Quick Replies** - Contextual follow-up suggestion chips after AI responses
+- **Formatting Toolbar** - Markdown formatting buttons above the chat input
+- **Scratchpad** - Persistent notepad panel with copy/insert/download actions
+- **Sticky Notes Board** - Visual draggable sticky notes canvas for brainstorming (`Alt+N`)
+- **Input History** - Navigate previous prompts with ↑/↓ arrow keys
+- **File Drop Zone** - Drag-and-drop file inclusion (text-based files, 100 KB limit)
+- **Focus Mode** - Distraction-free zen mode (`Ctrl+Shift+F`)
+- **Focus Timer** - Pomodoro-style focus timer with work/break cycles (`Alt+P`)
+- **Text Expander** - Shorthand triggers that auto-expand inline (`Ctrl+Shift+E`)
+- **Smart Paste** - Intelligent paste formatting - auto-detects JSON, code, CSV, SQL, URLs, stack traces
+- **Clipboard History** - Tracks copied text from chat with searchable panel (`Ctrl+Shift+V`)
+- **Auto-Save Draft** - Auto-persist unsent chat input across page refreshes
+- **Draft Recovery** - Auto-save/restore unsent message drafts per session
+- **Scroll Lock** - Suppress auto-scroll when reading history, floating jump-to-bottom pill
+- **Conversation Agenda** - Per-session goal checklist with progress tracking
+- **Conversation Flashcards** - Extract Q&A pairs as study flashcards with flip animation
 
 ### Analysis & Insights
-- **Chat Stats** — Conversation analytics: word counts, code blocks, response timing
-- **Cost Dashboard** — Persistent API spend tracker with budget alerts and daily chart
-- **Message Diff** — Compare any two messages with visual line-level diff
-- **Conversation Summarizer** — Heuristic summary with topics, decisions, and action items
-- **Response Time Badge** — Per-response latency indicator
-- **Usage Heatmap** — GitHub-style 7×24 activity heatmap across all sessions
-- **Conversation Sentiment** — Heuristic sentiment analysis with mood timeline (`Ctrl+Shift+M`)
-- **Conversation Mood Ring** — Real-time sentiment monitor with mood shifts, alerts, suggestions (`Alt+M`)
-- **Conversation Health Check** — Diagnostic for prompt quality, balance, context usage, repetition
-- **Typing Speed Monitor** — Live WPM indicator with sparkline dashboard (`Ctrl+Shift+T`)
-- **Readability Analyzer** — Flesch-Kincaid readability scoring with per-role stats (`Ctrl+Shift+R`)
-- **Conversation Timer** — Per-session active time tracking with auto-pause and time log (`Alt+T`)
-- **API Inspector** — Debug panel logging all API requests with payloads, timing, tokens, cost
+- **Chat Stats** - Conversation analytics: word counts, code blocks, response timing
+- **Cost Dashboard** - Persistent API spend tracker with budget alerts and daily chart
+- **Message Diff** - Compare any two messages with visual line-level diff
+- **Conversation Summarizer** - Heuristic summary with topics, decisions, and action items
+- **Response Time Badge** - Per-response latency indicator
+- **Usage Heatmap** - GitHub-style 7×24 activity heatmap across all sessions
+- **Conversation Sentiment** - Heuristic sentiment analysis with mood timeline (`Ctrl+Shift+M`)
+- **Conversation Mood Ring** - Real-time sentiment monitor with mood shifts, alerts, suggestions (`Alt+M`)
+- **Conversation Health Check** - Diagnostic for prompt quality, balance, context usage, repetition
+- **Typing Speed Monitor** - Live WPM indicator with sparkline dashboard (`Ctrl+Shift+T`)
+- **Readability Analyzer** - Flesch-Kincaid readability scoring with per-role stats (`Ctrl+Shift+R`)
+- **Conversation Timer** - Per-session active time tracking with auto-pause and time log (`Alt+T`)
+- **API Inspector** - Debug panel logging all API requests with payloads, timing, tokens, cost
 
 ### Personalization
-- **Persona Presets** — Switchable system prompt presets with custom persona support
-- **Theme Manager** — Dark/light theme with OS preference detection
-- **Preferences Panel** — Centralized settings panel with toggles, ranges, and reset
-- **Keyboard Shortcuts** — Global shortcuts with help modal
-- **Voice Input** — Browser speech recognition with language selection
-- **Read Aloud** — Text-to-speech for messages with voice/speed controls
-- **Voice Chat Mode** — Hands-free conversational loop: voice input → send → TTS → listen (`Alt+V`)
-- **Ambient Sound Player** — Procedural ambient soundscapes (rain, café, fire, wind, stream, white noise) via Web Audio API (`Alt+A`)
-- **Response Length Presets** — Pre-send verbosity control with 4 length modes
-- **Incognito Mode** — Private session mode that suppresses localStorage persistence (`Alt+I`)
+- **Persona Presets** - Switchable system prompt presets with custom persona support
+- **Theme Manager** - Dark/light theme with OS preference detection
+- **Preferences Panel** - Centralized settings panel with toggles, ranges, and reset
+- **Keyboard Shortcuts** - Global shortcuts with help modal
+- **Voice Input** - Browser speech recognition with language selection
+- **Read Aloud** - Text-to-speech for messages with voice/speed controls
+- **Voice Chat Mode** - Hands-free conversational loop: voice input → send → TTS → listen (`Alt+V`)
+- **Ambient Sound Player** - Procedural ambient soundscapes (rain, café, fire, wind, stream, white noise) via Web Audio API (`Alt+A`)
+- **Response Length Presets** - Pre-send verbosity control with 4 length modes
+- **Incognito Mode** - Private session mode that suppresses localStorage persistence (`Alt+I`)
 
 ### Messages & Data
-- **Message Annotations** — Private notes/annotations on messages with labels
-- **Message Reactions** — Per-message emoji reactions with persistent counts
-- **Message Reply** — Reply-to / quote a specific message with visual preview bar
-- **Message Context Menu** — Right-click context menu aggregating per-message actions
-- **Message Filter** — Visual content-type filters (code/questions/links/errors/lists/role)
-- **Message Highlighter** — Select text in messages and apply colored highlights (`Alt+H`)
-- **Message Reader View** — Full-width reader overlay for comfortable reading (`Alt+R`)
-- **Message Scheduler** — Queue messages with configurable delay for auto-send (`Alt+Q`)
-- **Emoji Picker** — Categorized emoji browser with search and recent tracking (`Ctrl+Shift+;`)
-- **Data Backup** — Full backup/restore for all user data (export/import/selective/merge)
-- **ChatGPT Importer** — Import ChatGPT exported conversations (`conversations.json`)
-- **Conversation Screenshot** — Render conversation as shareable PNG via Canvas API (`Ctrl+Shift+I`)
-- **Conversation Share Link** — Generate shareable URL with encoded conversation data (`Alt+S`)
-- **Notification Sound** — Background tab notification chime when AI finishes responding
-- **Offline Manager** — Service worker for offline access and caching
+- **Message Annotations** - Private notes/annotations on messages with labels
+- **Message Reactions** - Per-message emoji reactions with persistent counts
+- **Message Reply** - Reply-to / quote a specific message with visual preview bar
+- **Message Context Menu** - Right-click context menu aggregating per-message actions
+- **Message Filter** - Visual content-type filters (code/questions/links/errors/lists/role)
+- **Message Highlighter** - Select text in messages and apply colored highlights (`Alt+H`)
+- **Message Reader View** - Full-width reader overlay for comfortable reading (`Alt+R`)
+- **Message Scheduler** - Queue messages with configurable delay for auto-send (`Alt+Q`)
+- **Emoji Picker** - Categorized emoji browser with search and recent tracking (`Ctrl+Shift+;`)
+- **Data Backup** - Full backup/restore for all user data (export/import/selective/merge)
+- **ChatGPT Importer** - Import ChatGPT exported conversations (`conversations.json`)
+- **Conversation Screenshot** - Render conversation as shareable PNG via Canvas API (`Ctrl+Shift+I`)
+- **Conversation Share Link** - Generate shareable URL with encoded conversation data (`Alt+S`)
+- **Notification Sound** - Background tab notification chime when AI finishes responding
+- **Offline Manager** - Service worker for offline access and caching
 
 ### AI & Reliability
-- **Response Rating** — Thumbs up/down ratings on AI responses with model satisfaction dashboard
-- **Smart Retry** — Automatic retry with exponential backoff for transient API failures
-- **Message Editor** — Edit and resend user messages (truncates history and reloads into input)
-- **Message Translator** — Inline message translation to 20+ languages via OpenAI API
-- **Tone Adjuster** — Rewrite assistant messages in different tones (formal, casual, concise, ELI5)
-- **Word Cloud Generator** — Interactive word frequency cloud from conversation with 5 color schemes, PNG download (`Alt+W`)
-- **Zero Dependencies** — Single HTML file + CSS + JS. No build tools, no npm, no bundler. Just open and go.
+- **Response Rating** - Thumbs up/down ratings on AI responses with model satisfaction dashboard
+- **Smart Retry** - Automatic retry with exponential backoff for transient API failures
+- **Message Editor** - Edit and resend user messages (truncates history and reloads into input)
+- **Message Translator** - Inline message translation to 20+ languages via OpenAI API
+- **Tone Adjuster** - Rewrite assistant messages in different tones (formal, casual, concise, ELI5)
+- **Word Cloud Generator** - Interactive word frequency cloud from conversation with 5 color schemes, PNG download (`Alt+W`)
+- **Zero Dependencies** - Single HTML file + CSS + JS. No build tools, no npm, no bundler. Just open and go.
 
 ### Intelligence & Context
-- **Smart Context Sidebar** — AI-powered context panel showing relevant conversation snippets and session links
-- **Smart Model Advisor** — Recommends optimal model based on prompt complexity and cost
-- **Smart Session Prioritizer** — Ranks sessions by recency, engagement, and unfinished work
-- **Smart Auto Continue** — Detects truncated responses and automatically continues generation
-- **Prompt Chain Runner** — Multi-step prompt chains with variable substitution and conditional logic
-- **Split View** — Side-by-side dual conversation panes for parallel work
-- **Model Compare Panel** — Compare responses from multiple models simultaneously
-- **Context Window Meter** — Real-time token budget visualization with overflow warnings
-- **Conversation Export** — Export conversations to Markdown, JSON, or plain text
-- **PDF Export** — Render and download conversations as formatted PDF documents
-- **Conversation Brancher** — Advanced branch management with visual tree navigation
-- **OpenAI Client** — Centralized API client with streaming, retry, and token counting
-- **Input Guardrails** — Character limit (50K chars), token estimate warnings (~80K threshold), real-time counter
+- **Smart Context Sidebar** - AI-powered context panel showing relevant conversation snippets and session links
+- **Smart Model Advisor** - Recommends optimal model based on prompt complexity and cost
+- **Smart Session Prioritizer** - Ranks sessions by recency, engagement, and unfinished work
+- **Smart Auto Continue** - Detects truncated responses and automatically continues generation
+- **Smart Context Compressor** - Intelligent context window compression preserving semantic density
+- **Smart Context Watchdog** - Monitors context usage and warns about overflow or stale context
+- **Smart Knowledge Map** - Visual knowledge graph extracted from conversations
+- **Smart Contradiction Detector** - Identifies logical contradictions across conversation history
+- **Smart Question Tracker** - Tracks unanswered questions and resurfaces them
+- **Smart Conversation Digest** - Periodic conversation summaries with key insights
+- **Smart Response Auditor** - Automated quality checks on AI responses for accuracy and completeness
+- **Smart Goal Tracker** - Tracks multi-session goals with progress and milestones
+- **Smart Pattern Automator** - Detects repetitive interaction patterns and offers automation
+- **Smart Fact Memory** - Persistent fact extraction and recall across sessions
+- **Prompt Chain Runner** - Multi-step prompt chains with variable substitution and conditional logic
+- **Split View** - Side-by-side dual conversation panes for parallel work
+- **Model Compare Panel** - Compare responses from multiple models simultaneously
+- **Context Window Meter** - Real-time token budget visualization with overflow warnings
+- **Conversation Export** - Export conversations to Markdown, JSON, or plain text
+- **PDF Export** - Render and download conversations as formatted PDF documents
+- **Conversation Brancher** - Advanced branch management with visual tree navigation
+- **Conversation Memory** - Long-term memory that persists facts and preferences across sessions
+- **OpenAI Client** - Centralized API client with streaming, retry, and token counting
+- **Input Guardrails** - Character limit (50K chars), token estimate warnings (~80K threshold), real-time counter
+
+### Autonomous Agents
+- **Smart Adaptive Tone** - Communication style profiler that adapts response tone to user preferences (`Alt+Shift+Y`)
+- **Smart Cognitive Load** - Autonomous cognitive load monitor with overwhelm detection and pacing suggestions (`Alt+Shift+L`)
+- **Conversation Autopilot** - Autonomous conversation continuation with goal-directed prompting
+- **Follow-Up Reminder** - Proactive reminders for unanswered threads and pending action items
+- **Mood Tracker** - Longitudinal mood tracking with trends and wellness insights
 
 ## 🚀 Getting Started
 
@@ -159,7 +177,7 @@ A lightweight, zero-dependency chat interface that sends your prompts to GPT-4o,
 
 ### Usage
 
-1. **Open** `index.html` in your browser — or visit the [live demo](https://sauravbhattacharya001.github.io/agenticchat/)
+1. **Open** `index.html` in your browser - or visit the [live demo](https://sauravbhattacharya001.github.io/agenticchat/)
 2. **Paste** your OpenAI API key into the key field (stored in memory only, never persisted)
 3. **Type** a question or task and press **Enter**
 4. **Watch** the generated code and its output appear in the console area
@@ -191,13 +209,13 @@ User Prompt  →  GPT-4o (system prompt: reply with JS only)
 ```
 
 1. A **system prompt** instructs GPT-4o to respond exclusively with JavaScript in a fenced code block
-2. The app **extracts** the code using regex and delivers it to a sandboxed iframe via `postMessage` (not template interpolation — preventing script-tag injection)
+2. The app **extracts** the code using regex and delivers it to a sandboxed iframe via `postMessage` (not template interpolation - preventing script-tag injection)
 3. The iframe **executes** the code with `new Function()` inside an async wrapper
 4. Results are **returned** via `postMessage` with origin validation (`'null'` for sandboxed iframes) and nonce matching
 
 ### Modules
 
-The codebase is organized into **149 IIFE modules** in `app.js` (~44,000 lines), each using the revealing-module pattern:
+The codebase is organized into **165+ IIFE modules** in `app.js` (~43,000 lines), each using the revealing-module pattern:
 
 <details>
 <summary><strong>Core (9 modules)</strong></summary>
@@ -206,11 +224,11 @@ The codebase is organized into **149 IIFE modules** in `app.js` (~44,000 lines),
 |--------|---------|
 | `SafeStorage` | Safe localStorage wrapper for restricted-storage environments |
 | `TextAnalytics` | Shared NLP utilities (stopwords, tokenise, TF-IDF, cosine similarity) |
-| `ChatConfig` | Frozen constants — model list, pricing, token limits, system prompt |
+| `ChatConfig` | Frozen constants - model list, pricing, token limits, system prompt |
 | `ConversationManager` | Message history with sliding window trimming and token estimation |
 | `SandboxRunner` | Iframe sandbox lifecycle, execution, timeout, cancellation |
 | `ApiKeyManager` | OpenAI + per-service key storage, substitution, validation |
-| `UIController` | All DOM manipulation — button states, modals, output |
+| `UIController` | All DOM manipulation - button states, modals, output |
 | `ChatController` | Orchestrates send flow: input → API → code extraction → sandbox |
 | `OpenAIClient` | Centralized API client with streaming, retry, and token counting |
 
@@ -323,6 +341,23 @@ The codebase is organized into **149 IIFE modules** in `app.js` (~44,000 lines),
 | `PdfExport` | Render and download conversations as formatted PDF |
 | `ConversationBrancher` | Advanced branch management with visual tree navigation |
 | `MessageDiffViewer` | Enhanced diff viewer with syntax highlighting |
+| `SmartContextCompressor` | Intelligent context window compression |
+| `SmartContextWatchdog` | Context overflow monitoring and warnings |
+| `SmartKnowledgeMap` | Visual knowledge graph from conversations |
+| `SmartContradictionDetector` | Logical contradiction detection |
+| `SmartQuestionTracker` | Unanswered question tracking |
+| `SmartConversationDigest` | Periodic conversation summaries |
+| `SmartResponseAuditor` | Automated response quality checks |
+| `SmartGoalTracker` | Multi-session goal and milestone tracking |
+| `SmartPatternAutomator` | Repetitive pattern detection and automation |
+| `SmartFactMemory` | Persistent fact extraction and recall |
+| `SmartAdaptiveTone` | Communication style profiling and tone adaptation |
+| `SmartCognitiveLoad` | Cognitive load monitoring with overwhelm detection |
+| `ConversationAutopilot` | Goal-directed autonomous conversation continuation |
+| `ConversationMemory` | Long-term memory across sessions |
+| `ConversationBranching` | Branch management with merge and diff |
+| `FollowUpReminder` | Proactive reminders for pending threads |
+| `MoodTracker` | Longitudinal mood tracking with trends |
 
 </details>
 
@@ -332,17 +367,17 @@ The app executes AI-generated code, so security is a first-class concern:
 
 | Layer | Protection |
 |-------|-----------|
-| **Iframe Sandbox** | `sandbox="allow-scripts"` — no DOM access, no cookies, no localStorage, no same-origin |
-| **CSP** | `default-src 'none'; connect-src https:` — only outbound HTTPS allowed |
+| **Iframe Sandbox** | `sandbox="allow-scripts"` - no DOM access, no cookies, no localStorage, no same-origin |
+| **CSP** | `default-src 'none'; connect-src https:` - only outbound HTTPS allowed |
 | **Origin Check** | postMessage validated against `'null'` origin (sandboxed iframe) |
 | **Nonce** | `crypto.randomUUID()` ties each execution to its result, preventing replay |
 | **Code Delivery** | Code sent via postMessage, not embedded in HTML (prevents `</script>` injection) |
-| **API Key Isolation** | OpenAI key stored in parent JS variable only — never exposed to sandbox |
+| **API Key Isolation** | OpenAI key stored in parent JS variable only - never exposed to sandbox |
 
 ### ⚠️ Known Limitations
 
-- **Outbound HTTPS is allowed** — The sandbox CSP includes `connect-src https:` so LLM-generated code can call external APIs. This is required for the core use case but means sandbox code can make network requests.
-- **Service API keys are injectable** — When you provide a third-party API key (e.g., weather API), it's injected into sandbox code. A prompt injection attack could theoretically exfiltrate it. Your OpenAI key is safe (parent page only).
+- **Outbound HTTPS is allowed** - The sandbox CSP includes `connect-src https:` so LLM-generated code can call external APIs. This is required for the core use case but means sandbox code can make network requests.
+- **Service API keys are injectable** - When you provide a third-party API key (e.g., weather API), it's injected into sandbox code. A prompt injection attack could theoretically exfiltrate it. Your OpenAI key is safe (parent page only).
 
 ## 🛠️ Tech Stack
 
@@ -356,7 +391,7 @@ The app executes AI-generated code, so security is a first-class concern:
 | **Offline** | Service Worker with cache-first strategy |
 | **Hosting** | GitHub Pages |
 | **CI/CD** | GitHub Actions (build, test, lint, CodeQL, Docker, Pages deploy) |
-| **Testing** | Jest + jsdom (64 test suites, 2,370+ test cases) |
+| **Testing** | Jest + jsdom (70 test suites, 2,740+ test cases) |
 
 ## 📁 Project Structure
 
@@ -496,7 +531,7 @@ agenticchat/
 
 | Browser | Version | Status | Notes |
 |---------|---------|--------|-------|
-| Chrome | 90+ | ✅ Full | Recommended — best sandbox + speech API support |
+| Chrome | 90+ | ✅ Full | Recommended - best sandbox + speech API support |
 | Firefox | 88+ | ✅ Full | Voice input requires `media.navigator.enabled` |
 | Safari | 15+ | ✅ Full | Minor speech recognition differences |
 | Edge | 90+ | ✅ Full | Chromium-based, same as Chrome |
@@ -521,7 +556,7 @@ agenticchat/
 <details>
 <summary><strong>Generated code doesn't execute / "Sandbox error"</strong></summary>
 
-- The sandbox iframe blocks DOM access by design — code that references `document`, `window.location`, or `localStorage` will fail
+- The sandbox iframe blocks DOM access by design - code that references `document`, `window.location`, or `localStorage` will fail
 - Code can only make outbound HTTPS requests (`connect-src https:`)
 - Check the browser console for CSP violation messages
 - If you see timeout errors, the generated code may be stuck in an infinite loop
@@ -531,7 +566,7 @@ agenticchat/
 <details>
 <summary><strong>Voice input not working</strong></summary>
 
-- Speech recognition requires HTTPS (or localhost) — it won't work over plain HTTP
+- Speech recognition requires HTTPS (or localhost) - it won't work over plain HTTP
 - Firefox: ensure `media.navigator.enabled` is `true` in `about:config`
 - Safari: grant microphone permission when prompted
 - Some browsers require a user gesture (click) to activate the microphone
@@ -541,9 +576,9 @@ agenticchat/
 <details>
 <summary><strong>Data lost between sessions</strong></summary>
 
-- All data is stored in `localStorage` — clearing browser data will erase it
+- All data is stored in `localStorage` - clearing browser data will erase it
 - Use the **Data Backup** feature (Settings → Backup) to export your data regularly
-- `localStorage` has a ~5 MB limit per origin — the quota indicator in Settings shows usage
+- `localStorage` has a ~5 MB limit per origin - the quota indicator in Settings shows usage
 - Cross-tab sync uses `BroadcastChannel`; if you edit in two tabs simultaneously, the last write wins
 
 </details>
@@ -570,10 +605,10 @@ Contributions are welcome! Here's how:
 
 ### Guidelines
 
-- This is a **single-file app** — keep it that way unless there's a compelling reason to split
+- This is a **single-file app** - keep it that way unless there's a compelling reason to split
 - All 149 modules live in `app.js` as revealing-module IIFEs
-- Security is paramount — any change that touches the sandbox must be reviewed carefully
-- Run `npm test` to ensure all 64 test suites (2,370+ tests) pass before submitting
+- Security is paramount - any change that touches the sandbox must be reviewed carefully
+- Run `npm test` to ensure all 70 test suites (2,740+ tests) pass before submitting
 - Test with various prompt types (simple questions, API calls, error cases)
 
 ## 📄 License
