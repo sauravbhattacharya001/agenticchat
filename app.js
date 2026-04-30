@@ -47416,7 +47416,7 @@ const SmartAdaptiveTone = (function () {
       try { raw = localStorage.getItem(STORAGE_KEY); } catch (e) { /* noop */ }
     }
     if (raw) {
-      try { var parsed = JSON.parse(raw); _state = Object.assign(_defaultState(), parsed); } catch (e) { _state = _defaultState(); }
+      try { var parsed = sanitizeStorageObject(JSON.parse(raw)); _state = Object.assign(_defaultState(), parsed); } catch (e) { _state = _defaultState(); }
     }
   }
 
@@ -47436,7 +47436,7 @@ const SmartAdaptiveTone = (function () {
       try { raw = localStorage.getItem(CONFIG_KEY); } catch (e) { /* noop */ }
     }
     if (raw) {
-      try { var parsed = JSON.parse(raw); _config = Object.assign(_defaultConfig(), parsed); } catch (e) { _config = _defaultConfig(); }
+      try { var parsed = sanitizeStorageObject(JSON.parse(raw)); _config = Object.assign(_defaultConfig(), parsed); } catch (e) { _config = _defaultConfig(); }
     }
   }
 
@@ -48091,7 +48091,7 @@ const SmartCognitiveLoad = (function () {
     }
     if (raw) {
       try {
-        var parsed = JSON.parse(raw);
+        var parsed = sanitizeStorageObject(JSON.parse(raw));
         _state = Object.assign(_defaultState(), parsed);
       } catch (e) { _state = _defaultState(); }
     }
@@ -48114,7 +48114,7 @@ const SmartCognitiveLoad = (function () {
       try { raw = localStorage.getItem(CONFIG_KEY); } catch (e) { /* ignore */ }
     }
     if (raw) {
-      try { _config = Object.assign(_defaultConfig(), JSON.parse(raw)); } catch (e) { _config = _defaultConfig(); }
+      try { _config = Object.assign(_defaultConfig(), sanitizeStorageObject(JSON.parse(raw))); } catch (e) { _config = _defaultConfig(); }
     }
   }
 
