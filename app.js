@@ -46254,3 +46254,1057 @@ const SmartGoalTracker = (function () {
     _defaultState: _defaultState
   };
 })();
+
+/* ============================================================
+ * SmartPatternAutomator (Alt+Shift+J)
+ * Autonomous workflow pattern detection and automation engine.
+ * Detects recurring multi-step conversation patterns, generates
+ * reusable workflows, and offers real-time automation suggestions.
+ * ============================================================ */
+const SmartPatternAutomator = (function () {
+  'use strict';
+
+  var STORAGE_KEY = 'smartPatternAutomator';
+  var CONFIG_KEY = 'smartPatternAutomatorConfig';
+  var DEBOUNCE_MS = 1200;
+  var MIN_PATTERN_FREQ = 3;
+  var TRIGGER_CONFIDENCE = 0.7;
+  var MAX_WORKFLOWS = 50;
+  var MAX_AUTOMATIONS = 200;
+  var _debounceTimer = null;
+  var _panelEl = null;
+  var _visible = false;
+  var _notifEl = null;
+
+  /* ── intent categories ── */
+  var INTENTS = {
+    QUESTION: 'question',
+    CODE_REQUEST: 'code-request',
+    DEBUG: 'debug',
+    EXPLAIN: 'explain',
+    REFACTOR: 'refactor',
+    TRANSLATE: 'translate',
+    SUMMARIZE: 'summarize',
+    COMPARE: 'compare',
+    GENERATE: 'generate',
+    ANALYZE: 'analyze',
+    OTHER: 'other'
+  };
+
+  var INTENT_COLORS = {};
+  INTENT_COLORS[INTENTS.QUESTION] = '#5dade2';
+  INTENT_COLORS[INTENTS.CODE_REQUEST] = '#58d68d';
+  INTENT_COLORS[INTENTS.DEBUG] = '#ec7063';
+  INTENT_COLORS[INTENTS.EXPLAIN] = '#af7ac5';
+  INTENT_COLORS[INTENTS.REFACTOR] = '#f0b27a';
+  INTENT_COLORS[INTENTS.TRANSLATE] = '#85c1e9';
+  INTENT_COLORS[INTENTS.SUMMARIZE] = '#82e0aa';
+  INTENT_COLORS[INTENTS.COMPARE] = '#f7dc6f';
+  INTENT_COLORS[INTENTS.GENERATE] = '#d2b4de';
+  INTENT_COLORS[INTENTS.ANALYZE] = '#aed6f1';
+  INTENT_COLORS[INTENTS.OTHER] = '#aab7b8';
+
+  /* ── intent templates for workflow generation ── */
+  var INTENT_TEMPLATES = {};
+  INTENT_TEMPLATES[INTENTS.QUESTION] = 'What is {{topic}}?';
+  INTENT_TEMPLATES[INTENTS.CODE_REQUEST] = 'Write {{language}} code for {{topic}}';
+  INTENT_TEMPLATES[INTENTS.DEBUG] = 'Debug this {{language}} code: {{code}}';
+  INTENT_TEMPLATES[INTENTS.EXPLAIN] = 'Explain {{topic}} in detail';
+  INTENT_TEMPLATES[INTENTS.REFACTOR] = 'Refactor this code for {{topic}}';
+  INTENT_TEMPLATES[INTENTS.TRANSLATE] = 'Translate this to {{language}}';
+  INTENT_TEMPLATES[INTENTS.SUMMARIZE] = 'Summarize {{topic}}';
+  INTENT_TEMPLATES[INTENTS.COMPARE] = 'Compare {{topic}} vs {{alternative}}';
+  INTENT_TEMPLATES[INTENTS.GENERATE] = 'Generate {{topic}}';
+  INTENT_TEMPLATES[INTENTS.ANALYZE] = 'Analyze {{topic}}';
+  INTENT_TEMPLATES[INTENTS.OTHER] = '{{topic}}';
+
+  /* ── keyword maps for intent classification ── */
+  var INTENT_KEYWORDS = {};
+  INTENT_KEYWORDS[INTENTS.QUESTION] = ['what', 'why', 'how', 'when', 'where', 'which', 'who', 'does', 'is there', 'can you tell', 'do you know'];
+  INTENT_KEYWORDS[INTENTS.CODE_REQUEST] = ['write', 'create', 'build', 'implement', 'code', 'make a function', 'make a class', 'script', 'program', 'develop'];
+  INTENT_KEYWORDS[INTENTS.DEBUG] = ['debug', 'fix', 'error', 'bug', 'issue', 'broken', 'not working', 'fails', 'exception', 'crash', 'undefined', 'null'];
+  INTENT_KEYWORDS[INTENTS.EXPLAIN] = ['explain', 'describe', 'elaborate', 'tell me about', 'what does', 'how does', 'walk me through', 'teach'];
+  INTENT_KEYWORDS[INTENTS.REFACTOR] = ['refactor', 'improve', 'clean up', 'optimize', 'simplify', 'restructure', 'redesign', 'rewrite'];
+  INTENT_KEYWORDS[INTENTS.TRANSLATE] = ['translate', 'convert', 'port', 'migration', 'transform to', 'rewrite in', 'change to'];
+  INTENT_KEYWORDS[INTENTS.SUMMARIZE] = ['summarize', 'summary', 'tldr', 'brief', 'overview', 'recap', 'condense', 'key points'];
+  INTENT_KEYWORDS[INTENTS.COMPARE] = ['compare', 'difference', 'versus', 'vs', 'better', 'pros and cons', 'trade-off', 'which one'];
+  INTENT_KEYWORDS[INTENTS.GENERATE] = ['generate', 'produce', 'make', 'give me', 'list', 'suggest', 'brainstorm', 'come up with'];
+  INTENT_KEYWORDS[INTENTS.ANALYZE] = ['analyze', 'analyse', 'review', 'evaluate', 'assess', 'audit', 'inspect', 'examine', 'profile'];
+
+  /* ── default state ── */
+  function _defaultState() {
+    return {
+      patterns: [],
+      workflows: [],
+      automations: [],
+      feedback: {},
+      intentHistory: []
+    };
+  }
+
+  function _defaultConfig() {
+    return { enabled: true, autoTrigger: true, minFrequency: MIN_PATTERN_FREQ, confidenceThreshold: TRIGGER_CONFIDENCE };
+  }
+
+  var _state = _defaultState();
+  var _config = _defaultConfig();
+
+  /* ── storage ── */
+  function _save() {
+    if (typeof SafeStorage !== 'undefined' && typeof SafeStorage.setItem === 'function') {
+      SafeStorage.setItem(STORAGE_KEY, JSON.stringify(_state));
+    } else {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(_state)); } catch (e) { /* ignore */ }
+    }
+  }
+
+  function _load() {
+    var raw;
+    if (typeof SafeStorage !== 'undefined' && typeof SafeStorage.getItem === 'function') {
+      raw = SafeStorage.getItem(STORAGE_KEY);
+    } else {
+      try { raw = localStorage.getItem(STORAGE_KEY); } catch (e) { /* ignore */ }
+    }
+    if (raw) {
+      try {
+        var parsed = JSON.parse(raw);
+        if (typeof sanitizeStorageObject === 'function') parsed = sanitizeStorageObject(parsed);
+        var def = _defaultState();
+        _state.patterns = Array.isArray(parsed.patterns) ? parsed.patterns : def.patterns;
+        _state.workflows = Array.isArray(parsed.workflows) ? parsed.workflows : def.workflows;
+        _state.automations = Array.isArray(parsed.automations) ? parsed.automations : def.automations;
+        _state.feedback = (parsed.feedback && typeof parsed.feedback === 'object') ? parsed.feedback : def.feedback;
+        _state.intentHistory = Array.isArray(parsed.intentHistory) ? parsed.intentHistory : def.intentHistory;
+      } catch (e) { _state = _defaultState(); }
+    }
+  }
+
+  function _saveConfig() {
+    if (typeof SafeStorage !== 'undefined' && typeof SafeStorage.setItem === 'function') {
+      SafeStorage.setItem(CONFIG_KEY, JSON.stringify(_config));
+    } else {
+      try { localStorage.setItem(CONFIG_KEY, JSON.stringify(_config)); } catch (e) { /* ignore */ }
+    }
+  }
+
+  function _loadConfig() {
+    var raw;
+    if (typeof SafeStorage !== 'undefined' && typeof SafeStorage.getItem === 'function') {
+      raw = SafeStorage.getItem(CONFIG_KEY);
+    } else {
+      try { raw = localStorage.getItem(CONFIG_KEY); } catch (e) { /* ignore */ }
+    }
+    if (raw) {
+      try {
+        var parsed = JSON.parse(raw);
+        if (typeof sanitizeStorageObject === 'function') parsed = sanitizeStorageObject(parsed);
+        var def = _defaultConfig();
+        _config.enabled = typeof parsed.enabled === 'boolean' ? parsed.enabled : def.enabled;
+        _config.autoTrigger = typeof parsed.autoTrigger === 'boolean' ? parsed.autoTrigger : def.autoTrigger;
+        _config.minFrequency = typeof parsed.minFrequency === 'number' ? parsed.minFrequency : def.minFrequency;
+        _config.confidenceThreshold = typeof parsed.confidenceThreshold === 'number' ? parsed.confidenceThreshold : def.confidenceThreshold;
+      } catch (e) { _config = _defaultConfig(); }
+    }
+  }
+
+  /* ── Engine 1: Sequence Detector (Intent Classification) ── */
+  function classifyIntent(text) {
+    if (!text || typeof text !== 'string') return INTENTS.OTHER;
+    var lower = text.toLowerCase().trim();
+    if (lower.length < 5) return INTENTS.OTHER;
+
+    var scores = {};
+    var keys = Object.keys(INTENT_KEYWORDS);
+    for (var i = 0; i < keys.length; i++) {
+      var intent = keys[i];
+      var keywords = INTENT_KEYWORDS[intent];
+      var score = 0;
+      for (var j = 0; j < keywords.length; j++) {
+        if (lower.indexOf(keywords[j]) !== -1) {
+          score += keywords[j].split(' ').length;
+        }
+      }
+      if (score > 0) scores[intent] = score;
+    }
+
+    var best = INTENTS.OTHER;
+    var bestScore = 0;
+    var scoreKeys = Object.keys(scores);
+    for (var k = 0; k < scoreKeys.length; k++) {
+      if (scores[scoreKeys[k]] > bestScore) {
+        bestScore = scores[scoreKeys[k]];
+        best = scoreKeys[k];
+      }
+    }
+    return best;
+  }
+
+  function buildIntentSequence(messages) {
+    var seq = [];
+    if (!Array.isArray(messages)) return seq;
+    for (var i = 0; i < messages.length; i++) {
+      var msg = messages[i];
+      if (msg && msg.role === 'user' && msg.content) {
+        seq.push({
+          intent: classifyIntent(msg.content),
+          text: msg.content,
+          index: i
+        });
+      }
+    }
+    return seq;
+  }
+
+  /* ── Engine 2: Pattern Miner ── */
+  function minePatterns(intentSequences, minFreq) {
+    minFreq = minFreq || _config.minFrequency || MIN_PATTERN_FREQ;
+    var counts = {};
+    var recency = {};
+    var now = Date.now();
+
+    for (var s = 0; s < intentSequences.length; s++) {
+      var seq = intentSequences[s];
+      var sessionTime = seq._timestamp || now;
+      for (var windowSize = 2; windowSize <= Math.min(5, seq.intents.length); windowSize++) {
+        for (var i = 0; i <= seq.intents.length - windowSize; i++) {
+          var ngram = [];
+          for (var w = 0; w < windowSize; w++) {
+            ngram.push(seq.intents[i + w]);
+          }
+          var key = ngram.join('→');
+          counts[key] = (counts[key] || 0) + 1;
+          if (!recency[key] || sessionTime > recency[key]) {
+            recency[key] = sessionTime;
+          }
+        }
+      }
+    }
+
+    var totalWindows = 0;
+    var ckeys = Object.keys(counts);
+    for (var c = 0; c < ckeys.length; c++) totalWindows += counts[ckeys[c]];
+
+    var patterns = [];
+    for (var p = 0; p < ckeys.length; p++) {
+      var k = ckeys[p];
+      if (counts[k] >= minFreq) {
+        patterns.push({
+          id: 'pat_' + k.replace(/[^a-zA-Z0-9]/g, '_'),
+          intents: k.split('→'),
+          frequency: counts[k],
+          support: totalWindows > 0 ? counts[k] / totalWindows : 0,
+          lastSeen: recency[k] || now,
+          firstSeen: now
+        });
+      }
+    }
+
+    patterns.sort(function (a, b) {
+      if (b.frequency !== a.frequency) return b.frequency - a.frequency;
+      return b.lastSeen - a.lastSeen;
+    });
+
+    return patterns;
+  }
+
+  /* ── Engine 3: Workflow Generator ── */
+  function generateWorkflow(pattern) {
+    if (!pattern || !Array.isArray(pattern.intents) || pattern.intents.length < 2) return null;
+    var steps = [];
+    for (var i = 0; i < pattern.intents.length; i++) {
+      var intent = pattern.intents[i];
+      var template = INTENT_TEMPLATES[intent] || INTENT_TEMPLATES[INTENTS.OTHER];
+      steps.push({
+        order: i + 1,
+        intent: intent,
+        template: template
+      });
+    }
+
+    var name = _generateWorkflowName(pattern.intents);
+    return {
+      id: 'wf_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
+      name: name,
+      steps: steps,
+      pattern: pattern.intents.slice(),
+      frequency: pattern.frequency,
+      lastSeen: pattern.lastSeen,
+      created: Date.now(),
+      accepted: 0,
+      dismissed: 0,
+      favorite: false
+    };
+  }
+
+  function _generateWorkflowName(intents) {
+    var parts = [];
+    for (var i = 0; i < intents.length; i++) {
+      var name = intents[i].replace(/-/g, ' ');
+      name = name.charAt(0).toUpperCase() + name.slice(1);
+      parts.push(name);
+    }
+    return parts.join(' → ');
+  }
+
+  /* ── Engine 4: Automation Trigger ── */
+  function checkTrigger(recentIntents, workflows) {
+    workflows = workflows || _state.workflows;
+    if (!Array.isArray(recentIntents) || recentIntents.length === 0) return null;
+    if (!Array.isArray(workflows) || workflows.length === 0) return null;
+
+    var best = null;
+    var bestConf = 0;
+
+    for (var w = 0; w < workflows.length; w++) {
+      var wf = workflows[w];
+      if (!wf || !Array.isArray(wf.pattern) || wf.pattern.length < 2) continue;
+
+      for (var startLen = 1; startLen < wf.pattern.length; startLen++) {
+        if (startLen > recentIntents.length) break;
+        var match = true;
+        for (var j = 0; j < startLen; j++) {
+          var ri = recentIntents.length - startLen + j;
+          if (recentIntents[ri] !== wf.pattern[j]) {
+            match = false;
+            break;
+          }
+        }
+        if (match) {
+          var confidence = startLen / wf.pattern.length;
+          var freqBoost = Math.min(wf.frequency / 10, 0.2);
+          confidence = Math.min(confidence + freqBoost, 1.0);
+          if (confidence >= _config.confidenceThreshold && confidence > bestConf) {
+            bestConf = confidence;
+            best = {
+              workflow: wf,
+              matchedSteps: startLen,
+              remainingSteps: wf.pattern.length - startLen,
+              confidence: confidence,
+              remaining: wf.steps.slice(startLen)
+            };
+          }
+        }
+      }
+    }
+    return best;
+  }
+
+  /* ── Engine 5: Learning Engine ── */
+  function recordFeedback(workflowId, accepted) {
+    if (!workflowId) return;
+    if (!_state.feedback[workflowId]) {
+      _state.feedback[workflowId] = { accepted: 0, dismissed: 0 };
+    }
+    if (accepted) {
+      _state.feedback[workflowId].accepted++;
+    } else {
+      _state.feedback[workflowId].dismissed++;
+    }
+
+    for (var i = 0; i < _state.workflows.length; i++) {
+      if (_state.workflows[i].id === workflowId) {
+        if (accepted) {
+          _state.workflows[i].accepted++;
+        } else {
+          _state.workflows[i].dismissed++;
+        }
+        break;
+      }
+    }
+
+    _state.automations.push({
+      workflowId: workflowId,
+      accepted: !!accepted,
+      timestamp: Date.now()
+    });
+    if (_state.automations.length > MAX_AUTOMATIONS) {
+      _state.automations = _state.automations.slice(-MAX_AUTOMATIONS);
+    }
+
+    _pruneWorkflows();
+    _save();
+  }
+
+  function _pruneWorkflows() {
+    _state.workflows = _state.workflows.filter(function (wf) {
+      var fb = _state.feedback[wf.id];
+      if (!fb) return true;
+      var total = fb.accepted + fb.dismissed;
+      if (total >= 5 && fb.accepted / total < 0.2) return false;
+      if (total >= 3 && fb.accepted / total > 0.7) wf.favorite = true;
+      return true;
+    });
+  }
+
+  /* ── Engine 6: Insights Generator ── */
+  function generateInsights() {
+    var total = _state.automations.length;
+    var accepted = 0;
+    for (var i = 0; i < total; i++) {
+      if (_state.automations[i].accepted) accepted++;
+    }
+
+    var topWorkflows = _state.workflows.slice().sort(function (a, b) {
+      return (b.accepted + b.frequency) - (a.accepted + a.frequency);
+    }).slice(0, 5);
+
+    var patternIntentCounts = {};
+    for (var p = 0; p < _state.patterns.length; p++) {
+      var intents = _state.patterns[p].intents;
+      for (var j = 0; j < intents.length; j++) {
+        patternIntentCounts[intents[j]] = (patternIntentCounts[intents[j]] || 0) + 1;
+      }
+    }
+    var uniqueIntents = Object.keys(patternIntentCounts).length;
+
+    var efficiencyScore = 0;
+    if (_state.intentHistory.length > 0 && _state.workflows.length > 0) {
+      var matchable = 0;
+      for (var m = 0; m < _state.workflows.length; m++) {
+        matchable += _state.workflows[m].accepted;
+      }
+      efficiencyScore = Math.min(Math.round((matchable / Math.max(_state.intentHistory.length, 1)) * 100), 100);
+    }
+
+    var avgSteps = 0;
+    if (_state.workflows.length > 0) {
+      var sumSteps = 0;
+      for (var s = 0; s < _state.workflows.length; s++) {
+        sumSteps += _state.workflows[s].steps.length;
+      }
+      avgSteps = Math.round(sumSteps / _state.workflows.length * 10) / 10;
+    }
+
+    var timeSaved = 0;
+    for (var t = 0; t < _state.workflows.length; t++) {
+      timeSaved += _state.workflows[t].accepted * _state.workflows[t].steps.length * 15;
+    }
+
+    return {
+      totalAutomations: total,
+      acceptedCount: accepted,
+      acceptanceRate: total > 0 ? Math.round(accepted / total * 100) : 0,
+      efficiencyScore: efficiencyScore,
+      topWorkflows: topWorkflows,
+      patternDiversity: uniqueIntents,
+      totalPatterns: _state.patterns.length,
+      totalWorkflows: _state.workflows.length,
+      avgWorkflowSteps: avgSteps,
+      timeSavedSeconds: timeSaved,
+      favoriteCount: _state.workflows.filter(function (w) { return w.favorite; }).length
+    };
+  }
+
+  /* ── Main analyze function ── */
+  function analyze(messages) {
+    if (!Array.isArray(messages)) messages = [];
+
+    var seq = buildIntentSequence(messages);
+    var intentList = [];
+    for (var i = 0; i < seq.length; i++) {
+      intentList.push(seq[i].intent);
+    }
+
+    _state.intentHistory = intentList.slice();
+
+    var sessions = _buildSessionSequences(intentList);
+    var patterns = minePatterns(sessions, _config.minFrequency);
+    _state.patterns = patterns;
+
+    var newWorkflows = [];
+    for (var p = 0; p < patterns.length; p++) {
+      var existing = _findWorkflowByPattern(patterns[p].intents);
+      if (!existing) {
+        var wf = generateWorkflow(patterns[p]);
+        if (wf) newWorkflows.push(wf);
+      } else {
+        existing.frequency = patterns[p].frequency;
+        existing.lastSeen = patterns[p].lastSeen;
+      }
+    }
+
+    for (var n = 0; n < newWorkflows.length; n++) {
+      _state.workflows.push(newWorkflows[n]);
+    }
+
+    if (_state.workflows.length > MAX_WORKFLOWS) {
+      _state.workflows.sort(function (a, b) { return b.lastSeen - a.lastSeen; });
+      _state.workflows = _state.workflows.slice(0, MAX_WORKFLOWS);
+    }
+
+    if (_config.autoTrigger && intentList.length >= 2) {
+      var recentWindow = intentList.slice(-5);
+      var trigger = checkTrigger(recentWindow);
+      if (trigger) {
+        _showNotification(trigger);
+      }
+    }
+
+    _save();
+    return {
+      intents: intentList,
+      patterns: patterns,
+      workflows: _state.workflows,
+      trigger: null
+    };
+  }
+
+  function _buildSessionSequences(intentList) {
+    if (intentList.length === 0) return [];
+    var chunkSize = 20;
+    var sessions = [];
+    for (var i = 0; i < intentList.length; i += chunkSize) {
+      var chunk = intentList.slice(i, i + chunkSize);
+      sessions.push({ intents: chunk, _timestamp: Date.now() - (intentList.length - i) * 1000 });
+    }
+    return sessions;
+  }
+
+  function _findWorkflowByPattern(intents) {
+    var key = intents.join('→');
+    for (var i = 0; i < _state.workflows.length; i++) {
+      if (_state.workflows[i].pattern.join('→') === key) return _state.workflows[i];
+    }
+    return null;
+  }
+
+  /* ── Workflow CRUD ── */
+  function addWorkflow(name, steps) {
+    if (!name || !Array.isArray(steps) || steps.length < 2) return null;
+    var wf = {
+      id: 'wf_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
+      name: name,
+      steps: steps.map(function (s, idx) {
+        return { order: idx + 1, intent: s.intent || INTENTS.OTHER, template: s.template || '' };
+      }),
+      pattern: steps.map(function (s) { return s.intent || INTENTS.OTHER; }),
+      frequency: 0,
+      lastSeen: Date.now(),
+      created: Date.now(),
+      accepted: 0,
+      dismissed: 0,
+      favorite: false
+    };
+    _state.workflows.push(wf);
+    _save();
+    return wf;
+  }
+
+  function removeWorkflow(id) {
+    var len = _state.workflows.length;
+    _state.workflows = _state.workflows.filter(function (w) { return w.id !== id; });
+    if (_state.workflows.length < len) {
+      delete _state.feedback[id];
+      _save();
+      return true;
+    }
+    return false;
+  }
+
+  /* ── Notification bar ── */
+  function _showNotification(trigger) {
+    _dismissNotification();
+    if (!trigger || !trigger.workflow) return;
+
+    _notifEl = document.createElement('div');
+    _notifEl.className = 'spa-notification';
+    _notifEl.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);z-index:10200;' +
+      'background:#2d2d5e;color:#e0e0e0;border:1px solid #5dade2;border-radius:8px;padding:10px 18px;' +
+      'display:flex;align-items:center;gap:10px;font-size:13px;box-shadow:0 4px 16px rgba(0,0,0,0.4);';
+
+    var txt = document.createElement('span');
+    txt.textContent = '\uD83D\uDD04 Detected workflow: ' + trigger.workflow.name +
+      ' (' + Math.round(trigger.confidence * 100) + '% match). Auto-complete ' +
+      trigger.remainingSteps + ' remaining step(s)?';
+    _notifEl.appendChild(txt);
+
+    var acceptBtn = document.createElement('button');
+    acceptBtn.textContent = 'Yes';
+    acceptBtn.style.cssText = 'background:#58d68d;color:#000;border:none;border-radius:4px;padding:4px 12px;cursor:pointer;font-size:12px;';
+    acceptBtn.addEventListener('click', function () {
+      recordFeedback(trigger.workflow.id, true);
+      _dismissNotification();
+    });
+    _notifEl.appendChild(acceptBtn);
+
+    var dismissBtn = document.createElement('button');
+    dismissBtn.textContent = 'No';
+    dismissBtn.style.cssText = 'background:#555;color:#e0e0e0;border:none;border-radius:4px;padding:4px 12px;cursor:pointer;font-size:12px;';
+    dismissBtn.addEventListener('click', function () {
+      recordFeedback(trigger.workflow.id, false);
+      _dismissNotification();
+    });
+    _notifEl.appendChild(dismissBtn);
+
+    document.body.appendChild(_notifEl);
+    setTimeout(function () { _dismissNotification(); }, 15000);
+  }
+
+  function _dismissNotification() {
+    if (_notifEl && _notifEl.parentNode) {
+      _notifEl.parentNode.removeChild(_notifEl);
+    }
+    _notifEl = null;
+  }
+
+  /* ── UI Panel ── */
+  function _escHtml(s) {
+    if (typeof s !== 'string') return '';
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function _injectStyles() {
+    if (document.getElementById('spa-styles')) return;
+    var style = document.createElement('style');
+    style.id = 'spa-styles';
+    style.textContent = [
+      '.smart-pattern-automator-panel{position:fixed;top:50px;right:16px;width:420px;max-height:80vh;',
+      'background:#1a1a2e;color:#e0e0e0;border:1px solid #333;border-radius:10px;z-index:10100;',
+      'display:flex;flex-direction:column;font-family:system-ui,sans-serif;font-size:13px;',
+      'box-shadow:0 8px 32px rgba(0,0,0,0.5);overflow:hidden}',
+      '.spa-header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;',
+      'border-bottom:1px solid #333;background:#16213e}',
+      '.spa-header h3{margin:0;font-size:14px;font-weight:600}',
+      '.spa-close{background:none;border:none;color:#e0e0e0;font-size:18px;cursor:pointer;padding:0 4px}',
+      '.spa-tabs{display:flex;border-bottom:1px solid #333;background:#16213e}',
+      '.spa-tab{flex:1;padding:8px;text-align:center;cursor:pointer;border:none;background:none;',
+      'color:#aaa;font-size:12px;transition:all 0.2s}',
+      '.spa-tab.active{color:#5dade2;border-bottom:2px solid #5dade2;background:rgba(93,173,226,0.1)}',
+      '.spa-body{flex:1;overflow-y:auto;padding:12px 16px}',
+      '.spa-pattern-item{background:#16213e;border:1px solid #2a2a4a;border-radius:6px;padding:8px 10px;',
+      'margin-bottom:8px}',
+      '.spa-intent-pill{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;',
+      'margin:2px;color:#fff;font-weight:500}',
+      '.spa-freq-bar{height:4px;background:#333;border-radius:2px;margin-top:6px;overflow:hidden}',
+      '.spa-freq-fill{height:100%;background:#5dade2;border-radius:2px;transition:width 0.3s}',
+      '.spa-wf-item{background:#16213e;border:1px solid #2a2a4a;border-radius:6px;padding:10px;',
+      'margin-bottom:8px}',
+      '.spa-wf-name{font-weight:600;margin-bottom:4px}',
+      '.spa-wf-steps{font-size:12px;color:#aaa;margin-left:8px}',
+      '.spa-wf-step{padding:2px 0}',
+      '.spa-wf-stats{display:flex;gap:10px;margin-top:6px;font-size:11px;color:#888}',
+      '.spa-btn{border:none;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:11px;margin:2px}',
+      '.spa-btn-run{background:#58d68d;color:#000}',
+      '.spa-btn-del{background:#ec7063;color:#fff}',
+      '.spa-btn-fav{background:#f7dc6f;color:#000}',
+      '.spa-auto-item{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #2a2a4a;font-size:12px}',
+      '.spa-gauge{width:100%;height:60px;position:relative;background:#16213e;border-radius:8px;',
+      'border:1px solid #2a2a4a;display:flex;align-items:center;justify-content:center;margin-bottom:12px}',
+      '.spa-gauge-val{font-size:28px;font-weight:700;color:#5dade2}',
+      '.spa-gauge-label{font-size:11px;color:#888;margin-left:6px}',
+      '.spa-stat-row{display:flex;justify-content:space-between;padding:4px 0;font-size:12px}',
+      '.spa-sparkline{display:flex;align-items:flex-end;gap:2px;height:30px;margin:8px 0}',
+      '.spa-spark-bar{background:#5dade2;border-radius:1px;min-width:4px;flex:1}',
+      '.spa-empty{text-align:center;color:#666;padding:20px;font-style:italic}'
+    ].join('\n');
+    document.head.appendChild(style);
+  }
+
+  function _buildPanel() {
+    if (_panelEl) return;
+    _injectStyles();
+    _panelEl = document.createElement('div');
+    _panelEl.className = 'smart-pattern-automator-panel';
+    _panelEl.setAttribute('role', 'dialog');
+    _panelEl.setAttribute('aria-label', 'Pattern Automator');
+    _panelEl.style.display = 'none';
+
+    /* header */
+    var header = document.createElement('div');
+    header.className = 'spa-header';
+    var h3 = document.createElement('h3');
+    h3.textContent = '\uD83D\uDD04 Pattern Automator';
+    header.appendChild(h3);
+    var closeBtn = document.createElement('button');
+    closeBtn.className = 'spa-close';
+    closeBtn.textContent = '\u00D7';
+    closeBtn.addEventListener('click', hide);
+    header.appendChild(closeBtn);
+    _panelEl.appendChild(header);
+
+    /* tabs */
+    var tabBar = document.createElement('div');
+    tabBar.className = 'spa-tabs';
+    var tabNames = ['Patterns', 'Workflows', 'Automation', 'Insights'];
+    var tabIds = ['patterns', 'workflows', 'automation', 'insights'];
+    for (var i = 0; i < tabNames.length; i++) {
+      var tab = document.createElement('button');
+      tab.className = 'spa-tab' + (i === 0 ? ' active' : '');
+      tab.textContent = tabNames[i];
+      tab.dataset.tab = tabIds[i];
+      tab.addEventListener('click', _switchTab);
+      tabBar.appendChild(tab);
+    }
+    _panelEl.appendChild(tabBar);
+
+    /* body */
+    var body = document.createElement('div');
+    body.className = 'spa-body';
+    body.id = 'spa-body';
+    _panelEl.appendChild(body);
+
+    document.body.appendChild(_panelEl);
+    _renderTab('patterns');
+  }
+
+  function _switchTab(e) {
+    var tabId = e.target.dataset.tab;
+    var tabs = _panelEl.querySelectorAll('.spa-tab');
+    for (var i = 0; i < tabs.length; i++) {
+      tabs[i].classList.toggle('active', tabs[i].dataset.tab === tabId);
+    }
+    _renderTab(tabId);
+  }
+
+  function _renderTab(tabId) {
+    var body = _panelEl.querySelector('#spa-body');
+    if (!body) return;
+    while (body.firstChild) body.removeChild(body.firstChild);
+
+    if (tabId === 'patterns') _renderPatterns(body);
+    else if (tabId === 'workflows') _renderWorkflows(body);
+    else if (tabId === 'automation') _renderAutomation(body);
+    else if (tabId === 'insights') _renderInsights(body);
+  }
+
+  function _renderPatterns(container) {
+    if (_state.patterns.length === 0) {
+      var empty = document.createElement('div');
+      empty.className = 'spa-empty';
+      empty.textContent = 'No patterns detected yet. Keep chatting!';
+      container.appendChild(empty);
+      return;
+    }
+    var maxFreq = 1;
+    for (var m = 0; m < _state.patterns.length; m++) {
+      if (_state.patterns[m].frequency > maxFreq) maxFreq = _state.patterns[m].frequency;
+    }
+    for (var i = 0; i < _state.patterns.length; i++) {
+      var pat = _state.patterns[i];
+      var item = document.createElement('div');
+      item.className = 'spa-pattern-item';
+
+      var pills = document.createElement('div');
+      for (var j = 0; j < pat.intents.length; j++) {
+        var pill = document.createElement('span');
+        pill.className = 'spa-intent-pill';
+        pill.style.background = INTENT_COLORS[pat.intents[j]] || INTENT_COLORS[INTENTS.OTHER];
+        pill.textContent = pat.intents[j];
+        pills.appendChild(pill);
+        if (j < pat.intents.length - 1) {
+          var arrow = document.createElement('span');
+          arrow.textContent = ' \u2192 ';
+          arrow.style.color = '#666';
+          pills.appendChild(arrow);
+        }
+      }
+      item.appendChild(pills);
+
+      var meta = document.createElement('div');
+      meta.style.cssText = 'font-size:11px;color:#888;margin-top:4px';
+      meta.textContent = 'Frequency: ' + pat.frequency + ' | Support: ' + (pat.support * 100).toFixed(1) + '%';
+      item.appendChild(meta);
+
+      var barWrap = document.createElement('div');
+      barWrap.className = 'spa-freq-bar';
+      var barFill = document.createElement('div');
+      barFill.className = 'spa-freq-fill';
+      barFill.style.width = Math.round(pat.frequency / maxFreq * 100) + '%';
+      barWrap.appendChild(barFill);
+      item.appendChild(barWrap);
+
+      container.appendChild(item);
+    }
+  }
+
+  function _renderWorkflows(container) {
+    if (_state.workflows.length === 0) {
+      var empty = document.createElement('div');
+      empty.className = 'spa-empty';
+      empty.textContent = 'No workflows generated yet. Patterns need 3+ occurrences.';
+      container.appendChild(empty);
+      return;
+    }
+    for (var i = 0; i < _state.workflows.length; i++) {
+      var wf = _state.workflows[i];
+      var item = document.createElement('div');
+      item.className = 'spa-wf-item';
+
+      var nameEl = document.createElement('div');
+      nameEl.className = 'spa-wf-name';
+      nameEl.textContent = (wf.favorite ? '\u2B50 ' : '') + wf.name;
+      item.appendChild(nameEl);
+
+      var stepsEl = document.createElement('div');
+      stepsEl.className = 'spa-wf-steps';
+      for (var s = 0; s < wf.steps.length; s++) {
+        var stepEl = document.createElement('div');
+        stepEl.className = 'spa-wf-step';
+        stepEl.textContent = (s + 1) + '. [' + wf.steps[s].intent + '] ' + wf.steps[s].template;
+        stepsEl.appendChild(stepEl);
+      }
+      item.appendChild(stepsEl);
+
+      var statsEl = document.createElement('div');
+      statsEl.className = 'spa-wf-stats';
+      statsEl.textContent = '\u2705 ' + wf.accepted + ' accepted | \u274C ' + wf.dismissed +
+        ' dismissed | Freq: ' + wf.frequency;
+      item.appendChild(statsEl);
+
+      var btns = document.createElement('div');
+      btns.style.marginTop = '6px';
+
+      var delBtn = document.createElement('button');
+      delBtn.className = 'spa-btn spa-btn-del';
+      delBtn.textContent = 'Delete';
+      delBtn.dataset.wfid = wf.id;
+      delBtn.addEventListener('click', function (ev) {
+        removeWorkflow(ev.target.dataset.wfid);
+        _renderTab('workflows');
+      });
+      btns.appendChild(delBtn);
+
+      item.appendChild(btns);
+      container.appendChild(item);
+    }
+  }
+
+  function _renderAutomation(container) {
+    /* toggle */
+    var toggleWrap = document.createElement('div');
+    toggleWrap.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:12px';
+    var toggleLabel = document.createElement('span');
+    toggleLabel.textContent = 'Auto-trigger suggestions';
+    toggleWrap.appendChild(toggleLabel);
+    var toggleBtn = document.createElement('button');
+    toggleBtn.className = 'spa-btn';
+    toggleBtn.style.background = _config.autoTrigger ? '#58d68d' : '#555';
+    toggleBtn.style.color = _config.autoTrigger ? '#000' : '#e0e0e0';
+    toggleBtn.textContent = _config.autoTrigger ? 'ON' : 'OFF';
+    toggleBtn.addEventListener('click', function () {
+      _config.autoTrigger = !_config.autoTrigger;
+      _saveConfig();
+      _renderTab('automation');
+    });
+    toggleWrap.appendChild(toggleBtn);
+    container.appendChild(toggleWrap);
+
+    if (_state.automations.length === 0) {
+      var empty = document.createElement('div');
+      empty.className = 'spa-empty';
+      empty.textContent = 'No automation triggers yet.';
+      container.appendChild(empty);
+      return;
+    }
+
+    /* acceptance rate bar */
+    var total = _state.automations.length;
+    var accepted = 0;
+    for (var a = 0; a < total; a++) {
+      if (_state.automations[a].accepted) accepted++;
+    }
+    var rateEl = document.createElement('div');
+    rateEl.style.cssText = 'margin-bottom:12px;font-size:12px';
+    rateEl.textContent = 'Acceptance rate: ' + accepted + '/' + total + ' (' + Math.round(accepted / total * 100) + '%)';
+    container.appendChild(rateEl);
+
+    var barWrap = document.createElement('div');
+    barWrap.className = 'spa-freq-bar';
+    barWrap.style.height = '8px';
+    barWrap.style.marginBottom = '12px';
+    var barFill = document.createElement('div');
+    barFill.className = 'spa-freq-fill';
+    barFill.style.width = Math.round(accepted / total * 100) + '%';
+    barFill.style.background = accepted / total > 0.5 ? '#58d68d' : '#ec7063';
+    barWrap.appendChild(barFill);
+    container.appendChild(barWrap);
+
+    /* history list */
+    var recent = _state.automations.slice().reverse().slice(0, 20);
+    for (var i = 0; i < recent.length; i++) {
+      var item = document.createElement('div');
+      item.className = 'spa-auto-item';
+      var left = document.createElement('span');
+      var wfName = _findWorkflowById(recent[i].workflowId);
+      left.textContent = (wfName ? wfName.name : recent[i].workflowId);
+      item.appendChild(left);
+      var right = document.createElement('span');
+      right.textContent = (recent[i].accepted ? '\u2705' : '\u274C') + ' ' +
+        new Date(recent[i].timestamp).toLocaleString();
+      right.style.color = recent[i].accepted ? '#58d68d' : '#ec7063';
+      item.appendChild(right);
+      container.appendChild(item);
+    }
+  }
+
+  function _renderInsights(container) {
+    var ins = generateInsights();
+
+    /* efficiency gauge */
+    var gauge = document.createElement('div');
+    gauge.className = 'spa-gauge';
+    var gVal = document.createElement('span');
+    gVal.className = 'spa-gauge-val';
+    gVal.textContent = ins.efficiencyScore;
+    gauge.appendChild(gVal);
+    var gLabel = document.createElement('span');
+    gLabel.className = 'spa-gauge-label';
+    gLabel.textContent = '/ 100 efficiency';
+    gauge.appendChild(gLabel);
+    container.appendChild(gauge);
+
+    /* stats */
+    var stats = [
+      ['Total Patterns', ins.totalPatterns],
+      ['Total Workflows', ins.totalWorkflows],
+      ['Avg Steps/Workflow', ins.avgWorkflowSteps],
+      ['Acceptance Rate', ins.acceptanceRate + '%'],
+      ['Pattern Diversity', ins.patternDiversity + ' intents'],
+      ['Favorites', ins.favoriteCount],
+      ['Est. Time Saved', Math.round(ins.timeSavedSeconds / 60) + ' min']
+    ];
+    for (var i = 0; i < stats.length; i++) {
+      var row = document.createElement('div');
+      row.className = 'spa-stat-row';
+      var label = document.createElement('span');
+      label.textContent = stats[i][0];
+      label.style.color = '#aaa';
+      row.appendChild(label);
+      var val = document.createElement('span');
+      val.textContent = stats[i][1];
+      val.style.fontWeight = '600';
+      row.appendChild(val);
+      container.appendChild(row);
+    }
+
+    /* top workflows */
+    if (ins.topWorkflows.length > 0) {
+      var heading = document.createElement('div');
+      heading.style.cssText = 'margin-top:12px;font-weight:600;font-size:12px;color:#5dade2';
+      heading.textContent = 'Top Workflows';
+      container.appendChild(heading);
+      for (var t = 0; t < ins.topWorkflows.length; t++) {
+        var tw = ins.topWorkflows[t];
+        var twRow = document.createElement('div');
+        twRow.className = 'spa-stat-row';
+        var twName = document.createElement('span');
+        twName.textContent = (t + 1) + '. ' + tw.name;
+        twRow.appendChild(twName);
+        var twScore = document.createElement('span');
+        twScore.textContent = '\u2705' + tw.accepted + ' | \u274C' + tw.dismissed;
+        twScore.style.color = '#888';
+        twRow.appendChild(twScore);
+        container.appendChild(twRow);
+      }
+    }
+  }
+
+  function _findWorkflowById(id) {
+    for (var i = 0; i < _state.workflows.length; i++) {
+      if (_state.workflows[i].id === id) return _state.workflows[i];
+    }
+    return null;
+  }
+
+  /* ── Show / Hide / Toggle ── */
+  function show() {
+    _buildPanel();
+    _panelEl.style.display = 'flex';
+    _visible = true;
+    _renderTab('patterns');
+  }
+
+  function hide() {
+    if (_panelEl) _panelEl.style.display = 'none';
+    _visible = false;
+  }
+
+  function toggle() {
+    _visible ? hide() : show();
+  }
+
+  /* ── Chat observer ── */
+  function _onNewMessage() {
+    if (!_config.enabled) return;
+    var chatOut = document.getElementById('chat-output');
+    if (!chatOut) return;
+    var msgs = [];
+    var children = chatOut.querySelectorAll('.message');
+    for (var i = 0; i < children.length; i++) {
+      var role = children[i].classList.contains('user-message') ? 'user' : 'assistant';
+      msgs.push({ role: role, content: children[i].textContent || '' });
+    }
+    analyze(msgs);
+    if (_visible) {
+      var activeTab = _panelEl.querySelector('.spa-tab.active');
+      if (activeTab) _renderTab(activeTab.dataset.tab);
+    }
+  }
+
+  /* ── Init ── */
+  function init() {
+    _loadConfig();
+    _load();
+
+    document.addEventListener('keydown', function (e) {
+      if (e.altKey && e.shiftKey && e.key === 'J') {
+        e.preventDefault();
+        toggle();
+      }
+    });
+
+    if (typeof PanelRegistry !== 'undefined' && PanelRegistry.register) {
+      PanelRegistry.register('pattern-automator', { close: hide });
+    }
+
+    var chatOut = document.getElementById('chat-output');
+    if (chatOut) {
+      var _obs = new MutationObserver(function () {
+        if (!_config.enabled) return;
+        clearTimeout(_debounceTimer);
+        _debounceTimer = setTimeout(_onNewMessage, DEBOUNCE_MS);
+      });
+      _obs.observe(chatOut, { childList: true, subtree: true });
+    }
+
+    var toolbar = document.querySelector('.toolbar');
+    if (toolbar) {
+      var btn = document.createElement('button');
+      btn.id = 'pattern-automator-btn';
+      btn.className = 'btn-secondary';
+      btn.title = 'Pattern Automator \u2014 autonomous workflow pattern detection (Alt+Shift+J)';
+      btn.textContent = '\uD83D\uDD04';
+      btn.addEventListener('click', toggle);
+      toolbar.appendChild(btn);
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  return {
+    toggle: toggle,
+    show: show,
+    hide: hide,
+    analyze: analyze,
+    classifyIntent: classifyIntent,
+    buildIntentSequence: buildIntentSequence,
+    minePatterns: minePatterns,
+    generateWorkflow: generateWorkflow,
+    checkTrigger: checkTrigger,
+    recordFeedback: recordFeedback,
+    generateInsights: generateInsights,
+    addWorkflow: addWorkflow,
+    removeWorkflow: removeWorkflow,
+    getState: function () { return JSON.parse(JSON.stringify(_state)); },
+    getPatterns: function () { return _state.patterns.slice(); },
+    getWorkflows: function () { return _state.workflows.slice(); },
+    getAutomations: function () { return _state.automations.slice(); },
+    isEnabled: function () { return _config.enabled; },
+    setEnabled: function (v) { _config.enabled = !!v; _saveConfig(); },
+    INTENTS: INTENTS,
+    INTENT_COLORS: INTENT_COLORS,
+    _buildSessionSequences: _buildSessionSequences,
+    _defaultState: _defaultState,
+    _pruneWorkflows: _pruneWorkflows
+  };
+})();

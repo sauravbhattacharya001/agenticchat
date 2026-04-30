@@ -342,7 +342,8 @@ function loadApp() {
     'SmartKnowledgeMap',
     'MoodTracker',
     'SmartModelAdvisor',
-    'SmartGoalTracker'
+    'SmartGoalTracker',
+    'SmartPatternAutomator'
   ];
 
   for (const mod of modules) {
