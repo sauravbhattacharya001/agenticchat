@@ -45673,3 +45673,572 @@ const SmartConversationOracle = (() => {
     _defaultState: _defaultState
   };
 })();
+
+/* ============================================================
+ * SmartGoalTracker (Alt+Shift+G)
+ * Autonomous goal extraction and progress tracking engine.
+ * Detects user intents from conversation, monitors progress toward goals,
+ * identifies completion/stuck/abandoned states, and recommends next steps.
+ * ============================================================ */
+const SmartGoalTracker = (function () {
+  'use strict';
+
+  var STORAGE_KEY = 'smartGoalTracker';
+  var CONFIG_KEY = 'smartGoalTrackerConfig';
+  var DEBOUNCE_MS = 1200;
+  var MAX_GOALS = 50;
+  var _debounceTimer = null;
+  var _panelEl = null;
+  var _visible = false;
+
+  /* ── goal status enum ── */
+  var STATUS = { ACTIVE: 'active', PROGRESSING: 'progressing', STUCK: 'stuck', COMPLETED: 'completed', ABANDONED: 'abandoned' };
+
+  /* ── intent detection patterns ── */
+  var INTENT_PATTERNS = [
+    { re: /(?:i want to|i need to|i'd like to|help me|can you help|i'm trying to|let's|goal is to)\s+(.{10,120})/i, weight: 0.9 },
+    { re: /(?:how (?:do i|can i|to)|what's the best way to)\s+(.{10,100})/i, weight: 0.7 },
+    { re: /(?:build|create|make|implement|design|set up|configure|write|develop)\s+(?:a |an |the )?(.{5,80})/i, weight: 0.8, cat: 'build' },
+    { re: /(?:fix|solve|resolve|debug|troubleshoot)\s+(.{5,80})/i, weight: 0.75, cat: 'fix' },
+    { re: /(?:understand|learn|figure out|explain)\s+(.{5,80})/i, weight: 0.6, cat: 'learn' },
+    { re: /(?:optimize|improve|refactor|upgrade|migrate)\s+(.{5,80})/i, weight: 0.7, cat: 'optimize' }
+  ];
+
+  /* ── progress indicators ── */
+  var PROGRESS_SIGNALS = [
+    { re: /(?:that works|perfect|great|thanks|got it|makes sense|understood)/i, delta: 20 },
+    { re: /(?:next step|what's next|now i need|moving on)/i, delta: 15 },
+    { re: /(?:almost done|nearly there|one more thing)/i, delta: 25 },
+    { re: /(?:done|finished|completed|solved|fixed|it works)/i, delta: 40 }
+  ];
+
+  /* ── stuck indicators ── */
+  var STUCK_SIGNALS = [
+    { re: /(?:still not working|same error|doesn't work|tried everything)/i, score: 30 },
+    { re: /(?:i'm confused|lost|stuck|don't understand|no idea)/i, score: 25 },
+    { re: /(?:going in circles|back to square one|start over)/i, score: 35 },
+    { re: /(?:this is frustrating|ugh|argh|help)/i, score: 15 }
+  ];
+
+  /* ── completion signals ── */
+  var COMPLETION_SIGNALS = [
+    { re: /(?:all done|everything works|problem solved|mission accomplished)/i, confidence: 0.95 },
+    { re: /(?:thank you so much|you're a lifesaver|that fixed it)/i, confidence: 0.85 },
+    { re: /(?:moving on to something else|new topic|different question)/i, confidence: 0.7 },
+    { re: /(?:let's wrap up|that's all i needed)/i, confidence: 0.9 }
+  ];
+
+  /* ── default config ── */
+  var _config = { enabled: true, autoDetect: true, showBadges: true, stuckThreshold: 60, maxGoalsPerSession: 10 };
+
+  /* ── state ── */
+  var _state = { goals: [], sessionGoals: [], insights: [], lastAnalysis: 0 };
+
+  function _defaultState() { return { goals: [], sessionGoals: [], insights: [], lastAnalysis: 0 }; }
+
+  function _loadConfig() {
+    try { var s = localStorage.getItem(CONFIG_KEY); if (s) _config = JSON.parse(s); } catch (e) {}
+  }
+  function _saveConfig() {
+    try { localStorage.setItem(CONFIG_KEY, JSON.stringify(_config)); } catch (e) {}
+  }
+  function _load() {
+    try { var s = localStorage.getItem(STORAGE_KEY); if (s) _state = JSON.parse(s); } catch (e) { _state = _defaultState(); }
+    if (!_state.goals) _state = _defaultState();
+  }
+  function _save() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(_state)); } catch (e) {}
+  }
+
+  /* ── goal creation ── */
+  function _createGoal(text, confidence, category) {
+    return {
+      id: 'goal_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
+      text: text.trim().replace(/[.!?]+$/, ''),
+      category: category || _categorize(text),
+      status: STATUS.ACTIVE,
+      progress: 0,
+      stuckScore: 0,
+      confidence: confidence,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      milestones: [],
+      nextSteps: []
+    };
+  }
+
+  function _categorize(text) {
+    var t = text.toLowerCase();
+    if (/(?:build|create|implement|make|develop|write)/.test(t)) return 'build';
+    if (/(?:fix|debug|solve|resolve|troubleshoot)/.test(t)) return 'fix';
+    if (/(?:learn|understand|figure out|explain)/.test(t)) return 'learn';
+    if (/(?:optimize|improve|refactor|upgrade)/.test(t)) return 'optimize';
+    if (/(?:configure|set up|install|deploy)/.test(t)) return 'setup';
+    return 'general';
+  }
+
+  /* ── goal extraction from messages ── */
+  function extractGoals(messages) {
+    if (!_config.enabled || !_config.autoDetect) return [];
+    var newGoals = [];
+    var userMsgs = messages.filter(function(m) { return m.role === 'user'; });
+
+    userMsgs.forEach(function(msg) {
+      var text = msg.content || msg.text || '';
+      var bestMatch = null;
+      var bestWeight = 0;
+      INTENT_PATTERNS.forEach(function(pat) {
+        var match = text.match(pat.re);
+        if (match && match[1] && pat.weight > bestWeight) {
+          bestMatch = { text: match[1], weight: pat.weight, cat: pat.cat || null };
+          bestWeight = pat.weight;
+        }
+      });
+      if (bestMatch) {
+        var goalText = bestMatch.text;
+        // avoid duplicates
+        var isDup = _state.goals.some(function(g) {
+          return _similarity(g.text.toLowerCase(), goalText.toLowerCase()) > 0.6;
+        });
+        var isDupNew = newGoals.some(function(g) {
+          return _similarity(g.text.toLowerCase(), goalText.toLowerCase()) > 0.6;
+        });
+        if (!isDup && !isDupNew && _state.goals.length + newGoals.length < MAX_GOALS) {
+          var goal = _createGoal(goalText, bestMatch.weight, bestMatch.cat);
+          newGoals.push(goal);
+        }
+      }
+    });
+    return newGoals;
+  }
+
+  /* ── progress tracking ── */
+  function updateProgress(messages) {
+    var activeGoals = _state.goals.filter(function(g) { return g.status === STATUS.ACTIVE || g.status === STATUS.PROGRESSING; });
+    if (activeGoals.length === 0) return;
+
+    var recentMsgs = messages.slice(-5);
+    recentMsgs.forEach(function(msg) {
+      var text = msg.content || msg.text || '';
+      activeGoals.forEach(function(goal) {
+        // check progress signals
+        PROGRESS_SIGNALS.forEach(function(sig) {
+          if (sig.re.test(text)) {
+            goal.progress = Math.min(100, goal.progress + sig.delta);
+            goal.status = STATUS.PROGRESSING;
+            goal.updatedAt = Date.now();
+            if (sig.delta >= 15) {
+              goal.milestones.push({ text: text.substring(0, 80), time: Date.now(), delta: sig.delta });
+            }
+          }
+        });
+
+        // check stuck signals
+        STUCK_SIGNALS.forEach(function(sig) {
+          if (sig.re.test(text)) {
+            goal.stuckScore = Math.min(100, goal.stuckScore + sig.score);
+            goal.updatedAt = Date.now();
+            if (goal.stuckScore >= _config.stuckThreshold) {
+              goal.status = STATUS.STUCK;
+            }
+          }
+        });
+
+        // check completion signals
+        COMPLETION_SIGNALS.forEach(function(sig) {
+          if (sig.re.test(text) && sig.confidence > 0.7) {
+            goal.progress = 100;
+            goal.status = STATUS.COMPLETED;
+            goal.updatedAt = Date.now();
+          }
+        });
+      });
+    });
+    _save();
+  }
+
+  /* ── next step recommendations ── */
+  function recommendNextSteps(goal) {
+    var steps = [];
+    if (goal.status === STATUS.STUCK) {
+      steps.push({ text: 'Try rephrasing the problem from scratch', priority: 'high' });
+      steps.push({ text: 'Break the goal into smaller sub-tasks', priority: 'high' });
+      steps.push({ text: 'Ask for alternative approaches', priority: 'medium' });
+      if (goal.category === 'fix') {
+        steps.push({ text: 'Share the exact error message for targeted help', priority: 'high' });
+      }
+    } else if (goal.status === STATUS.ACTIVE || goal.status === STATUS.PROGRESSING) {
+      if (goal.progress < 30) {
+        steps.push({ text: 'Define specific success criteria', priority: 'medium' });
+        steps.push({ text: 'Outline the implementation steps', priority: 'medium' });
+      } else if (goal.progress < 70) {
+        steps.push({ text: 'Verify intermediate results before continuing', priority: 'medium' });
+        steps.push({ text: 'Check for edge cases in current approach', priority: 'low' });
+      } else {
+        steps.push({ text: 'Test the complete solution end-to-end', priority: 'high' });
+        steps.push({ text: 'Document what was done for future reference', priority: 'low' });
+      }
+    }
+    goal.nextSteps = steps;
+    return steps;
+  }
+
+  /* ── autonomous insights ── */
+  function generateInsights() {
+    var insights = [];
+    var active = _state.goals.filter(function(g) { return g.status === STATUS.ACTIVE || g.status === STATUS.PROGRESSING; });
+    var stuck = _state.goals.filter(function(g) { return g.status === STATUS.STUCK; });
+    var completed = _state.goals.filter(function(g) { return g.status === STATUS.COMPLETED; });
+
+    if (stuck.length > 0) {
+      insights.push({ type: 'warning', text: stuck.length + ' goal(s) appear stuck — consider trying a different approach' });
+    }
+    if (active.length > 3) {
+      insights.push({ type: 'info', text: 'Multiple active goals detected — focusing on one at a time may be more effective' });
+    }
+    if (completed.length > 0 && active.length > 0) {
+      var avgTime = completed.reduce(function(sum, g) { return sum + (g.updatedAt - g.createdAt); }, 0) / completed.length;
+      var oldActive = active.filter(function(g) { return (Date.now() - g.createdAt) > avgTime * 2; });
+      if (oldActive.length > 0) {
+        insights.push({ type: 'warning', text: oldActive.length + ' goal(s) taking much longer than average — may need to pivot' });
+      }
+    }
+    var categoryCount = {};
+    _state.goals.forEach(function(g) { categoryCount[g.category] = (categoryCount[g.category] || 0) + 1; });
+    var topCat = Object.keys(categoryCount).sort(function(a, b) { return categoryCount[b] - categoryCount[a]; })[0];
+    if (topCat && categoryCount[topCat] >= 3) {
+      insights.push({ type: 'insight', text: 'Most goals are "' + topCat + '" tasks — this session is focused on ' + topCat + 'ing' });
+    }
+
+    _state.insights = insights;
+    return insights;
+  }
+
+  /* ── similarity helper ── */
+  function _similarity(a, b) {
+    var setA = new Set(a.split(/\s+/));
+    var setB = new Set(b.split(/\s+/));
+    var intersection = 0;
+    setA.forEach(function(w) { if (setB.has(w)) intersection++; });
+    var union = setA.size + setB.size - intersection;
+    return union === 0 ? 0 : intersection / union;
+  }
+
+  /* ── analysis entry point ── */
+  function analyze(messages) {
+    if (!_config.enabled) return _state;
+    if (!messages) {
+      messages = _getMessages();
+    }
+
+    var newGoals = extractGoals(messages);
+    newGoals.forEach(function(g) { _state.goals.push(g); });
+    _state.sessionGoals = _state.goals.filter(function(g) { return g.status !== STATUS.ABANDONED; }).map(function(g) { return g.id; });
+
+    updateProgress(messages);
+    _state.goals.forEach(function(g) { recommendNextSteps(g); });
+    generateInsights();
+
+    _state.lastAnalysis = Date.now();
+    _save();
+    if (_visible) _render();
+    return _state;
+  }
+
+  function _getMessages() {
+    if (typeof ConversationManager !== 'undefined' && ConversationManager.getHistory) {
+      return ConversationManager.getHistory();
+    }
+    return [];
+  }
+
+  /* ── manual goal management ── */
+  function addGoal(text) {
+    var goal = _createGoal(text, 1.0, null);
+    _state.goals.push(goal);
+    _save();
+    if (_visible) _render();
+    return goal;
+  }
+
+  function completeGoal(id) {
+    var goal = _state.goals.find(function(g) { return g.id === id; });
+    if (goal) { goal.status = STATUS.COMPLETED; goal.progress = 100; goal.updatedAt = Date.now(); _save(); if (_visible) _render(); }
+  }
+
+  function abandonGoal(id) {
+    var goal = _state.goals.find(function(g) { return g.id === id; });
+    if (goal) { goal.status = STATUS.ABANDONED; goal.updatedAt = Date.now(); _save(); if (_visible) _render(); }
+  }
+
+  function removeGoal(id) {
+    _state.goals = _state.goals.filter(function(g) { return g.id !== id; });
+    _save();
+    if (_visible) _render();
+  }
+
+  /* ── UI ── */
+  function _injectStyles() {
+    if (document.getElementById('smart-goal-tracker-styles')) return;
+    var css = document.createElement('style');
+    css.id = 'smart-goal-tracker-styles';
+    css.textContent = [
+      '#goal-tracker-panel{position:fixed;top:0;right:0;width:420px;height:100%;background:var(--bg-primary,#1e1e2e);border-left:1px solid var(--border,#333);z-index:10200;display:flex;flex-direction:column;box-shadow:-4px 0 20px rgba(0,0,0,.3);font-family:system-ui,sans-serif;overflow:hidden;transition:transform .2s ease}',
+      '#goal-tracker-panel.hidden{transform:translateX(100%)}',
+      '.gt-header{padding:16px;border-bottom:1px solid var(--border,#333);display:flex;align-items:center;gap:10px}',
+      '.gt-header h2{margin:0;font-size:16px;color:var(--text-primary,#e0e0e0);flex:1}',
+      '.gt-close{background:none;border:none;color:var(--text-secondary,#888);font-size:20px;cursor:pointer}',
+      '.gt-body{flex:1;overflow-y:auto;padding:12px}',
+      '.gt-section{margin-bottom:16px}',
+      '.gt-section-title{font-size:12px;font-weight:600;text-transform:uppercase;color:var(--text-secondary,#888);margin-bottom:8px;letter-spacing:.5px}',
+      '.gt-goal-card{background:var(--bg-secondary,#2a2a3a);border-radius:8px;padding:12px;margin-bottom:8px;border-left:3px solid #666}',
+      '.gt-goal-card[data-status="active"]{border-left-color:#4fc3f7}',
+      '.gt-goal-card[data-status="progressing"]{border-left-color:#81c784}',
+      '.gt-goal-card[data-status="stuck"]{border-left-color:#ef5350}',
+      '.gt-goal-card[data-status="completed"]{border-left-color:#66bb6a;opacity:.7}',
+      '.gt-goal-card[data-status="abandoned"]{border-left-color:#757575;opacity:.5}',
+      '.gt-goal-text{font-size:13px;color:var(--text-primary,#e0e0e0);margin-bottom:6px}',
+      '.gt-goal-meta{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text-secondary,#888)}',
+      '.gt-progress-bar{flex:1;height:4px;background:var(--bg-primary,#1e1e2e);border-radius:2px;overflow:hidden}',
+      '.gt-progress-fill{height:100%;border-radius:2px;transition:width .3s ease}',
+      '.gt-progress-fill.active{background:#4fc3f7}',
+      '.gt-progress-fill.progressing{background:#81c784}',
+      '.gt-progress-fill.stuck{background:#ef5350}',
+      '.gt-progress-fill.completed{background:#66bb6a}',
+      '.gt-badge{display:inline-block;padding:2px 6px;border-radius:3px;font-size:10px;font-weight:600;text-transform:uppercase}',
+      '.gt-badge.active{background:rgba(79,195,247,.15);color:#4fc3f7}',
+      '.gt-badge.progressing{background:rgba(129,199,132,.15);color:#81c784}',
+      '.gt-badge.stuck{background:rgba(239,83,80,.15);color:#ef5350}',
+      '.gt-badge.completed{background:rgba(102,187,106,.15);color:#66bb6a}',
+      '.gt-insight{padding:8px 12px;border-radius:6px;font-size:12px;margin-bottom:6px}',
+      '.gt-insight.warning{background:rgba(255,167,38,.1);color:#ffa726;border-left:3px solid #ffa726}',
+      '.gt-insight.info{background:rgba(79,195,247,.1);color:#4fc3f7;border-left:3px solid #4fc3f7}',
+      '.gt-insight.insight{background:rgba(186,104,200,.1);color:#ba68c8;border-left:3px solid #ba68c8}',
+      '.gt-next-step{font-size:11px;color:var(--text-secondary,#888);padding:4px 8px;margin-top:4px}',
+      '.gt-next-step.high{color:#ef5350}',
+      '.gt-next-step.medium{color:#ffa726}',
+      '.gt-actions{display:flex;gap:4px;margin-top:6px}',
+      '.gt-actions button{background:none;border:1px solid var(--border,#444);border-radius:4px;padding:2px 8px;font-size:10px;color:var(--text-secondary,#888);cursor:pointer}',
+      '.gt-actions button:hover{background:var(--bg-primary,#1e1e2e);color:var(--text-primary,#e0e0e0)}',
+      '.gt-add-goal{width:100%;padding:8px;border:1px dashed var(--border,#444);border-radius:6px;background:none;color:var(--text-secondary,#888);cursor:pointer;font-size:12px}',
+      '.gt-add-goal:hover{border-color:var(--text-primary,#e0e0e0);color:var(--text-primary,#e0e0e0)}',
+      '.gt-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px}',
+      '.gt-stat{text-align:center;padding:8px;background:var(--bg-secondary,#2a2a3a);border-radius:6px}',
+      '.gt-stat-num{font-size:18px;font-weight:700;color:var(--text-primary,#e0e0e0)}',
+      '.gt-stat-label{font-size:10px;color:var(--text-secondary,#888);margin-top:2px}'
+    ].join('\n');
+    document.head.appendChild(css);
+  }
+
+  function _render() {
+    if (!_panelEl) return;
+    var body = _panelEl.querySelector('.gt-body');
+    if (!body) return;
+
+    var active = _state.goals.filter(function(g) { return g.status === STATUS.ACTIVE || g.status === STATUS.PROGRESSING; });
+    var stuck = _state.goals.filter(function(g) { return g.status === STATUS.STUCK; });
+    var completed = _state.goals.filter(function(g) { return g.status === STATUS.COMPLETED; });
+    var abandoned = _state.goals.filter(function(g) { return g.status === STATUS.ABANDONED; });
+
+    var html = '';
+    // stats
+    html += '<div class="gt-stats">';
+    html += '<div class="gt-stat"><div class="gt-stat-num">' + active.length + '</div><div class="gt-stat-label">Active</div></div>';
+    html += '<div class="gt-stat"><div class="gt-stat-num">' + stuck.length + '</div><div class="gt-stat-label">Stuck</div></div>';
+    html += '<div class="gt-stat"><div class="gt-stat-num">' + completed.length + '</div><div class="gt-stat-label">Done</div></div>';
+    html += '<div class="gt-stat"><div class="gt-stat-num">' + _state.goals.length + '</div><div class="gt-stat-label">Total</div></div>';
+    html += '</div>';
+
+    // insights
+    if (_state.insights.length > 0) {
+      html += '<div class="gt-section"><div class="gt-section-title">\uD83E\uDDE0 Autonomous Insights</div>';
+      _state.insights.forEach(function(ins) { html += '<div class="gt-insight ' + ins.type + '">' + ins.text + '</div>'; });
+      html += '</div>';
+    }
+
+    // stuck goals (priority)
+    if (stuck.length > 0) {
+      html += '<div class="gt-section"><div class="gt-section-title">\u26A0\uFE0F Stuck Goals</div>';
+      stuck.forEach(function(g) { html += _renderGoalCard(g); });
+      html += '</div>';
+    }
+
+    // active goals
+    if (active.length > 0) {
+      html += '<div class="gt-section"><div class="gt-section-title">\uD83C\uDFAF Active Goals</div>';
+      active.forEach(function(g) { html += _renderGoalCard(g); });
+      html += '</div>';
+    }
+
+    // completed goals
+    if (completed.length > 0) {
+      html += '<div class="gt-section"><div class="gt-section-title">\u2705 Completed</div>';
+      completed.slice(0, 5).forEach(function(g) { html += _renderGoalCard(g); });
+      html += '</div>';
+    }
+
+    // add goal button
+    html += '<button class="gt-add-goal" id="gt-add-goal-btn">+ Add a goal manually</button>';
+    body.innerHTML = html;
+
+    // bind actions
+    body.querySelectorAll('[data-goal-action]').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var action = btn.getAttribute('data-goal-action');
+        var id = btn.getAttribute('data-goal-id');
+        if (action === 'complete') completeGoal(id);
+        else if (action === 'abandon') abandonGoal(id);
+        else if (action === 'remove') removeGoal(id);
+      });
+    });
+
+    var addBtn = document.getElementById('gt-add-goal-btn');
+    if (addBtn) {
+      addBtn.addEventListener('click', function() {
+        var text = prompt('Enter your goal:');
+        if (text && text.trim()) addGoal(text.trim());
+      });
+    }
+  }
+
+  function _renderGoalCard(goal) {
+    var html = '<div class="gt-goal-card" data-status="' + goal.status + '">';
+    html += '<div class="gt-goal-text">' + _escHtml(goal.text) + '</div>';
+    html += '<div class="gt-goal-meta">';
+    html += '<span class="gt-badge ' + goal.status + '">' + goal.status + '</span>';
+    html += '<div class="gt-progress-bar"><div class="gt-progress-fill ' + goal.status + '" style="width:' + goal.progress + '%"></div></div>';
+    html += '<span>' + goal.progress + '%</span>';
+    html += '</div>';
+
+    // next steps for stuck/active
+    if (goal.nextSteps && goal.nextSteps.length > 0 && goal.status !== STATUS.COMPLETED) {
+      goal.nextSteps.slice(0, 2).forEach(function(step) {
+        html += '<div class="gt-next-step ' + step.priority + '">\u2192 ' + step.text + '</div>';
+      });
+    }
+
+    // action buttons
+    if (goal.status !== STATUS.COMPLETED && goal.status !== STATUS.ABANDONED) {
+      html += '<div class="gt-actions">';
+      html += '<button data-goal-action="complete" data-goal-id="' + goal.id + '">\u2713 Done</button>';
+      html += '<button data-goal-action="abandon" data-goal-id="' + goal.id + '">Skip</button>';
+      html += '</div>';
+    } else {
+      html += '<div class="gt-actions">';
+      html += '<button data-goal-action="remove" data-goal-id="' + goal.id + '">\u2715 Remove</button>';
+      html += '</div>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  function _escHtml(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+  /* ── panel show/hide ── */
+  function show() {
+    if (!_panelEl) _buildPanel();
+    _panelEl.classList.remove('hidden');
+    _visible = true;
+    analyze();
+  }
+
+  function hide() {
+    if (_panelEl) _panelEl.classList.add('hidden');
+    _visible = false;
+  }
+
+  function toggle() { _visible ? hide() : show(); }
+
+  function _buildPanel() {
+    _panelEl = document.createElement('div');
+    _panelEl.id = 'goal-tracker-panel';
+    _panelEl.className = 'hidden';
+    _panelEl.innerHTML = '<div class="gt-header"><h2>\uD83C\uDFAF Goal Tracker</h2><button class="gt-close" id="gt-close-btn">\u00D7</button></div><div class="gt-body"></div>';
+    document.body.appendChild(_panelEl);
+    document.getElementById('gt-close-btn').addEventListener('click', hide);
+  }
+
+  /* ── message observer ── */
+  function _onNewMessage() {
+    if (!_config.enabled) return;
+    analyze();
+  }
+
+  /* ── init ── */
+  function init() {
+    _loadConfig();
+    _load();
+    _injectStyles();
+
+    document.addEventListener('keydown', function(e) {
+      if (e.altKey && e.shiftKey && !e.ctrlKey && e.key === 'G') {
+        e.preventDefault();
+        toggle();
+      }
+    });
+
+    if (typeof KeyboardShortcuts !== 'undefined' && KeyboardShortcuts.register) {
+      KeyboardShortcuts.register('Alt+Shift+G', 'Goal Tracker', toggle);
+    }
+    if (typeof CommandPalette !== 'undefined' && CommandPalette.register) {
+      CommandPalette.register({ name: 'goals', description: 'Goal Tracker \u2014 autonomous goal extraction and progress tracking', icon: '\uD83C\uDFAF', action: toggle });
+    }
+    if (typeof SlashCommands !== 'undefined' && SlashCommands.register) {
+      SlashCommands.register('/goals', 'Open goal tracker dashboard', toggle);
+    }
+    if (typeof PanelRegistry !== 'undefined' && PanelRegistry.register) {
+      PanelRegistry.register('goal-tracker', { close: hide });
+    }
+
+    var chatOut = document.getElementById('chat-output');
+    if (chatOut) {
+      var _obs = new MutationObserver(function() {
+        if (!_config.enabled) return;
+        clearTimeout(_debounceTimer);
+        _debounceTimer = setTimeout(_onNewMessage, DEBOUNCE_MS);
+      });
+      _obs.observe(chatOut, { childList: true, subtree: true });
+    }
+
+    var toolbar = document.querySelector('.toolbar');
+    if (toolbar) {
+      var btn = document.createElement('button');
+      btn.id = 'goal-tracker-btn';
+      btn.className = 'btn-secondary';
+      btn.title = 'Goal Tracker \u2014 autonomous goal extraction and progress tracking (Alt+Shift+G)';
+      btn.textContent = '\uD83C\uDFAF';
+      btn.addEventListener('click', toggle);
+      toolbar.appendChild(btn);
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  return {
+    toggle: toggle,
+    show: show,
+    hide: hide,
+    analyze: analyze,
+    addGoal: addGoal,
+    completeGoal: completeGoal,
+    abandonGoal: abandonGoal,
+    removeGoal: removeGoal,
+    extractGoals: extractGoals,
+    updateProgress: updateProgress,
+    recommendNextSteps: recommendNextSteps,
+    generateInsights: generateInsights,
+    getState: function() { return JSON.parse(JSON.stringify(_state)); },
+    getGoals: function() { return _state.goals.slice(); },
+    getActiveGoals: function() { return _state.goals.filter(function(g) { return g.status === STATUS.ACTIVE || g.status === STATUS.PROGRESSING; }); },
+    getInsights: function() { return _state.insights.slice(); },
+    isEnabled: function() { return _config.enabled; },
+    setEnabled: function(v) { _config.enabled = !!v; _saveConfig(); },
+    STATUS: STATUS,
+    _extractGoals: extractGoals,
+    _updateProgress: updateProgress,
+    _similarity: _similarity,
+    _categorize: _categorize,
+    _createGoal: _createGoal,
+    _defaultState: _defaultState
+  };
+})();

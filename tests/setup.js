@@ -341,7 +341,8 @@ function loadApp() {
     'ConversationMemory',
     'SmartKnowledgeMap',
     'MoodTracker',
-    'SmartModelAdvisor'
+    'SmartModelAdvisor',
+    'SmartGoalTracker'
   ];
 
   for (const mod of modules) {
