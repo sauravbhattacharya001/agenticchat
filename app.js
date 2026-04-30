@@ -47942,3 +47942,775 @@ const SmartAdaptiveTone = (function () {
     _defaultState: _defaultState
   };
 })();
+
+/* ============================================================
+ * SmartCognitiveLoad — Autonomous Cognitive Load Monitor
+ *
+ * Tracks conversation complexity in real-time, detects overwhelm
+ * signals, and proactively suggests simplification strategies.
+ *
+ * 6 Complexity Dimensions:
+ *   - Topic Count (active distinct topics)
+ *   - Information Density (facts/data per message)
+ *   - Concept Depth (nesting/abstraction level)
+ *   - Vocabulary Complexity (rare words, avg word length)
+ *   - Context Switches (topic change frequency)
+ *   - Working Memory Load (open threads needing recall)
+ *
+ * 5 Overwhelm Signals:
+ *   - Compression (short responses after long AI replies)
+ *   - Confusion (re-asking about explained things)
+ *   - Abandonment (started but uncompleted topics)
+ *   - Delay (increasing response gaps)
+ *   - Explicit ("wait", "confused", "slow down")
+ *
+ * Load Zones: Flow (0-30), Learning (31-60), Strain (61-80), Overload (81-100)
+ *
+ * Keyboard shortcut: Alt+Shift+L
+ * ============================================================ */
+const SmartCognitiveLoad = (function () {
+  'use strict';
+
+  var STORAGE_KEY = 'smartCognitiveLoad';
+  var CONFIG_KEY = 'smartCognitiveLoadConfig';
+  var DEBOUNCE_MS = 600;
+  var MAX_SIGNALS = 200;
+  var MAX_HISTORY = 500;
+  var TOAST_COOLDOWN_MS = 300000; // 5 minutes
+  var _panelEl = null;
+  var _visible = false;
+  var _debounceTimer = null;
+  var _badgeEl = null;
+  var _lastToastTime = 0;
+  var _observer = null;
+
+  /* ── Zones ── */
+  var ZONES = {
+    FLOW: { name: 'Flow Zone', min: 0, max: 30, color: '#27ae60', emoji: '🟢', desc: 'Optimal — smooth processing' },
+    LEARNING: { name: 'Learning Zone', min: 31, max: 60, color: '#f39c12', emoji: '🟡', desc: 'Challenging but manageable' },
+    STRAIN: { name: 'Strain Zone', min: 61, max: 80, color: '#e67e22', emoji: '🟠', desc: 'Risk of overwhelm' },
+    OVERLOAD: { name: 'Overload Zone', min: 81, max: 100, color: '#e74c3c', emoji: '🔴', desc: 'Active overwhelm detected' }
+  };
+
+  /* ── Dimension definitions ── */
+  var DIMENSIONS = {
+    TOPIC_COUNT: 'topicCount',
+    INFO_DENSITY: 'infoDensity',
+    CONCEPT_DEPTH: 'conceptDepth',
+    VOCAB_COMPLEXITY: 'vocabComplexity',
+    CONTEXT_SWITCHES: 'contextSwitches',
+    WORKING_MEMORY: 'workingMemory'
+  };
+
+  var DIM_LABELS = {};
+  DIM_LABELS[DIMENSIONS.TOPIC_COUNT] = 'Topic Count';
+  DIM_LABELS[DIMENSIONS.INFO_DENSITY] = 'Info Density';
+  DIM_LABELS[DIMENSIONS.CONCEPT_DEPTH] = 'Concept Depth';
+  DIM_LABELS[DIMENSIONS.VOCAB_COMPLEXITY] = 'Vocabulary Complexity';
+  DIM_LABELS[DIMENSIONS.CONTEXT_SWITCHES] = 'Context Switches';
+  DIM_LABELS[DIMENSIONS.WORKING_MEMORY] = 'Working Memory';
+
+  var DIM_COLORS = {};
+  DIM_COLORS[DIMENSIONS.TOPIC_COUNT] = '#5dade2';
+  DIM_COLORS[DIMENSIONS.INFO_DENSITY] = '#58d68d';
+  DIM_COLORS[DIMENSIONS.CONCEPT_DEPTH] = '#af7ac5';
+  DIM_COLORS[DIMENSIONS.VOCAB_COMPLEXITY] = '#ec7063';
+  DIM_COLORS[DIMENSIONS.CONTEXT_SWITCHES] = '#f0b27a';
+  DIM_COLORS[DIMENSIONS.WORKING_MEMORY] = '#85c1e9';
+
+  /* ── Signal types ── */
+  var SIGNAL_TYPES = {
+    COMPRESSION: { id: 'compression', label: 'Compression', severity: 'medium', desc: 'Short response after long AI reply' },
+    CONFUSION: { id: 'confusion', label: 'Confusion', severity: 'high', desc: 'Re-asking about explained concepts' },
+    ABANDONMENT: { id: 'abandonment', label: 'Topic Abandonment', severity: 'medium', desc: 'Topic started but never completed' },
+    DELAY: { id: 'delay', label: 'Processing Delay', severity: 'low', desc: 'Increasing response gaps' },
+    EXPLICIT: { id: 'explicit', label: 'Explicit Overwhelm', severity: 'high', desc: 'User explicitly signals confusion' }
+  };
+
+  /* ── Recommendation types ── */
+  var RECOMMENDATION_TYPES = {
+    RECAP: { id: 'recap', label: 'Suggest Recap', icon: '📋', prompt: 'Can you give me a brief recap of what we\'ve discussed so far?' },
+    CHUNK: { id: 'chunk', label: 'Chunk This', icon: '🧩', prompt: 'Can you break that down into smaller pieces? One thing at a time.' },
+    SIMPLIFY: { id: 'simplify', label: 'Simplify', icon: '✨', prompt: 'Can you explain that in simpler terms?' },
+    PAUSE: { id: 'pause', label: 'Pause & Digest', icon: '⏸️', prompt: null },
+    CLOSE_TOPIC: { id: 'closeTopic', label: 'Close Topic', icon: '✅', prompt: 'Let\'s wrap up this topic before moving on.' },
+    VISUAL_AID: { id: 'visualAid', label: 'Visual Aid', icon: '📊', prompt: 'Can you show that as a diagram, table, or example instead?' }
+  };
+
+  /* ── Confusion keywords ── */
+  var CONFUSION_PHRASES = ['wait what', 'i don\'t understand', 'confused', 'what do you mean', 'can you explain again', 'i\'m lost', 'slow down', 'hold on', 'too fast', 'what?', 'huh?', 'come again', 'not following', 'say that again', 'you lost me'];
+
+  /* ── Abstract concept indicators ── */
+  var ABSTRACT_WORDS = ['paradigm', 'framework', 'architecture', 'abstraction', 'ontology', 'epistemology', 'heuristic', 'polymorphism', 'encapsulation', 'recursion', 'metacognition', 'emergence', 'entropy', 'determinism', 'isomorphism', 'topology', 'semantics', 'inference', 'axiom', 'theorem', 'corollary', 'hypothesis', 'methodology', 'taxonomy', 'orthogonal'];
+
+  /* ── Common words (for vocab complexity) ── */
+  var COMMON_WORDS_SET = new Set(['the', 'be', 'to', 'of', 'and', 'a', 'in', 'that', 'have', 'i', 'it', 'for', 'not', 'on', 'with', 'he', 'as', 'you', 'do', 'at', 'this', 'but', 'his', 'by', 'from', 'they', 'we', 'say', 'her', 'she', 'or', 'an', 'will', 'my', 'one', 'all', 'would', 'there', 'their', 'what', 'so', 'up', 'out', 'if', 'about', 'who', 'get', 'which', 'go', 'me', 'when', 'make', 'can', 'like', 'time', 'no', 'just', 'him', 'know', 'take', 'people', 'into', 'year', 'your', 'good', 'some', 'could', 'them', 'see', 'other', 'than', 'then', 'now', 'look', 'only', 'come', 'its', 'over', 'think', 'also', 'back', 'after', 'use', 'two', 'how', 'our', 'work', 'first', 'well', 'way', 'even', 'new', 'want', 'because', 'any', 'these', 'give', 'day', 'most', 'us', 'is', 'are', 'was', 'were', 'been', 'has', 'had', 'did', 'does', 'am']);
+
+  /* ── Default state ── */
+  function _defaultState() {
+    return {
+      dimensions: { topicCount: 0, infoDensity: 0, conceptDepth: 0, vocabComplexity: 0, contextSwitches: 0, workingMemory: 0 },
+      loadScore: 0,
+      zone: 'FLOW',
+      signals: [],
+      recommendations: [],
+      history: [],
+      topics: [],
+      lastAiLength: 0,
+      lastUserLength: 0,
+      messageCount: 0,
+      lastMessageTime: null,
+      openQuestions: [],
+      previousTopics: []
+    };
+  }
+
+  function _defaultConfig() {
+    return { enabled: true, showBadge: true, toastAlerts: true, autoRecommend: true, sensitivityMultiplier: 1.0 };
+  }
+
+  var _state = _defaultState();
+  var _config = _defaultConfig();
+
+  /* ── Storage ── */
+  function _save() {
+    var data = JSON.stringify(_state);
+    if (typeof SafeStorage !== 'undefined' && typeof SafeStorage.set === 'function') {
+      SafeStorage.set(STORAGE_KEY, data);
+    } else {
+      try { localStorage.setItem(STORAGE_KEY, data); } catch (e) { /* ignore */ }
+    }
+  }
+
+  function _load() {
+    var raw;
+    if (typeof SafeStorage !== 'undefined' && typeof SafeStorage.get === 'function') {
+      raw = SafeStorage.get(STORAGE_KEY);
+    } else {
+      try { raw = localStorage.getItem(STORAGE_KEY); } catch (e) { /* ignore */ }
+    }
+    if (raw) {
+      try {
+        var parsed = JSON.parse(raw);
+        _state = Object.assign(_defaultState(), parsed);
+      } catch (e) { _state = _defaultState(); }
+    }
+  }
+
+  function _saveConfig() {
+    var data = JSON.stringify(_config);
+    if (typeof SafeStorage !== 'undefined' && typeof SafeStorage.set === 'function') {
+      SafeStorage.set(CONFIG_KEY, data);
+    } else {
+      try { localStorage.setItem(CONFIG_KEY, data); } catch (e) { /* ignore */ }
+    }
+  }
+
+  function _loadConfig() {
+    var raw;
+    if (typeof SafeStorage !== 'undefined' && typeof SafeStorage.get === 'function') {
+      raw = SafeStorage.get(CONFIG_KEY);
+    } else {
+      try { raw = localStorage.getItem(CONFIG_KEY); } catch (e) { /* ignore */ }
+    }
+    if (raw) {
+      try { _config = Object.assign(_defaultConfig(), JSON.parse(raw)); } catch (e) { _config = _defaultConfig(); }
+    }
+  }
+
+  /* ── Text Analysis Utilities ── */
+  function _tokenize(text) {
+    if (!text) return [];
+    return text.toLowerCase().replace(/[^\w\s'-]/g, ' ').split(/\s+/).filter(function (w) { return w.length > 0; });
+  }
+
+  function _sentences(text) {
+    if (!text) return [];
+    return text.split(/[.!?]+/).filter(function (s) { return s.trim().length > 0; });
+  }
+
+  function _countFacts(text) {
+    // Heuristic: count numbers, proper nouns, URLs, code blocks, and list items
+    var facts = 0;
+    facts += (text.match(/\d+(\.\d+)?/g) || []).length;
+    facts += (text.match(/https?:\/\/\S+/g) || []).length;
+    facts += (text.match(/```[\s\S]*?```/g) || []).length * 3;
+    facts += (text.match(/^[\s]*[-*•]\s/gm) || []).length;
+    facts += (text.match(/\b[A-Z][a-z]+(?:\s[A-Z][a-z]+)+\b/g) || []).length;
+    return facts;
+  }
+
+  function _extractTopics(text) {
+    // Simple noun-phrase extraction using capitalized phrases and repeated nouns
+    var words = _tokenize(text);
+    var freq = {};
+    words.forEach(function (w) {
+      if (w.length > 4 && !COMMON_WORDS_SET.has(w)) {
+        freq[w] = (freq[w] || 0) + 1;
+      }
+    });
+    return Object.keys(freq).filter(function (k) { return freq[k] >= 1; }).sort(function (a, b) { return freq[b] - freq[a]; }).slice(0, 10);
+  }
+
+  /* ── Dimension Analyzers ── */
+  function analyzeTopicCount(text, state) {
+    var newTopics = _extractTopics(text);
+    var allTopics = (state.topics || []).concat(newTopics);
+    var unique = Array.from(new Set(allTopics));
+    // Normalize: 1 topic = 0, 10+ topics = 1.0
+    return Math.min(1, (unique.length - 1) / 9);
+  }
+
+  function analyzeInfoDensity(text) {
+    var sentences = _sentences(text);
+    if (sentences.length === 0) return 0;
+    var facts = _countFacts(text);
+    var density = facts / sentences.length;
+    // Normalize: 0 facts/sentence = 0, 5+ = 1.0
+    return Math.min(1, density / 5);
+  }
+
+  function analyzeConceptDepth(text) {
+    var words = _tokenize(text);
+    var abstractCount = words.filter(function (w) { return ABSTRACT_WORDS.indexOf(w) !== -1; }).length;
+    // Check for nested structures (indentation, sub-lists, parenthetical depth)
+    var maxParenDepth = 0;
+    var depth = 0;
+    for (var i = 0; i < text.length; i++) {
+      if (text[i] === '(' || text[i] === '[' || text[i] === '{') { depth++; maxParenDepth = Math.max(maxParenDepth, depth); }
+      else if (text[i] === ')' || text[i] === ']' || text[i] === '}') { depth = Math.max(0, depth - 1); }
+    }
+    var score = (abstractCount / Math.max(1, words.length)) * 10 + maxParenDepth * 0.15;
+    return Math.min(1, score);
+  }
+
+  function analyzeVocabComplexity(text) {
+    var words = _tokenize(text);
+    if (words.length === 0) return 0;
+    var avgLen = words.reduce(function (s, w) { return s + w.length; }, 0) / words.length;
+    var rareCount = words.filter(function (w) { return w.length > 3 && !COMMON_WORDS_SET.has(w); }).length;
+    var rareRatio = rareCount / words.length;
+    // Normalize: avgLen 4=0, 8+=1; rareRatio 0=0, 0.7+=1; blend
+    var lenScore = Math.min(1, Math.max(0, (avgLen - 4) / 4));
+    var rareScore = Math.min(1, rareRatio / 0.7);
+    return lenScore * 0.4 + rareScore * 0.6;
+  }
+
+  function analyzeContextSwitches(text, state) {
+    var currentTopics = _extractTopics(text);
+    var prevTopics = state.previousTopics || [];
+    if (prevTopics.length === 0) return 0;
+    // Jaccard distance between current and previous topic sets
+    var setA = new Set(currentTopics);
+    var setB = new Set(prevTopics);
+    var intersection = 0;
+    setA.forEach(function (t) { if (setB.has(t)) intersection++; });
+    var union = new Set([].concat(currentTopics, prevTopics)).size;
+    if (union === 0) return 0;
+    var similarity = intersection / union;
+    return 1 - similarity; // High distance = high context switch
+  }
+
+  function analyzeWorkingMemory(text, state) {
+    // Count open questions, unresolved references, active topics
+    var questions = (text.match(/\?/g) || []).length;
+    var openQ = (state.openQuestions || []).length + questions;
+    var activeTopics = (state.topics || []).length;
+    // Normalize: (openQuestions + activeTopics/2) / 10
+    var load = (openQ + activeTopics * 0.5) / 10;
+    return Math.min(1, load);
+  }
+
+  /* ── Analyze all dimensions ── */
+  function analyzeDimensions(text) {
+    var dims = {};
+    dims[DIMENSIONS.TOPIC_COUNT] = analyzeTopicCount(text, _state);
+    dims[DIMENSIONS.INFO_DENSITY] = analyzeInfoDensity(text);
+    dims[DIMENSIONS.CONCEPT_DEPTH] = analyzeConceptDepth(text);
+    dims[DIMENSIONS.VOCAB_COMPLEXITY] = analyzeVocabComplexity(text);
+    dims[DIMENSIONS.CONTEXT_SWITCHES] = analyzeContextSwitches(text, _state);
+    dims[DIMENSIONS.WORKING_MEMORY] = analyzeWorkingMemory(text, _state);
+    return dims;
+  }
+
+  /* ── Compute load score ── */
+  function computeLoadScore(dims) {
+    var weights = { topicCount: 0.15, infoDensity: 0.2, conceptDepth: 0.2, vocabComplexity: 0.15, contextSwitches: 0.15, workingMemory: 0.15 };
+    var score = 0;
+    Object.keys(weights).forEach(function (k) {
+      score += (dims[k] || 0) * weights[k];
+    });
+    return Math.round(score * 100 * (_config.sensitivityMultiplier || 1));
+  }
+
+  /* ── Classify zone ── */
+  function classifyZone(score) {
+    if (score <= 30) return 'FLOW';
+    if (score <= 60) return 'LEARNING';
+    if (score <= 80) return 'STRAIN';
+    return 'OVERLOAD';
+  }
+
+  /* ── Overwhelm Signal Detection ── */
+  function detectSignals(userText, aiText) {
+    var signals = [];
+    var now = Date.now();
+
+    // Compression: user response much shorter than AI message
+    if (aiText && userText) {
+      var aiLen = aiText.length;
+      var userLen = userText.length;
+      if (aiLen > 500 && userLen < aiLen * 0.1) {
+        signals.push({ type: SIGNAL_TYPES.COMPRESSION.id, severity: 'medium', ts: now, detail: 'Response was ' + Math.round(userLen / aiLen * 100) + '% of AI message length' });
+      }
+    }
+
+    // Confusion: explicit confusion phrases
+    if (userText) {
+      var lower = userText.toLowerCase();
+      var confused = CONFUSION_PHRASES.some(function (p) { return lower.indexOf(p) !== -1; });
+      if (confused) {
+        signals.push({ type: SIGNAL_TYPES.EXPLICIT.id, severity: 'high', ts: now, detail: 'User expressed confusion or asked to slow down' });
+      }
+
+      // Short confused questions
+      if (userText.length < 20 && (lower.indexOf('?') !== -1 || lower.indexOf('what') !== -1)) {
+        var words = _tokenize(userText);
+        if (words.length <= 5) {
+          signals.push({ type: SIGNAL_TYPES.CONFUSION.id, severity: 'medium', ts: now, detail: 'Very short clarification question' });
+        }
+      }
+    }
+
+    // Delay detection (gap between messages)
+    if (_state.lastMessageTime) {
+      var gap = now - _state.lastMessageTime;
+      if (gap > 120000 && _state.messageCount > 3) { // > 2 min gap after active conversation
+        signals.push({ type: SIGNAL_TYPES.DELAY.id, severity: 'low', ts: now, detail: 'Gap of ' + Math.round(gap / 60000) + ' minutes after active exchange' });
+      }
+    }
+
+    // Topic abandonment: topics that appeared earlier but not in recent messages
+    if (_state.topics && _state.topics.length > 5 && userText) {
+      var current = new Set(_extractTopics(userText));
+      var abandoned = _state.topics.filter(function (t) { return !current.has(t); });
+      if (abandoned.length > 4) {
+        signals.push({ type: SIGNAL_TYPES.ABANDONMENT.id, severity: 'medium', ts: now, detail: abandoned.length + ' topics started but not revisited' });
+      }
+    }
+
+    return signals;
+  }
+
+  /* ── Generate recommendations ── */
+  function generateRecommendations(dims, score, signals) {
+    var recs = [];
+    var zone = classifyZone(score);
+
+    if (dims[DIMENSIONS.WORKING_MEMORY] > 0.6) {
+      recs.push(Object.assign({}, RECOMMENDATION_TYPES.RECAP, { reason: 'Working memory load is high (' + Math.round(dims[DIMENSIONS.WORKING_MEMORY] * 100) + '%)' }));
+    }
+    if (dims[DIMENSIONS.INFO_DENSITY] > 0.7) {
+      recs.push(Object.assign({}, RECOMMENDATION_TYPES.CHUNK, { reason: 'Information density spike detected' }));
+    }
+    if (dims[DIMENSIONS.VOCAB_COMPLEXITY] > 0.7) {
+      recs.push(Object.assign({}, RECOMMENDATION_TYPES.SIMPLIFY, { reason: 'Vocabulary complexity is high (' + Math.round(dims[DIMENSIONS.VOCAB_COMPLEXITY] * 100) + '%)' }));
+    }
+    if (dims[DIMENSIONS.CONCEPT_DEPTH] > 0.6 && dims[DIMENSIONS.VOCAB_COMPLEXITY] > 0.5) {
+      recs.push(Object.assign({}, RECOMMENDATION_TYPES.VISUAL_AID, { reason: 'Abstract concepts dominate — a visual could help' }));
+    }
+
+    var highSeverityCount = signals.filter(function (s) { return s.severity === 'high'; }).length;
+    if (highSeverityCount >= 2 || zone === 'OVERLOAD') {
+      recs.push(Object.assign({}, RECOMMENDATION_TYPES.PAUSE, { reason: 'Multiple overwhelm signals detected' }));
+    }
+
+    if (dims[DIMENSIONS.TOPIC_COUNT] > 0.6 && signals.some(function (s) { return s.type === 'abandonment'; })) {
+      recs.push(Object.assign({}, RECOMMENDATION_TYPES.CLOSE_TOPIC, { reason: 'Several topics are open and unresolved' }));
+    }
+
+    return recs;
+  }
+
+  /* ── Process a new message pair ── */
+  function processMessage(userText, aiText) {
+    if (!_config.enabled) return null;
+
+    var combined = (userText || '') + ' ' + (aiText || '');
+    var dims = analyzeDimensions(combined);
+    var score = computeLoadScore(dims);
+    var zone = classifyZone(score);
+    var signals = detectSignals(userText, aiText);
+    var recs = _config.autoRecommend ? generateRecommendations(dims, score, signals) : [];
+
+    // Update state
+    _state.dimensions = dims;
+    _state.loadScore = score;
+    _state.zone = zone;
+    _state.signals = _state.signals.concat(signals).slice(-MAX_SIGNALS);
+    _state.recommendations = recs;
+    _state.history.push({ ts: Date.now(), score: score, zone: zone });
+    if (_state.history.length > MAX_HISTORY) _state.history = _state.history.slice(-MAX_HISTORY);
+    _state.messageCount++;
+    _state.lastMessageTime = Date.now();
+    _state.lastAiLength = (aiText || '').length;
+    _state.lastUserLength = (userText || '').length;
+
+    // Update topics
+    var newTopics = _extractTopics(combined);
+    _state.previousTopics = _state.topics || [];
+    _state.topics = Array.from(new Set((_state.topics || []).concat(newTopics))).slice(-30);
+
+    // Track open questions
+    var qs = (userText || '').match(/\?/g) || [];
+    _state.openQuestions = (_state.openQuestions || []).concat(qs.map(function () { return Date.now(); })).slice(-20);
+
+    _save();
+    _updateBadge();
+    _maybeToast(zone, score);
+    if (_visible) _renderPanel();
+
+    return { dims: dims, score: score, zone: zone, signals: signals, recommendations: recs };
+  }
+
+  /* ── Toast notifications ── */
+  function _maybeToast(zone, score) {
+    if (!_config.toastAlerts) return;
+    if (zone !== 'STRAIN' && zone !== 'OVERLOAD') return;
+    var now = Date.now();
+    if (now - _lastToastTime < TOAST_COOLDOWN_MS) return;
+    _lastToastTime = now;
+    _showToast(zone, score);
+  }
+
+  function _showToast(zone, score) {
+    var existing = document.getElementById('cogload-toast');
+    if (existing) existing.remove();
+    var z = ZONES[zone];
+    var el = document.createElement('div');
+    el.id = 'cogload-toast';
+    el.style.cssText = 'position:fixed;bottom:80px;right:20px;z-index:10200;background:#1a1a2e;border:1px solid ' + z.color + ';border-radius:10px;padding:12px 18px;color:#e0e0e0;font-size:13px;box-shadow:0 4px 20px rgba(0,0,0,0.4);animation:cogload-fadein 0.3s ease;max-width:280px;';
+    el.innerHTML = '<div style="font-weight:600;margin-bottom:4px;">' + z.emoji + ' Cognitive Load: ' + score + '/100</div><div style="font-size:11px;opacity:0.8;">' + z.desc + '</div>';
+    el.addEventListener('click', function () { el.remove(); toggle(); });
+    document.body.appendChild(el);
+    setTimeout(function () { if (el.parentNode) el.remove(); }, 6000);
+  }
+
+  /* ── Badge ── */
+  function _createBadge() {
+    if (_badgeEl) return;
+    _badgeEl = document.createElement('div');
+    _badgeEl.id = 'cogload-badge';
+    _badgeEl.style.cssText = 'position:fixed;bottom:20px;right:80px;z-index:10050;width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.3);transition:all 0.3s ease;user-select:none;';
+    _badgeEl.title = 'Cognitive Load Monitor (Alt+Shift+L)';
+    _badgeEl.addEventListener('click', toggle);
+    document.body.appendChild(_badgeEl);
+    _updateBadge();
+  }
+
+  function _updateBadge() {
+    if (!_badgeEl || !_config.showBadge) return;
+    var score = _state.loadScore || 0;
+    var z = ZONES[_state.zone || 'FLOW'];
+    _badgeEl.style.background = z.color;
+    _badgeEl.style.color = '#fff';
+    _badgeEl.textContent = score;
+    _badgeEl.style.display = _config.showBadge ? 'flex' : 'none';
+  }
+
+  /* ── Panel UI ── */
+  function _createPanel() {
+    if (_panelEl) return;
+    _panelEl = document.createElement('div');
+    _panelEl.id = 'cogload-panel';
+    _panelEl.style.cssText = 'position:fixed;top:60px;right:20px;width:420px;max-height:calc(100vh - 100px);background:#1a1a2e;border:1px solid #2d2d44;border-radius:12px;z-index:10100;color:#e0e0e0;font-family:-apple-system,BlinkMacSystemFont,sans-serif;font-size:13px;box-shadow:0 8px 32px rgba(0,0,0,0.5);overflow:hidden;display:none;flex-direction:column;';
+    document.body.appendChild(_panelEl);
+  }
+
+  function _renderPanel() {
+    if (!_panelEl) return;
+    var z = ZONES[_state.zone || 'FLOW'];
+    var score = _state.loadScore || 0;
+    var dims = _state.dimensions || {};
+    var signals = _state.signals || [];
+    var recs = _state.recommendations || [];
+    var history = _state.history || [];
+
+    var html = '';
+    // Header
+    html += '<div style="padding:14px 18px;border-bottom:1px solid #2d2d44;display:flex;align-items:center;justify-content:space-between;">';
+    html += '<div style="font-size:15px;font-weight:600;">🧠 Cognitive Load Monitor</div>';
+    html += '<button id="cogload-close" style="background:none;border:none;color:#888;font-size:18px;cursor:pointer;">✕</button>';
+    html += '</div>';
+
+    // Tabs
+    html += '<div style="display:flex;border-bottom:1px solid #2d2d44;" id="cogload-tabs">';
+    var tabs = ['Dashboard', 'Signals', 'Recommendations', 'History'];
+    var activeTab = _panelEl._activeTab || 0;
+    tabs.forEach(function (t, i) {
+      var active = i === activeTab;
+      html += '<div class="cogload-tab" data-tab="' + i + '" style="flex:1;text-align:center;padding:10px 4px;cursor:pointer;font-size:12px;border-bottom:2px solid ' + (active ? '#5dade2' : 'transparent') + ';color:' + (active ? '#5dade2' : '#888') + ';transition:all 0.2s;">' + t + '</div>';
+    });
+    html += '</div>';
+
+    // Content
+    html += '<div style="padding:16px 18px;overflow-y:auto;max-height:calc(100vh - 260px);" id="cogload-content">';
+
+    if (activeTab === 0) {
+      // Dashboard - Gauge + Dimensions
+      html += _renderGauge(score, z);
+      html += '<div style="margin-top:16px;">';
+      Object.keys(DIMENSIONS).forEach(function (k) {
+        var dimKey = DIMENSIONS[k];
+        var val = Math.round((dims[dimKey] || 0) * 100);
+        var color = DIM_COLORS[dimKey];
+        html += '<div style="margin-bottom:8px;">';
+        html += '<div style="display:flex;justify-content:space-between;margin-bottom:2px;"><span style="font-size:11px;">' + DIM_LABELS[dimKey] + '</span><span style="font-size:11px;color:' + color + ';">' + val + '%</span></div>';
+        html += '<div style="height:6px;background:#2d2d44;border-radius:3px;overflow:hidden;"><div style="height:100%;width:' + val + '%;background:' + color + ';border-radius:3px;transition:width 0.4s;"></div></div>';
+        html += '</div>';
+      });
+      html += '</div>';
+    } else if (activeTab === 1) {
+      // Signals timeline
+      if (signals.length === 0) {
+        html += '<div style="text-align:center;color:#666;padding:30px 0;">No overwhelm signals detected yet</div>';
+      } else {
+        var recent = signals.slice(-20).reverse();
+        recent.forEach(function (s) {
+          var sevColor = s.severity === 'high' ? '#e74c3c' : s.severity === 'medium' ? '#f39c12' : '#27ae60';
+          var timeStr = new Date(s.ts).toLocaleTimeString();
+          html += '<div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid #2d2d44;">';
+          html += '<div style="width:8px;height:8px;border-radius:50%;background:' + sevColor + ';margin-top:4px;flex-shrink:0;"></div>';
+          html += '<div style="flex:1;"><div style="font-size:12px;font-weight:500;">' + (SIGNAL_TYPES[s.type.toUpperCase()] || { label: s.type }).label + '</div>';
+          html += '<div style="font-size:11px;color:#888;">' + (s.detail || '') + '</div>';
+          html += '<div style="font-size:10px;color:#555;margin-top:2px;">' + timeStr + '</div></div></div>';
+        });
+      }
+    } else if (activeTab === 2) {
+      // Recommendations
+      if (recs.length === 0) {
+        html += '<div style="text-align:center;color:#666;padding:30px 0;">No recommendations — load is manageable 👍</div>';
+      } else {
+        recs.forEach(function (r) {
+          html += '<div class="cogload-rec" data-prompt="' + _escapeAttr(r.prompt || '') + '" style="background:#2d2d44;border-radius:8px;padding:12px;margin-bottom:8px;cursor:' + (r.prompt ? 'pointer' : 'default') + ';transition:background 0.2s;">';
+          html += '<div style="font-size:13px;font-weight:500;">' + (r.icon || '') + ' ' + r.label + '</div>';
+          html += '<div style="font-size:11px;color:#888;margin-top:4px;">' + (r.reason || '') + '</div>';
+          if (r.prompt) html += '<div style="font-size:10px;color:#5dade2;margin-top:4px;">Click to insert prompt →</div>';
+          html += '</div>';
+        });
+      }
+    } else if (activeTab === 3) {
+      // History sparkline
+      if (history.length < 2) {
+        html += '<div style="text-align:center;color:#666;padding:30px 0;">Not enough data yet — keep chatting</div>';
+      } else {
+        html += _renderSparkline(history);
+        // Session averages
+        var avg = Math.round(history.reduce(function (s, h) { return s + h.score; }, 0) / history.length);
+        var maxScore = Math.max.apply(null, history.map(function (h) { return h.score; }));
+        var minScore = Math.min.apply(null, history.map(function (h) { return h.score; }));
+        html += '<div style="margin-top:16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">';
+        html += '<div style="text-align:center;background:#2d2d44;border-radius:8px;padding:12px;"><div style="font-size:18px;font-weight:700;">' + avg + '</div><div style="font-size:10px;color:#888;">Average</div></div>';
+        html += '<div style="text-align:center;background:#2d2d44;border-radius:8px;padding:12px;"><div style="font-size:18px;font-weight:700;">' + maxScore + '</div><div style="font-size:10px;color:#888;">Peak</div></div>';
+        html += '<div style="text-align:center;background:#2d2d44;border-radius:8px;padding:12px;"><div style="font-size:18px;font-weight:700;">' + minScore + '</div><div style="font-size:10px;color:#888;">Minimum</div></div>';
+        html += '</div>';
+        html += '<div style="margin-top:12px;font-size:11px;color:#888;">Total messages analyzed: ' + _state.messageCount + '</div>';
+      }
+    }
+
+    html += '</div>';
+    _panelEl.innerHTML = html;
+
+    // Event listeners
+    var closeBtn = _panelEl.querySelector('#cogload-close');
+    if (closeBtn) closeBtn.addEventListener('click', hide);
+
+    var tabEls = _panelEl.querySelectorAll('.cogload-tab');
+    tabEls.forEach(function (t) {
+      t.addEventListener('click', function () {
+        _panelEl._activeTab = parseInt(t.getAttribute('data-tab'));
+        _renderPanel();
+      });
+    });
+
+    var recEls = _panelEl.querySelectorAll('.cogload-rec[data-prompt]');
+    recEls.forEach(function (r) {
+      r.addEventListener('click', function () {
+        var prompt = r.getAttribute('data-prompt');
+        if (prompt) _insertPrompt(prompt);
+      });
+    });
+  }
+
+  function _renderGauge(score, zone) {
+    var angle = (score / 100) * 180;
+    var rad = (angle - 90) * (Math.PI / 180);
+    var r = 60;
+    var cx = 80;
+    var cy = 75;
+    var x = cx + r * Math.cos(rad);
+    var y = cy + r * Math.sin(rad);
+    var largeArc = angle > 90 ? 1 : 0;
+
+    var svg = '<svg width="160" height="100" style="display:block;margin:0 auto;">';
+    svg += '<path d="M 20 75 A 60 60 0 0 1 140 75" fill="none" stroke="#2d2d44" stroke-width="10" stroke-linecap="round"/>';
+    if (score > 0) {
+      svg += '<path d="M 20 75 A 60 60 0 ' + largeArc + ' 1 ' + x.toFixed(1) + ' ' + (y.toFixed(1)) + '" fill="none" stroke="' + zone.color + '" stroke-width="10" stroke-linecap="round"/>';
+    }
+    svg += '<text x="80" y="65" text-anchor="middle" font-size="22" font-weight="700" fill="' + zone.color + '">' + score + '</text>';
+    svg += '<text x="80" y="82" text-anchor="middle" font-size="10" fill="#888">' + zone.name + '</text>';
+    svg += '</svg>';
+
+    return '<div style="text-align:center;margin-bottom:8px;">' + svg + '<div style="font-size:11px;color:#888;">' + zone.emoji + ' ' + zone.desc + '</div></div>';
+  }
+
+  function _renderSparkline(history) {
+    var w = 380;
+    var h = 80;
+    var points = history.slice(-50);
+    var step = w / Math.max(1, points.length - 1);
+
+    var svg = '<svg width="' + w + '" height="' + h + '" style="display:block;margin:0 auto;">';
+    // Zone backgrounds
+    svg += '<rect x="0" y="0" width="' + w + '" height="' + (h * 0.2) + '" fill="rgba(231,76,60,0.1)"/>';
+    svg += '<rect x="0" y="' + (h * 0.2) + '" width="' + w + '" height="' + (h * 0.2) + '" fill="rgba(230,126,34,0.1)"/>';
+    svg += '<rect x="0" y="' + (h * 0.4) + '" width="' + w + '" height="' + (h * 0.3) + '" fill="rgba(243,156,18,0.05)"/>';
+    svg += '<rect x="0" y="' + (h * 0.7) + '" width="' + w + '" height="' + (h * 0.3) + '" fill="rgba(39,174,96,0.05)"/>';
+
+    // Line
+    var pathD = '';
+    points.forEach(function (p, i) {
+      var x = i * step;
+      var y = h - (p.score / 100) * h;
+      pathD += (i === 0 ? 'M' : 'L') + ' ' + x.toFixed(1) + ' ' + y.toFixed(1);
+    });
+    svg += '<path d="' + pathD + '" fill="none" stroke="#5dade2" stroke-width="2"/>';
+    svg += '</svg>';
+    return svg;
+  }
+
+  function _escapeAttr(str) {
+    return str.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function _insertPrompt(text) {
+    var input = document.getElementById('user-input') || document.querySelector('textarea');
+    if (input) {
+      input.value = text;
+      input.focus();
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  }
+
+  /* ── Panel visibility ── */
+  function show() { if (!_panelEl) _createPanel(); _panelEl.style.display = 'flex'; _visible = true; _renderPanel(); }
+  function hide() { if (_panelEl) _panelEl.style.display = 'none'; _visible = false; }
+  function toggle() { _visible ? hide() : show(); }
+
+  /* ── Message observer ── */
+  function _onNewMessage() {
+    var chatOut = document.getElementById('chat-output') || document.querySelector('.chat-messages');
+    if (!chatOut) return;
+    var messages = chatOut.querySelectorAll('.message, [class*="message"]');
+    if (messages.length < 2) return;
+    var last = messages[messages.length - 1];
+    var prev = messages[messages.length - 2];
+    var aiText = last ? (last.textContent || '').trim() : '';
+    var userText = prev ? (prev.textContent || '').trim() : '';
+    // Determine which is user vs AI based on class
+    if (last.classList.contains('user-message') || last.classList.contains('user')) {
+      userText = aiText;
+      aiText = '';
+    }
+    processMessage(userText, aiText);
+  }
+
+  /* ── Inject CSS animation ── */
+  function _injectStyles() {
+    var style = document.createElement('style');
+    style.textContent = '@keyframes cogload-fadein{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}.cogload-rec:hover{background:#3d3d54 !important;}';
+    document.head.appendChild(style);
+  }
+
+  /* ── Init ── */
+  function init() {
+    _loadConfig();
+    _load();
+    _injectStyles();
+    _createPanel();
+    if (_config.showBadge) _createBadge();
+
+    // Register keyboard shortcut
+    if (typeof KeyboardShortcuts !== 'undefined' && KeyboardShortcuts.register) {
+      KeyboardShortcuts.register('Alt+Shift+L', 'Cognitive Load', toggle);
+    }
+
+    // Register with CommandPalette if available
+    if (typeof CommandPalette !== 'undefined' && CommandPalette.register) {
+      CommandPalette.register({ id: 'cp:cognitive-load', label: 'Cognitive Load Monitor', icon: '🧠', action: toggle });
+    }
+
+    // Observe chat output for new messages
+    var chatOut = document.getElementById('chat-output') || document.querySelector('.chat-messages');
+    if (chatOut) {
+      _observer = new MutationObserver(function () {
+        if (!_config.enabled) return;
+        clearTimeout(_debounceTimer);
+        _debounceTimer = setTimeout(_onNewMessage, DEBOUNCE_MS);
+      });
+      _observer.observe(chatOut, { childList: true, subtree: true });
+    }
+
+    // Toolbar button
+    var toolbar = document.querySelector('.toolbar');
+    if (toolbar) {
+      var btn = document.createElement('button');
+      btn.id = 'cognitive-load-btn';
+      btn.className = 'btn-secondary';
+      btn.title = 'Cognitive Load Monitor \u2014 autonomous overwhelm detection (Alt+Shift+L)';
+      btn.textContent = '\uD83E\uDDE0';
+      btn.addEventListener('click', toggle);
+      toolbar.appendChild(btn);
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  return {
+    toggle: toggle,
+    show: show,
+    hide: hide,
+    processMessage: processMessage,
+    analyzeDimensions: analyzeDimensions,
+    computeLoadScore: computeLoadScore,
+    classifyZone: classifyZone,
+    detectSignals: detectSignals,
+    generateRecommendations: generateRecommendations,
+    analyzeTopicCount: analyzeTopicCount,
+    analyzeInfoDensity: analyzeInfoDensity,
+    analyzeConceptDepth: analyzeConceptDepth,
+    analyzeVocabComplexity: analyzeVocabComplexity,
+    analyzeContextSwitches: analyzeContextSwitches,
+    analyzeWorkingMemory: analyzeWorkingMemory,
+    getState: function () { return JSON.parse(JSON.stringify(_state)); },
+    getConfig: function () { return Object.assign({}, _config); },
+    getLoadScore: function () { return _state.loadScore; },
+    getZone: function () { return _state.zone; },
+    getSignals: function () { return _state.signals.slice(); },
+    getRecommendations: function () { return _state.recommendations.slice(); },
+    getHistory: function () { return _state.history.slice(); },
+    isEnabled: function () { return _config.enabled; },
+    setEnabled: function (v) { _config.enabled = !!v; _saveConfig(); },
+    DIMENSIONS: DIMENSIONS,
+    DIM_LABELS: DIM_LABELS,
+    ZONES: ZONES,
+    SIGNAL_TYPES: SIGNAL_TYPES,
+    RECOMMENDATION_TYPES: RECOMMENDATION_TYPES,
+    _defaultState: _defaultState,
+    _defaultConfig: _defaultConfig,
+    _tokenize: _tokenize,
+    _sentences: _sentences,
+    _countFacts: _countFacts,
+    _extractTopics: _extractTopics
+  };
+})();
