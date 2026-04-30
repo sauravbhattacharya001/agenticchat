@@ -42642,7 +42642,10 @@ const SmartFactMemory = (() => {
     SafeStorage.set(STORAGE_KEY, JSON.stringify(_facts));
   }
   function _load() {
-    try { _facts = JSON.parse(SafeStorage.get(STORAGE_KEY)) || []; }
+    try {
+      var parsed = sanitizeStorageObject(JSON.parse(SafeStorage.get(STORAGE_KEY)));
+      _facts = Array.isArray(parsed) ? parsed : [];
+    }
     catch (_e) { _facts = []; }
   }
   function _saveConfig() {
@@ -42650,7 +42653,7 @@ const SmartFactMemory = (() => {
   }
   function _loadConfig() {
     try {
-      var c = JSON.parse(SafeStorage.get(CONFIG_KEY));
+      var c = sanitizeStorageObject(JSON.parse(SafeStorage.get(CONFIG_KEY)));
       if (c) { _config.enabled = c.enabled !== false; _config.autoExtract = c.autoExtract !== false; _config.showBadge = c.showBadge !== false; }
     } catch (_e) {}
   }
