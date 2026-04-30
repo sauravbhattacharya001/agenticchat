@@ -42639,18 +42639,18 @@ const SmartFactMemory = (() => {
 
   /* ── persistence ── */
   function _save() {
-    SafeStorage.setItem(STORAGE_KEY, JSON.stringify(_facts));
+    SafeStorage.set(STORAGE_KEY, JSON.stringify(_facts));
   }
   function _load() {
-    try { _facts = JSON.parse(SafeStorage.getItem(STORAGE_KEY)) || []; }
+    try { _facts = JSON.parse(SafeStorage.get(STORAGE_KEY)) || []; }
     catch (_e) { _facts = []; }
   }
   function _saveConfig() {
-    SafeStorage.setItem(CONFIG_KEY, JSON.stringify(_config));
+    SafeStorage.set(CONFIG_KEY, JSON.stringify(_config));
   }
   function _loadConfig() {
     try {
-      var c = JSON.parse(SafeStorage.getItem(CONFIG_KEY));
+      var c = JSON.parse(SafeStorage.get(CONFIG_KEY));
       if (c) { _config.enabled = c.enabled !== false; _config.autoExtract = c.autoExtract !== false; _config.showBadge = c.showBadge !== false; }
     } catch (_e) {}
   }
@@ -46351,8 +46351,8 @@ const SmartPatternAutomator = (function () {
 
   /* ── storage ── */
   function _save() {
-    if (typeof SafeStorage !== 'undefined' && typeof SafeStorage.setItem === 'function') {
-      SafeStorage.setItem(STORAGE_KEY, JSON.stringify(_state));
+    if (typeof SafeStorage !== 'undefined' && typeof SafeStorage.set === 'function') {
+      SafeStorage.set(STORAGE_KEY, JSON.stringify(_state));
     } else {
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(_state)); } catch (e) { /* ignore */ }
     }
@@ -46360,8 +46360,8 @@ const SmartPatternAutomator = (function () {
 
   function _load() {
     var raw;
-    if (typeof SafeStorage !== 'undefined' && typeof SafeStorage.getItem === 'function') {
-      raw = SafeStorage.getItem(STORAGE_KEY);
+    if (typeof SafeStorage !== 'undefined' && typeof SafeStorage.get === 'function') {
+      raw = SafeStorage.get(STORAGE_KEY);
     } else {
       try { raw = localStorage.getItem(STORAGE_KEY); } catch (e) { /* ignore */ }
     }
@@ -46380,8 +46380,8 @@ const SmartPatternAutomator = (function () {
   }
 
   function _saveConfig() {
-    if (typeof SafeStorage !== 'undefined' && typeof SafeStorage.setItem === 'function') {
-      SafeStorage.setItem(CONFIG_KEY, JSON.stringify(_config));
+    if (typeof SafeStorage !== 'undefined' && typeof SafeStorage.set === 'function') {
+      SafeStorage.set(CONFIG_KEY, JSON.stringify(_config));
     } else {
       try { localStorage.setItem(CONFIG_KEY, JSON.stringify(_config)); } catch (e) { /* ignore */ }
     }
@@ -46389,8 +46389,8 @@ const SmartPatternAutomator = (function () {
 
   function _loadConfig() {
     var raw;
-    if (typeof SafeStorage !== 'undefined' && typeof SafeStorage.getItem === 'function') {
-      raw = SafeStorage.getItem(CONFIG_KEY);
+    if (typeof SafeStorage !== 'undefined' && typeof SafeStorage.get === 'function') {
+      raw = SafeStorage.get(CONFIG_KEY);
     } else {
       try { raw = localStorage.getItem(CONFIG_KEY); } catch (e) { /* ignore */ }
     }
