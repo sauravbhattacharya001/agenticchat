@@ -44799,23 +44799,29 @@ const SmartConversationOracle = (() => {
 
   /* ── persistence ── */
   function _save() {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(_state)); } catch(e) {}
+    try { SafeStorage.set(STORAGE_KEY, JSON.stringify(_state)); } catch(e) {}
   }
   function _load() {
     try {
-      var d = JSON.parse(localStorage.getItem(STORAGE_KEY));
-      if (d && typeof d === 'object') {
-        _state = Object.assign(_defaultState(), d);
+      var raw = SafeStorage.get(STORAGE_KEY);
+      if (raw) {
+        var d = sanitizeStorageObject(JSON.parse(raw));
+        if (d && typeof d === 'object') {
+          _state = Object.assign(_defaultState(), d);
+        }
       }
     } catch(e) {}
   }
   function _saveConfig() {
-    try { localStorage.setItem(CONFIG_KEY, JSON.stringify(_config)); } catch(e) {}
+    try { SafeStorage.set(CONFIG_KEY, JSON.stringify(_config)); } catch(e) {}
   }
   function _loadConfig() {
     try {
-      var d = JSON.parse(localStorage.getItem(CONFIG_KEY));
-      if (d && typeof d === 'object') _config = Object.assign(_config, d);
+      var raw = SafeStorage.get(CONFIG_KEY);
+      if (raw) {
+        var d = sanitizeStorageObject(JSON.parse(raw));
+        if (d && typeof d === 'object') _config = Object.assign(_config, d);
+      }
     } catch(e) {}
   }
 
@@ -45737,17 +45743,23 @@ const SmartGoalTracker = (function () {
   function _defaultState() { return { goals: [], sessionGoals: [], insights: [], lastAnalysis: 0 }; }
 
   function _loadConfig() {
-    try { var s = localStorage.getItem(CONFIG_KEY); if (s) _config = JSON.parse(s); } catch (e) {}
+    try {
+      var s = SafeStorage.get(CONFIG_KEY);
+      if (s) _config = sanitizeStorageObject(JSON.parse(s));
+    } catch (e) {}
   }
   function _saveConfig() {
-    try { localStorage.setItem(CONFIG_KEY, JSON.stringify(_config)); } catch (e) {}
+    try { SafeStorage.set(CONFIG_KEY, JSON.stringify(_config)); } catch (e) {}
   }
   function _load() {
-    try { var s = localStorage.getItem(STORAGE_KEY); if (s) _state = JSON.parse(s); } catch (e) { _state = _defaultState(); }
+    try {
+      var s = SafeStorage.get(STORAGE_KEY);
+      if (s) _state = sanitizeStorageObject(JSON.parse(s));
+    } catch (e) { _state = _defaultState(); }
     if (!_state.goals) _state = _defaultState();
   }
   function _save() {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(_state)); } catch (e) {}
+    try { SafeStorage.set(STORAGE_KEY, JSON.stringify(_state)); } catch (e) {}
   }
 
   /* ── goal creation ── */
