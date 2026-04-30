@@ -48041,7 +48041,7 @@ const SmartCognitiveLoad = (function () {
   var CONFUSION_PHRASES = ['wait what', 'i don\'t understand', 'confused', 'what do you mean', 'can you explain again', 'i\'m lost', 'slow down', 'hold on', 'too fast', 'what?', 'huh?', 'come again', 'not following', 'say that again', 'you lost me'];
 
   /* ── Abstract concept indicators ── */
-  var ABSTRACT_WORDS = ['paradigm', 'framework', 'architecture', 'abstraction', 'ontology', 'epistemology', 'heuristic', 'polymorphism', 'encapsulation', 'recursion', 'metacognition', 'emergence', 'entropy', 'determinism', 'isomorphism', 'topology', 'semantics', 'inference', 'axiom', 'theorem', 'corollary', 'hypothesis', 'methodology', 'taxonomy', 'orthogonal'];
+  var ABSTRACT_WORDS_SET = new Set(['paradigm', 'framework', 'architecture', 'abstraction', 'ontology', 'epistemology', 'heuristic', 'polymorphism', 'encapsulation', 'recursion', 'metacognition', 'emergence', 'entropy', 'determinism', 'isomorphism', 'topology', 'semantics', 'inference', 'axiom', 'theorem', 'corollary', 'hypothesis', 'methodology', 'taxonomy', 'orthogonal']);
 
   /* ── Common words (for vocab complexity) ── */
   var COMMON_WORDS_SET = new Set(['the', 'be', 'to', 'of', 'and', 'a', 'in', 'that', 'have', 'i', 'it', 'for', 'not', 'on', 'with', 'he', 'as', 'you', 'do', 'at', 'this', 'but', 'his', 'by', 'from', 'they', 'we', 'say', 'her', 'she', 'or', 'an', 'will', 'my', 'one', 'all', 'would', 'there', 'their', 'what', 'so', 'up', 'out', 'if', 'about', 'who', 'get', 'which', 'go', 'me', 'when', 'make', 'can', 'like', 'time', 'no', 'just', 'him', 'know', 'take', 'people', 'into', 'year', 'your', 'good', 'some', 'could', 'them', 'see', 'other', 'than', 'then', 'now', 'look', 'only', 'come', 'its', 'over', 'think', 'also', 'back', 'after', 'use', 'two', 'how', 'our', 'work', 'first', 'well', 'way', 'even', 'new', 'want', 'because', 'any', 'these', 'give', 'day', 'most', 'us', 'is', 'are', 'was', 'were', 'been', 'has', 'had', 'did', 'does', 'am']);
@@ -48153,8 +48153,8 @@ const SmartCognitiveLoad = (function () {
   }
 
   /* ── Dimension Analyzers ── */
-  function analyzeTopicCount(text, state) {
-    var newTopics = _extractTopics(text);
+  function analyzeTopicCount(text, state, currentTopics) {
+    var newTopics = currentTopics || _extractTopics(text);
     var allTopics = (state.topics || []).concat(newTopics);
     var unique = Array.from(new Set(allTopics));
     // Normalize: 1 topic = 0, 10+ topics = 1.0
@@ -48170,9 +48170,12 @@ const SmartCognitiveLoad = (function () {
     return Math.min(1, density / 5);
   }
 
-  function analyzeConceptDepth(text) {
-    var words = _tokenize(text);
-    var abstractCount = words.filter(function (w) { return ABSTRACT_WORDS.indexOf(w) !== -1; }).length;
+  function analyzeConceptDepth(text, tokens) {
+    var words = tokens || _tokenize(text);
+    var abstractCount = 0;
+    for (var wi = 0; wi < words.length; wi++) {
+      if (ABSTRACT_WORDS_SET.has(words[wi])) abstractCount++;
+    }
     // Check for nested structures (indentation, sub-lists, parenthetical depth)
     var maxParenDepth = 0;
     var depth = 0;
@@ -48184,11 +48187,16 @@ const SmartCognitiveLoad = (function () {
     return Math.min(1, score);
   }
 
-  function analyzeVocabComplexity(text) {
-    var words = _tokenize(text);
+  function analyzeVocabComplexity(text, tokens) {
+    var words = tokens || _tokenize(text);
     if (words.length === 0) return 0;
-    var avgLen = words.reduce(function (s, w) { return s + w.length; }, 0) / words.length;
-    var rareCount = words.filter(function (w) { return w.length > 3 && !COMMON_WORDS_SET.has(w); }).length;
+    var totalLen = 0;
+    var rareCount = 0;
+    for (var i = 0; i < words.length; i++) {
+      totalLen += words[i].length;
+      if (words[i].length > 3 && !COMMON_WORDS_SET.has(words[i])) rareCount++;
+    }
+    var avgLen = totalLen / words.length;
     var rareRatio = rareCount / words.length;
     // Normalize: avgLen 4=0, 8+=1; rareRatio 0=0, 0.7+=1; blend
     var lenScore = Math.min(1, Math.max(0, (avgLen - 4) / 4));
@@ -48196,16 +48204,16 @@ const SmartCognitiveLoad = (function () {
     return lenScore * 0.4 + rareScore * 0.6;
   }
 
-  function analyzeContextSwitches(text, state) {
-    var currentTopics = _extractTopics(text);
+  function analyzeContextSwitches(text, state, currentTopics) {
+    var topics = currentTopics || _extractTopics(text);
     var prevTopics = state.previousTopics || [];
     if (prevTopics.length === 0) return 0;
     // Jaccard distance between current and previous topic sets
-    var setA = new Set(currentTopics);
+    var setA = new Set(topics);
     var setB = new Set(prevTopics);
     var intersection = 0;
     setA.forEach(function (t) { if (setB.has(t)) intersection++; });
-    var union = new Set([].concat(currentTopics, prevTopics)).size;
+    var union = setA.size + setB.size - intersection;
     if (union === 0) return 0;
     var similarity = intersection / union;
     return 1 - similarity; // High distance = high context switch
@@ -48222,13 +48230,18 @@ const SmartCognitiveLoad = (function () {
   }
 
   /* ── Analyze all dimensions ── */
+  var _lastAnalyzedTopics = null; // cached between analyzeDimensions and processMessage
   function analyzeDimensions(text) {
+    // Pre-compute shared work: tokenize once, extract topics once
+    var tokens = _tokenize(text);
+    var currentTopics = _extractTopics(text);
+    _lastAnalyzedTopics = currentTopics;
     var dims = {};
-    dims[DIMENSIONS.TOPIC_COUNT] = analyzeTopicCount(text, _state);
+    dims[DIMENSIONS.TOPIC_COUNT] = analyzeTopicCount(text, _state, currentTopics);
     dims[DIMENSIONS.INFO_DENSITY] = analyzeInfoDensity(text);
-    dims[DIMENSIONS.CONCEPT_DEPTH] = analyzeConceptDepth(text);
-    dims[DIMENSIONS.VOCAB_COMPLEXITY] = analyzeVocabComplexity(text);
-    dims[DIMENSIONS.CONTEXT_SWITCHES] = analyzeContextSwitches(text, _state);
+    dims[DIMENSIONS.CONCEPT_DEPTH] = analyzeConceptDepth(text, tokens);
+    dims[DIMENSIONS.VOCAB_COMPLEXITY] = analyzeVocabComplexity(text, tokens);
+    dims[DIMENSIONS.CONTEXT_SWITCHES] = analyzeContextSwitches(text, _state, currentTopics);
     dims[DIMENSIONS.WORKING_MEMORY] = analyzeWorkingMemory(text, _state);
     return dims;
   }
@@ -48356,8 +48369,9 @@ const SmartCognitiveLoad = (function () {
     _state.lastAiLength = (aiText || '').length;
     _state.lastUserLength = (userText || '').length;
 
-    // Update topics
-    var newTopics = _extractTopics(combined);
+    // Update topics (reuse pre-computed topics from analyzeDimensions)
+    var newTopics = _lastAnalyzedTopics || _extractTopics(combined);
+    _lastAnalyzedTopics = null;
     _state.previousTopics = _state.topics || [];
     _state.topics = Array.from(new Set((_state.topics || []).concat(newTopics))).slice(-30);
 
