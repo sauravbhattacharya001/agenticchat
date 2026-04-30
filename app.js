@@ -47311,3 +47311,634 @@ const SmartPatternAutomator = (function () {
     _pruneWorkflows: _pruneWorkflows
   };
 })();
+
+const SmartAdaptiveTone = (function () {
+  'use strict';
+
+  var STORAGE_KEY = 'smartAdaptiveTone';
+  var CONFIG_KEY = 'smartAdaptiveToneConfig';
+  var DEBOUNCE_MS = 800;
+  var PROFILE_DECAY = 0.92;
+  var SHIFT_THRESHOLD = 0.25;
+  var MAX_HISTORY = 200;
+  var _panelEl = null;
+  var _visible = false;
+  var _debounceTimer = null;
+  var _notifEl = null;
+
+  /* ── 6 style dimensions ── */
+  var DIMENSIONS = {
+    FORMALITY: 'formality',
+    VERBOSITY: 'verbosity',
+    TECHNICALITY: 'technicality',
+    EMOTIONALITY: 'emotionality',
+    DIRECTNESS: 'directness',
+    POLITENESS: 'politeness'
+  };
+
+  var DIM_LABELS = {};
+  DIM_LABELS[DIMENSIONS.FORMALITY] = 'Formality';
+  DIM_LABELS[DIMENSIONS.VERBOSITY] = 'Verbosity';
+  DIM_LABELS[DIMENSIONS.TECHNICALITY] = 'Technicality';
+  DIM_LABELS[DIMENSIONS.EMOTIONALITY] = 'Emotionality';
+  DIM_LABELS[DIMENSIONS.DIRECTNESS] = 'Directness';
+  DIM_LABELS[DIMENSIONS.POLITENESS] = 'Politeness';
+
+  var DIM_COLORS = {};
+  DIM_COLORS[DIMENSIONS.FORMALITY] = '#5dade2';
+  DIM_COLORS[DIMENSIONS.VERBOSITY] = '#58d68d';
+  DIM_COLORS[DIMENSIONS.TECHNICALITY] = '#af7ac5';
+  DIM_COLORS[DIMENSIONS.EMOTIONALITY] = '#ec7063';
+  DIM_COLORS[DIMENSIONS.DIRECTNESS] = '#f0b27a';
+  DIM_COLORS[DIMENSIONS.POLITENESS] = '#85c1e9';
+
+  /* ── formality indicators ── */
+  var FORMAL_WORDS = ['therefore', 'furthermore', 'consequently', 'nevertheless', 'accordingly', 'henceforth', 'regarding', 'pertaining', 'hereby', 'wherein', 'moreover', 'notwithstanding', 'subsequently', 'aforementioned', 'pursuant'];
+  var INFORMAL_WORDS = ['gonna', 'wanna', 'gotta', 'kinda', 'sorta', 'yeah', 'nah', 'hey', 'lol', 'omg', 'btw', 'tbh', 'idk', 'imo', 'nope', 'yep', 'dude', 'bro', 'yo', 'sup', 'cuz', 'chill', 'cool', 'awesome', 'dope'];
+  var CONTRACTIONS = ["don't", "won't", "can't", "isn't", "aren't", "wasn't", "weren't", "hasn't", "haven't", "hadn't", "wouldn't", "shouldn't", "couldn't", "didn't", "doesn't", "i'm", "you're", "we're", "they're", "it's", "he's", "she's", "that's", "there's", "here's", "what's", "who's", "let's", "i've", "you've", "we've", "they've", "i'll", "you'll", "we'll", "they'll", "i'd", "you'd", "we'd", "they'd"];
+
+  /* ── technicality indicators ── */
+  var TECH_WORDS = ['algorithm', 'api', 'async', 'backend', 'binary', 'boolean', 'buffer', 'cache', 'callback', 'class', 'compile', 'component', 'constructor', 'database', 'debug', 'deploy', 'dependency', 'docker', 'endpoint', 'enum', 'framework', 'function', 'git', 'http', 'instance', 'interface', 'iterate', 'json', 'kernel', 'lambda', 'library', 'middleware', 'module', 'mutex', 'namespace', 'node', 'npm', 'object', 'parameter', 'parser', 'pipeline', 'pointer', 'polymorphism', 'promise', 'protocol', 'query', 'recursive', 'regex', 'repository', 'runtime', 'schema', 'server', 'socket', 'sql', 'stack', 'syntax', 'tcp', 'thread', 'token', 'typescript', 'variable', 'webpack'];
+
+  /* ── emotionality indicators ── */
+  var EMOTION_WORDS = ['love', 'hate', 'amazing', 'terrible', 'excited', 'frustrated', 'angry', 'happy', 'sad', 'wonderful', 'horrible', 'fantastic', 'awful', 'thrilled', 'devastated', 'furious', 'delighted', 'annoyed', 'grateful', 'disgusted', 'ecstatic', 'miserable', 'passionate', 'desperate', 'overwhelmed'];
+  var EMOTION_PUNCTUATION = /[!?]{2,}|!!+|\?\?+/g;
+  var EMOJI_PATTERN = /[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu;
+
+  /* ── politeness indicators ── */
+  var POLITE_WORDS = ['please', 'thank', 'thanks', 'appreciate', 'kindly', 'sorry', 'excuse', 'pardon', 'grateful', 'would you mind', 'could you', 'if possible', 'at your convenience', 'i appreciate', 'thank you'];
+  var DIRECT_WORDS = ['do', 'tell', 'show', 'give', 'make', 'fix', 'just', 'now', 'immediately', 'stop', 'go', 'run', 'list', 'explain'];
+
+  /* ── tone archetypes ── */
+  var ARCHETYPES = {
+    ACADEMIC: { name: 'Academic', formality: 0.85, verbosity: 0.75, technicality: 0.7, emotionality: 0.15, directness: 0.4, politeness: 0.6, emoji: '\uD83C\uDF93' },
+    CASUAL: { name: 'Casual', formality: 0.2, verbosity: 0.4, technicality: 0.3, emotionality: 0.6, directness: 0.7, politeness: 0.4, emoji: '\uD83D\uDE0E' },
+    TECHNICAL: { name: 'Technical', formality: 0.6, verbosity: 0.5, technicality: 0.9, emotionality: 0.1, directness: 0.8, politeness: 0.3, emoji: '\uD83D\uDCBB' },
+    EXECUTIVE: { name: 'Executive', formality: 0.7, verbosity: 0.2, technicality: 0.4, emotionality: 0.2, directness: 0.9, politeness: 0.5, emoji: '\uD83D\uDCBC' },
+    FRIENDLY: { name: 'Friendly', formality: 0.3, verbosity: 0.6, technicality: 0.2, emotionality: 0.7, directness: 0.5, politeness: 0.8, emoji: '\uD83E\uDD17' },
+    MENTOR: { name: 'Mentor', formality: 0.5, verbosity: 0.7, technicality: 0.6, emotionality: 0.4, directness: 0.5, politeness: 0.7, emoji: '\uD83E\uDDD1\u200D\uD83C\uDFEB' }
+  };
+
+  /* ── default state ── */
+  function _defaultState() {
+    return {
+      profile: { formality: 0.5, verbosity: 0.5, technicality: 0.5, emotionality: 0.5, directness: 0.5, politeness: 0.5 },
+      messageCount: 0,
+      history: [],
+      shifts: [],
+      archetype: null,
+      recommendations: [],
+      sessionSnapshots: []
+    };
+  }
+
+  function _defaultConfig() {
+    return { enabled: true, autoAdapt: true, showBadges: true, shiftAlerts: true, shiftThreshold: SHIFT_THRESHOLD };
+  }
+
+  var _state = _defaultState();
+  var _config = _defaultConfig();
+
+  /* ── storage ── */
+  function _save() {
+    if (typeof SafeStorage !== 'undefined' && typeof SafeStorage.set === 'function') {
+      SafeStorage.set(STORAGE_KEY, JSON.stringify(_state));
+    } else {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(_state)); } catch (e) { /* ignore */ }
+    }
+  }
+
+  function _load() {
+    var raw;
+    if (typeof SafeStorage !== 'undefined' && typeof SafeStorage.get === 'function') {
+      raw = SafeStorage.get(STORAGE_KEY);
+    } else {
+      try { raw = localStorage.getItem(STORAGE_KEY); } catch (e) { /* noop */ }
+    }
+    if (raw) {
+      try { var parsed = JSON.parse(raw); _state = Object.assign(_defaultState(), parsed); } catch (e) { _state = _defaultState(); }
+    }
+  }
+
+  function _saveConfig() {
+    if (typeof SafeStorage !== 'undefined' && typeof SafeStorage.set === 'function') {
+      SafeStorage.set(CONFIG_KEY, JSON.stringify(_config));
+    } else {
+      try { localStorage.setItem(CONFIG_KEY, JSON.stringify(_config)); } catch (e) { /* ignore */ }
+    }
+  }
+
+  function _loadConfig() {
+    var raw;
+    if (typeof SafeStorage !== 'undefined' && typeof SafeStorage.get === 'function') {
+      raw = SafeStorage.get(CONFIG_KEY);
+    } else {
+      try { raw = localStorage.getItem(CONFIG_KEY); } catch (e) { /* noop */ }
+    }
+    if (raw) {
+      try { var parsed = JSON.parse(raw); _config = Object.assign(_defaultConfig(), parsed); } catch (e) { _config = _defaultConfig(); }
+    }
+  }
+
+  /* ── text analysis helpers ── */
+  function _tokenize(text) {
+    return (text || '').toLowerCase().split(/[\s,.;:!?()\[\]{}'"]+/).filter(function (w) { return w.length > 0; });
+  }
+
+  function _countMatches(tokens, wordList) {
+    var count = 0;
+    for (var i = 0; i < tokens.length; i++) {
+      for (var j = 0; j < wordList.length; j++) {
+        if (tokens[i] === wordList[j] || tokens[i].indexOf(wordList[j]) >= 0) { count++; break; }
+      }
+    }
+    return count;
+  }
+
+  function _sentenceCount(text) {
+    var sents = (text || '').split(/[.!?]+/).filter(function (s) { return s.trim().length > 3; });
+    return Math.max(1, sents.length);
+  }
+
+  function _avgSentenceLength(text) {
+    var tokens = _tokenize(text);
+    return tokens.length / _sentenceCount(text);
+  }
+
+  /* ── dimension scorers (return 0-1) ── */
+  function _scoreFormality(text) {
+    var tokens = _tokenize(text);
+    if (tokens.length === 0) return 0.5;
+    var formalCount = _countMatches(tokens, FORMAL_WORDS);
+    var informalCount = _countMatches(tokens, INFORMAL_WORDS);
+    var contractionCount = 0;
+    var lower = text.toLowerCase();
+    for (var i = 0; i < CONTRACTIONS.length; i++) {
+      if (lower.indexOf(CONTRACTIONS[i]) >= 0) contractionCount++;
+    }
+    var avgLen = _avgSentenceLength(text);
+    var lenBonus = Math.min(1, avgLen / 25) * 0.3;
+    var formalSignal = (formalCount / tokens.length) * 5 + lenBonus;
+    var informalSignal = ((informalCount + contractionCount * 0.5) / tokens.length) * 5;
+    var raw = 0.5 + (formalSignal - informalSignal) * 0.5;
+    return Math.max(0, Math.min(1, raw));
+  }
+
+  function _scoreVerbosity(text) {
+    var tokens = _tokenize(text);
+    var wordCount = tokens.length;
+    if (wordCount <= 5) return 0.1;
+    if (wordCount <= 15) return 0.3;
+    if (wordCount <= 40) return 0.5;
+    if (wordCount <= 80) return 0.7;
+    if (wordCount <= 150) return 0.85;
+    return 0.95;
+  }
+
+  function _scoreTechnicality(text) {
+    var tokens = _tokenize(text);
+    if (tokens.length === 0) return 0.5;
+    var techCount = _countMatches(tokens, TECH_WORDS);
+    var hasCode = /`|[^]+|function\s*\(|=>|var\s|let\s|const\s|import\s|class\s/.test(text);
+    var raw = (techCount / tokens.length) * 4 + (hasCode ? 0.3 : 0);
+    return Math.max(0, Math.min(1, raw));
+  }
+
+  function _scoreEmotionality(text) {
+    var tokens = _tokenize(text);
+    if (tokens.length === 0) return 0.5;
+    var emotionCount = _countMatches(tokens, EMOTION_WORDS);
+    var punctMatch = text.match(EMOTION_PUNCTUATION);
+    var punctCount = punctMatch ? punctMatch.length : 0;
+    var emojiMatch = text.match(EMOJI_PATTERN);
+    var emojiCount = emojiMatch ? emojiMatch.length : 0;
+    var capsWords = (text.match(/\b[A-Z]{2,}\b/g) || []).length;
+    var raw = (emotionCount / tokens.length) * 4 + punctCount * 0.1 + emojiCount * 0.08 + capsWords * 0.05;
+    return Math.max(0, Math.min(1, raw));
+  }
+
+  function _scoreDirectness(text) {
+    var tokens = _tokenize(text);
+    if (tokens.length === 0) return 0.5;
+    var directCount = _countMatches(tokens, DIRECT_WORDS);
+    var isImperative = /^(do|tell|show|give|make|fix|list|run|stop|go|explain|write|create|find|get|set|add|remove|delete|update)\b/i.test(text.trim());
+    var shortSentences = _avgSentenceLength(text) < 10 ? 0.2 : 0;
+    var raw = (directCount / tokens.length) * 3 + (isImperative ? 0.3 : 0) + shortSentences;
+    return Math.max(0, Math.min(1, raw));
+  }
+
+  function _scorePoliteness(text) {
+    var tokens = _tokenize(text);
+    if (tokens.length === 0) return 0.5;
+    var politeCount = _countMatches(tokens, POLITE_WORDS);
+    var lower = text.toLowerCase();
+    var hasGreeting = /^(hi|hello|hey|good morning|good afternoon|good evening)\b/i.test(lower.trim());
+    var hasClosing = /(thanks|thank you|cheers|regards|best|appreciated)\s*[.!]?\s*$/i.test(lower.trim());
+    var raw = (politeCount / tokens.length) * 5 + (hasGreeting ? 0.15 : 0) + (hasClosing ? 0.15 : 0);
+    return Math.max(0, Math.min(1, raw));
+  }
+
+  /* ── core analysis ── */
+  function analyzeMessage(text) {
+    if (!text || text.trim().length < 3) return null;
+    return {
+      formality: _scoreFormality(text),
+      verbosity: _scoreVerbosity(text),
+      technicality: _scoreTechnicality(text),
+      emotionality: _scoreEmotionality(text),
+      directness: _scoreDirectness(text),
+      politeness: _scorePoliteness(text),
+      timestamp: Date.now(),
+      wordCount: _tokenize(text).length
+    };
+  }
+
+  function updateProfile(scores) {
+    if (!scores) return;
+    var keys = Object.keys(DIMENSIONS);
+    for (var i = 0; i < keys.length; i++) {
+      var dim = DIMENSIONS[keys[i]];
+      _state.profile[dim] = _state.profile[dim] * PROFILE_DECAY + scores[dim] * (1 - PROFILE_DECAY);
+    }
+    _state.messageCount++;
+    _state.history.push({ scores: scores, ts: scores.timestamp });
+    if (_state.history.length > MAX_HISTORY) _state.history.shift();
+    _save();
+  }
+
+  function detectShift(scores) {
+    if (!scores || _state.messageCount < 5) return null;
+    var shifts = [];
+    var keys = Object.keys(DIMENSIONS);
+    for (var i = 0; i < keys.length; i++) {
+      var dim = DIMENSIONS[keys[i]];
+      var delta = scores[dim] - _state.profile[dim];
+      if (Math.abs(delta) >= _config.shiftThreshold) {
+        shifts.push({ dimension: dim, delta: delta, from: _state.profile[dim], to: scores[dim], direction: delta > 0 ? 'increased' : 'decreased' });
+      }
+    }
+    if (shifts.length > 0) {
+      var shiftRecord = { shifts: shifts, ts: Date.now() };
+      _state.shifts.push(shiftRecord);
+      if (_state.shifts.length > 50) _state.shifts.shift();
+      _save();
+      return shiftRecord;
+    }
+    return null;
+  }
+
+  function classifyArchetype(profile) {
+    var bestMatch = null;
+    var bestDist = Infinity;
+    var archetypeKeys = Object.keys(ARCHETYPES);
+    for (var i = 0; i < archetypeKeys.length; i++) {
+      var arch = ARCHETYPES[archetypeKeys[i]];
+      var dist = 0;
+      var keys = Object.keys(DIMENSIONS);
+      for (var j = 0; j < keys.length; j++) {
+        var dim = DIMENSIONS[keys[j]];
+        var diff = (profile[dim] || 0.5) - arch[dim];
+        dist += diff * diff;
+      }
+      dist = Math.sqrt(dist);
+      if (dist < bestDist) { bestDist = dist; bestMatch = arch; }
+    }
+    _state.archetype = bestMatch ? bestMatch.name : null;
+    return { archetype: bestMatch, distance: bestDist, confidence: Math.max(0, 1 - bestDist / 1.5) };
+  }
+
+  function generateRecommendations(profile) {
+    var recs = [];
+    if (profile.formality > 0.7) {
+      recs.push({ type: 'tone', text: 'User prefers formal language \u2014 avoid contractions, use precise vocabulary', priority: 'high' });
+    } else if (profile.formality < 0.3) {
+      recs.push({ type: 'tone', text: 'User writes casually \u2014 match with relaxed, conversational replies', priority: 'high' });
+    }
+    if (profile.verbosity > 0.7) {
+      recs.push({ type: 'length', text: 'User writes long messages \u2014 detailed responses are welcome', priority: 'medium' });
+    } else if (profile.verbosity < 0.3) {
+      recs.push({ type: 'length', text: 'User is concise \u2014 keep responses brief and to the point', priority: 'high' });
+    }
+    if (profile.technicality > 0.7) {
+      recs.push({ type: 'content', text: 'High technical fluency \u2014 use jargon, skip basic explanations', priority: 'medium' });
+    } else if (profile.technicality < 0.3) {
+      recs.push({ type: 'content', text: 'Non-technical user \u2014 explain concepts simply, avoid jargon', priority: 'high' });
+    }
+    if (profile.emotionality > 0.6) {
+      recs.push({ type: 'engagement', text: 'User is expressive \u2014 acknowledge emotions, show empathy', priority: 'medium' });
+    } else if (profile.emotionality < 0.2) {
+      recs.push({ type: 'engagement', text: 'User is matter-of-fact \u2014 stick to information, skip emotional language', priority: 'low' });
+    }
+    if (profile.directness > 0.7) {
+      recs.push({ type: 'structure', text: 'User is direct \u2014 lead with answers, minimize preamble', priority: 'high' });
+    }
+    if (profile.politeness > 0.7) {
+      recs.push({ type: 'social', text: 'User is polite \u2014 reciprocate courtesy, use warm closings', priority: 'low' });
+    }
+    _state.recommendations = recs;
+    _save();
+    return recs;
+  }
+
+  function getAlignmentScore(aiText) {
+    if (!aiText || _state.messageCount < 3) return null;
+    var aiScores = analyzeMessage(aiText);
+    if (!aiScores) return null;
+    var totalDiff = 0;
+    var keys = Object.keys(DIMENSIONS);
+    for (var i = 0; i < keys.length; i++) {
+      var dim = DIMENSIONS[keys[i]];
+      totalDiff += Math.abs(aiScores[dim] - _state.profile[dim]);
+    }
+    var alignment = Math.max(0, 1 - totalDiff / keys.length);
+    return { score: alignment, label: alignment > 0.8 ? 'Excellent' : alignment > 0.6 ? 'Good' : alignment > 0.4 ? 'Moderate' : 'Misaligned', aiScores: aiScores };
+  }
+
+  function getProfileSummary() {
+    var arch = classifyArchetype(_state.profile);
+    return {
+      profile: Object.assign({}, _state.profile),
+      archetype: arch,
+      messageCount: _state.messageCount,
+      recentShifts: _state.shifts.slice(-5),
+      recommendations: _state.recommendations
+    };
+  }
+
+  function getTrend(dimension, windowSize) {
+    windowSize = windowSize || 10;
+    var recent = _state.history.slice(-windowSize);
+    if (recent.length < 3) return { trend: 'insufficient_data', slope: 0 };
+    var values = recent.map(function (h) { return h.scores[dimension] || 0; });
+    var n = values.length;
+    var sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+    for (var i = 0; i < n; i++) { sumX += i; sumY += values[i]; sumXY += i * values[i]; sumX2 += i * i; }
+    var slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+    var label = slope > 0.02 ? 'increasing' : slope < -0.02 ? 'decreasing' : 'stable';
+    return { trend: label, slope: slope, values: values };
+  }
+
+  function generateInsights() {
+    if (_state.messageCount < 5) return [{ type: 'info', text: 'Need more messages to generate insights (have ' + _state.messageCount + ', need 5)' }];
+    var insights = [];
+    var arch = classifyArchetype(_state.profile);
+    insights.push({ type: 'archetype', text: 'Communication style: ' + arch.archetype.emoji + ' ' + arch.archetype.name + ' (confidence: ' + Math.round(arch.confidence * 100) + '%)', priority: 'high' });
+
+    var keys = Object.keys(DIMENSIONS);
+    for (var i = 0; i < keys.length; i++) {
+      var dim = DIMENSIONS[keys[i]];
+      var trend = getTrend(dim);
+      if (trend.trend !== 'stable' && trend.trend !== 'insufficient_data') {
+        insights.push({ type: 'trend', text: DIM_LABELS[dim] + ' is ' + trend.trend + ' (slope: ' + trend.slope.toFixed(3) + ')', priority: 'medium' });
+      }
+    }
+
+    if (_state.shifts.length > 0) {
+      var recentShift = _state.shifts[_state.shifts.length - 1];
+      var shiftAge = (Date.now() - recentShift.ts) / 60000;
+      if (shiftAge < 30) {
+        var dims = recentShift.shifts.map(function (s) { return DIM_LABELS[s.dimension] + ' ' + s.direction; }).join(', ');
+        insights.push({ type: 'shift', text: 'Recent tone shift detected: ' + dims, priority: 'high' });
+      }
+    }
+
+    var extreme = [];
+    for (var j = 0; j < keys.length; j++) {
+      var d = DIMENSIONS[keys[j]];
+      if (_state.profile[d] > 0.8) extreme.push(DIM_LABELS[d] + ' (very high)');
+      else if (_state.profile[d] < 0.2) extreme.push(DIM_LABELS[d] + ' (very low)');
+    }
+    if (extreme.length > 0) {
+      insights.push({ type: 'extreme', text: 'Notable dimensions: ' + extreme.join(', '), priority: 'medium' });
+    }
+
+    return insights;
+  }
+
+  /* ── UI ── */
+  function _createPanel() {
+    if (_panelEl) return _panelEl;
+    _panelEl = document.createElement('div');
+    _panelEl.id = 'smart-adaptive-tone-panel';
+    _panelEl.style.cssText = 'position:fixed;top:60px;right:20px;width:380px;max-height:80vh;background:var(--bg-secondary,#1e1e2e);border:1px solid var(--border-color,#444);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,0.4);z-index:10100;display:none;overflow:hidden;font-family:system-ui,sans-serif;color:var(--text-primary,#e0e0e0);';
+    document.body.appendChild(_panelEl);
+    return _panelEl;
+  }
+
+  function _renderPanel() {
+    var panel = _createPanel();
+    var summary = getProfileSummary();
+    var insights = generateInsights();
+    var recs = generateRecommendations(_state.profile);
+    var arch = summary.archetype;
+
+    var html = '<div style="padding:16px;border-bottom:1px solid var(--border-color,#444);display:flex;align-items:center;justify-content:space-between;">';
+    html += '<div style="display:flex;align-items:center;gap:8px;"><span style="font-size:20px;">\uD83C\uDFA8</span><strong style="font-size:14px;">Adaptive Tone</strong>';
+    html += '<span style="font-size:11px;opacity:0.6;">(' + _state.messageCount + ' msgs)</span></div>';
+    html += '<button onclick="SmartAdaptiveTone.hide()" style="background:none;border:none;color:inherit;font-size:18px;cursor:pointer;">\u2715</button></div>';
+
+    /* tabs */
+    html += '<div id="sat-tabs" style="display:flex;border-bottom:1px solid var(--border-color,#444);">';
+    html += '<button class="sat-tab sat-tab-active" data-tab="profile" style="flex:1;padding:8px;border:none;background:none;color:inherit;cursor:pointer;font-size:12px;border-bottom:2px solid #5dade2;">Profile</button>';
+    html += '<button class="sat-tab" data-tab="insights" style="flex:1;padding:8px;border:none;background:none;color:inherit;cursor:pointer;font-size:12px;border-bottom:2px solid transparent;">Insights</button>';
+    html += '<button class="sat-tab" data-tab="recs" style="flex:1;padding:8px;border:none;background:none;color:inherit;cursor:pointer;font-size:12px;border-bottom:2px solid transparent;">Adapt</button>';
+    html += '<button class="sat-tab" data-tab="history" style="flex:1;padding:8px;border:none;background:none;color:inherit;cursor:pointer;font-size:12px;border-bottom:2px solid transparent;">Shifts</button>';
+    html += '</div>';
+
+    /* profile tab */
+    html += '<div class="sat-content" id="sat-tab-profile" style="padding:16px;overflow-y:auto;max-height:55vh;">';
+    if (arch && arch.archetype) {
+      html += '<div style="text-align:center;margin-bottom:12px;padding:10px;background:rgba(93,173,226,0.1);border-radius:8px;">';
+      html += '<span style="font-size:28px;">' + arch.archetype.emoji + '</span>';
+      html += '<div style="font-size:14px;font-weight:600;margin-top:4px;">' + arch.archetype.name + '</div>';
+      html += '<div style="font-size:11px;opacity:0.7;">Confidence: ' + Math.round(arch.confidence * 100) + '%</div></div>';
+    }
+    var dimKeys = Object.keys(DIMENSIONS);
+    for (var i = 0; i < dimKeys.length; i++) {
+      var dim = DIMENSIONS[dimKeys[i]];
+      var val = _state.profile[dim] || 0.5;
+      var pct = Math.round(val * 100);
+      var color = DIM_COLORS[dim];
+      html += '<div style="margin-bottom:10px;">';
+      html += '<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px;"><span>' + DIM_LABELS[dim] + '</span><span style="opacity:0.7;">' + pct + '%</span></div>';
+      html += '<div style="height:6px;background:rgba(255,255,255,0.1);border-radius:3px;overflow:hidden;">';
+      html += '<div style="height:100%;width:' + pct + '%;background:' + color + ';border-radius:3px;transition:width 0.3s;"></div></div></div>';
+    }
+    html += '</div>';
+
+    /* insights tab */
+    html += '<div class="sat-content" id="sat-tab-insights" style="padding:16px;overflow-y:auto;max-height:55vh;display:none;">';
+    for (var j = 0; j < insights.length; j++) {
+      var ins = insights[j];
+      var iconMap = { archetype: '\uD83C\uDFAD', trend: '\uD83D\uDCC8', shift: '\u26A1', extreme: '\uD83D\uDD25', info: '\u2139\uFE0F' };
+      html += '<div style="padding:10px;margin-bottom:8px;background:rgba(255,255,255,0.05);border-radius:8px;font-size:12px;">';
+      html += '<span style="margin-right:6px;">' + (iconMap[ins.type] || '\u2022') + '</span>' + ins.text + '</div>';
+    }
+    if (insights.length === 0) html += '<div style="text-align:center;opacity:0.5;padding:20px;">No insights yet</div>';
+    html += '</div>';
+
+    /* recommendations tab */
+    html += '<div class="sat-content" id="sat-tab-recs" style="padding:16px;overflow-y:auto;max-height:55vh;display:none;">';
+    if (recs.length > 0) {
+      html += '<div style="font-size:11px;opacity:0.6;margin-bottom:10px;">Tone adaptation suggestions based on user style:</div>';
+      for (var k = 0; k < recs.length; k++) {
+        var rec = recs[k];
+        var prioColor = rec.priority === 'high' ? '#ec7063' : rec.priority === 'medium' ? '#f0b27a' : '#85c1e9';
+        html += '<div style="padding:10px;margin-bottom:8px;background:rgba(255,255,255,0.05);border-radius:8px;border-left:3px solid ' + prioColor + ';font-size:12px;">';
+        html += '<div style="font-size:10px;text-transform:uppercase;opacity:0.6;margin-bottom:3px;">' + rec.type + ' \u2022 ' + rec.priority + '</div>';
+        html += rec.text + '</div>';
+      }
+    } else {
+      html += '<div style="text-align:center;opacity:0.5;padding:20px;">Send more messages to get adaptation tips</div>';
+    }
+    html += '</div>';
+
+    /* shifts/history tab */
+    html += '<div class="sat-content" id="sat-tab-history" style="padding:16px;overflow-y:auto;max-height:55vh;display:none;">';
+    if (_state.shifts.length > 0) {
+      var recent = _state.shifts.slice(-10).reverse();
+      for (var m = 0; m < recent.length; m++) {
+        var s = recent[m];
+        var age = Math.round((Date.now() - s.ts) / 60000);
+        var ageLabel = age < 60 ? age + 'm ago' : Math.round(age / 60) + 'h ago';
+        html += '<div style="padding:10px;margin-bottom:8px;background:rgba(255,255,255,0.05);border-radius:8px;font-size:12px;">';
+        html += '<div style="font-size:10px;opacity:0.6;margin-bottom:4px;">\u26A1 ' + ageLabel + '</div>';
+        for (var n = 0; n < s.shifts.length; n++) {
+          var sh = s.shifts[n];
+          html += '<div>' + DIM_LABELS[sh.dimension] + ': ' + Math.round(sh.from * 100) + '% \u2192 ' + Math.round(sh.to * 100) + '% (' + sh.direction + ')</div>';
+        }
+        html += '</div>';
+      }
+    } else {
+      html += '<div style="text-align:center;opacity:0.5;padding:20px;">No tone shifts detected yet</div>';
+    }
+    html += '</div>';
+
+    panel.innerHTML = html;
+
+    /* tab switching */
+    var tabs = panel.querySelectorAll('.sat-tab');
+    for (var t = 0; t < tabs.length; t++) {
+      tabs[t].addEventListener('click', function () {
+        var tabName = this.getAttribute('data-tab');
+        var allTabs = panel.querySelectorAll('.sat-tab');
+        var allContents = panel.querySelectorAll('.sat-content');
+        for (var x = 0; x < allTabs.length; x++) {
+          allTabs[x].style.borderBottomColor = 'transparent';
+          allTabs[x].classList.remove('sat-tab-active');
+        }
+        for (var y = 0; y < allContents.length; y++) allContents[y].style.display = 'none';
+        this.style.borderBottomColor = '#5dade2';
+        this.classList.add('sat-tab-active');
+        var target = panel.querySelector('#sat-tab-' + tabName);
+        if (target) target.style.display = 'block';
+      });
+    }
+  }
+
+  function _showNotification(msg) {
+    if (!_config.shiftAlerts) return;
+    if (_notifEl) _notifEl.remove();
+    _notifEl = document.createElement('div');
+    _notifEl.style.cssText = 'position:fixed;top:16px;right:20px;padding:10px 16px;background:#2d2d44;border:1px solid #5dade2;border-radius:8px;color:#e0e0e0;font-size:12px;z-index:10200;box-shadow:0 4px 12px rgba(0,0,0,0.3);animation:fadeIn 0.3s;';
+    _notifEl.textContent = '\uD83C\uDFA8 ' + msg;
+    document.body.appendChild(_notifEl);
+    setTimeout(function () { if (_notifEl) { _notifEl.remove(); _notifEl = null; } }, 4000);
+  }
+
+  function show() { _renderPanel(); _createPanel().style.display = 'block'; _visible = true; }
+  function hide() { if (_panelEl) _panelEl.style.display = 'none'; _visible = false; }
+  function toggle() { _visible ? hide() : show(); }
+
+  /* ── message hook ── */
+  function _onNewMessage() {
+    if (!_config.enabled) return;
+    var chatOut = document.getElementById('chat-output');
+    if (!chatOut) return;
+    var msgs = chatOut.querySelectorAll('.message.user-message');
+    if (msgs.length === 0) return;
+    var lastMsg = msgs[msgs.length - 1];
+    if (lastMsg._satProcessed) return;
+    lastMsg._satProcessed = true;
+
+    var text = (lastMsg.textContent || '').trim();
+    if (text.length < 5) return;
+
+    var scores = analyzeMessage(text);
+    if (!scores) return;
+
+    var shift = detectShift(scores);
+    updateProfile(scores);
+    generateRecommendations(_state.profile);
+    classifyArchetype(_state.profile);
+
+    if (shift && _config.shiftAlerts) {
+      var dims = shift.shifts.map(function (s) { return DIM_LABELS[s.dimension]; }).join(', ');
+      _showNotification('Tone shift: ' + dims);
+    }
+
+    if (_visible) _renderPanel();
+  }
+
+  /* ── keyboard shortcut ── */
+  function _onKeyDown(e) {
+    if (e.altKey && e.shiftKey && e.key === 'Y') {
+      e.preventDefault();
+      toggle();
+    }
+  }
+
+  /* ── init ── */
+  function init() {
+    _load();
+    _loadConfig();
+    document.addEventListener('keydown', _onKeyDown);
+
+    var chatOut = document.getElementById('chat-output');
+    if (chatOut) {
+      var obs = new MutationObserver(function () {
+        if (!_config.enabled) return;
+        clearTimeout(_debounceTimer);
+        _debounceTimer = setTimeout(_onNewMessage, DEBOUNCE_MS);
+      });
+      obs.observe(chatOut, { childList: true, subtree: true });
+    }
+
+    var toolbar = document.querySelector('.toolbar');
+    if (toolbar) {
+      var btn = document.createElement('button');
+      btn.id = 'adaptive-tone-btn';
+      btn.className = 'btn-secondary';
+      btn.title = 'Adaptive Tone \u2014 autonomous communication style profiler (Alt+Shift+Y)';
+      btn.textContent = '\uD83C\uDFA8';
+      btn.addEventListener('click', toggle);
+      toolbar.appendChild(btn);
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  return {
+    toggle: toggle,
+    show: show,
+    hide: hide,
+    analyzeMessage: analyzeMessage,
+    updateProfile: updateProfile,
+    detectShift: detectShift,
+    classifyArchetype: classifyArchetype,
+    generateRecommendations: generateRecommendations,
+    getAlignmentScore: getAlignmentScore,
+    getProfileSummary: getProfileSummary,
+    getTrend: getTrend,
+    generateInsights: generateInsights,
+    getState: function () { return JSON.parse(JSON.stringify(_state)); },
+    getProfile: function () { return Object.assign({}, _state.profile); },
+    getShifts: function () { return _state.shifts.slice(); },
+    isEnabled: function () { return _config.enabled; },
+    setEnabled: function (v) { _config.enabled = !!v; _saveConfig(); },
+    DIMENSIONS: DIMENSIONS,
+    DIM_LABELS: DIM_LABELS,
+    ARCHETYPES: ARCHETYPES,
+    _defaultState: _defaultState
+  };
+})();
