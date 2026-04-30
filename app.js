@@ -47352,22 +47352,22 @@ const SmartAdaptiveTone = (function () {
   DIM_COLORS[DIMENSIONS.DIRECTNESS] = '#f0b27a';
   DIM_COLORS[DIMENSIONS.POLITENESS] = '#85c1e9';
 
-  /* ── formality indicators ── */
-  var FORMAL_WORDS = ['therefore', 'furthermore', 'consequently', 'nevertheless', 'accordingly', 'henceforth', 'regarding', 'pertaining', 'hereby', 'wherein', 'moreover', 'notwithstanding', 'subsequently', 'aforementioned', 'pursuant'];
-  var INFORMAL_WORDS = ['gonna', 'wanna', 'gotta', 'kinda', 'sorta', 'yeah', 'nah', 'hey', 'lol', 'omg', 'btw', 'tbh', 'idk', 'imo', 'nope', 'yep', 'dude', 'bro', 'yo', 'sup', 'cuz', 'chill', 'cool', 'awesome', 'dope'];
+  /* ── formality indicators (Set for O(1) lookup) ── */
+  var FORMAL_SET = new Set(['therefore', 'furthermore', 'consequently', 'nevertheless', 'accordingly', 'henceforth', 'regarding', 'pertaining', 'hereby', 'wherein', 'moreover', 'notwithstanding', 'subsequently', 'aforementioned', 'pursuant']);
+  var INFORMAL_SET = new Set(['gonna', 'wanna', 'gotta', 'kinda', 'sorta', 'yeah', 'nah', 'hey', 'lol', 'omg', 'btw', 'tbh', 'idk', 'imo', 'nope', 'yep', 'dude', 'bro', 'yo', 'sup', 'cuz', 'chill', 'cool', 'awesome', 'dope']);
   var CONTRACTIONS = ["don't", "won't", "can't", "isn't", "aren't", "wasn't", "weren't", "hasn't", "haven't", "hadn't", "wouldn't", "shouldn't", "couldn't", "didn't", "doesn't", "i'm", "you're", "we're", "they're", "it's", "he's", "she's", "that's", "there's", "here's", "what's", "who's", "let's", "i've", "you've", "we've", "they've", "i'll", "you'll", "we'll", "they'll", "i'd", "you'd", "we'd", "they'd"];
 
-  /* ── technicality indicators ── */
-  var TECH_WORDS = ['algorithm', 'api', 'async', 'backend', 'binary', 'boolean', 'buffer', 'cache', 'callback', 'class', 'compile', 'component', 'constructor', 'database', 'debug', 'deploy', 'dependency', 'docker', 'endpoint', 'enum', 'framework', 'function', 'git', 'http', 'instance', 'interface', 'iterate', 'json', 'kernel', 'lambda', 'library', 'middleware', 'module', 'mutex', 'namespace', 'node', 'npm', 'object', 'parameter', 'parser', 'pipeline', 'pointer', 'polymorphism', 'promise', 'protocol', 'query', 'recursive', 'regex', 'repository', 'runtime', 'schema', 'server', 'socket', 'sql', 'stack', 'syntax', 'tcp', 'thread', 'token', 'typescript', 'variable', 'webpack'];
+  /* ── technicality indicators (Set for O(1) lookup) ── */
+  var TECH_SET = new Set(['algorithm', 'api', 'async', 'backend', 'binary', 'boolean', 'buffer', 'cache', 'callback', 'class', 'compile', 'component', 'constructor', 'database', 'debug', 'deploy', 'dependency', 'docker', 'endpoint', 'enum', 'framework', 'function', 'git', 'http', 'instance', 'interface', 'iterate', 'json', 'kernel', 'lambda', 'library', 'middleware', 'module', 'mutex', 'namespace', 'node', 'npm', 'object', 'parameter', 'parser', 'pipeline', 'pointer', 'polymorphism', 'promise', 'protocol', 'query', 'recursive', 'regex', 'repository', 'runtime', 'schema', 'server', 'socket', 'sql', 'stack', 'syntax', 'tcp', 'thread', 'token', 'typescript', 'variable', 'webpack']);
 
-  /* ── emotionality indicators ── */
-  var EMOTION_WORDS = ['love', 'hate', 'amazing', 'terrible', 'excited', 'frustrated', 'angry', 'happy', 'sad', 'wonderful', 'horrible', 'fantastic', 'awful', 'thrilled', 'devastated', 'furious', 'delighted', 'annoyed', 'grateful', 'disgusted', 'ecstatic', 'miserable', 'passionate', 'desperate', 'overwhelmed'];
+  /* ── emotionality indicators (Set for O(1) lookup) ── */
+  var EMOTION_SET = new Set(['love', 'hate', 'amazing', 'terrible', 'excited', 'frustrated', 'angry', 'happy', 'sad', 'wonderful', 'horrible', 'fantastic', 'awful', 'thrilled', 'devastated', 'furious', 'delighted', 'annoyed', 'grateful', 'disgusted', 'ecstatic', 'miserable', 'passionate', 'desperate', 'overwhelmed']);
   var EMOTION_PUNCTUATION = /[!?]{2,}|!!+|\?\?+/g;
   var EMOJI_PATTERN = /[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu;
 
-  /* ── politeness indicators ── */
-  var POLITE_WORDS = ['please', 'thank', 'thanks', 'appreciate', 'kindly', 'sorry', 'excuse', 'pardon', 'grateful', 'would you mind', 'could you', 'if possible', 'at your convenience', 'i appreciate', 'thank you'];
-  var DIRECT_WORDS = ['do', 'tell', 'show', 'give', 'make', 'fix', 'just', 'now', 'immediately', 'stop', 'go', 'run', 'list', 'explain'];
+  /* ── politeness indicators (Set for O(1) lookup) ── */
+  var POLITE_SET = new Set(['please', 'thank', 'thanks', 'appreciate', 'kindly', 'sorry', 'excuse', 'pardon', 'grateful']);
+  var DIRECT_SET = new Set(['do', 'tell', 'show', 'give', 'make', 'fix', 'just', 'now', 'immediately', 'stop', 'go', 'run', 'list', 'explain']);
 
   /* ── tone archetypes ── */
   var ARCHETYPES = {
@@ -47445,12 +47445,15 @@ const SmartAdaptiveTone = (function () {
     return (text || '').toLowerCase().split(/[\s,.;:!?()\[\]{}'"]+/).filter(function (w) { return w.length > 0; });
   }
 
-  function _countMatches(tokens, wordList) {
+  /**
+   * Count tokens that match a Set. O(tokens) instead of O(tokens × wordList).
+   * For exact matching only (substring matching removed — the old indexOf
+   * fallback caused false positives and was the primary perf bottleneck).
+   */
+  function _countSetMatches(tokens, wordSet) {
     var count = 0;
     for (var i = 0; i < tokens.length; i++) {
-      for (var j = 0; j < wordList.length; j++) {
-        if (tokens[i] === wordList[j] || tokens[i].indexOf(wordList[j]) >= 0) { count++; break; }
-      }
+      if (wordSet.has(tokens[i])) count++;
     }
     return count;
   }
@@ -47466,17 +47469,20 @@ const SmartAdaptiveTone = (function () {
   }
 
   /* ── dimension scorers (return 0-1) ── */
-  function _scoreFormality(text) {
-    var tokens = _tokenize(text);
+  /* Refactored: all scorers accept pre-computed tokens to avoid
+   * redundant _tokenize() calls. analyzeMessage() tokenizes once
+   * and passes the result to each scorer — eliminates 6× duplicate
+   * tokenization (split + filter + lowercase) per message. */
+  function _scoreFormality(text, tokens) {
     if (tokens.length === 0) return 0.5;
-    var formalCount = _countMatches(tokens, FORMAL_WORDS);
-    var informalCount = _countMatches(tokens, INFORMAL_WORDS);
+    var formalCount = _countSetMatches(tokens, FORMAL_SET);
+    var informalCount = _countSetMatches(tokens, INFORMAL_SET);
     var contractionCount = 0;
     var lower = text.toLowerCase();
     for (var i = 0; i < CONTRACTIONS.length; i++) {
       if (lower.indexOf(CONTRACTIONS[i]) >= 0) contractionCount++;
     }
-    var avgLen = _avgSentenceLength(text);
+    var avgLen = tokens.length / _sentenceCount(text);
     var lenBonus = Math.min(1, avgLen / 25) * 0.3;
     var formalSignal = (formalCount / tokens.length) * 5 + lenBonus;
     var informalSignal = ((informalCount + contractionCount * 0.5) / tokens.length) * 5;
@@ -47484,8 +47490,7 @@ const SmartAdaptiveTone = (function () {
     return Math.max(0, Math.min(1, raw));
   }
 
-  function _scoreVerbosity(text) {
-    var tokens = _tokenize(text);
+  function _scoreVerbosity(text, tokens) {
     var wordCount = tokens.length;
     if (wordCount <= 5) return 0.1;
     if (wordCount <= 15) return 0.3;
@@ -47495,19 +47500,17 @@ const SmartAdaptiveTone = (function () {
     return 0.95;
   }
 
-  function _scoreTechnicality(text) {
-    var tokens = _tokenize(text);
+  function _scoreTechnicality(text, tokens) {
     if (tokens.length === 0) return 0.5;
-    var techCount = _countMatches(tokens, TECH_WORDS);
+    var techCount = _countSetMatches(tokens, TECH_SET);
     var hasCode = /`|[^]+|function\s*\(|=>|var\s|let\s|const\s|import\s|class\s/.test(text);
     var raw = (techCount / tokens.length) * 4 + (hasCode ? 0.3 : 0);
     return Math.max(0, Math.min(1, raw));
   }
 
-  function _scoreEmotionality(text) {
-    var tokens = _tokenize(text);
+  function _scoreEmotionality(text, tokens) {
     if (tokens.length === 0) return 0.5;
-    var emotionCount = _countMatches(tokens, EMOTION_WORDS);
+    var emotionCount = _countSetMatches(tokens, EMOTION_SET);
     var punctMatch = text.match(EMOTION_PUNCTUATION);
     var punctCount = punctMatch ? punctMatch.length : 0;
     var emojiMatch = text.match(EMOJI_PATTERN);
@@ -47517,20 +47520,18 @@ const SmartAdaptiveTone = (function () {
     return Math.max(0, Math.min(1, raw));
   }
 
-  function _scoreDirectness(text) {
-    var tokens = _tokenize(text);
+  function _scoreDirectness(text, tokens) {
     if (tokens.length === 0) return 0.5;
-    var directCount = _countMatches(tokens, DIRECT_WORDS);
+    var directCount = _countSetMatches(tokens, DIRECT_SET);
     var isImperative = /^(do|tell|show|give|make|fix|list|run|stop|go|explain|write|create|find|get|set|add|remove|delete|update)\b/i.test(text.trim());
-    var shortSentences = _avgSentenceLength(text) < 10 ? 0.2 : 0;
+    var shortSentences = (tokens.length / _sentenceCount(text)) < 10 ? 0.2 : 0;
     var raw = (directCount / tokens.length) * 3 + (isImperative ? 0.3 : 0) + shortSentences;
     return Math.max(0, Math.min(1, raw));
   }
 
-  function _scorePoliteness(text) {
-    var tokens = _tokenize(text);
+  function _scorePoliteness(text, tokens) {
     if (tokens.length === 0) return 0.5;
-    var politeCount = _countMatches(tokens, POLITE_WORDS);
+    var politeCount = _countSetMatches(tokens, POLITE_SET);
     var lower = text.toLowerCase();
     var hasGreeting = /^(hi|hello|hey|good morning|good afternoon|good evening)\b/i.test(lower.trim());
     var hasClosing = /(thanks|thank you|cheers|regards|best|appreciated)\s*[.!]?\s*$/i.test(lower.trim());
@@ -47539,17 +47540,28 @@ const SmartAdaptiveTone = (function () {
   }
 
   /* ── core analysis ── */
+  /**
+   * Analyze a single message's tone across 6 dimensions.
+   * Optimized: tokenizes the text exactly once and threads the token
+   * array into all 6 scorers. Previously each scorer called _tokenize()
+   * independently — 7 total tokenizations (6 scorers + wordCount) per
+   * message. Now: 1 tokenization. For a 200-word message with 60+
+   * TECH_WORDS, this eliminates ~6 redundant split/filter/lowercase
+   * passes AND replaces O(tokens×wordList) nested loops with O(tokens)
+   * Set lookups in each scorer.
+   */
   function analyzeMessage(text) {
     if (!text || text.trim().length < 3) return null;
+    var tokens = _tokenize(text);
     return {
-      formality: _scoreFormality(text),
-      verbosity: _scoreVerbosity(text),
-      technicality: _scoreTechnicality(text),
-      emotionality: _scoreEmotionality(text),
-      directness: _scoreDirectness(text),
-      politeness: _scorePoliteness(text),
+      formality: _scoreFormality(text, tokens),
+      verbosity: _scoreVerbosity(text, tokens),
+      technicality: _scoreTechnicality(text, tokens),
+      emotionality: _scoreEmotionality(text, tokens),
+      directness: _scoreDirectness(text, tokens),
+      politeness: _scorePoliteness(text, tokens),
       timestamp: Date.now(),
-      wordCount: _tokenize(text).length
+      wordCount: tokens.length
     };
   }
 
