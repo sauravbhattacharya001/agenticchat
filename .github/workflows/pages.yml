@@ -9,6 +9,7 @@ on:
       - 'style.css'
       - 'sw.js'
       - 'manifest.json'
+      - 'docs/**'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 
@@ -35,9 +36,10 @@ jobs:
 
       - name: Prepare deployment directory
         run: |
-          mkdir -p _site
+          mkdir -p _site/docs
           cp index.html app.js style.css sw.js manifest.json _site/
           cp LICENSE _site/ 2>/dev/null || true
+          cp docs/*.html _site/docs/ 2>/dev/null || true
 
       - name: Setup Pages
         uses: actions/configure-pages@v6
