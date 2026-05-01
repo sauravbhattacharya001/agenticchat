@@ -42639,23 +42639,18 @@ const SmartFactMemory = (() => {
 
   /* ── persistence ── */
   function _save() {
-    SafeStorage.set(STORAGE_KEY, JSON.stringify(_facts));
+    SafeStorage.trySetJSON(STORAGE_KEY, _facts);
   }
   function _load() {
-    try {
-      var parsed = sanitizeStorageObject(JSON.parse(SafeStorage.get(STORAGE_KEY)));
-      _facts = Array.isArray(parsed) ? parsed : [];
-    }
-    catch (_e) { _facts = []; }
+    var parsed = SafeStorage.getJSON(STORAGE_KEY);
+    _facts = Array.isArray(parsed) ? parsed : [];
   }
   function _saveConfig() {
-    SafeStorage.set(CONFIG_KEY, JSON.stringify(_config));
+    SafeStorage.trySetJSON(CONFIG_KEY, _config);
   }
   function _loadConfig() {
-    try {
-      var c = sanitizeStorageObject(JSON.parse(SafeStorage.get(CONFIG_KEY)));
-      if (c) { _config.enabled = c.enabled !== false; _config.autoExtract = c.autoExtract !== false; _config.showBadge = c.showBadge !== false; }
-    } catch (_e) {}
+    var c = SafeStorage.getJSON(CONFIG_KEY);
+    if (c) { _config.enabled = c.enabled !== false; _config.autoExtract = c.autoExtract !== false; _config.showBadge = c.showBadge !== false; }
   }
 
   /* ── extraction engine ── */
@@ -44802,30 +44797,20 @@ const SmartConversationOracle = (() => {
 
   /* ── persistence ── */
   function _save() {
-    try { SafeStorage.set(STORAGE_KEY, JSON.stringify(_state)); } catch(e) {}
+    SafeStorage.trySetJSON(STORAGE_KEY, _state);
   }
   function _load() {
-    try {
-      var raw = SafeStorage.get(STORAGE_KEY);
-      if (raw) {
-        var d = sanitizeStorageObject(JSON.parse(raw));
-        if (d && typeof d === 'object') {
-          _state = Object.assign(_defaultState(), d);
-        }
-      }
-    } catch(e) {}
+    var d = SafeStorage.getJSON(STORAGE_KEY);
+    if (d && typeof d === 'object') {
+      _state = Object.assign(_defaultState(), d);
+    }
   }
   function _saveConfig() {
-    try { SafeStorage.set(CONFIG_KEY, JSON.stringify(_config)); } catch(e) {}
+    SafeStorage.trySetJSON(CONFIG_KEY, _config);
   }
   function _loadConfig() {
-    try {
-      var raw = SafeStorage.get(CONFIG_KEY);
-      if (raw) {
-        var d = sanitizeStorageObject(JSON.parse(raw));
-        if (d && typeof d === 'object') _config = Object.assign(_config, d);
-      }
-    } catch(e) {}
+    var d = SafeStorage.getJSON(CONFIG_KEY);
+    if (d && typeof d === 'object') _config = Object.assign(_config, d);
   }
 
   /* ── NLP helpers ── */
@@ -45746,23 +45731,19 @@ const SmartGoalTracker = (function () {
   function _defaultState() { return { goals: [], sessionGoals: [], insights: [], lastAnalysis: 0 }; }
 
   function _loadConfig() {
-    try {
-      var s = SafeStorage.get(CONFIG_KEY);
-      if (s) _config = sanitizeStorageObject(JSON.parse(s));
-    } catch (e) {}
+    var c = SafeStorage.getJSON(CONFIG_KEY);
+    if (c) _config = c;
   }
   function _saveConfig() {
-    try { SafeStorage.set(CONFIG_KEY, JSON.stringify(_config)); } catch (e) {}
+    SafeStorage.trySetJSON(CONFIG_KEY, _config);
   }
   function _load() {
-    try {
-      var s = SafeStorage.get(STORAGE_KEY);
-      if (s) _state = sanitizeStorageObject(JSON.parse(s));
-    } catch (e) { _state = _defaultState(); }
+    var d = SafeStorage.getJSON(STORAGE_KEY);
+    if (d) _state = d;
     if (!_state.goals) _state = _defaultState();
   }
   function _save() {
-    try { SafeStorage.set(STORAGE_KEY, JSON.stringify(_state)); } catch (e) {}
+    SafeStorage.trySetJSON(STORAGE_KEY, _state);
   }
 
   /* ── goal creation ── */
@@ -46354,59 +46335,33 @@ const SmartPatternAutomator = (function () {
 
   /* ── storage ── */
   function _save() {
-    if (typeof SafeStorage !== 'undefined' && typeof SafeStorage.set === 'function') {
-      SafeStorage.set(STORAGE_KEY, JSON.stringify(_state));
-    } else {
-      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(_state)); } catch (e) { /* ignore */ }
-    }
+    SafeStorage.trySetJSON(STORAGE_KEY, _state);
   }
 
   function _load() {
-    var raw;
-    if (typeof SafeStorage !== 'undefined' && typeof SafeStorage.get === 'function') {
-      raw = SafeStorage.get(STORAGE_KEY);
-    } else {
-      try { raw = localStorage.getItem(STORAGE_KEY); } catch (e) { /* ignore */ }
-    }
-    if (raw) {
-      try {
-        var parsed = JSON.parse(raw);
-        if (typeof sanitizeStorageObject === 'function') parsed = sanitizeStorageObject(parsed);
-        var def = _defaultState();
-        _state.patterns = Array.isArray(parsed.patterns) ? parsed.patterns : def.patterns;
-        _state.workflows = Array.isArray(parsed.workflows) ? parsed.workflows : def.workflows;
-        _state.automations = Array.isArray(parsed.automations) ? parsed.automations : def.automations;
-        _state.feedback = (parsed.feedback && typeof parsed.feedback === 'object') ? parsed.feedback : def.feedback;
-        _state.intentHistory = Array.isArray(parsed.intentHistory) ? parsed.intentHistory : def.intentHistory;
-      } catch (e) { _state = _defaultState(); }
+    var parsed = SafeStorage.getJSON(STORAGE_KEY);
+    if (parsed) {
+      var def = _defaultState();
+      _state.patterns = Array.isArray(parsed.patterns) ? parsed.patterns : def.patterns;
+      _state.workflows = Array.isArray(parsed.workflows) ? parsed.workflows : def.workflows;
+      _state.automations = Array.isArray(parsed.automations) ? parsed.automations : def.automations;
+      _state.feedback = (parsed.feedback && typeof parsed.feedback === 'object') ? parsed.feedback : def.feedback;
+      _state.intentHistory = Array.isArray(parsed.intentHistory) ? parsed.intentHistory : def.intentHistory;
     }
   }
 
   function _saveConfig() {
-    if (typeof SafeStorage !== 'undefined' && typeof SafeStorage.set === 'function') {
-      SafeStorage.set(CONFIG_KEY, JSON.stringify(_config));
-    } else {
-      try { localStorage.setItem(CONFIG_KEY, JSON.stringify(_config)); } catch (e) { /* ignore */ }
-    }
+    SafeStorage.trySetJSON(CONFIG_KEY, _config);
   }
 
   function _loadConfig() {
-    var raw;
-    if (typeof SafeStorage !== 'undefined' && typeof SafeStorage.get === 'function') {
-      raw = SafeStorage.get(CONFIG_KEY);
-    } else {
-      try { raw = localStorage.getItem(CONFIG_KEY); } catch (e) { /* ignore */ }
-    }
-    if (raw) {
-      try {
-        var parsed = JSON.parse(raw);
-        if (typeof sanitizeStorageObject === 'function') parsed = sanitizeStorageObject(parsed);
-        var def = _defaultConfig();
-        _config.enabled = typeof parsed.enabled === 'boolean' ? parsed.enabled : def.enabled;
-        _config.autoTrigger = typeof parsed.autoTrigger === 'boolean' ? parsed.autoTrigger : def.autoTrigger;
-        _config.minFrequency = typeof parsed.minFrequency === 'number' ? parsed.minFrequency : def.minFrequency;
-        _config.confidenceThreshold = typeof parsed.confidenceThreshold === 'number' ? parsed.confidenceThreshold : def.confidenceThreshold;
-      } catch (e) { _config = _defaultConfig(); }
+    var parsed = SafeStorage.getJSON(CONFIG_KEY);
+    if (parsed) {
+      var def = _defaultConfig();
+      _config.enabled = typeof parsed.enabled === 'boolean' ? parsed.enabled : def.enabled;
+      _config.autoTrigger = typeof parsed.autoTrigger === 'boolean' ? parsed.autoTrigger : def.autoTrigger;
+      _config.minFrequency = typeof parsed.minFrequency === 'number' ? parsed.minFrequency : def.minFrequency;
+      _config.confidenceThreshold = typeof parsed.confidenceThreshold === 'number' ? parsed.confidenceThreshold : def.confidenceThreshold;
     }
   }
 
@@ -47401,42 +47356,24 @@ const SmartAdaptiveTone = (function () {
 
   /* ── storage ── */
   function _save() {
-    if (typeof SafeStorage !== 'undefined' && typeof SafeStorage.set === 'function') {
-      SafeStorage.set(STORAGE_KEY, JSON.stringify(_state));
-    } else {
-      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(_state)); } catch (e) { /* ignore */ }
-    }
+    SafeStorage.trySetJSON(STORAGE_KEY, _state);
   }
 
   function _load() {
-    var raw;
-    if (typeof SafeStorage !== 'undefined' && typeof SafeStorage.get === 'function') {
-      raw = SafeStorage.get(STORAGE_KEY);
-    } else {
-      try { raw = localStorage.getItem(STORAGE_KEY); } catch (e) { /* noop */ }
-    }
-    if (raw) {
-      try { var parsed = sanitizeStorageObject(JSON.parse(raw)); _state = Object.assign(_defaultState(), parsed); } catch (e) { _state = _defaultState(); }
+    var parsed = SafeStorage.getJSON(STORAGE_KEY);
+    if (parsed) {
+      _state = Object.assign(_defaultState(), parsed);
     }
   }
 
   function _saveConfig() {
-    if (typeof SafeStorage !== 'undefined' && typeof SafeStorage.set === 'function') {
-      SafeStorage.set(CONFIG_KEY, JSON.stringify(_config));
-    } else {
-      try { localStorage.setItem(CONFIG_KEY, JSON.stringify(_config)); } catch (e) { /* ignore */ }
-    }
+    SafeStorage.trySetJSON(CONFIG_KEY, _config);
   }
 
   function _loadConfig() {
-    var raw;
-    if (typeof SafeStorage !== 'undefined' && typeof SafeStorage.get === 'function') {
-      raw = SafeStorage.get(CONFIG_KEY);
-    } else {
-      try { raw = localStorage.getItem(CONFIG_KEY); } catch (e) { /* noop */ }
-    }
-    if (raw) {
-      try { var parsed = sanitizeStorageObject(JSON.parse(raw)); _config = Object.assign(_defaultConfig(), parsed); } catch (e) { _config = _defaultConfig(); }
+    var parsed = SafeStorage.getJSON(CONFIG_KEY);
+    if (parsed) {
+      _config = Object.assign(_defaultConfig(), parsed);
     }
   }
 
@@ -48086,47 +48023,24 @@ const SmartCognitiveLoad = (function () {
 
   /* ── Storage ── */
   function _save() {
-    var data = JSON.stringify(_state);
-    if (typeof SafeStorage !== 'undefined' && typeof SafeStorage.set === 'function') {
-      SafeStorage.set(STORAGE_KEY, data);
-    } else {
-      try { localStorage.setItem(STORAGE_KEY, data); } catch (e) { /* ignore */ }
-    }
+    SafeStorage.trySetJSON(STORAGE_KEY, _state);
   }
 
   function _load() {
-    var raw;
-    if (typeof SafeStorage !== 'undefined' && typeof SafeStorage.get === 'function') {
-      raw = SafeStorage.get(STORAGE_KEY);
-    } else {
-      try { raw = localStorage.getItem(STORAGE_KEY); } catch (e) { /* ignore */ }
-    }
-    if (raw) {
-      try {
-        var parsed = sanitizeStorageObject(JSON.parse(raw));
-        _state = Object.assign(_defaultState(), parsed);
-      } catch (e) { _state = _defaultState(); }
+    var parsed = SafeStorage.getJSON(STORAGE_KEY);
+    if (parsed) {
+      _state = Object.assign(_defaultState(), parsed);
     }
   }
 
   function _saveConfig() {
-    var data = JSON.stringify(_config);
-    if (typeof SafeStorage !== 'undefined' && typeof SafeStorage.set === 'function') {
-      SafeStorage.set(CONFIG_KEY, data);
-    } else {
-      try { localStorage.setItem(CONFIG_KEY, data); } catch (e) { /* ignore */ }
-    }
+    SafeStorage.trySetJSON(CONFIG_KEY, _config);
   }
 
   function _loadConfig() {
-    var raw;
-    if (typeof SafeStorage !== 'undefined' && typeof SafeStorage.get === 'function') {
-      raw = SafeStorage.get(CONFIG_KEY);
-    } else {
-      try { raw = localStorage.getItem(CONFIG_KEY); } catch (e) { /* ignore */ }
-    }
-    if (raw) {
-      try { _config = Object.assign(_defaultConfig(), sanitizeStorageObject(JSON.parse(raw))); } catch (e) { _config = _defaultConfig(); }
+    var parsed = SafeStorage.getJSON(CONFIG_KEY);
+    if (parsed) {
+      _config = Object.assign(_defaultConfig(), parsed);
     }
   }
 

@@ -16,7 +16,14 @@ global.localStorage = (() => {
   let store = {};
   return { getItem: k => store[k] || null, setItem: (k, v) => { store[k] = v; }, removeItem: k => { delete store[k]; }, clear: () => { store = {}; } };
 })();
-global.SafeStorage = { get: k => localStorage.getItem(k), set: (k, v) => localStorage.setItem(k, v) };
+global.SafeStorage = {
+  get: k => localStorage.getItem(k),
+  set: (k, v) => localStorage.setItem(k, v),
+  getJSON: (k, fallback = null) => { const raw = localStorage.getItem(k); if (raw == null) return fallback; try { return JSON.parse(raw); } catch (_) { return fallback; } },
+  setJSON: (k, v) => localStorage.setItem(k, JSON.stringify(v)),
+  trySetJSON: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) {} },
+  trySet: (k, v) => { try { localStorage.setItem(k, v); } catch (_) {} }
+};
 global.setTimeout = (fn) => fn();
 global.clearTimeout = () => {};
 
