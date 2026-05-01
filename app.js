@@ -48654,3 +48654,898 @@ const SmartCognitiveLoad = (function () {
     _extractTopics: _extractTopics
   };
 })();
+
+/* ============================================================
+ * SmartIntentAligner — Autonomous Intent Alignment Verification Engine
+ *
+ * Detects when AI responses diverge from user intent through 7 engines:
+ *   1. Topic Drift Detector
+ *   2. Scope Mismatch Detector
+ *   3. Constraint Violation Detector
+ *   4. Format Mismatch Detector
+ *   5. Depth Mismatch Detector
+ *   6. Hallucination Risk Detector
+ *   7. Relevance Decay Tracker
+ *
+ * Shortcut: Ctrl+Shift+Y
+ * ============================================================ */
+const SmartIntentAligner = (function () {
+  'use strict';
+
+  var STORAGE_KEY = 'smartIntentAligner';
+  var CONFIG_KEY = 'smartIntentAlignerConfig';
+  var DEBOUNCE_MS = 700;
+  var MAX_EXCHANGES = 200;
+  var MAX_CORRECTIONS = 100;
+  var MAX_INSIGHTS = 50;
+  var TOAST_COOLDOWN_MS = 300000;
+  var _panelEl = null;
+  var _visible = false;
+  var _debounceTimer = null;
+  var _badgeEl = null;
+  var _lastToastTime = 0;
+  var _observer = null;
+
+  /* ── Alignment Tiers ── */
+  var TIERS = {
+    PERFECT: { name: 'Perfect', min: 90, max: 100, color: '#27ae60', emoji: '🟢', desc: 'AI fully addressed your intent' },
+    GOOD: { name: 'Good', min: 70, max: 89, color: '#f1c40f', emoji: '🟡', desc: 'Mostly aligned with minor gaps' },
+    DRIFTING: { name: 'Drifting', min: 50, max: 69, color: '#e67e22', emoji: '🟠', desc: 'Notable divergence from intent' },
+    MISALIGNED: { name: 'Misaligned', min: 0, max: 49, color: '#e74c3c', emoji: '🔴', desc: 'AI response missed the mark' }
+  };
+
+  /* ── Dimension IDs ── */
+  var DIMENSIONS = {
+    TOPIC_DRIFT: 'topicDrift',
+    SCOPE_MATCH: 'scopeMatch',
+    CONSTRAINT_ADHERENCE: 'constraintAdherence',
+    FORMAT_MATCH: 'formatMatch',
+    DEPTH_MATCH: 'depthMatch',
+    HALLUCINATION_RISK: 'hallucinationRisk',
+    RELEVANCE_DECAY: 'relevanceDecay'
+  };
+
+  var DIM_LABELS = {};
+  DIM_LABELS[DIMENSIONS.TOPIC_DRIFT] = 'Topic Alignment';
+  DIM_LABELS[DIMENSIONS.SCOPE_MATCH] = 'Scope Match';
+  DIM_LABELS[DIMENSIONS.CONSTRAINT_ADHERENCE] = 'Constraint Adherence';
+  DIM_LABELS[DIMENSIONS.FORMAT_MATCH] = 'Format Match';
+  DIM_LABELS[DIMENSIONS.DEPTH_MATCH] = 'Depth Match';
+  DIM_LABELS[DIMENSIONS.HALLUCINATION_RISK] = 'Confidence Quality';
+  DIM_LABELS[DIMENSIONS.RELEVANCE_DECAY] = 'Relevance Trend';
+
+  var DIM_WEIGHTS = {};
+  DIM_WEIGHTS[DIMENSIONS.TOPIC_DRIFT] = 0.25;
+  DIM_WEIGHTS[DIMENSIONS.SCOPE_MATCH] = 0.15;
+  DIM_WEIGHTS[DIMENSIONS.CONSTRAINT_ADHERENCE] = 0.20;
+  DIM_WEIGHTS[DIMENSIONS.FORMAT_MATCH] = 0.10;
+  DIM_WEIGHTS[DIMENSIONS.DEPTH_MATCH] = 0.10;
+  DIM_WEIGHTS[DIMENSIONS.HALLUCINATION_RISK] = 0.10;
+  DIM_WEIGHTS[DIMENSIONS.RELEVANCE_DECAY] = 0.10;
+
+  var DIM_COLORS = {};
+  DIM_COLORS[DIMENSIONS.TOPIC_DRIFT] = '#3498db';
+  DIM_COLORS[DIMENSIONS.SCOPE_MATCH] = '#2ecc71';
+  DIM_COLORS[DIMENSIONS.CONSTRAINT_ADHERENCE] = '#9b59b6';
+  DIM_COLORS[DIMENSIONS.FORMAT_MATCH] = '#1abc9c';
+  DIM_COLORS[DIMENSIONS.DEPTH_MATCH] = '#e67e22';
+  DIM_COLORS[DIMENSIONS.HALLUCINATION_RISK] = '#e74c3c';
+  DIM_COLORS[DIMENSIONS.RELEVANCE_DECAY] = '#34495e';
+
+  /* ── Constraint patterns ── */
+  var CONSTRAINT_PATTERNS = [
+    { regex: /\bonly\s+(?:in\s+)?(\w+)/gi, type: 'inclusion' },
+    { regex: /\bdon'?t\s+(?:include|use|mention|add)\s+(.+?)(?:\.|,|$)/gi, type: 'exclusion' },
+    { regex: /\bin\s+(python|javascript|java|c\+\+|ruby|go|rust|typescript|c#|swift|kotlin|php|sql)\b/gi, type: 'language' },
+    { regex: /\b(?:under|less than|max|maximum|at most)\s+(\d+)\s+(words?|lines?|sentences?|characters?|paragraphs?)/gi, type: 'length_max' },
+    { regex: /\b(?:at least|more than|min|minimum)\s+(\d+)\s+(words?|lines?|sentences?|characters?|paragraphs?)/gi, type: 'length_min' },
+    { regex: /\bwithout\s+(.+?)(?:\.|,|$)/gi, type: 'exclusion' },
+    { regex: /\b(?:no|avoid)\s+(.+?)(?:\.|,|$)/gi, type: 'exclusion' },
+    { regex: /\b(?:keep it|make it)\s+(short|brief|concise|simple|detailed|thorough)/gi, type: 'style' }
+  ];
+
+  /* ── Format signals ── */
+  var FORMAT_REQUESTS = {
+    list: [/\b(?:list|bullet|enumerate|itemize)\b/i, /\bgive me a list\b/i, /\blist (?:of|the|all)\b/i],
+    code: [/\b(?:code|implementation|function|script|program|snippet)\b/i, /\bwrite (?:a |the )?(?:code|function|script)\b/i, /\bhow (?:to|do I) (?:code|implement|write)\b/i],
+    table: [/\b(?:table|tabular|grid|comparison table)\b/i, /\bformat (?:as|in) a table\b/i],
+    brief: [/\b(?:brief|short|concise|tl;?dr|one.?liner|summary)\b/i, /\b(?:keep it|make it) (?:short|brief)\b/i],
+    detailed: [/\b(?:detailed|thorough|comprehensive|in.?depth|elaborate|explain fully)\b/i],
+    steps: [/\b(?:step.?by.?step|steps|procedure|walkthrough|how.?to)\b/i]
+  };
+
+  /* ── Depth signals ── */
+  var SHALLOW_SIGNALS = ['explain like i\'m 5', 'eli5', 'simple terms', 'simply', 'basics', 'beginner', 'overview', 'high level', 'in a nutshell', 'layman'];
+  var DEEP_SIGNALS = ['detailed', 'in depth', 'comprehensive', 'thorough', 'advanced', 'technical', 'elaborate', 'deep dive', 'nuanced', 'rigorous'];
+
+  /* ── Hedging phrases ── */
+  var HEDGE_PHRASES = ['i think', 'i believe', 'might be', 'could be', 'possibly', 'perhaps', 'it seems', 'it appears', 'not entirely sure', 'if i recall', 'to my knowledge', 'as far as i know', 'i\'m not certain', 'arguably', 'presumably', 'supposedly'];
+
+  /* ── Stopwords ── */
+  var STOPWORDS = new Set(['the', 'be', 'to', 'of', 'and', 'a', 'in', 'that', 'have', 'i', 'it', 'for', 'not', 'on', 'with', 'he', 'as', 'you', 'do', 'at', 'this', 'but', 'his', 'by', 'from', 'they', 'we', 'say', 'her', 'she', 'or', 'an', 'will', 'my', 'one', 'all', 'would', 'there', 'their', 'what', 'so', 'up', 'out', 'if', 'about', 'who', 'get', 'which', 'go', 'me', 'when', 'make', 'can', 'like', 'time', 'no', 'just', 'him', 'know', 'take', 'people', 'into', 'your', 'some', 'could', 'them', 'see', 'other', 'than', 'then', 'now', 'look', 'only', 'come', 'its', 'over', 'think', 'also', 'back', 'use', 'how', 'our', 'well', 'way', 'even', 'new', 'want', 'because', 'any', 'these', 'give', 'most', 'us', 'is', 'are', 'was', 'were', 'been', 'has', 'had', 'did', 'does', 'am', 'been', 'being', 'each', 'few', 'more', 'such', 'own', 'same', 'should', 'too', 'very', 'much', 'many']);
+
+  /* ── Helpers ── */
+  function _tokenize(text) {
+    if (!text) return [];
+    return text.toLowerCase().replace(/[^a-z0-9\s'-]/g, ' ').split(/\s+/).filter(function (w) { return w.length > 1 && !STOPWORDS.has(w); });
+  }
+
+  function _sentences(text) {
+    if (!text) return [];
+    return text.split(/[.!?]+/).map(function (s) { return s.trim(); }).filter(function (s) { return s.length > 5; });
+  }
+
+  function _wordCount(text) {
+    if (!text) return 0;
+    return text.split(/\s+/).filter(function (w) { return w.length > 0; }).length;
+  }
+
+  function _keywordOverlap(tokens1, tokens2) {
+    if (!tokens1.length || !tokens2.length) return 0;
+    var set1 = new Set(tokens1);
+    var set2 = new Set(tokens2);
+    var intersection = 0;
+    set1.forEach(function (w) { if (set2.has(w)) intersection++; });
+    var union = new Set(tokens1.concat(tokens2)).size;
+    return union > 0 ? intersection / union : 0;
+  }
+
+  function _hasCodeBlock(text) {
+    return /```[\s\S]*?```/.test(text) || /`[^`]+`/.test(text) || /^\s{4,}\S/m.test(text);
+  }
+
+  function _hasList(text) {
+    var listLines = (text.match(/^[\s]*[-*•]\s+.+/gm) || []).length;
+    var numberedLines = (text.match(/^[\s]*\d+[.)]\s+.+/gm) || []).length;
+    return (listLines + numberedLines) >= 3;
+  }
+
+  function _hasTable(text) {
+    return /\|.+\|/.test(text) && /\|[-:]+\|/.test(text);
+  }
+
+  function _hasSteps(text) {
+    var stepLines = (text.match(/^[\s]*(?:step\s*\d|#?\d+[.):])\s+/gim) || []).length;
+    return stepLines >= 2;
+  }
+
+  /* ── Default state ── */
+  function _defaultState() {
+    return {
+      exchanges: [],
+      patterns: { weakestDimension: null, strongestDimension: null, avgScore: 100, trend: 'stable' },
+      corrections: [],
+      insights: [],
+      preferences: { preferredFormat: null, preferredDepth: null, detectedStyle: null },
+      currentScore: 100,
+      currentTier: 'PERFECT',
+      currentScores: {}
+    };
+  }
+
+  function _defaultConfig() {
+    return { enabled: true, showBadge: true, toastOnMisalignment: true, threshold: 50 };
+  }
+
+  var _state = _defaultState();
+  var _config = _defaultConfig();
+
+  function _loadState() {
+    var raw = SafeStorage.getJSON(STORAGE_KEY, null);
+    if (raw && typeof raw === 'object') {
+      _state = Object.assign(_defaultState(), raw);
+    }
+  }
+
+  function _saveState() {
+    SafeStorage.set(STORAGE_KEY, JSON.stringify(_state));
+  }
+
+  function _loadConfig() {
+    var raw = SafeStorage.getJSON(CONFIG_KEY, null);
+    if (raw && typeof raw === 'object') {
+      _config = Object.assign(_defaultConfig(), raw);
+    }
+  }
+
+  function _saveConfig() {
+    SafeStorage.set(CONFIG_KEY, JSON.stringify(_config));
+  }
+
+  /* ════════════════════════════════════════════════════════════
+   * DETECTOR 1: Topic Drift
+   * ════════════════════════════════════════════════════════════ */
+  function analyzeTopicDrift(userMsg, aiMsg) {
+    var userTokens = _tokenize(userMsg);
+    var aiTokens = _tokenize(aiMsg);
+    if (userTokens.length === 0) return 100;
+    var overlap = _keywordOverlap(userTokens, aiTokens);
+    // Scale: 0 overlap → score 20, 0.3+ overlap → score 100
+    var score = Math.min(100, Math.round(20 + (overlap / 0.3) * 80));
+    return Math.max(0, Math.min(100, score));
+  }
+
+  /* ════════════════════════════════════════════════════════════
+   * DETECTOR 2: Scope Mismatch
+   * ════════════════════════════════════════════════════════════ */
+  function analyzeScopeMatch(userMsg, aiMsg) {
+    var userWords = _wordCount(userMsg);
+    var aiWords = _wordCount(aiMsg);
+    var userSentences = _sentences(userMsg);
+    var aiSentences = _sentences(aiMsg);
+
+    // Detect if user asked a specific question
+    var isSpecific = /\b(?:what is|how do|why does|where is|when did|which one|can you tell me)\b/i.test(userMsg) && userWords < 30;
+    var isBroad = /\b(?:explain|describe|tell me about|overview|everything about|all about)\b/i.test(userMsg);
+
+    var score = 85; // default good
+
+    if (isSpecific && aiSentences.length > 15) {
+      // Specific question got overly long response
+      score = Math.max(40, 85 - (aiSentences.length - 15) * 3);
+    } else if (isBroad && aiSentences.length < 3 && aiWords < 50) {
+      // Broad question got too-short response
+      score = Math.max(30, 30 + aiWords);
+    }
+
+    // Ratio check: if AI response is 20x+ longer than question, slight penalty
+    if (userWords > 0 && aiWords / userWords > 20) {
+      score = Math.min(score, 70);
+    }
+
+    return Math.max(0, Math.min(100, score));
+  }
+
+  /* ════════════════════════════════════════════════════════════
+   * DETECTOR 3: Constraint Adherence
+   * ════════════════════════════════════════════════════════════ */
+  function analyzeConstraintAdherence(userMsg, aiMsg) {
+    var constraints = extractConstraints(userMsg);
+    if (constraints.length === 0) return 100; // no constraints = perfect adherence
+
+    var violations = 0;
+    var total = constraints.length;
+
+    constraints.forEach(function (c) {
+      if (c.type === 'length_max') {
+        var aiWordCount = _wordCount(aiMsg);
+        var limit = parseInt(c.value, 10);
+        if (c.unit && c.unit.match(/word/i) && aiWordCount > limit * 1.5) violations++;
+        else if (c.unit && c.unit.match(/line/i) && _sentences(aiMsg).length > limit * 1.5) violations++;
+      } else if (c.type === 'exclusion') {
+        var excluded = c.value.toLowerCase().trim();
+        if (excluded.length > 2 && aiMsg.toLowerCase().indexOf(excluded) !== -1) violations++;
+      } else if (c.type === 'language') {
+        // Check if code is in the requested language
+        if (_hasCodeBlock(aiMsg)) {
+          var lang = c.value.toLowerCase();
+          var codeBlocks = aiMsg.match(/```(\w*)\n[\s\S]*?```/g) || [];
+          if (codeBlocks.length > 0) {
+            var hasLang = codeBlocks.some(function (block) {
+              return block.toLowerCase().indexOf(lang) !== -1;
+            });
+            if (!hasLang) violations++;
+          }
+        }
+      } else if (c.type === 'style') {
+        var style = c.value.toLowerCase();
+        if ((style === 'short' || style === 'brief' || style === 'concise') && _wordCount(aiMsg) > 150) {
+          violations++;
+        } else if ((style === 'detailed' || style === 'thorough') && _wordCount(aiMsg) < 50) {
+          violations++;
+        }
+      }
+    });
+
+    var adherenceRatio = 1 - (violations / total);
+    return Math.max(0, Math.min(100, Math.round(adherenceRatio * 100)));
+  }
+
+  function extractConstraints(text) {
+    var constraints = [];
+    CONSTRAINT_PATTERNS.forEach(function (pattern) {
+      var match;
+      var re = new RegExp(pattern.regex.source, pattern.regex.flags);
+      while ((match = re.exec(text)) !== null) {
+        var entry = { type: pattern.type, value: match[1] || '' };
+        if (match[2]) entry.unit = match[2];
+        constraints.push(entry);
+      }
+    });
+    return constraints;
+  }
+
+  /* ════════════════════════════════════════════════════════════
+   * DETECTOR 4: Format Match
+   * ════════════════════════════════════════════════════════════ */
+  function analyzeFormatMatch(userMsg, aiMsg) {
+    var requestedFormat = detectRequestedFormat(userMsg);
+    if (!requestedFormat) return 90; // no explicit format request = assume fine
+
+    var score = 90;
+    switch (requestedFormat) {
+      case 'list':
+        if (!_hasList(aiMsg)) score = 35;
+        break;
+      case 'code':
+        if (!_hasCodeBlock(aiMsg)) score = 30;
+        break;
+      case 'table':
+        if (!_hasTable(aiMsg)) score = 35;
+        break;
+      case 'brief':
+        if (_wordCount(aiMsg) > 100) score = Math.max(30, 90 - (_wordCount(aiMsg) - 100));
+        break;
+      case 'detailed':
+        if (_wordCount(aiMsg) < 80) score = Math.max(30, 30 + _wordCount(aiMsg));
+        break;
+      case 'steps':
+        if (!_hasSteps(aiMsg) && !_hasList(aiMsg)) score = 40;
+        break;
+    }
+    return Math.max(0, Math.min(100, score));
+  }
+
+  function detectRequestedFormat(text) {
+    var formats = Object.keys(FORMAT_REQUESTS);
+    for (var i = 0; i < formats.length; i++) {
+      var patterns = FORMAT_REQUESTS[formats[i]];
+      for (var j = 0; j < patterns.length; j++) {
+        if (patterns[j].test(text)) return formats[i];
+      }
+    }
+    return null;
+  }
+
+  /* ════════════════════════════════════════════════════════════
+   * DETECTOR 5: Depth Match
+   * ════════════════════════════════════════════════════════════ */
+  function analyzeDepthMatch(userMsg, aiMsg) {
+    var wantsShallow = SHALLOW_SIGNALS.some(function (s) { return userMsg.toLowerCase().indexOf(s) !== -1; });
+    var wantsDeep = DEEP_SIGNALS.some(function (s) { return userMsg.toLowerCase().indexOf(s) !== -1; });
+
+    if (!wantsShallow && !wantsDeep) return 85; // neutral
+
+    var aiWords = _wordCount(aiMsg);
+    var aiTokens = _tokenize(aiMsg);
+    // Approximate complexity: average word length
+    var avgWordLen = aiTokens.length > 0 ? aiTokens.reduce(function (s, w) { return s + w.length; }, 0) / aiTokens.length : 4;
+
+    var score = 85;
+    if (wantsShallow) {
+      // Penalize long or complex responses
+      if (aiWords > 200) score -= Math.min(40, (aiWords - 200) / 5);
+      if (avgWordLen > 7) score -= Math.min(20, (avgWordLen - 7) * 10);
+    } else if (wantsDeep) {
+      // Penalize short or simple responses
+      if (aiWords < 80) score -= Math.min(40, (80 - aiWords));
+      if (avgWordLen < 4.5) score -= 15;
+    }
+
+    return Math.max(0, Math.min(100, Math.round(score)));
+  }
+
+  /* ════════════════════════════════════════════════════════════
+   * DETECTOR 6: Hallucination Risk
+   * ════════════════════════════════════════════════════════════ */
+  function analyzeHallucinationRisk(userMsg, aiMsg) {
+    var aiLower = aiMsg.toLowerCase();
+    var hedgeCount = 0;
+    HEDGE_PHRASES.forEach(function (p) {
+      var idx = -1;
+      while ((idx = aiLower.indexOf(p, idx + 1)) !== -1) hedgeCount++;
+    });
+
+    var sentences = _sentences(aiMsg);
+    var hedgeRatio = sentences.length > 0 ? hedgeCount / sentences.length : 0;
+
+    // High hedging = lower confidence quality
+    var score = 100;
+    if (hedgeRatio > 0.5) score -= 40;
+    else if (hedgeRatio > 0.3) score -= 25;
+    else if (hedgeRatio > 0.15) score -= 10;
+
+    // Check for self-contradictions (simplistic: "but actually", "wait, no", negation of prior statement)
+    var contradictionSignals = (aiMsg.match(/\b(?:actually|however|but wait|correction|i was wrong|let me correct|on second thought)\b/gi) || []).length;
+    if (contradictionSignals > 2) score -= 20;
+    else if (contradictionSignals > 0) score -= 10;
+
+    return Math.max(0, Math.min(100, score));
+  }
+
+  /* ════════════════════════════════════════════════════════════
+   * DETECTOR 7: Relevance Decay
+   * ════════════════════════════════════════════════════════════ */
+  function analyzeRelevanceDecay(exchanges) {
+    if (!exchanges || exchanges.length < 3) return 90; // not enough data
+
+    var recent = exchanges.slice(-5);
+    var scores = recent.map(function (e) { return e.composite || 85; });
+
+    // Check trend
+    var sum = 0;
+    for (var i = 1; i < scores.length; i++) {
+      sum += scores[i] - scores[i - 1];
+    }
+    var avgChange = sum / (scores.length - 1);
+
+    if (avgChange < -5) return Math.max(30, 70 + Math.round(avgChange * 3));
+    if (avgChange < -2) return 75;
+    return 90;
+  }
+
+  /* ════════════════════════════════════════════════════════════
+   * Composite Scoring
+   * ════════════════════════════════════════════════════════════ */
+  function computeComposite(scores) {
+    var total = 0;
+    var weightSum = 0;
+    Object.keys(DIM_WEIGHTS).forEach(function (dim) {
+      if (typeof scores[dim] === 'number') {
+        total += scores[dim] * DIM_WEIGHTS[dim];
+        weightSum += DIM_WEIGHTS[dim];
+      }
+    });
+    return weightSum > 0 ? Math.round(total / weightSum) : 85;
+  }
+
+  function classifyTier(score) {
+    if (score >= 90) return 'PERFECT';
+    if (score >= 70) return 'GOOD';
+    if (score >= 50) return 'DRIFTING';
+    return 'MISALIGNED';
+  }
+
+  /* ════════════════════════════════════════════════════════════
+   * Corrective Prompt Generation
+   * ════════════════════════════════════════════════════════════ */
+  function generateCorrections(scores, userMsg, aiMsg) {
+    var corrections = [];
+    var userTokens = _tokenize(userMsg);
+    var topKeywords = userTokens.slice(0, 5).join(', ');
+
+    if (scores[DIMENSIONS.TOPIC_DRIFT] < 60) {
+      corrections.push({
+        dimension: DIMENSIONS.TOPIC_DRIFT,
+        prompt: 'Going back to my original question about ' + topKeywords + ' — can you address that specifically?',
+        severity: 'high'
+      });
+    }
+    if (scores[DIMENSIONS.SCOPE_MATCH] < 60) {
+      var tooLong = _wordCount(aiMsg) > 200;
+      corrections.push({
+        dimension: DIMENSIONS.SCOPE_MATCH,
+        prompt: tooLong ? 'That\'s more detail than I need. Can you give me just the key points?' : 'Can you elaborate more on that? I need a more complete answer.',
+        severity: 'medium'
+      });
+    }
+    if (scores[DIMENSIONS.CONSTRAINT_ADHERENCE] < 70) {
+      var constraints = extractConstraints(userMsg);
+      var constraintDesc = constraints.map(function (c) { return c.value; }).join(', ');
+      corrections.push({
+        dimension: DIMENSIONS.CONSTRAINT_ADHERENCE,
+        prompt: 'Please follow my constraints: ' + constraintDesc,
+        severity: 'high'
+      });
+    }
+    if (scores[DIMENSIONS.FORMAT_MATCH] < 60) {
+      var fmt = detectRequestedFormat(userMsg) || 'list';
+      corrections.push({
+        dimension: DIMENSIONS.FORMAT_MATCH,
+        prompt: 'Can you format that as a ' + fmt + ' instead?',
+        severity: 'medium'
+      });
+    }
+    if (scores[DIMENSIONS.DEPTH_MATCH] < 60) {
+      var wantsShallow = SHALLOW_SIGNALS.some(function (s) { return userMsg.toLowerCase().indexOf(s) !== -1; });
+      corrections.push({
+        dimension: DIMENSIONS.DEPTH_MATCH,
+        prompt: wantsShallow ? 'That\'s too complex. Can you simplify it significantly?' : 'I need more depth and detail on this topic.',
+        severity: 'medium'
+      });
+    }
+    if (scores[DIMENSIONS.HALLUCINATION_RISK] < 60) {
+      corrections.push({
+        dimension: DIMENSIONS.HALLUCINATION_RISK,
+        prompt: 'Can you be more definitive? If you\'re unsure about something, please say so clearly rather than hedging throughout.',
+        severity: 'low'
+      });
+    }
+
+    return corrections;
+  }
+
+  /* ════════════════════════════════════════════════════════════
+   * Insight Generation
+   * ════════════════════════════════════════════════════════════ */
+  function generateInsights(exchanges) {
+    var insights = [];
+    if (exchanges.length < 5) return insights;
+
+    var dimSums = {};
+    var dimCounts = {};
+    Object.keys(DIMENSIONS).forEach(function (k) {
+      var dim = DIMENSIONS[k];
+      dimSums[dim] = 0;
+      dimCounts[dim] = 0;
+    });
+
+    exchanges.forEach(function (ex) {
+      if (!ex.scores) return;
+      Object.keys(ex.scores).forEach(function (dim) {
+        if (typeof ex.scores[dim] === 'number') {
+          dimSums[dim] = (dimSums[dim] || 0) + ex.scores[dim];
+          dimCounts[dim] = (dimCounts[dim] || 0) + 1;
+        }
+      });
+    });
+
+    var weakest = null;
+    var weakestAvg = 101;
+    var strongest = null;
+    var strongestAvg = -1;
+
+    Object.keys(dimSums).forEach(function (dim) {
+      if (dimCounts[dim] > 0) {
+        var avg = dimSums[dim] / dimCounts[dim];
+        if (avg < weakestAvg) { weakestAvg = avg; weakest = dim; }
+        if (avg > strongestAvg) { strongestAvg = avg; strongest = dim; }
+      }
+    });
+
+    if (weakest && weakestAvg < 70) {
+      insights.push({
+        type: 'weakness',
+        dimension: weakest,
+        message: 'Your conversations often struggle with ' + (DIM_LABELS[weakest] || weakest) + ' (avg: ' + Math.round(weakestAvg) + '). Try being more explicit about this in your prompts.',
+        timestamp: Date.now()
+      });
+    }
+
+    // Detect format preference
+    var formatCounts = { list: 0, code: 0, brief: 0, detailed: 0 };
+    exchanges.forEach(function (ex) {
+      if (!ex.userMsg) return;
+      var fmt = detectRequestedFormat(ex.userMsg);
+      if (fmt && formatCounts.hasOwnProperty(fmt)) formatCounts[fmt]++;
+    });
+    var topFormat = Object.keys(formatCounts).reduce(function (a, b) { return formatCounts[a] > formatCounts[b] ? a : b; });
+    if (formatCounts[topFormat] > 3) {
+      insights.push({
+        type: 'preference',
+        message: 'You frequently request ' + topFormat + ' format. Consider setting this as a default in your system prompt.',
+        timestamp: Date.now()
+      });
+    }
+
+    return insights;
+  }
+
+  /* ════════════════════════════════════════════════════════════
+   * Main Analysis Pipeline
+   * ════════════════════════════════════════════════════════════ */
+  function analyzeExchange(userMsg, aiMsg) {
+    var scores = {};
+    scores[DIMENSIONS.TOPIC_DRIFT] = analyzeTopicDrift(userMsg, aiMsg);
+    scores[DIMENSIONS.SCOPE_MATCH] = analyzeScopeMatch(userMsg, aiMsg);
+    scores[DIMENSIONS.CONSTRAINT_ADHERENCE] = analyzeConstraintAdherence(userMsg, aiMsg);
+    scores[DIMENSIONS.FORMAT_MATCH] = analyzeFormatMatch(userMsg, aiMsg);
+    scores[DIMENSIONS.DEPTH_MATCH] = analyzeDepthMatch(userMsg, aiMsg);
+    scores[DIMENSIONS.HALLUCINATION_RISK] = analyzeHallucinationRisk(userMsg, aiMsg);
+    scores[DIMENSIONS.RELEVANCE_DECAY] = analyzeRelevanceDecay(_state.exchanges);
+
+    var composite = computeComposite(scores);
+    var tier = classifyTier(composite);
+    var corrections = generateCorrections(scores, userMsg, aiMsg);
+
+    var exchange = {
+      userMsg: userMsg.substring(0, 500),
+      aiMsg: aiMsg.substring(0, 500),
+      scores: scores,
+      composite: composite,
+      tier: tier,
+      corrections: corrections,
+      timestamp: Date.now()
+    };
+
+    _state.exchanges.push(exchange);
+    if (_state.exchanges.length > MAX_EXCHANGES) _state.exchanges = _state.exchanges.slice(-MAX_EXCHANGES);
+
+    // Update corrections log
+    corrections.forEach(function (c) {
+      _state.corrections.push({ prompt: c.prompt, dimension: c.dimension, used: false, preScore: composite, postScore: null, timestamp: Date.now() });
+    });
+    if (_state.corrections.length > MAX_CORRECTIONS) _state.corrections = _state.corrections.slice(-MAX_CORRECTIONS);
+
+    // Update patterns
+    var allScores = _state.exchanges.map(function (e) { return e.composite; });
+    _state.patterns.avgScore = Math.round(allScores.reduce(function (a, b) { return a + b; }, 0) / allScores.length);
+    var insights = generateInsights(_state.exchanges);
+    if (insights.length > 0) {
+      _state.insights = insights.concat(_state.insights).slice(0, MAX_INSIGHTS);
+    }
+
+    _state.currentScore = composite;
+    _state.currentTier = tier;
+    _state.currentScores = scores;
+
+    _saveState();
+    return exchange;
+  }
+
+  /* ════════════════════════════════════════════════════════════
+   * DOM / UI
+   * ════════════════════════════════════════════════════════════ */
+  function _getLastExchangePair() {
+    var chatOut = document.getElementById('chat-output');
+    if (!chatOut) return null;
+    var msgs = chatOut.querySelectorAll('.message');
+    if (msgs.length < 2) return null;
+    var ai = msgs[msgs.length - 1];
+    var user = msgs[msgs.length - 2];
+    if (!ai || !user) return null;
+    var aiRole = ai.classList.contains('assistant') || ai.querySelector('.assistant');
+    var userRole = user.classList.contains('user') || user.querySelector('.user');
+    if (!aiRole && !userRole) {
+      // fallback: try text content
+      return { userMsg: user.textContent || '', aiMsg: ai.textContent || '' };
+    }
+    return { userMsg: user.textContent || '', aiMsg: ai.textContent || '' };
+  }
+
+  function _onNewMessage() {
+    if (!_config.enabled) return;
+    var pair = _getLastExchangePair();
+    if (!pair || !pair.userMsg || !pair.aiMsg) return;
+
+    var exchange = analyzeExchange(pair.userMsg, pair.aiMsg);
+    _updateBadge();
+    _renderPanel();
+
+    if (_config.toastOnMisalignment && exchange.composite < _config.threshold) {
+      var now = Date.now();
+      if (now - _lastToastTime > TOAST_COOLDOWN_MS) {
+        _lastToastTime = now;
+        _showToast(exchange);
+      }
+    }
+  }
+
+  function _showToast(exchange) {
+    var existing = document.getElementById('intent-aligner-toast');
+    if (existing) existing.remove();
+
+    var toast = document.createElement('div');
+    toast.id = 'intent-aligner-toast';
+    toast.style.cssText = 'position:fixed;bottom:80px;right:20px;background:#2d2d2d;border:1px solid ' + TIERS[exchange.tier].color + ';border-radius:10px;padding:12px 16px;z-index:100000;max-width:320px;box-shadow:0 4px 20px rgba(0,0,0,0.3);font-size:13px;color:#eee;animation:slideInUp 0.3s ease;';
+    toast.innerHTML = '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><span style="font-size:18px;">' + TIERS[exchange.tier].emoji + '</span><strong>Intent Misalignment Detected</strong></div>' +
+      '<div style="color:#aaa;margin-bottom:8px;">Score: ' + exchange.composite + '/100 — ' + TIERS[exchange.tier].desc + '</div>' +
+      (exchange.corrections.length > 0 ? '<div style="background:#1a1a2e;border-radius:6px;padding:8px;cursor:pointer;border:1px solid #333;" id="intent-toast-correction">"' + exchange.corrections[0].prompt.substring(0, 80) + '"</div>' : '') +
+      '<div style="text-align:right;margin-top:6px;"><span style="cursor:pointer;color:#888;font-size:11px;" id="intent-toast-close">dismiss</span></div>';
+
+    document.body.appendChild(toast);
+
+    var closeBtn = document.getElementById('intent-toast-close');
+    if (closeBtn) closeBtn.addEventListener('click', function () { toast.remove(); });
+
+    var corrBtn = document.getElementById('intent-toast-correction');
+    if (corrBtn && exchange.corrections.length > 0) {
+      corrBtn.addEventListener('click', function () {
+        var input = document.getElementById('chat-input') || document.querySelector('textarea');
+        if (input) { input.value = exchange.corrections[0].prompt; input.focus(); }
+        toast.remove();
+      });
+    }
+
+    setTimeout(function () { if (toast.parentNode) toast.remove(); }, 15000);
+  }
+
+  function _updateBadge() {
+    if (!_config.showBadge || !_badgeEl) return;
+    var tier = TIERS[_state.currentTier] || TIERS.PERFECT;
+    _badgeEl.textContent = tier.emoji + ' ' + _state.currentScore;
+    _badgeEl.style.borderColor = tier.color;
+    _badgeEl.style.display = 'inline-flex';
+  }
+
+  function _createBadge() {
+    _badgeEl = document.createElement('span');
+    _badgeEl.id = 'intent-aligner-badge';
+    _badgeEl.style.cssText = 'position:fixed;bottom:20px;left:20px;background:#1a1a2e;border:2px solid #27ae60;border-radius:16px;padding:4px 10px;font-size:12px;color:#eee;cursor:pointer;z-index:99999;display:none;align-items:center;gap:4px;box-shadow:0 2px 8px rgba(0,0,0,0.3);';
+    _badgeEl.addEventListener('click', toggle);
+    document.body.appendChild(_badgeEl);
+  }
+
+  function _renderPanel() {
+    if (!_panelEl || !_visible) return;
+    var tier = TIERS[_state.currentTier] || TIERS.PERFECT;
+    var scores = _state.currentScores || {};
+    var activeTab = _panelEl.dataset.activeTab || 'live';
+
+    var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;"><h3 style="margin:0;font-size:15px;">🎯 Intent Aligner</h3><span style="cursor:pointer;font-size:18px;" id="intent-panel-close">&times;</span></div>';
+
+    // Tabs
+    html += '<div style="display:flex;gap:4px;margin-bottom:12px;">';
+    ['live', 'history', 'corrections', 'insights'].forEach(function (tab) {
+      var active = tab === activeTab;
+      html += '<button style="flex:1;padding:5px 8px;border:1px solid ' + (active ? '#5dade2' : '#444') + ';background:' + (active ? '#1a3a5c' : '#2d2d2d') + ';color:' + (active ? '#5dade2' : '#aaa') + ';border-radius:6px;cursor:pointer;font-size:11px;text-transform:capitalize;" data-tab="' + tab + '">' + tab + '</button>';
+    });
+    html += '</div>';
+
+    // Tab content
+    html += '<div style="max-height:350px;overflow-y:auto;">';
+
+    if (activeTab === 'live') {
+      // Score gauge
+      html += '<div style="text-align:center;margin-bottom:12px;"><div style="font-size:36px;font-weight:bold;color:' + tier.color + ';">' + _state.currentScore + '</div><div style="font-size:12px;color:#aaa;">' + tier.emoji + ' ' + tier.name + ' — ' + tier.desc + '</div></div>';
+      // Dimension bars
+      Object.keys(DIMENSIONS).forEach(function (k) {
+        var dim = DIMENSIONS[k];
+        var val = scores[dim] != null ? scores[dim] : 100;
+        html += '<div style="margin-bottom:6px;"><div style="display:flex;justify-content:space-between;font-size:11px;color:#ccc;"><span>' + DIM_LABELS[dim] + '</span><span>' + val + '</span></div><div style="background:#333;border-radius:3px;height:6px;margin-top:2px;"><div style="width:' + val + '%;height:100%;background:' + DIM_COLORS[dim] + ';border-radius:3px;"></div></div></div>';
+      });
+    } else if (activeTab === 'history') {
+      if (_state.exchanges.length === 0) {
+        html += '<div style="color:#888;text-align:center;padding:20px;">No exchanges analyzed yet</div>';
+      } else {
+        // Sparkline
+        var recent = _state.exchanges.slice(-20);
+        var sparkChars = recent.map(function (e) {
+          var s = e.composite || 85;
+          if (s >= 90) return '█';
+          if (s >= 70) return '▆';
+          if (s >= 50) return '▃';
+          return '▁';
+        }).join('');
+        html += '<div style="font-family:monospace;font-size:14px;margin-bottom:10px;color:#5dade2;">Trend: ' + sparkChars + '</div>';
+        html += '<div style="font-size:11px;color:#aaa;margin-bottom:10px;">Avg: ' + _state.patterns.avgScore + ' | Exchanges: ' + _state.exchanges.length + '</div>';
+        // Recent misalignments
+        var misaligned = _state.exchanges.filter(function (e) { return e.composite < 70; }).slice(-8).reverse();
+        misaligned.forEach(function (e) {
+          var t = TIERS[e.tier] || TIERS.GOOD;
+          html += '<div style="border:1px solid #333;border-left:3px solid ' + t.color + ';padding:6px 8px;margin-bottom:6px;border-radius:4px;font-size:11px;"><div style="color:#ccc;">' + t.emoji + ' Score: ' + e.composite + ' — ' + new Date(e.timestamp).toLocaleTimeString() + '</div><div style="color:#888;margin-top:2px;">' + (e.userMsg || '').substring(0, 60) + '...</div></div>';
+        });
+      }
+    } else if (activeTab === 'corrections') {
+      var pendingCorrections = _state.corrections.filter(function (c) { return !c.used; }).slice(-10).reverse();
+      if (pendingCorrections.length === 0) {
+        html += '<div style="color:#888;text-align:center;padding:20px;">No corrections needed — alignment is good!</div>';
+      } else {
+        pendingCorrections.forEach(function (c, i) {
+          html += '<div style="border:1px solid #444;border-radius:6px;padding:8px;margin-bottom:6px;cursor:pointer;background:#1a1a2e;" class="correction-item" data-idx="' + i + '"><div style="font-size:11px;color:#5dade2;margin-bottom:4px;">' + (DIM_LABELS[c.dimension] || c.dimension) + '</div><div style="font-size:12px;color:#eee;">"' + c.prompt + '"</div></div>';
+        });
+      }
+    } else if (activeTab === 'insights') {
+      if (_state.insights.length === 0) {
+        html += '<div style="color:#888;text-align:center;padding:20px;">Insights will appear after more conversations</div>';
+      } else {
+        _state.insights.slice(0, 10).forEach(function (ins) {
+          html += '<div style="border:1px solid #333;border-radius:6px;padding:8px;margin-bottom:6px;"><div style="font-size:12px;color:#eee;">' + ins.message + '</div><div style="font-size:10px;color:#666;margin-top:4px;">' + new Date(ins.timestamp).toLocaleDateString() + '</div></div>';
+        });
+      }
+    }
+
+    html += '</div>';
+    _panelEl.innerHTML = html;
+
+    // Event listeners
+    var closeBtn = _panelEl.querySelector('#intent-panel-close');
+    if (closeBtn) closeBtn.addEventListener('click', hide);
+
+    _panelEl.querySelectorAll('[data-tab]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        _panelEl.dataset.activeTab = btn.dataset.tab;
+        _renderPanel();
+      });
+    });
+
+    _panelEl.querySelectorAll('.correction-item').forEach(function (item) {
+      item.addEventListener('click', function () {
+        var idx = parseInt(item.dataset.idx, 10);
+        var pendingCorrections = _state.corrections.filter(function (c) { return !c.used; }).slice(-10).reverse();
+        var c = pendingCorrections[idx];
+        if (c) {
+          var input = document.getElementById('chat-input') || document.querySelector('textarea');
+          if (input) { input.value = c.prompt; input.focus(); }
+          c.used = true;
+          _saveState();
+          _renderPanel();
+        }
+      });
+    });
+  }
+
+  function _createPanel() {
+    _panelEl = document.createElement('div');
+    _panelEl.id = 'intent-aligner-panel';
+    _panelEl.dataset.activeTab = 'live';
+    _panelEl.style.cssText = 'position:fixed;top:60px;right:20px;width:340px;background:#1e1e2e;border:1px solid #333;border-radius:12px;padding:16px;z-index:100001;box-shadow:0 8px 32px rgba(0,0,0,0.4);color:#eee;font-family:system-ui,sans-serif;display:none;';
+    document.body.appendChild(_panelEl);
+  }
+
+  function show() { if (_panelEl) { _panelEl.style.display = 'block'; _visible = true; _renderPanel(); } }
+  function hide() { if (_panelEl) { _panelEl.style.display = 'none'; _visible = false; } }
+  function toggle() { _visible ? hide() : show(); }
+
+  /* ── Init ── */
+  function init() {
+    _loadConfig();
+    _loadState();
+    _createPanel();
+    _createBadge();
+    _updateBadge();
+
+    // Keyboard shortcut: Ctrl+Shift+Y
+    document.addEventListener('keydown', function (e) {
+      if (e.ctrlKey && e.shiftKey && e.key === 'Y') { e.preventDefault(); toggle(); }
+    });
+
+    // Observe chat output
+    var chatOut = document.getElementById('chat-output');
+    if (chatOut) {
+      _observer = new MutationObserver(function () {
+        if (!_config.enabled) return;
+        clearTimeout(_debounceTimer);
+        _debounceTimer = setTimeout(_onNewMessage, DEBOUNCE_MS);
+      });
+      _observer.observe(chatOut, { childList: true, subtree: true });
+    }
+
+    // Toolbar button
+    var toolbar = document.querySelector('.toolbar');
+    if (toolbar) {
+      var btn = document.createElement('button');
+      btn.id = 'intent-aligner-btn';
+      btn.className = 'btn-secondary';
+      btn.title = 'Intent Aligner \u2014 autonomous alignment verification (Ctrl+Shift+Y)';
+      btn.textContent = '\uD83C\uDFAF';
+      btn.addEventListener('click', toggle);
+      toolbar.appendChild(btn);
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  return {
+    toggle: toggle,
+    show: show,
+    hide: hide,
+    analyzeExchange: analyzeExchange,
+    analyzeTopicDrift: analyzeTopicDrift,
+    analyzeScopeMatch: analyzeScopeMatch,
+    analyzeConstraintAdherence: analyzeConstraintAdherence,
+    analyzeFormatMatch: analyzeFormatMatch,
+    analyzeDepthMatch: analyzeDepthMatch,
+    analyzeHallucinationRisk: analyzeHallucinationRisk,
+    analyzeRelevanceDecay: analyzeRelevanceDecay,
+    computeComposite: computeComposite,
+    classifyTier: classifyTier,
+    generateCorrections: generateCorrections,
+    generateInsights: generateInsights,
+    extractConstraints: extractConstraints,
+    detectRequestedFormat: detectRequestedFormat,
+    getState: function () { return JSON.parse(JSON.stringify(_state)); },
+    getConfig: function () { return Object.assign({}, _config); },
+    getScore: function () { return _state.currentScore; },
+    getTier: function () { return _state.currentTier; },
+    getExchanges: function () { return _state.exchanges.slice(); },
+    getCorrections: function () { return _state.corrections.slice(); },
+    getInsights: function () { return _state.insights.slice(); },
+    isEnabled: function () { return _config.enabled; },
+    setEnabled: function (v) { _config.enabled = !!v; _saveConfig(); },
+    TIERS: TIERS,
+    DIMENSIONS: DIMENSIONS,
+    DIM_LABELS: DIM_LABELS,
+    DIM_WEIGHTS: DIM_WEIGHTS,
+    _defaultState: _defaultState,
+    _defaultConfig: _defaultConfig,
+    _tokenize: _tokenize,
+    _sentences: _sentences,
+    _wordCount: _wordCount,
+    _keywordOverlap: _keywordOverlap,
+    _hasCodeBlock: _hasCodeBlock,
+    _hasList: _hasList,
+    _hasTable: _hasTable,
+    _hasSteps: _hasSteps
+  };
+})();
