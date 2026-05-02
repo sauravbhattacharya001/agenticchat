@@ -49659,7 +49659,7 @@ const SmartConversationWeather = (function () {
   function _loadState() {
     try {
       var raw = SafeStorage.get(STORAGE_KEY);
-      if (raw) { var p = JSON.parse(raw); _state = Object.assign(_defaultState(), p); }
+      if (raw) { var p = sanitizeStorageObject(JSON.parse(raw)); _state = Object.assign(_defaultState(), p); }
     } catch (_) { _state = _defaultState(); }
   }
   function _saveConfig() {
@@ -49668,7 +49668,7 @@ const SmartConversationWeather = (function () {
   function _loadConfig() {
     try {
       var raw = SafeStorage.get(CONFIG_KEY);
-      if (raw) { _config = Object.assign(_defaultConfig(), JSON.parse(raw)); }
+      if (raw) { _config = Object.assign(_defaultConfig(), sanitizeStorageObject(JSON.parse(raw))); }
     } catch (_) { _config = _defaultConfig(); }
   }
 
