@@ -48049,13 +48049,15 @@ const SmartCognitiveLoad = (function () {
   }
 
   function _countFacts(text) {
-    // Heuristic: count numbers, proper nouns, URLs, code blocks, and list items
+    // Heuristic: count numbers, proper nouns, URLs, code blocks, and list items.
+    // Single combined regex instead of 5 separate .match() passes over the text.
+    var FACT_RE = /\d+(?:\.\d+)?|https?:\/\/\S+|```[\s\S]*?```|^[\t ]*[-*•]\s|\b[A-Z][a-z]+(?:\s[A-Z][a-z]+)+\b/gm;
     var facts = 0;
-    facts += (text.match(/\d+(\.\d+)?/g) || []).length;
-    facts += (text.match(/https?:\/\/\S+/g) || []).length;
-    facts += (text.match(/```[\s\S]*?```/g) || []).length * 3;
-    facts += (text.match(/^[\s]*[-*•]\s/gm) || []).length;
-    facts += (text.match(/\b[A-Z][a-z]+(?:\s[A-Z][a-z]+)+\b/g) || []).length;
+    var m;
+    while ((m = FACT_RE.exec(text)) !== null) {
+      // Code blocks contribute 3 facts each
+      facts += (m[0].charAt(0) === '`' && m[0].length > 6) ? 3 : 1;
+    }
     return facts;
   }
 
@@ -48068,7 +48070,7 @@ const SmartCognitiveLoad = (function () {
         freq[w] = (freq[w] || 0) + 1;
       }
     });
-    return Object.keys(freq).filter(function (k) { return freq[k] >= 1; }).sort(function (a, b) { return freq[b] - freq[a]; }).slice(0, 10);
+    return Object.keys(freq).sort(function (a, b) { return freq[b] - freq[a]; }).slice(0, 10);
   }
 
   /* ── Dimension Analyzers ── */
@@ -48224,7 +48226,7 @@ const SmartCognitiveLoad = (function () {
 
     // Topic abandonment: topics that appeared earlier but not in recent messages
     if (_state.topics && _state.topics.length > 5 && userText) {
-      var current = new Set(_extractTopics(userText));
+      var current = new Set(_lastAnalyzedTopics || _extractTopics(userText));
       var abandoned = _state.topics.filter(function (t) { return !current.has(t); });
       if (abandoned.length > 4) {
         signals.push({ type: SIGNAL_TYPES.ABANDONMENT.id, severity: 'medium', ts: now, detail: abandoned.length + ' topics started but not revisited' });
