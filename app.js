@@ -9470,9 +9470,9 @@ const ConversationTimeline = (() => {
     // Track scroll position
     const chatArea = getChatScrollParent();
     if (chatArea) {
-      chatArea.addEventListener('scroll', scheduleViewportUpdate);
+      chatArea.addEventListener('scroll', scheduleViewportUpdate, { passive: true });
     }
-    window.addEventListener('resize', scheduleViewportUpdate);
+    window.addEventListener('resize', scheduleViewportUpdate, { passive: true });
   }
 
   function buildDOM() {
@@ -9486,7 +9486,7 @@ const ConversationTimeline = (() => {
     stripEl = document.createElement('div');
     stripEl.id = 'timeline-strip';
     stripEl.addEventListener('click', handleStripClick);
-    stripEl.addEventListener('mousemove', handleStripHover);
+    stripEl.addEventListener('mousemove', handleStripHover, { passive: true });
     stripEl.addEventListener('mouseleave', hideTooltip);
 
     // Viewport indicator
@@ -26415,7 +26415,7 @@ const SmartScroll = (() => {
       }
       clearTimeout(_saveTick);
       _saveTick = setTimeout(savePosition, 1000);
-    });
+    }, { passive: true });
     window.addEventListener('beforeunload', savePosition);
 
     // End key shortcut
@@ -29777,15 +29777,21 @@ var ScrollLock = (function () {
     var el = _getChatOutput();
     if (!el) return;
 
+    var _scrollLockTick = false;
     el.addEventListener('scroll', function () {
-      if (_isNearBottom(el)) {
-        // User scrolled back to bottom → unlock
-        if (_locked) unlock();
-      } else {
-        // User scrolled up → lock
-        if (!_locked) lock();
-      }
-    });
+      if (_scrollLockTick) return;
+      _scrollLockTick = true;
+      requestAnimationFrame(function () {
+        _scrollLockTick = false;
+        if (_isNearBottom(el)) {
+          // User scrolled back to bottom → unlock
+          if (_locked) unlock();
+        } else {
+          // User scrolled up → lock
+          if (!_locked) lock();
+        }
+      });
+    }, { passive: true });
   }
 
   // Alt+J shortcut
