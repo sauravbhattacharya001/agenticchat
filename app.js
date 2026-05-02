@@ -111,6 +111,7 @@
  *   SmartFactMemory       - autonomous fact/decision/preference/action-item extractor with persistent cros
  *   SmartContextWatchdog   - autonomous real-time context health monitor with token pressure, topic drift, stale context detection, proactive recommendations, and floating health indicator (Alt+Shift+W)s-session knowledge base (Alt+Shift+F)
  *   SmartResponseAuditor   - autonomous AI response quality auditor with 7 heuristic checks (hallucination risk, hedge overload, self-contradiction, code quality, unsupported claims, repetition, incomplete response), inline badges, audit panel (Alt+Shift+Q)
+ *   SmartConversationWeather - autonomous weather-metaphor conversation atmosphere monitor with 6 dimensions, 5 classifications, 6 phenomena detectors, forecast trends, autonomous insights (Alt+Shift+3)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -49539,5 +49540,785 @@ const SmartIntentAligner = (function () {
     _hasList: _hasList,
     _hasTable: _hasTable,
     _hasSteps: _hasSteps
+  };
+})();
+
+/* ============================================================
+ * SmartConversationWeather — Autonomous Conversation Atmosphere Monitor
+ *
+ * Uses weather metaphors to track conversation health in real-time.
+ * Each exchange is analysed across 6 atmosphere dimensions and
+ * classified into a weather condition from Sunny to Stormy.
+ *
+ * 6 Atmosphere Dimensions (0-100 each):
+ *   1. Clarity (☀️)     — Exchange unambiguity and relevance
+ *   2. Energy (⚡)       — Message frequency, length, enthusiasm
+ *   3. Warmth (🌡️)     — Politeness, friendliness, collaboration
+ *   4. Turbulence (🌪️)  — Topic shifts, corrections, frustration
+ *   5. Pressure (📊)     — Complexity, urgency, stakes
+ *   6. Visibility (🔭)   — Goal clarity and direction
+ *
+ * Weather Classifications:
+ *   ☀️ Sunny (80-100) | ⛅ Partly Cloudy (60-79) | ☁️ Overcast (40-59)
+ *   🌧️ Rainy (20-39)  | ⛈️ Stormy (0-19)
+ *
+ * Weather Phenomena:
+ *   🌈 Rainbow | ❄️ Cold Front | 🌊 Heat Wave | 🌫️ Fog Bank
+ *   💨 Wind Shift | ⚡ Lightning
+ *
+ * Keyboard shortcut: Alt+Shift+3
+ * ============================================================ */
+const SmartConversationWeather = (function () {
+  'use strict';
+
+  var STORAGE_KEY = 'smartConversationWeather';
+  var CONFIG_KEY = 'smartConversationWeatherConfig';
+  var DEBOUNCE_MS = 600;
+  var MAX_EXCHANGES = 200;
+  var MAX_PHENOMENA = 100;
+  var MAX_INSIGHTS = 50;
+  var MAX_HISTORY = 200;
+  var TOAST_COOLDOWN_MS = 300000;
+  var _panelEl = null;
+  var _visible = false;
+  var _debounceTimer = null;
+  var _badgeEl = null;
+  var _lastToastTime = 0;
+  var _observer = null;
+
+  /* ── Weather classifications ── */
+  var WEATHER_TYPES = {
+    SUNNY:        { name: 'Sunny',        min: 80, max: 100, emoji: '☀️', color: '#f1c40f', desc: 'Clear, productive, pleasant' },
+    PARTLY_CLOUDY:{ name: 'Partly Cloudy',min: 60, max: 79,  emoji: '⛅', color: '#85c1e9', desc: 'Generally good with minor issues' },
+    OVERCAST:     { name: 'Overcast',     min: 40, max: 59,  emoji: '☁️', color: '#95a5a6', desc: 'Muddled, needs attention' },
+    RAINY:        { name: 'Rainy',        min: 20, max: 39,  emoji: '🌧️', color: '#5dade2', desc: 'Problematic, frustration building' },
+    STORMY:       { name: 'Stormy',       min: 0,  max: 19,  emoji: '⛈️', color: '#e74c3c', desc: 'Major issues, breakdown risk' }
+  };
+
+  /* ── Dimension IDs ── */
+  var DIMS = {
+    CLARITY:    'clarity',
+    ENERGY:     'energy',
+    WARMTH:     'warmth',
+    TURBULENCE: 'turbulence',
+    PRESSURE:   'pressure',
+    VISIBILITY: 'visibility'
+  };
+
+  var DIM_META = {};
+  DIM_META[DIMS.CLARITY]    = { label: 'Clarity',    emoji: '☀️', color: '#f1c40f', weight: 0.20, highGood: true };
+  DIM_META[DIMS.ENERGY]     = { label: 'Energy',     emoji: '⚡', color: '#e67e22', weight: 0.15, highGood: true };
+  DIM_META[DIMS.WARMTH]     = { label: 'Warmth',     emoji: '🌡️', color: '#e74c3c', weight: 0.20, highGood: true };
+  DIM_META[DIMS.TURBULENCE] = { label: 'Turbulence', emoji: '🌪️', color: '#9b59b6', weight: 0.15, highGood: false };
+  DIM_META[DIMS.PRESSURE]   = { label: 'Pressure',   emoji: '📊', color: '#2ecc71', weight: 0.10, highGood: false };
+  DIM_META[DIMS.VISIBILITY] = { label: 'Visibility',  emoji: '🔭', color: '#3498db', weight: 0.20, highGood: true };
+
+  /* ── Phenomena ── */
+  var PHENOMENA = {
+    RAINBOW:    { id: 'rainbow',    emoji: '🌈', name: 'Rainbow',    desc: 'Recovery from bad to good exchange' },
+    COLD_FRONT: { id: 'coldFront',  emoji: '❄️', name: 'Cold Front', desc: 'Sudden drop in warmth/engagement' },
+    HEAT_WAVE:  { id: 'heatWave',   emoji: '🌊', name: 'Heat Wave',  desc: 'Sustained high energy burst' },
+    FOG_BANK:   { id: 'fogBank',    emoji: '🌫️', name: 'Fog Bank',   desc: 'Extended unclear direction' },
+    WIND_SHIFT: { id: 'windShift',  emoji: '💨', name: 'Wind Shift', desc: 'Major topic change detected' },
+    LIGHTNING:  { id: 'lightning',   emoji: '⚡', name: 'Lightning',  desc: 'Breakthrough / problem solved' }
+  };
+
+  /* ── Word lists ── */
+  var WARMTH_POS = new Set(['thanks','thank','please','appreciate','great','awesome','wonderful','excellent','helpful','love','perfect','nice','good','fantastic','brilliant','amazing','cheers','kudos']);
+  var WARMTH_NEG = new Set(['wrong','bad','no','fix','broken','useless','terrible','awful','stupid','annoying','frustrated','hate','ridiculous','pathetic','waste']);
+  var URGENCY_WORDS = new Set(['urgent','asap','deadline','critical','immediately','hurry','rush','emergency','priority','crucial','now','quickly','time-sensitive']);
+  var GOAL_WORDS = new Set(['i want','i need','the goal','objective','target','aim','purpose','plan','intend','trying to','looking to','hoping to','goal is']);
+  var VAGUE_WORDS = new Set(['maybe','somehow','not sure','i guess','perhaps','possibly','kind of','sort of','idk','dunno','whatever','unclear']);
+  var BREAKTHROUGH_WORDS = new Set(['solved','works','perfect','eureka','got it','figured','fixed','success','nailed','bingo','yes!','finally','that\'s it','exactly']);
+  var CONFUSION_WORDS = new Set(['confused','what?','huh?','don\'t understand','not following','wait what','lost','unclear','say again']);
+
+  /* ── State & Config ── */
+  var _defaultState = function () {
+    return {
+      exchanges: [],
+      phenomena: [],
+      insights: [],
+      currentWeather: 'SUNNY',
+      currentScore: 80,
+      dimensions: { clarity: 80, energy: 50, warmth: 70, turbulence: 20, pressure: 30, visibility: 75 },
+      history: []
+    };
+  };
+  var _defaultConfig = function () {
+    return { enabled: true, toastAlerts: true, phenomenaDetection: true, forecastWarnings: true };
+  };
+  var _state = _defaultState();
+  var _config = _defaultConfig();
+
+  function _clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+  /* ── Persistence ── */
+  function _saveState() {
+    try { SafeStorage.set(STORAGE_KEY, JSON.stringify(_state)); } catch (_) {}
+  }
+  function _loadState() {
+    try {
+      var raw = SafeStorage.get(STORAGE_KEY);
+      if (raw) { var p = JSON.parse(raw); _state = Object.assign(_defaultState(), p); }
+    } catch (_) { _state = _defaultState(); }
+  }
+  function _saveConfig() {
+    try { SafeStorage.set(CONFIG_KEY, JSON.stringify(_config)); } catch (_) {}
+  }
+  function _loadConfig() {
+    try {
+      var raw = SafeStorage.get(CONFIG_KEY);
+      if (raw) { _config = Object.assign(_defaultConfig(), JSON.parse(raw)); }
+    } catch (_) { _config = _defaultConfig(); }
+  }
+
+  /* ── Tokenization helpers ── */
+  function _tokenize(text) {
+    if (!text) return [];
+    return text.toLowerCase().replace(/[^a-z0-9\s'-]/g, ' ').split(/\s+/).filter(function (w) { return w.length > 1; });
+  }
+  function _wordCount(text) { return _tokenize(text).length; }
+  function _sentences(text) {
+    if (!text) return [];
+    return text.split(/[.!?]+/).map(function (s) { return s.trim(); }).filter(Boolean);
+  }
+
+  /* ── Dimension Analyzers ── */
+
+  function analyzeClarity(userMsg, aiMsg) {
+    var userTokens = _tokenize(userMsg);
+    var aiTokens = _tokenize(aiMsg);
+    if (userTokens.length === 0 || aiTokens.length === 0) return 50;
+
+    // Keyword overlap — higher overlap = more relevant response
+    var userSet = new Set(userTokens);
+    var overlap = 0;
+    for (var i = 0; i < aiTokens.length; i++) {
+      if (userSet.has(aiTokens[i])) overlap++;
+    }
+    var overlapRatio = Math.min(overlap / Math.max(userTokens.length, 1), 1);
+    var overlapScore = overlapRatio * 40;
+
+    // Question-answer alignment — if user asks question, AI should provide substance
+    var hasQuestion = /\?/.test(userMsg);
+    var answerScore = 30;
+    if (hasQuestion) {
+      var aiLen = aiTokens.length;
+      answerScore = aiLen > 5 ? 30 : aiLen * 6;
+    }
+
+    // Sentence structure — well-structured AI response
+    var aiSentences = _sentences(aiMsg);
+    var structureScore = Math.min(aiSentences.length * 5, 30);
+
+    return _clamp(Math.round(overlapScore + answerScore + structureScore), 0, 100);
+  }
+
+  function analyzeEnergy(userMsg, aiMsg) {
+    var userLen = _wordCount(userMsg);
+    var aiLen = _wordCount(aiMsg);
+    var totalLen = userLen + aiLen;
+
+    // Length energy
+    var lengthScore = Math.min(totalLen / 2, 40);
+
+    // Exclamation/emoji enthusiasm
+    var exclCount = (userMsg.match(/!/g) || []).length + (aiMsg.match(/!/g) || []).length;
+    var emojiCount = (userMsg.match(/[\u{1F300}-\u{1F9FF}]/gu) || []).length + (aiMsg.match(/[\u{1F300}-\u{1F9FF}]/gu) || []).length;
+    var enthusiasmScore = Math.min((exclCount * 5) + (emojiCount * 3), 30);
+
+    // Capitalized words (emphasis)
+    var capsWords = ((userMsg + ' ' + aiMsg).match(/\b[A-Z]{2,}\b/g) || []).length;
+    var emphasisScore = Math.min(capsWords * 5, 15);
+
+    // Code blocks boost energy
+    var codeBlocks = ((aiMsg).match(/`/g) || []).length / 2;
+    var codeScore = Math.min(codeBlocks * 5, 15);
+
+    return _clamp(Math.round(lengthScore + enthusiasmScore + emphasisScore + codeScore), 0, 100);
+  }
+
+  function analyzeWarmth(userMsg, aiMsg) {
+    var combined = (userMsg + ' ' + aiMsg).toLowerCase();
+    var tokens = _tokenize(combined);
+
+    var posCount = 0;
+    var negCount = 0;
+    for (var i = 0; i < tokens.length; i++) {
+      if (WARMTH_POS.has(tokens[i])) posCount++;
+      if (WARMTH_NEG.has(tokens[i])) negCount++;
+    }
+
+    // Check multi-word phrases
+    WARMTH_NEG.forEach(function (phrase) {
+      if (phrase.indexOf(' ') === -1) return;
+      if (combined.indexOf(phrase) !== -1) negCount++;
+    });
+
+    // Base warmth
+    var baseWarmth = 60;
+    var warmth = baseWarmth + (posCount * 8) - (negCount * 12);
+
+    // Greeting boost
+    if (/^(hi|hello|hey|good morning|good evening)/i.test(userMsg.trim())) warmth += 10;
+
+    // Terse response penalty
+    if (_wordCount(aiMsg) < 3 && _wordCount(userMsg) > 10) warmth -= 10;
+
+    return _clamp(Math.round(warmth), 0, 100);
+  }
+
+  function analyzeTurbulence(userMsg, aiMsg, prevUserMsg) {
+    var score = 10; // baseline low turbulence
+
+    // Topic shift detection via keyword overlap with previous
+    if (prevUserMsg) {
+      var prevTokens = new Set(_tokenize(prevUserMsg));
+      var currTokens = _tokenize(userMsg);
+      var overlap = 0;
+      for (var i = 0; i < currTokens.length; i++) {
+        if (prevTokens.has(currTokens[i])) overlap++;
+      }
+      var ratio = currTokens.length > 0 ? overlap / currTokens.length : 1;
+      if (ratio < 0.1) score += 40; // major topic shift
+      else if (ratio < 0.3) score += 20;
+    }
+
+    // Correction signals
+    var correctionPhrases = ['actually','no,','that\'s wrong','not what i','incorrect','you misunderstood','i meant','let me clarify'];
+    var combinedLower = userMsg.toLowerCase();
+    for (var j = 0; j < correctionPhrases.length; j++) {
+      if (combinedLower.indexOf(correctionPhrases[j]) !== -1) { score += 10; break; }
+    }
+
+    // Confusion/frustration signals
+    var confLower = userMsg.toLowerCase();
+    CONFUSION_WORDS.forEach(function (w) {
+      if (confLower.indexOf(w) !== -1) score += 8;
+    });
+
+    // Re-asking
+    if (/\?\s*$/.test(userMsg) && prevUserMsg && /\?\s*$/.test(prevUserMsg)) {
+      var prevQ = _tokenize(prevUserMsg);
+      var currQ = _tokenize(userMsg);
+      var qOverlap = 0;
+      var pSet = new Set(prevQ);
+      for (var k = 0; k < currQ.length; k++) { if (pSet.has(currQ[k])) qOverlap++; }
+      if (currQ.length > 0 && qOverlap / currQ.length > 0.5) score += 15;
+    }
+
+    return _clamp(Math.round(score), 0, 100);
+  }
+
+  function analyzePressure(userMsg, aiMsg) {
+    var combined = (userMsg + ' ' + aiMsg).toLowerCase();
+    var tokens = _tokenize(combined);
+    var score = 20; // baseline
+
+    // Urgency words
+    var urgencyCount = 0;
+    for (var i = 0; i < tokens.length; i++) {
+      if (URGENCY_WORDS.has(tokens[i])) urgencyCount++;
+    }
+    // Multi-word urgency
+    if (combined.indexOf('time-sensitive') !== -1) urgencyCount++;
+    score += urgencyCount * 10;
+
+    // Code complexity
+    var codeBlocks = (aiMsg.match(/`[\s\S]*?`/g) || []);
+    if (codeBlocks.length > 0) score += Math.min(codeBlocks.length * 8, 20);
+
+    // Technical density — long words
+    var longWords = tokens.filter(function (w) { return w.length > 10; }).length;
+    score += Math.min(longWords * 3, 15);
+
+    // Message length pressure
+    var totalWords = _wordCount(userMsg) + _wordCount(aiMsg);
+    if (totalWords > 200) score += 10;
+
+    return _clamp(Math.round(score), 0, 100);
+  }
+
+  function analyzeVisibility(userMsg) {
+    var lower = userMsg.toLowerCase();
+    var score = 60; // baseline
+
+    // Goal language boost
+    GOAL_WORDS.forEach(function (phrase) {
+      if (lower.indexOf(phrase) !== -1) score += 8;
+    });
+
+    // Vague language penalty
+    VAGUE_WORDS.forEach(function (phrase) {
+      if (lower.indexOf(phrase) !== -1) score -= 8;
+    });
+
+    // Specific indicators (numbers, filenames, variable names)
+    var specifics = (userMsg.match(/\b\d+\b/g) || []).length;
+    specifics += (userMsg.match(/\b\w+\.\w{2,4}\b/g) || []).length; // filenames
+    score += Math.min(specifics * 4, 16);
+
+    // Question clarity
+    if (/\bhow\b|\bwhat\b|\bwhy\b|\bwhere\b|\bwhen\b/i.test(userMsg)) score += 5;
+
+    return _clamp(Math.round(score), 0, 100);
+  }
+
+  /* ── Composite scoring ── */
+  function computeComposite(dims) {
+    // Turbulence and pressure are inverted (high = bad for weather)
+    var effective = {};
+    Object.keys(DIMS).forEach(function (k) {
+      var dimKey = DIMS[k];
+      var meta = DIM_META[dimKey];
+      effective[dimKey] = meta.highGood ? dims[dimKey] : (100 - dims[dimKey]);
+    });
+
+    var score = 0;
+    Object.keys(DIMS).forEach(function (k) {
+      var dimKey = DIMS[k];
+      score += effective[dimKey] * DIM_META[dimKey].weight;
+    });
+    return _clamp(Math.round(score), 0, 100);
+  }
+
+  function classifyWeather(score) {
+    if (score >= 80) return 'SUNNY';
+    if (score >= 60) return 'PARTLY_CLOUDY';
+    if (score >= 40) return 'OVERCAST';
+    if (score >= 20) return 'RAINY';
+    return 'STORMY';
+  }
+
+  /* ── Phenomena detection ── */
+  function detectPhenomena(dims, prevDims, exchanges) {
+    var detected = [];
+
+    if (prevDims) {
+      // Rainbow: score recovery of 20+
+      var prevScore = computeComposite(prevDims);
+      var currScore = computeComposite(dims);
+      if (prevScore < 50 && currScore >= prevScore + 20) {
+        detected.push({ type: PHENOMENA.RAINBOW, delta: currScore - prevScore });
+      }
+
+      // Cold Front: warmth drop of 25+
+      if (prevDims.warmth - dims.warmth >= 25) {
+        detected.push({ type: PHENOMENA.COLD_FRONT, delta: prevDims.warmth - dims.warmth });
+      }
+
+      // Wind Shift: turbulence spike of 30+
+      if (dims.turbulence - prevDims.turbulence >= 30) {
+        detected.push({ type: PHENOMENA.WIND_SHIFT, delta: dims.turbulence - prevDims.turbulence });
+      }
+    }
+
+    // Heat Wave: last 3 exchanges all have energy > 70
+    if (exchanges.length >= 3) {
+      var last3 = exchanges.slice(-3);
+      var allHigh = last3.every(function (ex) { return ex.dimensions.energy > 70; });
+      if (allHigh) detected.push({ type: PHENOMENA.HEAT_WAVE });
+    }
+
+    // Fog Bank: last 3 exchanges all have visibility < 40
+    if (exchanges.length >= 3) {
+      var last3v = exchanges.slice(-3);
+      var allLow = last3v.every(function (ex) { return ex.dimensions.visibility < 40; });
+      if (allLow) detected.push({ type: PHENOMENA.FOG_BANK });
+    }
+
+    // Lightning: breakthrough words
+    return detected;
+  }
+
+  function detectLightning(userMsg, aiMsg) {
+    var combined = (userMsg + ' ' + aiMsg).toLowerCase();
+    var found = false;
+    BREAKTHROUGH_WORDS.forEach(function (w) {
+      if (combined.indexOf(w) !== -1) found = true;
+    });
+    return found;
+  }
+
+  /* ── Full exchange analysis ── */
+  function analyzeExchange(userMsg, aiMsg, prevUserMsg, prevDims) {
+    var dims = {
+      clarity: analyzeClarity(userMsg, aiMsg),
+      energy: analyzeEnergy(userMsg, aiMsg),
+      warmth: analyzeWarmth(userMsg, aiMsg),
+      turbulence: analyzeTurbulence(userMsg, aiMsg, prevUserMsg),
+      pressure: analyzePressure(userMsg, aiMsg),
+      visibility: analyzeVisibility(userMsg)
+    };
+    var score = computeComposite(dims);
+    var weather = classifyWeather(score);
+    var phenomena = _config.phenomenaDetection ? detectPhenomena(dims, prevDims, _state.exchanges) : [];
+    if (detectLightning(userMsg, aiMsg)) {
+      phenomena.push({ type: PHENOMENA.LIGHTNING });
+    }
+
+    return { dimensions: dims, score: score, weather: weather, phenomena: phenomena, ts: Date.now() };
+  }
+
+  /* ── Insights ── */
+  function generateInsights() {
+    var insights = [];
+    var d = _state.dimensions;
+
+    if (d.clarity < 40) {
+      insights.push({ id: 'lowClarity', icon: '🌫️', text: 'Clarity is low — try rephrasing your question more specifically.', priority: 'high' });
+    }
+    if (d.turbulence > 70) {
+      insights.push({ id: 'highTurbulence', icon: '🌪️', text: 'High turbulence — consider staying on one topic before switching.', priority: 'high' });
+    }
+    if (d.warmth < 35) {
+      insights.push({ id: 'coldConversation', icon: '❄️', text: 'Conversation feels cold — a friendly tone can improve responses.', priority: 'medium' });
+    }
+    if (d.pressure > 75) {
+      insights.push({ id: 'highPressure', icon: '📊', text: 'High pressure detected — consider breaking complex requests into steps.', priority: 'medium' });
+    }
+    if (d.visibility < 35) {
+      insights.push({ id: 'lowVisibility', icon: '🔭', text: 'Goals unclear — try stating what you want to achieve explicitly.', priority: 'high' });
+    }
+    if (d.energy < 25) {
+      insights.push({ id: 'lowEnergy', icon: '💤', text: 'Low energy — the conversation may be winding down.', priority: 'low' });
+    }
+    if (d.energy > 85) {
+      insights.push({ id: 'veryHighEnergy', icon: '🔥', text: 'Very high energy — great momentum! Keep it up.', priority: 'info' });
+    }
+    if (_state.currentScore < 40 && _state.history.length > 3) {
+      var recent = _state.history.slice(-3);
+      var declining = recent.every(function (s, i) { return i === 0 || s <= recent[i - 1]; });
+      if (declining) {
+        insights.push({ id: 'decliningWeather', icon: '📉', text: 'Weather has been declining — consider taking a break or clarifying goals.', priority: 'high' });
+      }
+    }
+    return insights;
+  }
+
+  /* ── Forecast (trend from history) ── */
+  function getForecast() {
+    var result = {};
+    Object.keys(DIMS).forEach(function (k) {
+      var dimKey = DIMS[k];
+      var points = _state.exchanges.slice(-20).map(function (ex) { return ex.dimensions[dimKey]; });
+      result[dimKey] = points;
+    });
+    result.composite = _state.history.slice(-20);
+    return result;
+  }
+
+  function _sparkline(arr) {
+    if (!arr || arr.length === 0) return '—';
+    var chars = '▁▂▃▄▅▆▇█';
+    var mn = Math.min.apply(null, arr);
+    var mx = Math.max.apply(null, arr);
+    var range = mx - mn || 1;
+    return arr.map(function (v) { return chars[Math.min(Math.floor(((v - mn) / range) * 7), 7)]; }).join('');
+  }
+
+  /* ── Toast ── */
+  function _showToast(msg) {
+    if (!_config.toastAlerts) return;
+    var now = Date.now();
+    if (now - _lastToastTime < TOAST_COOLDOWN_MS) return;
+    _lastToastTime = now;
+    var toast = document.createElement('div');
+    toast.style.cssText = 'position:fixed;bottom:80px;right:20px;background:#1e1e2e;color:#eee;padding:12px 18px;border-radius:10px;z-index:100003;box-shadow:0 4px 16px rgba(0,0,0,0.4);font-size:13px;max-width:320px;transition:opacity 0.4s;';
+    toast.textContent = msg;
+    document.body.appendChild(toast);
+    setTimeout(function () { toast.style.opacity = '0'; setTimeout(function () { toast.remove(); }, 500); }, 4000);
+  }
+
+  /* ── Message extraction ── */
+  function _extractMessages() {
+    var chatOut = document.getElementById('chat-output');
+    if (!chatOut) return [];
+    var msgs = [];
+    var children = chatOut.children;
+    for (var i = 0; i < children.length; i++) {
+      var el = children[i];
+      var role = el.dataset && el.dataset.role;
+      if (!role) {
+        if (el.classList.contains('user-message') || el.classList.contains('user-msg')) role = 'user';
+        else if (el.classList.contains('assistant-message') || el.classList.contains('ai-msg') || el.classList.contains('bot-message')) role = 'assistant';
+      }
+      if (role) msgs.push({ role: role, text: (el.textContent || '').trim() });
+    }
+    return msgs;
+  }
+
+  function _onNewMessage() {
+    if (!_config.enabled) return;
+    var msgs = _extractMessages();
+    if (msgs.length < 2) return;
+
+    // Find last user-assistant pair
+    var lastAI = null, lastUser = null, prevUser = null;
+    for (var i = msgs.length - 1; i >= 0; i--) {
+      if (!lastAI && msgs[i].role === 'assistant') lastAI = msgs[i];
+      else if (lastAI && !lastUser && msgs[i].role === 'user') lastUser = msgs[i];
+      else if (lastUser && msgs[i].role === 'user') { prevUser = msgs[i]; break; }
+    }
+    if (!lastUser || !lastAI) return;
+
+    var prevDims = _state.exchanges.length > 0 ? _state.exchanges[_state.exchanges.length - 1].dimensions : null;
+    var prevUserText = prevUser ? prevUser.text : null;
+    var result = analyzeExchange(lastUser.text, lastAI.text, prevUserText, prevDims);
+
+    // Store exchange
+    _state.exchanges.push(result);
+    if (_state.exchanges.length > MAX_EXCHANGES) _state.exchanges = _state.exchanges.slice(-MAX_EXCHANGES);
+
+    // Update current state
+    _state.dimensions = result.dimensions;
+    _state.currentScore = result.score;
+    _state.currentWeather = result.weather;
+    _state.history.push(result.score);
+    if (_state.history.length > MAX_HISTORY) _state.history = _state.history.slice(-MAX_HISTORY);
+
+    // Record phenomena
+    if (result.phenomena.length > 0) {
+      result.phenomena.forEach(function (p) {
+        _state.phenomena.push({ type: p.type.id, emoji: p.type.emoji, name: p.type.name, desc: p.type.desc, ts: Date.now(), delta: p.delta });
+      });
+      if (_state.phenomena.length > MAX_PHENOMENA) _state.phenomena = _state.phenomena.slice(-MAX_PHENOMENA);
+    }
+
+    // Insights
+    _state.insights = generateInsights();
+    if (_state.insights.length > MAX_INSIGHTS) _state.insights = _state.insights.slice(0, MAX_INSIGHTS);
+
+    _saveState();
+    _updateBadge();
+
+    // Toast on weather change
+    var prevWeather = _state.exchanges.length >= 2 ? _state.exchanges[_state.exchanges.length - 2].weather : null;
+    if (prevWeather && prevWeather !== result.weather) {
+      var wt = WEATHER_TYPES[result.weather];
+      _showToast(wt.emoji + ' Weather changed to ' + wt.name + ' — ' + wt.desc);
+    }
+
+    // Phenomena toast
+    if (result.phenomena.length > 0) {
+      var ph = result.phenomena[0];
+      _showToast(ph.type.emoji + ' ' + ph.type.name + ' detected — ' + ph.type.desc);
+    }
+
+    if (_visible) _renderPanel();
+  }
+
+  /* ── Badge ── */
+  function _createBadge() {
+    _badgeEl = document.createElement('div');
+    _badgeEl.id = 'weather-badge';
+    _badgeEl.title = 'Conversation Weather (Alt+Shift+3)';
+    _badgeEl.style.cssText = 'position:fixed;bottom:90px;right:18px;background:#1e1e2e;color:#eee;border:1px solid #444;border-radius:20px;padding:4px 10px;font-size:13px;z-index:100002;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.3);user-select:none;';
+    _badgeEl.addEventListener('click', toggle);
+    document.body.appendChild(_badgeEl);
+    _updateBadge();
+  }
+
+  function _updateBadge() {
+    if (!_badgeEl) return;
+    var wt = WEATHER_TYPES[_state.currentWeather] || WEATHER_TYPES.SUNNY;
+    _badgeEl.textContent = wt.emoji + ' ' + _state.currentScore + '°';
+    _badgeEl.style.borderColor = wt.color;
+  }
+
+  /* ── Panel ── */
+  function _createPanel() {
+    _panelEl = document.createElement('div');
+    _panelEl.id = 'weather-panel';
+    _panelEl.dataset.activeTab = 'live';
+    _panelEl.style.cssText = 'position:fixed;top:60px;right:20px;width:350px;max-height:520px;overflow-y:auto;background:#1e1e2e;border:1px solid #333;border-radius:12px;padding:16px;z-index:100001;box-shadow:0 8px 32px rgba(0,0,0,0.4);color:#eee;font-family:system-ui,sans-serif;display:none;font-size:13px;';
+    document.body.appendChild(_panelEl);
+  }
+
+  function _renderPanel() {
+    if (!_panelEl) return;
+    var tab = _panelEl.dataset.activeTab || 'live';
+    var wt = WEATHER_TYPES[_state.currentWeather] || WEATHER_TYPES.SUNNY;
+
+    var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">';
+    html += '<span style="font-weight:700;font-size:14px;">🌤️ Conversation Weather</span>';
+    html += '<span style="cursor:pointer;font-size:16px;" id="cw-close">✕</span></div>';
+
+    // Tabs
+    var tabs = [['live','Live'],['forecast','Forecast'],['phenomena','Phenomena'],['insights','Insights']];
+    html += '<div style="display:flex;gap:4px;margin-bottom:12px;">';
+    tabs.forEach(function (t) {
+      var active = tab === t[0];
+      html += '<button data-cw-tab="' + t[0] + '" style="flex:1;padding:5px 0;border:1px solid ' + (active ? '#5dade2' : '#444') + ';background:' + (active ? '#2c3e50' : 'transparent') + ';color:#eee;border-radius:6px;cursor:pointer;font-size:11px;">' + t[1] + '</button>';
+    });
+    html += '</div>';
+
+    if (tab === 'live') {
+      html += '<div style="text-align:center;margin-bottom:12px;">';
+      html += '<div style="font-size:40px;">' + wt.emoji + '</div>';
+      html += '<div style="font-size:28px;font-weight:700;color:' + wt.color + ';">' + _state.currentScore + '°</div>';
+      html += '<div style="font-size:13px;color:#aaa;">' + wt.name + ' — ' + wt.desc + '</div>';
+      html += '</div>';
+
+      // Dimension bars
+      Object.keys(DIMS).forEach(function (k) {
+        var dimKey = DIMS[k];
+        var meta = DIM_META[dimKey];
+        var val = _state.dimensions[dimKey];
+        html += '<div style="margin-bottom:6px;">';
+        html += '<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:2px;">';
+        html += '<span>' + meta.emoji + ' ' + meta.label + '</span><span>' + val + '</span></div>';
+        html += '<div style="background:#333;border-radius:4px;height:6px;overflow:hidden;">';
+        html += '<div style="width:' + val + '%;height:100%;background:' + meta.color + ';border-radius:4px;transition:width 0.3s;"></div>';
+        html += '</div></div>';
+      });
+
+    } else if (tab === 'forecast') {
+      var forecast = getForecast();
+      html += '<div style="font-size:12px;color:#aaa;margin-bottom:8px;">Trend (last 20 exchanges)</div>';
+      Object.keys(DIMS).forEach(function (k) {
+        var dimKey = DIMS[k];
+        var meta = DIM_META[dimKey];
+        var points = forecast[dimKey] || [];
+        html += '<div style="margin-bottom:6px;font-size:12px;">';
+        html += '<span style="color:' + meta.color + ';">' + meta.emoji + ' ' + meta.label + '</span> ';
+        html += '<span style="font-family:monospace;letter-spacing:1px;">' + _sparkline(points) + '</span>';
+        html += '</div>';
+      });
+      html += '<div style="margin-top:8px;font-size:12px;">';
+      html += '<span>📈 Composite</span> ';
+      html += '<span style="font-family:monospace;letter-spacing:1px;">' + _sparkline(forecast.composite) + '</span>';
+      html += '</div>';
+
+      // Trend warning
+      if (forecast.composite.length >= 5) {
+        var last5 = forecast.composite.slice(-5);
+        var allDown = last5.every(function (v, i) { return i === 0 || v <= last5[i - 1]; });
+        if (allDown && _config.forecastWarnings) {
+          html += '<div style="margin-top:10px;padding:8px;background:#3b1f1f;border-radius:6px;font-size:12px;">⚠️ Forecast: Weather has been declining for 5+ exchanges.</div>';
+        }
+      }
+
+    } else if (tab === 'phenomena') {
+      if (_state.phenomena.length === 0) {
+        html += '<div style="color:#888;text-align:center;padding:20px;">No weather phenomena detected yet.</div>';
+      } else {
+        _state.phenomena.slice().reverse().slice(0, 30).forEach(function (p) {
+          var time = new Date(p.ts).toLocaleTimeString();
+          html += '<div style="padding:6px 0;border-bottom:1px solid #333;">';
+          html += '<span style="font-size:16px;">' + p.emoji + '</span> ';
+          html += '<strong>' + p.name + '</strong>';
+          if (p.delta) html += ' <span style="color:#aaa;">(Δ' + p.delta + ')</span>';
+          html += '<div style="font-size:11px;color:#888;">' + time + ' — ' + p.desc + '</div>';
+          html += '</div>';
+        });
+      }
+
+    } else if (tab === 'insights') {
+      if (_state.insights.length === 0) {
+        html += '<div style="color:#888;text-align:center;padding:20px;">☀️ All clear! No recommendations.</div>';
+      } else {
+        _state.insights.forEach(function (ins) {
+          var bg = ins.priority === 'high' ? '#3b1f1f' : ins.priority === 'medium' ? '#3b2f1f' : '#1f2f1f';
+          html += '<div style="padding:8px;margin-bottom:6px;background:' + bg + ';border-radius:6px;font-size:12px;">';
+          html += ins.icon + ' ' + ins.text;
+          html += '</div>';
+        });
+      }
+    }
+
+    _panelEl.innerHTML = html;
+
+    // Event listeners
+    var closeBtn = _panelEl.querySelector('#cw-close');
+    if (closeBtn) closeBtn.addEventListener('click', hide);
+    var tabBtns = _panelEl.querySelectorAll('[data-cw-tab]');
+    tabBtns.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        _panelEl.dataset.activeTab = btn.dataset.cwTab;
+        _renderPanel();
+      });
+    });
+  }
+
+  function show() { if (_panelEl) { _panelEl.style.display = 'block'; _visible = true; _renderPanel(); } }
+  function hide() { if (_panelEl) { _panelEl.style.display = 'none'; _visible = false; } }
+  function toggle() { _visible ? hide() : show(); }
+
+  /* ── Init ── */
+  function init() {
+    _loadConfig();
+    _loadState();
+    _createPanel();
+    _createBadge();
+    _updateBadge();
+
+    // Keyboard shortcut: Alt+Shift+3
+    document.addEventListener('keydown', function (e) {
+      if (e.altKey && e.shiftKey && e.key === '3') { e.preventDefault(); toggle(); }
+    });
+
+    // Observe chat output
+    var chatOut = document.getElementById('chat-output');
+    if (chatOut) {
+      _observer = new MutationObserver(function () {
+        if (!_config.enabled) return;
+        clearTimeout(_debounceTimer);
+        _debounceTimer = setTimeout(_onNewMessage, DEBOUNCE_MS);
+      });
+      _observer.observe(chatOut, { childList: true, subtree: true });
+    }
+
+    // Toolbar button
+    var toolbar = document.querySelector('.toolbar');
+    if (toolbar) {
+      var btn = document.createElement('button');
+      btn.id = 'conversation-weather-btn';
+      btn.className = 'btn-secondary';
+      btn.title = 'Conversation Weather \u2014 atmosphere monitor (Alt+Shift+3)';
+      btn.textContent = '\uD83C\uDF24\uFE0F';
+      btn.addEventListener('click', toggle);
+      toolbar.appendChild(btn);
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  return {
+    toggle: toggle,
+    show: show,
+    hide: hide,
+    analyzeClarity: analyzeClarity,
+    analyzeEnergy: analyzeEnergy,
+    analyzeWarmth: analyzeWarmth,
+    analyzeTurbulence: analyzeTurbulence,
+    analyzePressure: analyzePressure,
+    analyzeVisibility: analyzeVisibility,
+    analyzeExchange: analyzeExchange,
+    computeComposite: computeComposite,
+    classifyWeather: classifyWeather,
+    detectPhenomena: detectPhenomena,
+    detectLightning: detectLightning,
+    generateInsights: generateInsights,
+    getForecast: getForecast,
+    getState: function () { return JSON.parse(JSON.stringify(_state)); },
+    getConfig: function () { return Object.assign({}, _config); },
+    getScore: function () { return _state.currentScore; },
+    getWeather: function () { return _state.currentWeather; },
+    getDimensions: function () { return Object.assign({}, _state.dimensions); },
+    getPhenomena: function () { return _state.phenomena.slice(); },
+    getInsights: function () { return _state.insights.slice(); },
+    isEnabled: function () { return _config.enabled; },
+    setEnabled: function (v) { _config.enabled = !!v; _saveConfig(); },
+    WEATHER_TYPES: WEATHER_TYPES,
+    DIMS: DIMS,
+    DIM_META: DIM_META,
+    PHENOMENA: PHENOMENA,
+    _defaultState: _defaultState,
+    _defaultConfig: _defaultConfig,
+    _tokenize: _tokenize,
+    _wordCount: _wordCount,
+    _sentences: _sentences,
+    _sparkline: _sparkline
   };
 })();
