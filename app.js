@@ -43489,14 +43489,24 @@ var SmartResponseAuditor = (function () {
     return text.split(/(?<=[.!?])\s+/).filter(function(s) { return s.trim().length > 0; });
   }
 
-  function _countMatches(text, patterns) {
+  /**
+   * Match a word list against text, returning total hit count and which words matched.
+   * Consolidates the repeated regex-loop pattern from _checkHallucination/_checkHedgeOverload.
+   */
+  function _matchWordList(text, words) {
     var count = 0;
-    for (var i = 0; i < patterns.length; i++) {
-      var re = patterns[i] instanceof RegExp ? patterns[i] : new RegExp('\\b' + patterns[i].replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'gi');
+    var flagged = [];
+    var flaggedWithCounts = [];
+    for (var i = 0; i < words.length; i++) {
+      var re = new RegExp('\\b' + words[i].replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'gi');
       var m = text.match(re);
-      if (m) count += m.length;
+      if (m) {
+        count += m.length;
+        flagged.push(words[i]);
+        flaggedWithCounts.push(words[i] + ' (\u00d7' + m.length + ')');
+      }
     }
-    return count;
+    return { count: count, flagged: flagged, flaggedWithCounts: flaggedWithCounts };
   }
 
   function _wordCount(text) {
@@ -43516,16 +43526,9 @@ var SmartResponseAuditor = (function () {
 
   /* ── audit checks ── */
   function _checkHallucination(text) {
-    var confCount = 0;
-    var flagged = [];
-    for (var i = 0; i < CONFIDENCE_WORDS.length; i++) {
-      var re = new RegExp('\\b' + CONFIDENCE_WORDS[i].replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'gi');
-      var m = text.match(re);
-      if (m) {
-        confCount += m.length;
-        flagged.push(CONFIDENCE_WORDS[i]);
-      }
-    }
+    var result = _matchWordList(text, CONFIDENCE_WORDS);
+    var confCount = result.count;
+    var flagged = result.flagged;
     var hasFactual = false;
     for (var f = 0; f < FACTUAL_PATTERNS.length; f++) {
       if (FACTUAL_PATTERNS[f].test(text)) { hasFactual = true; break; }
@@ -43542,16 +43545,9 @@ var SmartResponseAuditor = (function () {
   function _checkHedgeOverload(text) {
     var wc = _wordCount(text);
     if (wc < 10) return { name: 'Hedge Overload', score: 0, details: 'Too short to evaluate', ratio: 0 };
-    var hedgeCount = 0;
-    var flagged = [];
-    for (var i = 0; i < HEDGE_WORDS.length; i++) {
-      var re = new RegExp('\\b' + HEDGE_WORDS[i].replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'gi');
-      var m = text.match(re);
-      if (m) {
-        hedgeCount += m.length;
-        flagged.push(HEDGE_WORDS[i] + ' (\u00d7' + m.length + ')');
-      }
-    }
+    var result = _matchWordList(text, HEDGE_WORDS);
+    var hedgeCount = result.count;
+    var flagged = result.flaggedWithCounts;
     var ratio = hedgeCount / wc;
     var thresh = SENSITIVITY_THRESHOLDS[_config.sensitivity || 'medium'].hedge;
     var score = ratio > thresh ? Math.min(100, Math.round((ratio / thresh) * 50)) : 0;
@@ -47400,10 +47396,6 @@ const SmartAdaptiveTone = (function () {
     return Math.max(1, sents.length);
   }
 
-  function _avgSentenceLength(text) {
-    var tokens = _tokenize(text);
-    return tokens.length / _sentenceCount(text);
-  }
 
   /* ── dimension scorers (return 0-1) ── */
   /* Refactored: all scorers accept pre-computed tokens to avoid
