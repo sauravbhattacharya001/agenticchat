@@ -50324,3 +50324,576 @@ const SmartConversationWeather = (function () {
     _sparkline: _sparkline
   };
 })();
+
+const SmartAssumptionDetector = (function () {
+  'use strict';
+
+  var STORAGE_KEY = 'smartAssumptionDetector';
+  var CONFIG_KEY = 'smartAssumptionDetectorConfig';
+  var DEBOUNCE_MS = 700;
+  var MAX_ASSUMPTIONS = 500;
+  var MAX_EXCHANGES = 200;
+  var MAX_INSIGHTS = 50;
+  var TOAST_COOLDOWN_MS = 300000;
+  var _panelEl = null;
+  var _visible = false;
+  var _debounceTimer = null;
+  var _badgeEl = null;
+  var _lastToastTime = 0;
+  var _observer = null;
+
+  /* ── Assumption Categories ── */
+  var CATEGORIES = {
+    CAUSAL:     { id: 'causal',     name: 'Causal',     emoji: '🔗', weight: 0.9, desc: 'Assumes X causes Y without evidence',
+      patterns: [/\bwill fix\b/i, /\bbecause of\b/i, /\bleads to\b/i, /\bresults in\b/i, /\bcaused by\b/i, /\bso that\b/i, /\btherefore\b/i, /\bthus\b/i, /\bconsequently\b/i, /\bif we .+ then\b/i],
+      alternatives: ['What evidence supports this causal link?', 'Could there be other contributing factors?', 'Is this correlation or causation?'] },
+    UNIVERSAL:  { id: 'universal',  name: 'Universal',  emoji: '🌐', weight: 0.8, desc: 'Overgeneralizes across groups or time',
+      patterns: [/\beveryone\b/i, /\balways\b/i, /\bnever\b/i, /\ball people\b/i, /\bnobody\b/i, /\bno one\b/i, /\bobviously\b/i, /\bclearly\b/i, /\bundoubtedly\b/i, /\bwithout exception\b/i],
+      alternatives: ['Who specifically? Are there exceptions?', 'Under what conditions might this not hold?', 'What percentage actually fits this claim?'] },
+    TEMPORAL:   { id: 'temporal',   name: 'Temporal',   emoji: '⏳', weight: 0.7, desc: 'Assumes timing or sequence without justification',
+      patterns: [/\bfirst we need\b/i, /\bbefore we can\b/i, /\bafter this\b/i, /\bonce we\b/i, /\bby then\b/i, /\bsoon\b/i, /\beventually\b/i, /\bin time\b/i, /\bdown the road\b/i],
+      alternatives: ['Could these steps happen in parallel?', 'What is the actual dependency here?', 'Is this ordering flexible?'] },
+    CAPABILITY: { id: 'capability', name: 'Capability', emoji: '💪', weight: 1.0, desc: 'Assumes ability or feasibility without verification',
+      patterns: [/\beasily\b/i, /\bsimply\b/i, /\bjust need to\b/i, /\btrivial(?:ly)?\b/i, /\bstraightforward\b/i, /\bquick fix\b/i, /\bno.?brainer\b/i, /\bpiece of cake\b/i, /\bshould be simple\b/i],
+      alternatives: ['What are the hidden complexities?', 'Has this been validated in practice?', 'What could make this harder than expected?'] },
+    KNOWLEDGE:  { id: 'knowledge',  name: 'Knowledge',  emoji: '📚', weight: 0.6, desc: 'Assumes shared context or understanding',
+      patterns: [/\bas you know\b/i, /\bof course\b/i, /\bnaturally\b/i, /\bit'?s well known\b/i, /\bas we discussed\b/i, /\bremember that\b/i, /\byou already know\b/i, /\bneedless to say\b/i],
+      alternatives: ['Should this context be stated explicitly?', 'Does the other party actually have this background?', 'What if someone new reads this?'] },
+    VALUE:      { id: 'value',      name: 'Value',      emoji: '⚖️', weight: 0.8, desc: 'Assumes shared values or priorities',
+      patterns: [/\bbest approach\b/i, /\bobviously better\b/i, /\bideal solution\b/i, /\bthe right way\b/i, /\bshould always\b/i, /\bproper way\b/i, /\bonly correct\b/i, /\bsuperior\b/i],
+      alternatives: ['Best by which criteria?', 'What trade-offs does this approach have?', 'Who might disagree and why?'] },
+    SCOPE:      { id: 'scope',      name: 'Scope',      emoji: '🔍', weight: 0.7, desc: 'Assumes boundaries without stating them',
+      patterns: [/\bthe system\b/i, /\bthe users\b/i, /\bthe data\b/i, /\beverything\b/i, /\bthe whole thing\b/i, /\ball of it\b/i, /\bthe platform\b/i, /\bthe app\b/i],
+      alternatives: ['Which system/component specifically?', 'Can you narrow this to a concrete boundary?', 'Are we talking about all users or a subset?'] },
+    BINARY:     { id: 'binary',     name: 'Binary',     emoji: '⚡', weight: 0.9, desc: 'False dichotomy — ignores alternatives',
+      patterns: [/\beither\b.{1,40}\bor\b/i, /\bonly option\b/i, /\bonly way\b/i, /\bmust choose between\b/i, /\btwo choices\b/i, /\bno other\b/i, /\bit'?s either\b/i, /\bonly alternative\b/i],
+      alternatives: ['Are there really only two options?', 'What is a third path that combines elements?', 'Who else has solved this differently?'] }
+  };
+
+  /* ── Awareness Tiers ── */
+  var TIERS = {
+    VIGILANT: { name: 'Vigilant',  min: 90, max: 100, color: '#27ae60', emoji: '🟢', desc: 'Highly aware of hidden assumptions' },
+    AWARE:    { name: 'Aware',     min: 70, max: 89,  color: '#f1c40f', emoji: '🟡', desc: 'Good awareness, some blind spots' },
+    CASUAL:   { name: 'Casual',    min: 50, max: 69,  color: '#e67e22', emoji: '🟠', desc: 'Many assumptions going unnoticed' },
+    BLIND:    { name: 'Blind',     min: 0,  max: 49,  color: '#e74c3c', emoji: '🔴', desc: 'Significant blind spots in reasoning' }
+  };
+
+  var SENSITIVITIES = { low: 0.7, medium: 0.5, high: 0.3 };
+
+  /* ── Default state & config ── */
+  function _defaultState() {
+    return {
+      assumptions: [],
+      exchanges: [],
+      insights: [],
+      currentScore: 100,
+      totalDetected: 0,
+      totalAddressed: 0,
+      categoryBreakdown: {}
+    };
+  }
+  function _defaultConfig() {
+    return { enabled: true, sensitivity: 'medium', showBadge: true, showToasts: true, autoAnalyze: true };
+  }
+
+  var _state = _defaultState();
+  var _config = _defaultConfig();
+
+  /* ── Persistence ── */
+  function _load() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) { var p = JSON.parse(raw); Object.keys(_state).forEach(function (k) { if (p[k] !== undefined) _state[k] = p[k]; }); }
+    } catch (e) { /* ignore */ }
+    try {
+      var rc = localStorage.getItem(CONFIG_KEY);
+      if (rc) { var c = JSON.parse(rc); Object.keys(_config).forEach(function (k) { if (c[k] !== undefined) _config[k] = c[k]; }); }
+    } catch (e) { /* ignore */ }
+  }
+  function _save() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(_state)); } catch (e) { /* ignore */ }
+  }
+  function _saveConfig() {
+    try { localStorage.setItem(CONFIG_KEY, JSON.stringify(_config)); } catch (e) { /* ignore */ }
+  }
+
+  /* ── Helpers ── */
+  function _sentences(text) {
+    if (!text) return [];
+    return text.split(/[.!?]+/).map(function (s) { return s.trim(); }).filter(function (s) { return s.length > 2; });
+  }
+  function _clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+  function _sparkline(arr) {
+    var chars = '\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588';
+    if (!arr.length) return '';
+    var mn = Math.min.apply(null, arr);
+    var mx = Math.max.apply(null, arr);
+    var range = mx - mn || 1;
+    return arr.map(function (v) { return chars[Math.round((v - mn) / range * 7)]; }).join('');
+  }
+  function _ts() { return new Date().toISOString(); }
+  function _pickRandom(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+  /* ── Detectors ── */
+  function _detectCategory(text, catKey) {
+    var cat = CATEGORIES[catKey];
+    if (!cat) return [];
+    var results = [];
+    var sents = _sentences(text);
+    sents.forEach(function (sent) {
+      var markers = [];
+      cat.patterns.forEach(function (rx) {
+        var m = sent.match(rx);
+        if (m) markers.push(m[0]);
+      });
+      if (markers.length > 0) {
+        var conf = 0.65 + (markers.length > 1 ? 0.15 : 0);
+        conf = _clamp(conf, 0, 1);
+        results.push({
+          category: cat.id,
+          categoryName: cat.name,
+          emoji: cat.emoji,
+          text: sent,
+          confidence: Math.round(conf * 100) / 100,
+          markers: markers,
+          alternative: _pickRandom(cat.alternatives),
+          timestamp: _ts()
+        });
+      }
+    });
+    return results;
+  }
+
+  function detectCausal(text)     { return _detectCategory(text, 'CAUSAL'); }
+  function detectUniversal(text)  { return _detectCategory(text, 'UNIVERSAL'); }
+  function detectTemporal(text)   { return _detectCategory(text, 'TEMPORAL'); }
+  function detectCapability(text) { return _detectCategory(text, 'CAPABILITY'); }
+  function detectKnowledge(text)  { return _detectCategory(text, 'KNOWLEDGE'); }
+  function detectValue(text)      { return _detectCategory(text, 'VALUE'); }
+  function detectScope(text)      { return _detectCategory(text, 'SCOPE'); }
+  function detectBinary(text)     { return _detectCategory(text, 'BINARY'); }
+
+  function analyzeMessage(text, role) {
+    if (!text || !_config.enabled) return [];
+    var threshold = SENSITIVITIES[_config.sensitivity] || 0.5;
+    var all = [];
+    Object.keys(CATEGORIES).forEach(function (k) {
+      var hits = _detectCategory(text, k);
+      hits.forEach(function (h) { h.role = role || 'unknown'; });
+      all = all.concat(hits);
+    });
+    var filtered = all.filter(function (a) { return a.confidence >= threshold; });
+
+    /* Update state */
+    filtered.forEach(function (a) {
+      a.addressed = false;
+      _state.assumptions.unshift(a);
+      _state.totalDetected++;
+      var cid = a.category;
+      _state.categoryBreakdown[cid] = (_state.categoryBreakdown[cid] || 0) + 1;
+    });
+    if (_state.assumptions.length > MAX_ASSUMPTIONS) {
+      _state.assumptions = _state.assumptions.slice(0, MAX_ASSUMPTIONS);
+    }
+
+    /* Record exchange */
+    _state.exchanges.push({ role: role || 'unknown', text: text.slice(0, 300), assumptionCount: filtered.length, timestamp: _ts() });
+    if (_state.exchanges.length > MAX_EXCHANGES) _state.exchanges = _state.exchanges.slice(-MAX_EXCHANGES);
+
+    /* Recompute score */
+    _state.currentScore = computeScore();
+
+    /* Generate insights periodically */
+    if (_state.totalDetected % 5 === 0 && _state.totalDetected > 0) {
+      var newInsights = generateInsights();
+      newInsights.forEach(function (ins) { _state.insights.unshift(ins); });
+      if (_state.insights.length > MAX_INSIGHTS) _state.insights = _state.insights.slice(0, MAX_INSIGHTS);
+    }
+
+    _save();
+
+    /* Toast for high-confidence */
+    if (filtered.length > 0 && _config.showToasts) {
+      var top = filtered.reduce(function (a, b) { return a.confidence > b.confidence ? a : b; });
+      if (top.confidence > 0.7) _showToast(top);
+    }
+
+    _refreshUI();
+    return filtered;
+  }
+
+  /* ── Scoring ── */
+  function computeScore() {
+    var unaddressed = _state.assumptions.filter(function (a) { return !a.addressed; });
+    var penalty = 0;
+    unaddressed.slice(0, 50).forEach(function (a) {
+      var cat = null;
+      Object.keys(CATEGORIES).forEach(function (k) { if (CATEGORIES[k].id === a.category) cat = CATEGORIES[k]; });
+      var w = cat ? cat.weight : 0.7;
+      penalty += a.confidence * w * 2;
+    });
+    var bonus = _state.totalAddressed * 5;
+    return _clamp(Math.round(100 - penalty + bonus), 0, 100);
+  }
+
+  function classifyTier(score) {
+    var s = score !== undefined ? score : _state.currentScore;
+    var result = TIERS.BLIND;
+    Object.keys(TIERS).forEach(function (k) {
+      if (s >= TIERS[k].min && s <= TIERS[k].max) result = TIERS[k];
+    });
+    return result;
+  }
+
+  /* ── Address assumption ── */
+  function addressAssumption(index) {
+    if (_state.assumptions[index] && !_state.assumptions[index].addressed) {
+      _state.assumptions[index].addressed = true;
+      _state.totalAddressed++;
+      _state.currentScore = computeScore();
+      _save();
+      _refreshUI();
+    }
+  }
+
+  /* ── Insight Generation ── */
+  function generateInsights() {
+    var insights = [];
+    var now = _ts();
+
+    /* Recurring assumption — same category 3+ times */
+    Object.keys(CATEGORIES).forEach(function (k) {
+      var cat = CATEGORIES[k];
+      var count = _state.categoryBreakdown[cat.id] || 0;
+      if (count >= 3) {
+        insights.push({ type: 'recurring', emoji: '🔁', text: cat.name + ' assumptions detected ' + count + ' times \u2014 this may be a habitual pattern', timestamp: now });
+      }
+    });
+
+    /* Blind spot — category never detected */
+    Object.keys(CATEGORIES).forEach(function (k) {
+      var cat = CATEGORIES[k];
+      if (!_state.categoryBreakdown[cat.id] && _state.totalDetected > 10) {
+        insights.push({ type: 'blindspot', emoji: '🕳️', text: 'No ' + cat.name + ' assumptions detected yet \u2014 possible blind spot', timestamp: now });
+      }
+    });
+
+    /* Improving awareness */
+    if (_state.totalAddressed > 0 && _state.totalDetected > 0) {
+      var ratio = _state.totalAddressed / _state.totalDetected;
+      if (ratio > 0.5) {
+        insights.push({ type: 'improving', emoji: '📈', text: 'Good awareness! You\u2019ve addressed ' + Math.round(ratio * 100) + '% of detected assumptions', timestamp: now });
+      }
+    }
+
+    /* High-risk pattern: CAUSAL + CAPABILITY together in recent exchanges */
+    var recent = _state.assumptions.slice(0, 20);
+    var hasCausal = recent.some(function (a) { return a.category === 'causal'; });
+    var hasCap = recent.some(function (a) { return a.category === 'capability'; });
+    if (hasCausal && hasCap) {
+      insights.push({ type: 'highrisk', emoji: '⚠️', text: 'Causal + Capability assumptions detected together \u2014 overconfidence risk', timestamp: now });
+    }
+
+    /* Assumption cluster — 3+ categories in single exchange */
+    var lastExchange = _state.exchanges[_state.exchanges.length - 1];
+    if (lastExchange && lastExchange.assumptionCount >= 3) {
+      insights.push({ type: 'cluster', emoji: '🎯', text: 'Multiple assumption types in single message \u2014 complex reasoning with many hidden premises', timestamp: now });
+    }
+
+    return insights;
+  }
+
+  /* ── Toast ── */
+  function _showToast(assumption) {
+    var now = Date.now();
+    if (now - _lastToastTime < TOAST_COOLDOWN_MS) return;
+    _lastToastTime = now;
+    var msg = '\uD83D\uDD0D Hidden assumption: ' + assumption.text.slice(0, 60) + (assumption.text.length > 60 ? '\u2026' : '') + ' \u2014 ' + assumption.categoryName;
+    if (typeof ToastManager !== 'undefined' && ToastManager.show) {
+      ToastManager.show(msg, 'info');
+    }
+  }
+
+  /* ── UI ── */
+  function _injectStyles() {
+    if (document.getElementById('assumption-detector-styles')) return;
+    var style = document.createElement('style');
+    style.id = 'assumption-detector-styles';
+    style.textContent = [
+      '.assumption-detector-panel{position:fixed;top:50%;right:16px;transform:translateY(-50%);width:400px;max-height:80vh;background:#1e1e2e;border:1px solid #444;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.5);z-index:10100;display:flex;flex-direction:column;font-family:system-ui,sans-serif;color:#e0e0e0;overflow:hidden}',
+      '.assumption-detector-header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid #333;background:#16161e}',
+      '.assumption-detector-header h3{margin:0;font-size:14px}',
+      '.assumption-detector-tabs{display:flex;border-bottom:1px solid #333}',
+      '.assumption-detector-tabs button{flex:1;padding:8px 4px;border:none;background:transparent;color:#888;cursor:pointer;font-size:11px;border-bottom:2px solid transparent;transition:all .2s}',
+      '.assumption-detector-tabs button.active{color:#e0e0e0;border-bottom-color:#9b59b6}',
+      '.assumption-detector-body{flex:1;overflow-y:auto;padding:12px 16px;min-height:200px;max-height:60vh}',
+      '.assumption-item{background:#262636;border-radius:8px;padding:10px 12px;margin-bottom:8px;border-left:3px solid #9b59b6}',
+      '.assumption-item .cat-badge{font-size:11px;background:#333;padding:2px 8px;border-radius:10px;margin-right:6px}',
+      '.assumption-item .conf-bar{height:4px;background:#333;border-radius:2px;margin:6px 0}',
+      '.assumption-item .conf-fill{height:100%;border-radius:2px;background:#9b59b6}',
+      '.assumption-item .alt-text{font-size:11px;color:#aaa;font-style:italic;margin-top:4px}',
+      '.assumption-item .addr-btn{font-size:11px;background:#27ae60;border:none;color:#fff;padding:3px 10px;border-radius:4px;cursor:pointer;margin-top:6px}',
+      '.assumption-item .addr-btn:hover{background:#2ecc71}',
+      '.assumption-item.addressed{opacity:0.5;border-left-color:#27ae60}',
+      '.assumption-badge{position:fixed;bottom:80px;right:20px;width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;cursor:pointer;z-index:10050;box-shadow:0 2px 12px rgba(0,0,0,.4);transition:all .3s;border:2px solid #444}',
+      '.assumption-badge:hover{transform:scale(1.1)}',
+      '.insight-item{background:#262636;border-radius:8px;padding:8px 12px;margin-bottom:6px;font-size:12px}',
+      '.insight-item .type-badge{font-size:10px;background:#333;padding:1px 6px;border-radius:8px;margin-left:6px}',
+      '.ad-gauge{text-align:center;margin:16px 0}',
+      '.ad-gauge .score{font-size:48px;font-weight:700}',
+      '.ad-gauge .tier{font-size:14px;margin-top:4px}',
+      '.ad-breakdown-bar{display:flex;align-items:center;margin-bottom:6px;font-size:12px}',
+      '.ad-breakdown-bar .bar{flex:1;height:8px;background:#333;border-radius:4px;margin:0 8px;overflow:hidden}',
+      '.ad-breakdown-bar .fill{height:100%;border-radius:4px}'
+    ].join('\n');
+    document.head.appendChild(style);
+  }
+
+  function _buildPanel() {
+    if (_panelEl) return;
+    _injectStyles();
+    _panelEl = document.createElement('div');
+    _panelEl.className = 'assumption-detector-panel';
+    _panelEl.style.display = 'none';
+    _panelEl.innerHTML = [
+      '<div class="assumption-detector-header"><h3>\uD83D\uDD0D Assumption Detector</h3><button id="ad-close" style="background:none;border:none;color:#888;cursor:pointer;font-size:18px">\u2715</button></div>',
+      '<div class="assumption-detector-tabs">',
+      '  <button class="active" data-tab="feed">Live Feed</button>',
+      '  <button data-tab="breakdown">Breakdown</button>',
+      '  <button data-tab="awareness">Awareness</button>',
+      '  <button data-tab="insights">Insights</button>',
+      '</div>',
+      '<div class="assumption-detector-body" id="ad-body"></div>'
+    ].join('');
+    document.body.appendChild(_panelEl);
+
+    _panelEl.querySelector('#ad-close').addEventListener('click', hide);
+    var tabs = _panelEl.querySelectorAll('.assumption-detector-tabs button');
+    tabs.forEach(function (t) {
+      t.addEventListener('click', function () {
+        tabs.forEach(function (b) { b.classList.remove('active'); });
+        t.classList.add('active');
+        _renderTab(t.getAttribute('data-tab'));
+      });
+    });
+  }
+
+  function _renderTab(tab) {
+    var body = _panelEl.querySelector('#ad-body');
+    if (!body) return;
+    if (tab === 'feed') _renderFeed(body);
+    else if (tab === 'breakdown') _renderBreakdown(body);
+    else if (tab === 'awareness') _renderAwareness(body);
+    else if (tab === 'insights') _renderInsights(body);
+  }
+
+  function _renderFeed(el) {
+    if (_state.assumptions.length === 0) {
+      el.innerHTML = '<div style="text-align:center;color:#666;padding:40px 0"><p>\uD83D\uDD0D No assumptions detected yet</p><p style="font-size:12px">Start a conversation and the detector will monitor for hidden assumptions</p></div>';
+      return;
+    }
+    var html = _state.assumptions.slice(0, 30).map(function (a, i) {
+      var cls = a.addressed ? ' addressed' : '';
+      return [
+        '<div class="assumption-item' + cls + '">',
+        '  <span class="cat-badge">' + a.emoji + ' ' + a.categoryName + '</span>',
+        '  <span style="font-size:11px;color:#888">' + (a.role || '') + ' \u2022 ' + Math.round(a.confidence * 100) + '%</span>',
+        '  <div class="conf-bar"><div class="conf-fill" style="width:' + Math.round(a.confidence * 100) + '%"></div></div>',
+        '  <div style="font-size:12px;margin:4px 0">\u201C' + _esc(a.text.slice(0, 120)) + '\u201D</div>',
+        '  <div style="font-size:11px;color:#aaa">Marker: <em>' + _esc(a.markers.join(', ')) + '</em></div>',
+        '  <div class="alt-text">\uD83D\uDCA1 ' + _esc(a.alternative) + '</div>',
+        a.addressed ? '<span style="font-size:11px;color:#27ae60">\u2713 Addressed</span>' : '<button class="addr-btn" data-idx="' + i + '">\u2713 Address</button>',
+        '</div>'
+      ].join('');
+    }).join('');
+    el.innerHTML = html;
+    el.querySelectorAll('.addr-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        addressAssumption(parseInt(btn.getAttribute('data-idx'), 10));
+      });
+    });
+  }
+
+  function _renderBreakdown(el) {
+    var maxCount = 1;
+    Object.keys(CATEGORIES).forEach(function (k) {
+      var c = _state.categoryBreakdown[CATEGORIES[k].id] || 0;
+      if (c > maxCount) maxCount = c;
+    });
+    var html = '<h4 style="margin:0 0 12px;font-size:13px">Category Breakdown</h4>';
+    Object.keys(CATEGORIES).forEach(function (k) {
+      var cat = CATEGORIES[k];
+      var count = _state.categoryBreakdown[cat.id] || 0;
+      var pct = Math.round((count / maxCount) * 100);
+      html += '<div class="ad-breakdown-bar">' +
+        '<span style="width:90px">' + cat.emoji + ' ' + cat.name + '</span>' +
+        '<div class="bar"><div class="fill" style="width:' + pct + '%;background:#9b59b6"></div></div>' +
+        '<span style="width:30px;text-align:right">' + count + '</span></div>';
+    });
+    html += '<div style="margin-top:16px;font-size:12px;color:#888">Total detected: ' + _state.totalDetected + ' | Addressed: ' + _state.totalAddressed + '</div>';
+    el.innerHTML = html;
+  }
+
+  function _renderAwareness(el) {
+    var tier = classifyTier(_state.currentScore);
+    var scores = _state.exchanges.slice(-20).map(function (e) { return 100 - e.assumptionCount * 10; });
+    var spark = _sparkline(scores.length ? scores : [100]);
+    var ratio = _state.totalDetected > 0 ? Math.round((_state.totalAddressed / _state.totalDetected) * 100) : 100;
+    el.innerHTML = [
+      '<div class="ad-gauge">',
+      '  <div class="score" style="color:' + tier.color + '">' + _state.currentScore + '</div>',
+      '  <div class="tier">' + tier.emoji + ' ' + tier.name + ' \u2014 ' + tier.desc + '</div>',
+      '</div>',
+      '<div style="text-align:center;font-size:16px;letter-spacing:1px;margin:12px 0">' + spark + '</div>',
+      '<div style="text-align:center;font-size:12px;color:#888">Last 20 exchanges</div>',
+      '<div style="margin-top:20px;text-align:center">',
+      '  <div style="font-size:24px;font-weight:700">' + ratio + '%</div>',
+      '  <div style="font-size:12px;color:#888">Assumptions addressed</div>',
+      '</div>',
+      '<div style="margin-top:20px;text-align:center;font-size:12px;color:#666">',
+      '  Total: ' + _state.totalDetected + ' detected, ' + _state.totalAddressed + ' addressed',
+      '</div>'
+    ].join('');
+  }
+
+  function _renderInsights(el) {
+    if (_state.insights.length === 0) {
+      el.innerHTML = '<div style="text-align:center;color:#666;padding:40px 0"><p>\uD83E\uDDE0 No insights yet</p><p style="font-size:12px">Insights appear as patterns emerge in your conversation</p></div>';
+      return;
+    }
+    el.innerHTML = _state.insights.slice(0, 20).map(function (ins) {
+      return '<div class="insight-item">' + ins.emoji + ' ' + _esc(ins.text) +
+        '<span class="type-badge">' + ins.type + '</span>' +
+        '<div style="font-size:10px;color:#666;margin-top:2px">' + ins.timestamp + '</div></div>';
+    }).join('');
+  }
+
+  function _esc(s) {
+    if (!s) return '';
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  /* ── Badge ── */
+  function _buildBadge() {
+    if (_badgeEl) return;
+    _badgeEl = document.createElement('div');
+    _badgeEl.className = 'assumption-badge';
+    _badgeEl.title = 'Assumption Detector \u2014 awareness score (Alt+Shift+4)';
+    _badgeEl.addEventListener('click', toggle);
+    document.body.appendChild(_badgeEl);
+    _updateBadge();
+  }
+
+  function _updateBadge() {
+    if (!_badgeEl) return;
+    if (!_config.showBadge || !_config.enabled) { _badgeEl.style.display = 'none'; return; }
+    _badgeEl.style.display = 'flex';
+    var tier = classifyTier(_state.currentScore);
+    _badgeEl.style.background = tier.color;
+    _badgeEl.style.color = '#fff';
+    _badgeEl.textContent = _state.currentScore;
+  }
+
+  /* ── Mutation Observer ── */
+  function _attachObserver() {
+    if (_observer) return;
+    var container = document.querySelector('.messages');
+    if (!container) return;
+    _observer = new MutationObserver(function () {
+      if (!_config.autoAnalyze || !_config.enabled) return;
+      clearTimeout(_debounceTimer);
+      _debounceTimer = setTimeout(function () {
+        var msgs = container.querySelectorAll('.message');
+        if (msgs.length === 0) return;
+        var last = msgs[msgs.length - 1];
+        if (last.dataset.adProcessed) return;
+        last.dataset.adProcessed = '1';
+        var text = (last.textContent || '').trim();
+        var role = last.classList.contains('user') ? 'user' : 'assistant';
+        analyzeMessage(text, role);
+      }, DEBOUNCE_MS);
+    });
+    _observer.observe(container, { childList: true, subtree: true });
+  }
+
+  function _refreshUI() {
+    _updateBadge();
+    if (_visible && _panelEl) {
+      var activeTab = _panelEl.querySelector('.assumption-detector-tabs button.active');
+      if (activeTab) _renderTab(activeTab.getAttribute('data-tab'));
+    }
+  }
+
+  /* ── Toggle / Show / Hide ── */
+  function toggle() { if (_visible) hide(); else show(); }
+  function show() {
+    _buildPanel();
+    _panelEl.style.display = 'flex';
+    _visible = true;
+    _renderTab('feed');
+  }
+  function hide() {
+    if (_panelEl) _panelEl.style.display = 'none';
+    _visible = false;
+  }
+
+  /* ── Init ── */
+  function init() {
+    _load();
+    _buildBadge();
+    _attachObserver();
+
+    /* Keyboard shortcut: Alt+Shift+4 */
+    document.addEventListener('keydown', function (e) {
+      if (e.altKey && e.shiftKey && e.key === '4') { e.preventDefault(); toggle(); }
+    });
+
+    /* Toolbar button */
+    var toolbar = document.querySelector('.toolbar') || document.querySelector('.chat-toolbar');
+    if (toolbar) {
+      var btn = document.createElement('button');
+      btn.className = 'toolbar-btn';
+      btn.title = 'Assumption Detector \u2014 hidden assumption monitor (Alt+Shift+4)';
+      btn.textContent = '\uD83D\uDD0D';
+      btn.addEventListener('click', toggle);
+      toolbar.appendChild(btn);
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', init);
+
+  return {
+    toggle: toggle,
+    show: show,
+    hide: hide,
+    analyzeMessage: analyzeMessage,
+    detectCausal: detectCausal,
+    detectUniversal: detectUniversal,
+    detectTemporal: detectTemporal,
+    detectCapability: detectCapability,
+    detectKnowledge: detectKnowledge,
+    detectValue: detectValue,
+    detectScope: detectScope,
+    detectBinary: detectBinary,
+    computeScore: computeScore,
+    classifyTier: classifyTier,
+    generateInsights: generateInsights,
+    addressAssumption: addressAssumption,
+    getState: function () { return JSON.parse(JSON.stringify(_state)); },
+    getConfig: function () { return Object.assign({}, _config); },
+    getScore: function () { return _state.currentScore; },
+    getTier: function () { return classifyTier(_state.currentScore); },
+    getAssumptions: function () { return _state.assumptions.slice(); },
+    getInsights: function () { return _state.insights.slice(); },
+    getCategoryBreakdown: function () { return Object.assign({}, _state.categoryBreakdown); },
+    isEnabled: function () { return _config.enabled; },
+    setEnabled: function (v) { _config.enabled = !!v; _saveConfig(); _updateBadge(); },
+    CATEGORIES: CATEGORIES,
+    TIERS: TIERS,
+    SENSITIVITIES: SENSITIVITIES,
+    _defaultState: _defaultState,
+    _defaultConfig: _defaultConfig,
+    _sentences: _sentences,
+    _sparkline: _sparkline
+  };
+})();
