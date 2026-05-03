@@ -112,6 +112,7 @@
  *   SmartContextWatchdog   - autonomous real-time context health monitor with token pressure, topic drift, stale context detection, proactive recommendations, and floating health indicator (Alt+Shift+W)s-session knowledge base (Alt+Shift+F)
  *   SmartResponseAuditor   - autonomous AI response quality auditor with 7 heuristic checks (hallucination risk, hedge overload, self-contradiction, code quality, unsupported claims, repetition, incomplete response), inline badges, audit panel (Alt+Shift+Q)
  *   SmartConversationWeather - autonomous weather-metaphor conversation atmosphere monitor with 6 dimensions, 5 classifications, 6 phenomena detectors, forecast trends, autonomous insights (Alt+Shift+3)
+ *   SmartDebateMode       - autonomous devil's advocate engine with claim detection, bias spotting, counter-argument generation, debate health scoring (Alt+Shift+6)
  *
  * All modules communicate through a thin public API; no direct DOM
  * manipulation outside UIController except where unavoidable (sandbox).
@@ -51680,6 +51681,804 @@ const SmartReferenceTracker = (function () {
     _switchTab: _switchTab,
     _copyRef: _copyRef,
     _exportToClipboard: _exportToClipboard,
+    _renderPanel: function () { _renderPanel(); }
+  };
+})();
+
+/* ============================================================
+ * SmartDebateMode
+ *
+ * Autonomous devil's advocate engine — detects one-sided reasoning,
+ * generates counter-arguments, spots reasoning biases, and suggests
+ * alternative perspectives to improve critical thinking.
+ *
+ * 7 engines: Claim Detector, Bias Spotter, Counter-Argument Generator,
+ * Perspective Multiplier, Steel Man Builder, Debate Health Scorer,
+ * Insight Generator.
+ *
+ * Keyboard shortcut: Alt+Shift+6
+ * ============================================================ */
+const SmartDebateMode = (function () {
+  'use strict';
+
+  var STORAGE_KEY = 'smartDebateMode';
+  var CONFIG_KEY = 'smartDebateModeConfig';
+  var DEBOUNCE_MS = 700;
+  var MAX_CLAIMS = 500;
+  var MAX_BIASES = 200;
+  var MAX_PERSPECTIVES = 200;
+  var MAX_EXCHANGES = 200;
+  var MAX_INSIGHTS = 50;
+  var TOAST_COOLDOWN_MS = 300000;
+  var _panelEl = null;
+  var _visible = false;
+  var _debounceTimer = null;
+  var _badgeEl = null;
+  var _lastToastTime = 0;
+  var _observer = null;
+
+  /* ── Claim Categories ── */
+  var CLAIM_CATEGORIES = {
+    STRONG: { id: 'strong', name: 'Strong Claim', emoji: '💪', weight: 1.0,
+      patterns: [/\bis the best\b/i, /\bdefinitely\b/i, /\bonly way\b/i, /\bwithout a doubt\b/i, /\babsolutely\b/i, /\bcertainly\b/i, /\bno question\b/i, /\bundeniably\b/i, /\bguaranteed\b/i, /\bwithout exception\b/i],
+      counters: ['What evidence would change your mind?', 'Is this universally true or context-dependent?', 'Can you think of a single exception?'] },
+    COMPARATIVE: { id: 'comparative', name: 'Comparative', emoji: '⚖️', weight: 0.8,
+      patterns: [/\bbetter than\b/i, /\bsuperior to\b/i, /\bworse than\b/i, /\binferior\b/i, /\boutperforms?\b/i, /\bmore .+ than\b/i, /\bless .+ than\b/i, /\bpreferable\b/i],
+      counters: ['By what metric?', 'Better for whom and under what conditions?', 'What are the trade-offs being ignored?'] },
+    PRESCRIPTIVE: { id: 'prescriptive', name: 'Prescriptive', emoji: '📋', weight: 0.9,
+      patterns: [/\bshould always\b/i, /\bmust\b/i, /\bneed to\b/i, /\bhave to\b/i, /\bshould never\b/i, /\bshould\b/i, /\bought to\b/i, /\bimperative\b/i],
+      counters: ['Who decided this? What authority?', 'What happens if we do the opposite?', 'Is this a preference disguised as a rule?'] },
+    PREDICTIVE: { id: 'predictive', name: 'Predictive', emoji: '🔮', weight: 0.7,
+      patterns: [/\bwill happen\b/i, /\bgoing to\b/i, /\binevitabl[ey]\b/i, /\bbound to\b/i, /\bcertain to\b/i, /\bwill become\b/i, /\bwill lead to\b/i, /\bmark my words\b/i],
+      counters: ['What could prevent this outcome?', 'How confident are you on a scale of 1-10?', 'What alternative futures are possible?'] },
+    EVALUATIVE: { id: 'evaluative', name: 'Evaluative', emoji: '🎯', weight: 0.6,
+      patterns: [/\bterrible\b/i, /\bamazing\b/i, /\bfantastic\b/i, /\bawful\b/i, /\bperfect\b/i, /\buseless\b/i, /\bbrilliant\b/i, /\bworthless\b/i, /\bexcellent\b/i, /\bhorrible\b/i],
+      counters: ['What criteria are you judging by?', 'Who might evaluate this differently?', 'Is this fact or feeling?'] }
+  };
+
+  /* ── Bias Categories ── */
+  var BIAS_CATEGORIES = {
+    CONFIRMATION: { id: 'confirmation', name: 'Confirmation Bias', emoji: '🔄', weight: 1.0,
+      patterns: [/\bproves? (that |my )/i, /\bjust as I (thought|expected|predicted)\b/i, /\bsee\?? I was right\b/i, /\bexactly what I said\b/i, /\bconfirms?\b/i],
+      desc: 'Seeking only evidence that supports existing beliefs',
+      antidote: 'Actively seek disconfirming evidence' },
+    ANCHORING: { id: 'anchoring', name: 'Anchoring', emoji: '⚓', weight: 0.8,
+      patterns: [/\boriginally\b/i, /\bfirst impression\b/i, /\binitial\b/i, /\bstarting point\b/i, /\bmy first thought\b/i],
+      desc: 'Over-relying on the first piece of information',
+      antidote: 'Consider the problem from scratch without the anchor' },
+    RECENCY: { id: 'recency', name: 'Recency Bias', emoji: '🕐', weight: 0.7,
+      patterns: [/\brecently\b/i, /\bjust (saw|read|heard)\b/i, /\blatest\b/i, /\bthis (morning|week|month)\b/i, /\byesterday\b/i],
+      desc: 'Favoring recent information over historical data',
+      antidote: 'Look at longer-term trends and historical precedents' },
+    SURVIVORSHIP: { id: 'survivorship', name: 'Survivorship Bias', emoji: '🏆', weight: 0.9,
+      patterns: [/\bsuccessful (people|companies|teams)\b/i, /\btop performers\b/i, /\blook at .+ they\b/i, /\bwhat .+ did right\b/i, /\bwhat winners\b/i],
+      desc: 'Focusing only on successes while ignoring failures',
+      antidote: 'Study the failures too — what did they have in common?' },
+    AUTHORITY: { id: 'authority', name: 'Appeal to Authority', emoji: '👑', weight: 0.7,
+      patterns: [/\bexperts? say\b/i, /\baccording to\b/i, /\b(elon|bezos|jobs|gates|musk) (said|says|thinks?|believes?)\b/i, /\bstudies? show\b/i, /\bresearch proves?\b/i],
+      desc: 'Accepting claims based on authority rather than evidence',
+      antidote: 'Evaluate the argument on its merits, not its source' },
+    HASTY_GENERALIZATION: { id: 'hasty_gen', name: 'Hasty Generalization', emoji: '🎲', weight: 0.8,
+      patterns: [/\beveryone knows?\b/i, /\ball .+ are\b/i, /\bnobody\b/i, /\bno one ever\b/i, /\bpeople always\b/i, /\bnever works?\b/i, /\balways fails?\b/i],
+      desc: 'Drawing broad conclusions from limited examples',
+      antidote: 'What is the actual sample size? Are there counter-examples?' },
+    SUNK_COST: { id: 'sunk_cost', name: 'Sunk Cost', emoji: '💸', weight: 0.9,
+      patterns: [/\balready invested\b/i, /\bcome this far\b/i, /\btoo late to\b/i, /\bwasted if we\b/i, /\bcan't stop now\b/i, /\bspent so much\b/i],
+      desc: 'Continuing because of past investment rather than future value',
+      antidote: 'If you were starting fresh today, would you still choose this?' }
+  };
+
+  /* ── Perspective Types ── */
+  var PERSPECTIVE_TYPES = {
+    STAKEHOLDER: { id: 'stakeholder', name: 'Stakeholder', emoji: '👥',
+      templates: ['How would {role} see this?', 'What would {role} object to?'],
+      roles: ['the end user', 'a competitor', 'a regulator', 'a new employee', 'the CFO', 'a customer', 'a critic'] },
+    TEMPORAL: { id: 'temporal', name: 'Temporal', emoji: '⏰',
+      templates: ['How will this look in {time}?', 'Would you have agreed with this {time} ago?'],
+      frames: ['6 months', '2 years', '5 years', '10 years', 'a generation'] },
+    SCALE: { id: 'scale', name: 'Scale', emoji: '📐',
+      templates: ['Does this hold at {scale} scale?', 'What changes at {scale} scale?'],
+      scales: ['10x larger', '100x larger', 'much smaller', 'global', 'individual'] },
+    CULTURAL: { id: 'cultural', name: 'Cultural', emoji: '🌍',
+      templates: ['How would this be viewed in {culture}?'],
+      contexts: ['a different industry', 'a different country', 'a non-profit context', 'academia', 'a startup vs enterprise'] },
+    CONTRARIAN: { id: 'contrarian', name: 'Contrarian', emoji: '🔥',
+      templates: ['What if the exact opposite were true?', 'Play devil\'s advocate: why is this wrong?', 'What would a skeptic say?', 'Argue against your own position.'] }
+  };
+
+  /* ── Scoring Tiers ── */
+  var TIERS = {
+    DIALECTICAL:  { name: 'Dialectical',  min: 90, max: 100, color: '#27ae60', emoji: '🟢', desc: 'Excellent critical thinking' },
+    BALANCED:     { name: 'Balanced',     min: 70, max: 89,  color: '#f1c40f', emoji: '🟡', desc: 'Good but room for more perspectives' },
+    ONE_SIDED:    { name: 'One-Sided',    min: 50, max: 69,  color: '#e67e22', emoji: '🟠', desc: 'Notable gaps in reasoning' },
+    ECHO_CHAMBER: { name: 'Echo Chamber', min: 0,  max: 49,  color: '#e74c3c', emoji: '🔴', desc: 'Heavily one-sided, needs counter-arguments' }
+  };
+
+  var SENSITIVITIES = { low: 0.7, medium: 0.5, high: 0.3 };
+
+  /* ── Default state & config ── */
+  function _defaultState() {
+    return {
+      claims: [],
+      biases: [],
+      perspectives: [],
+      insights: [],
+      exchanges: [],
+      currentScore: 100,
+      totalClaimsDetected: 0,
+      totalBiasesSpotted: 0,
+      categoryBreakdown: {}
+    };
+  }
+  function _defaultConfig() {
+    return { enabled: true, sensitivity: 'medium', showBadge: true, showToasts: true, autoAnalyze: true };
+  }
+
+  var _state = _defaultState();
+  var _config = _defaultConfig();
+
+  /* ── Persistence ── */
+  function _load() {
+    try {
+      var raw = (typeof SafeStorage !== 'undefined' ? SafeStorage.get(STORAGE_KEY) : localStorage.getItem(STORAGE_KEY));
+      if (raw) { var p = JSON.parse(raw); Object.keys(_state).forEach(function (k) { if (p[k] !== undefined) _state[k] = p[k]; }); }
+    } catch (e) { /* ignore */ }
+  }
+  function _save() {
+    try {
+      var s = JSON.stringify(_state);
+      if (typeof SafeStorage !== 'undefined') SafeStorage.set(STORAGE_KEY, s); else localStorage.setItem(STORAGE_KEY, s);
+    } catch (e) { /* ignore */ }
+  }
+  function _loadConfig() {
+    try {
+      var raw = (typeof SafeStorage !== 'undefined' ? SafeStorage.get(CONFIG_KEY) : localStorage.getItem(CONFIG_KEY));
+      if (raw) { var c = JSON.parse(raw); Object.keys(_config).forEach(function (k) { if (c[k] !== undefined) _config[k] = c[k]; }); }
+    } catch (e) { /* ignore */ }
+  }
+  function _saveConfig() {
+    try {
+      var s = JSON.stringify(_config);
+      if (typeof SafeStorage !== 'undefined') SafeStorage.set(CONFIG_KEY, s); else localStorage.setItem(CONFIG_KEY, s);
+    } catch (e) { /* ignore */ }
+  }
+
+  /* ── Helpers ── */
+  function _sentences(text) {
+    if (!text) return [];
+    return text.split(/[.!?\n]+/).map(function (s) { return s.trim(); }).filter(function (s) { return s.length > 5; });
+  }
+  function _clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+  function _sparkline(arr) {
+    var chars = '\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588';
+    if (!arr.length) return '';
+    var mn = Math.min.apply(null, arr);
+    var mx = Math.max.apply(null, arr);
+    var range = mx - mn || 1;
+    return arr.map(function (v) { return chars[Math.round((v - mn) / range * 7)]; }).join('');
+  }
+  function _ts() { return new Date().toISOString(); }
+  function _pickRandom(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+  function _uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+
+  /* ── Engine 1: Claim Detector ── */
+  function detectClaims(text, role) {
+    if (!text) return [];
+    var results = [];
+    var sents = _sentences(text);
+    var threshold = SENSITIVITIES[_config.sensitivity] || 0.5;
+    Object.keys(CLAIM_CATEGORIES).forEach(function (key) {
+      var cat = CLAIM_CATEGORIES[key];
+      sents.forEach(function (sent) {
+        var markers = [];
+        cat.patterns.forEach(function (rx) {
+          var m = sent.match(rx);
+          if (m) markers.push(m[0]);
+        });
+        if (markers.length > 0) {
+          var conf = 0.6 + (markers.length > 1 ? 0.2 : 0.1);
+          conf = _clamp(conf, 0, 1);
+          if (conf >= threshold) {
+            results.push({
+              id: _uid(),
+              category: cat.id,
+              categoryName: cat.name,
+              emoji: cat.emoji,
+              text: sent,
+              confidence: Math.round(conf * 100) / 100,
+              markers: markers,
+              counterArgument: _pickRandom(cat.counters),
+              role: role || 'unknown',
+              timestamp: _ts(),
+              challenged: false
+            });
+          }
+        }
+      });
+    });
+    return results;
+  }
+
+  /* ── Engine 2: Bias Spotter ── */
+  function detectBiases(text, role) {
+    if (!text) return [];
+    var results = [];
+    var sents = _sentences(text);
+    var threshold = SENSITIVITIES[_config.sensitivity] || 0.5;
+    Object.keys(BIAS_CATEGORIES).forEach(function (key) {
+      var cat = BIAS_CATEGORIES[key];
+      sents.forEach(function (sent) {
+        var markers = [];
+        cat.patterns.forEach(function (rx) {
+          var m = sent.match(rx);
+          if (m) markers.push(m[0]);
+        });
+        if (markers.length > 0) {
+          var conf = 0.55 + (markers.length > 1 ? 0.2 : 0.1);
+          conf = _clamp(conf, 0, 1);
+          if (conf >= threshold) {
+            results.push({
+              id: _uid(),
+              biasType: cat.id,
+              biasName: cat.name,
+              emoji: cat.emoji,
+              text: sent,
+              confidence: Math.round(conf * 100) / 100,
+              markers: markers,
+              description: cat.desc,
+              antidote: cat.antidote,
+              role: role || 'unknown',
+              timestamp: _ts()
+            });
+          }
+        }
+      });
+    });
+    return results;
+  }
+
+  /* ── Engine 3: Counter-Argument Generator ── */
+  function generateCounterArguments(claims) {
+    if (!claims || !claims.length) return [];
+    return claims.map(function (claim) {
+      var cat = CLAIM_CATEGORIES[claim.category.toUpperCase()] || CLAIM_CATEGORIES.STRONG;
+      var counters = cat ? cat.counters : ['What if you are wrong?'];
+      return {
+        claimId: claim.id,
+        claimText: claim.text,
+        counterArguments: counters.slice(),
+        primaryCounter: claim.counterArgument || counters[0],
+        strength: claim.confidence > 0.7 ? 'strong' : 'moderate'
+      };
+    });
+  }
+
+  /* ── Engine 4: Perspective Multiplier ── */
+  function suggestPerspectives(text) {
+    if (!text) return [];
+    var perspectives = [];
+    Object.keys(PERSPECTIVE_TYPES).forEach(function (key) {
+      var ptype = PERSPECTIVE_TYPES[key];
+      if (key === 'CONTRARIAN') {
+        perspectives.push({
+          id: _uid(),
+          type: ptype.id,
+          typeName: ptype.name,
+          emoji: ptype.emoji,
+          suggestion: _pickRandom(ptype.templates),
+          timestamp: _ts()
+        });
+      } else if (key === 'STAKEHOLDER') {
+        var role = _pickRandom(ptype.roles);
+        var tmpl = _pickRandom(ptype.templates);
+        perspectives.push({
+          id: _uid(),
+          type: ptype.id,
+          typeName: ptype.name,
+          emoji: ptype.emoji,
+          suggestion: tmpl.replace('{role}', role),
+          timestamp: _ts()
+        });
+      } else if (key === 'TEMPORAL') {
+        var frame = _pickRandom(ptype.frames);
+        var tmpl2 = _pickRandom(ptype.templates);
+        perspectives.push({
+          id: _uid(),
+          type: ptype.id,
+          typeName: ptype.name,
+          emoji: ptype.emoji,
+          suggestion: tmpl2.replace('{time}', frame),
+          timestamp: _ts()
+        });
+      } else if (key === 'SCALE') {
+        var scale = _pickRandom(ptype.scales);
+        var tmpl3 = _pickRandom(ptype.templates);
+        perspectives.push({
+          id: _uid(),
+          type: ptype.id,
+          typeName: ptype.name,
+          emoji: ptype.emoji,
+          suggestion: tmpl3.replace('{scale}', scale),
+          timestamp: _ts()
+        });
+      } else if (key === 'CULTURAL') {
+        var ctx = _pickRandom(ptype.contexts);
+        var tmpl4 = _pickRandom(ptype.templates);
+        perspectives.push({
+          id: _uid(),
+          type: ptype.id,
+          typeName: ptype.name,
+          emoji: ptype.emoji,
+          suggestion: tmpl4.replace('{culture}', ctx),
+          timestamp: _ts()
+        });
+      }
+    });
+    return perspectives;
+  }
+
+  /* ── Engine 5: Steel Man Builder ── */
+  function buildSteelMan(claim) {
+    if (!claim) return null;
+    var templates = [
+      'The strongest case for the opposite: even if "' + claim.text.slice(0, 60) + '", one could argue that...',
+      'A sophisticated opponent would say: the premise assumes...',
+      'Steel man position: granting the evidence cited, the conclusion does not follow because...',
+      'The best counter-position acknowledges the kernel of truth but challenges the scope.',
+      'Rather than dismissing this, the strongest rebuttal builds on the same evidence with a different interpretation.'
+    ];
+    return {
+      claimId: claim.id,
+      claimText: claim.text,
+      steelManPrompt: _pickRandom(templates),
+      category: claim.category,
+      timestamp: _ts()
+    };
+  }
+
+  /* ── Engine 6: Debate Health Scorer ── */
+  function computeScore() {
+    var base = 100;
+    var unchallenged = _state.claims.filter(function (c) { return !c.challenged; });
+    var biasCount = _state.biases.length;
+    var totalExchanges = _state.exchanges.length;
+
+    /* Penalty for unchallenged claims */
+    var claimPenalty = Math.min(unchallenged.length * 3, 40);
+    /* Penalty for biases */
+    var biasPenalty = Math.min(biasCount * 4, 30);
+    /* Bonus for perspective diversity */
+    var perspectiveBonus = Math.min(_state.perspectives.length * 2, 15);
+    /* Penalty for one-sided exchanges (all from same role) */
+    var roles = {};
+    _state.exchanges.forEach(function (e) { roles[e.role] = (roles[e.role] || 0) + 1; });
+    var roleKeys = Object.keys(roles);
+    var diversityPenalty = 0;
+    if (roleKeys.length <= 1 && totalExchanges > 3) diversityPenalty = 10;
+
+    var score = base - claimPenalty - biasPenalty - diversityPenalty + perspectiveBonus;
+    return _clamp(Math.round(score), 0, 100);
+  }
+
+  function classifyTier(score) {
+    if (score >= 90) return TIERS.DIALECTICAL;
+    if (score >= 70) return TIERS.BALANCED;
+    if (score >= 50) return TIERS.ONE_SIDED;
+    return TIERS.ECHO_CHAMBER;
+  }
+
+  /* ── Engine 7: Insight Generator ── */
+  function generateInsights() {
+    var insights = [];
+    var unchallenged = _state.claims.filter(function (c) { return !c.challenged; });
+
+    if (unchallenged.length >= 5) {
+      insights.push({
+        id: _uid(),
+        type: 'unchallenged_claims',
+        emoji: '⚠️',
+        message: unchallenged.length + ' claims have gone unchallenged. Consider playing devil\'s advocate.',
+        severity: unchallenged.length > 10 ? 'high' : 'medium',
+        timestamp: _ts()
+      });
+    }
+
+    /* Check for bias concentration */
+    var biasCounts = {};
+    _state.biases.forEach(function (b) { biasCounts[b.biasName] = (biasCounts[b.biasName] || 0) + 1; });
+    Object.keys(biasCounts).forEach(function (name) {
+      if (biasCounts[name] >= 3) {
+        insights.push({
+          id: _uid(),
+          type: 'bias_concentration',
+          emoji: '🔄',
+          message: 'Recurring ' + name + ' detected (' + biasCounts[name] + ' times). Be extra vigilant.',
+          severity: 'medium',
+          timestamp: _ts()
+        });
+      }
+    });
+
+    /* Check for claim category concentration */
+    var catCounts = {};
+    _state.claims.forEach(function (c) { catCounts[c.categoryName] = (catCounts[c.categoryName] || 0) + 1; });
+    var topCat = null; var topCount = 0;
+    Object.keys(catCounts).forEach(function (name) {
+      if (catCounts[name] > topCount) { topCat = name; topCount = catCounts[name]; }
+    });
+    if (topCat && topCount >= 4) {
+      insights.push({
+        id: _uid(),
+        type: 'claim_pattern',
+        emoji: '📊',
+        message: 'Most claims are ' + topCat + ' (' + topCount + '). Try varying your argument types.',
+        severity: 'low',
+        timestamp: _ts()
+      });
+    }
+
+    /* One-sided conversation check */
+    var recentExchanges = _state.exchanges.slice(-10);
+    var allSameRole = recentExchanges.length >= 5 && recentExchanges.every(function (e) { return e.role === recentExchanges[0].role; });
+    if (allSameRole) {
+      insights.push({
+        id: _uid(),
+        type: 'one_sided',
+        emoji: '📢',
+        message: 'Conversation has been one-sided for ' + recentExchanges.length + ' exchanges. Consider exploring opposing views.',
+        severity: 'high',
+        timestamp: _ts()
+      });
+    }
+
+    /* Score trend */
+    if (_state.currentScore < 50) {
+      insights.push({
+        id: _uid(),
+        type: 'low_score',
+        emoji: '🔴',
+        message: 'Debate health is low (' + _state.currentScore + '/100). Actively seek counter-arguments.',
+        severity: 'high',
+        timestamp: _ts()
+      });
+    }
+
+    return insights;
+  }
+
+  /* ── Main Analysis ── */
+  function analyzeMessage(text, role) {
+    if (!text || !_config.enabled) return { claims: [], biases: [], perspectives: [] };
+
+    var claims = detectClaims(text, role);
+    var biases = detectBiases(text, role);
+
+    /* Update state with claims */
+    claims.forEach(function (c) {
+      _state.claims.unshift(c);
+      _state.totalClaimsDetected++;
+      _state.categoryBreakdown[c.category] = (_state.categoryBreakdown[c.category] || 0) + 1;
+    });
+    if (_state.claims.length > MAX_CLAIMS) _state.claims = _state.claims.slice(0, MAX_CLAIMS);
+
+    /* Update state with biases */
+    biases.forEach(function (b) {
+      _state.biases.unshift(b);
+      _state.totalBiasesSpotted++;
+    });
+    if (_state.biases.length > MAX_BIASES) _state.biases = _state.biases.slice(0, MAX_BIASES);
+
+    /* Suggest perspectives when claims found */
+    var perspectives = [];
+    if (claims.length > 0) {
+      perspectives = suggestPerspectives(text);
+      perspectives.forEach(function (p) { _state.perspectives.unshift(p); });
+      if (_state.perspectives.length > MAX_PERSPECTIVES) _state.perspectives = _state.perspectives.slice(0, MAX_PERSPECTIVES);
+    }
+
+    /* Record exchange */
+    _state.exchanges.push({ role: role || 'unknown', text: text.slice(0, 300), claimCount: claims.length, biasCount: biases.length, timestamp: _ts() });
+    if (_state.exchanges.length > MAX_EXCHANGES) _state.exchanges = _state.exchanges.slice(-MAX_EXCHANGES);
+
+    /* Recompute score */
+    _state.currentScore = computeScore();
+
+    /* Generate insights periodically */
+    if (_state.totalClaimsDetected % 5 === 0 && _state.totalClaimsDetected > 0) {
+      var newInsights = generateInsights();
+      newInsights.forEach(function (ins) { _state.insights.unshift(ins); });
+      if (_state.insights.length > MAX_INSIGHTS) _state.insights = _state.insights.slice(0, MAX_INSIGHTS);
+    }
+
+    _save();
+
+    /* Toast for strong claims */
+    if (claims.length > 0 && _config.showToasts) {
+      var top = claims.reduce(function (a, b) { return a.confidence > b.confidence ? a : b; });
+      if (top.confidence > 0.7) _showToast(top);
+    }
+
+    _refreshUI();
+    return { claims: claims, biases: biases, perspectives: perspectives };
+  }
+
+  /* ── Mark claim as challenged ── */
+  function challengeClaim(claimId) {
+    _state.claims.forEach(function (c) {
+      if (c.id === claimId) c.challenged = true;
+    });
+    _state.currentScore = computeScore();
+    _save();
+    _refreshUI();
+  }
+
+  /* ── Toast ── */
+  function _showToast(claim) {
+    var now = Date.now();
+    if (now - _lastToastTime < TOAST_COOLDOWN_MS) return;
+    _lastToastTime = now;
+    var el = document.createElement('div');
+    el.style.cssText = 'position:fixed;top:20px;right:20px;background:#e74c3c;color:#fff;padding:12px 18px;border-radius:8px;z-index:99999;font-size:13px;max-width:350px;box-shadow:0 4px 12px rgba(0,0,0,.3);cursor:pointer;transition:opacity .3s;';
+    el.textContent = '\uD83D\uDDE1\uFE0F Devil\'s Advocate: ' + claim.counterArgument;
+    el.onclick = function () { el.remove(); };
+    document.body.appendChild(el);
+    setTimeout(function () { el.style.opacity = '0'; setTimeout(function () { el.remove(); }, 300); }, 6000);
+  }
+
+  /* ── Badge ── */
+  function _updateBadge() {
+    if (!_badgeEl) return;
+    if (!_config.showBadge || !_config.enabled) { _badgeEl.style.display = 'none'; return; }
+    var tier = classifyTier(_state.currentScore);
+    _badgeEl.style.display = 'flex';
+    _badgeEl.style.background = tier.color;
+    _badgeEl.textContent = '\uD83D\uDDE1\uFE0F ' + _state.currentScore;
+    _badgeEl.title = 'Debate Health: ' + tier.name + ' (' + _state.currentScore + '/100) \u2014 Alt+Shift+6';
+  }
+
+  /* ── Panel Rendering ── */
+  var _activeTab = 'claims';
+  function _switchTab(tabId) { _activeTab = tabId; _renderPanel(); }
+
+  function _renderPanel() {
+    if (!_panelEl) return;
+    var tier = classifyTier(_state.currentScore);
+    var tabs = [
+      { id: 'claims', label: '\uD83D\uDDE1\uFE0F Claims (' + _state.claims.length + ')' },
+      { id: 'biases', label: '\uD83D\uDD04 Biases (' + _state.biases.length + ')' },
+      { id: 'perspectives', label: '\uD83D\uDC65 Perspectives (' + _state.perspectives.length + ')' },
+      { id: 'insights', label: '\uD83D\uDCA1 Insights (' + _state.insights.length + ')' }
+    ];
+
+    var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">';
+    html += '<span style="font-weight:bold;font-size:14px;">\uD83D\uDDE1\uFE0F Debate Mode</span>';
+    html += '<button onclick="SmartDebateMode.toggle()" style="background:none;border:none;color:#ecf0f1;cursor:pointer;font-size:16px;" title="Close">\u2715</button>';
+    html += '</div>';
+
+    /* Score gauge */
+    html += '<div style="text-align:center;margin:10px 0;">';
+    html += '<div style="font-size:28px;font-weight:bold;color:' + tier.color + ';">' + _state.currentScore + '</div>';
+    html += '<div style="font-size:11px;color:#bdc3c7;">' + tier.emoji + ' ' + tier.name + ' \u2014 ' + tier.desc + '</div>';
+    html += '<div style="font-size:10px;color:#95a5a6;margin-top:2px;">Claims: ' + _state.totalClaimsDetected + ' | Biases: ' + _state.totalBiasesSpotted + '</div>';
+    html += '</div>';
+
+    /* Tabs */
+    html += '<div style="display:flex;border-bottom:1px solid #4a6a8a;margin-bottom:8px;">';
+    for (var t = 0; t < tabs.length; t++) {
+      var active = tabs[t].id === _activeTab;
+      html += '<button onclick="SmartDebateMode._switchTab(\'' + tabs[t].id + '\')" style="flex:1;padding:6px 2px;background:' + (active ? '#34495e' : 'transparent') + ';color:#ecf0f1;border:none;border-bottom:2px solid ' + (active ? '#3498db' : 'transparent') + ';cursor:pointer;font-size:11px;">' + tabs[t].label + '</button>';
+    }
+    html += '</div>';
+
+    /* Tab content */
+    html += '<div style="max-height:350px;overflow-y:auto;font-size:12px;">';
+    if (_activeTab === 'claims') {
+      if (_state.claims.length === 0) {
+        html += '<div style="color:#95a5a6;text-align:center;padding:20px;">No claims detected yet</div>';
+      } else {
+        _state.claims.slice(0, 30).forEach(function (c) {
+          var bg = c.challenged ? '#2c3e50' : '#34495e';
+          html += '<div style="padding:6px 8px;margin:3px 0;background:' + bg + ';border-radius:4px;border-left:3px solid ' + (c.challenged ? '#27ae60' : '#e74c3c') + ';">';
+          html += '<div style="font-size:11px;color:#95a5a6;">' + c.emoji + ' ' + c.categoryName + ' \u00B7 ' + Math.round(c.confidence * 100) + '%</div>';
+          html += '<div style="margin:2px 0;">"' + (c.text.length > 80 ? c.text.slice(0, 80) + '\u2026' : c.text) + '"</div>';
+          html += '<div style="color:#e67e22;font-style:italic;font-size:11px;">\u21AA ' + c.counterArgument + '</div>';
+          if (!c.challenged) {
+            html += '<button onclick="SmartDebateMode.challengeClaim(\'' + c.id + '\');SmartDebateMode._renderPanel();" style="margin-top:3px;padding:2px 8px;background:#27ae60;color:#fff;border:none;border-radius:3px;font-size:10px;cursor:pointer;">\u2713 Challenged</button>';
+          } else {
+            html += '<div style="color:#27ae60;font-size:10px;margin-top:2px;">\u2713 Addressed</div>';
+          }
+          html += '</div>';
+        });
+      }
+    } else if (_activeTab === 'biases') {
+      if (_state.biases.length === 0) {
+        html += '<div style="color:#95a5a6;text-align:center;padding:20px;">No biases detected yet</div>';
+      } else {
+        _state.biases.slice(0, 30).forEach(function (b) {
+          html += '<div style="padding:6px 8px;margin:3px 0;background:#34495e;border-radius:4px;border-left:3px solid #e67e22;">';
+          html += '<div style="font-size:11px;color:#95a5a6;">' + b.emoji + ' ' + b.biasName + ' \u00B7 ' + Math.round(b.confidence * 100) + '%</div>';
+          html += '<div style="margin:2px 0;">"' + (b.text.length > 80 ? b.text.slice(0, 80) + '\u2026' : b.text) + '"</div>';
+          html += '<div style="color:#3498db;font-style:italic;font-size:11px;">\uD83D\uDC8A ' + b.antidote + '</div>';
+          html += '</div>';
+        });
+      }
+    } else if (_activeTab === 'perspectives') {
+      if (_state.perspectives.length === 0) {
+        html += '<div style="color:#95a5a6;text-align:center;padding:20px;">No perspectives suggested yet</div>';
+      } else {
+        _state.perspectives.slice(0, 30).forEach(function (p) {
+          html += '<div style="padding:6px 8px;margin:3px 0;background:#34495e;border-radius:4px;">';
+          html += '<span style="font-size:11px;color:#95a5a6;">' + p.emoji + ' ' + p.typeName + '</span> ';
+          html += '<span>' + p.suggestion + '</span>';
+          html += '</div>';
+        });
+      }
+    } else if (_activeTab === 'insights') {
+      if (_state.insights.length === 0) {
+        html += '<div style="color:#95a5a6;text-align:center;padding:20px;">Insights will appear as patterns emerge</div>';
+      } else {
+        _state.insights.slice(0, 20).forEach(function (ins) {
+          var sColor = ins.severity === 'high' ? '#e74c3c' : ins.severity === 'medium' ? '#e67e22' : '#95a5a6';
+          html += '<div style="padding:6px 8px;margin:3px 0;background:#34495e;border-radius:4px;border-left:3px solid ' + sColor + ';">';
+          html += ins.emoji + ' ' + ins.message;
+          html += '</div>';
+        });
+      }
+    }
+    html += '</div>';
+
+    /* Config */
+    html += '<div style="margin-top:8px;border-top:1px solid #4a6a8a;padding-top:6px;display:flex;gap:6px;align-items:center;font-size:11px;">';
+    html += '<label style="color:#95a5a6;">Sensitivity:</label>';
+    ['low', 'medium', 'high'].forEach(function (s) {
+      var sel = _config.sensitivity === s;
+      html += '<button onclick="SmartDebateMode.setSensitivity(\'' + s + '\')" style="padding:2px 6px;background:' + (sel ? '#3498db' : '#2c3e50') + ';color:#ecf0f1;border:1px solid #4a6a8a;border-radius:3px;cursor:pointer;font-size:10px;">' + s + '</button>';
+    });
+    html += '<span style="flex:1;"></span>';
+    html += '<button onclick="SmartDebateMode.reset()" style="padding:2px 8px;background:#c0392b;color:#fff;border:none;border-radius:3px;font-size:10px;cursor:pointer;">Reset</button>';
+    html += '</div>';
+
+    _panelEl.innerHTML = html;
+  }
+
+  function _refreshUI() {
+    _updateBadge();
+    if (_visible) _renderPanel();
+  }
+
+  /* ── Toggle / Show / Hide ── */
+  function toggle() { _visible ? hide() : show(); }
+  function show() {
+    if (!_panelEl) {
+      _panelEl = document.createElement('div');
+      _panelEl.id = 'smart-debate-mode-panel';
+      _panelEl.style.cssText = 'position:fixed;bottom:50px;left:15px;width:380px;max-height:550px;background:#2c3e50;color:#ecf0f1;border-radius:10px;padding:14px;z-index:90002;box-shadow:0 4px 20px rgba(0,0,0,.4);font-family:system-ui,sans-serif;overflow:hidden;';
+      document.body.appendChild(_panelEl);
+    }
+    _panelEl.style.display = 'block';
+    _visible = true;
+    _renderPanel();
+  }
+  function hide() {
+    if (_panelEl) _panelEl.style.display = 'none';
+    _visible = false;
+  }
+
+  /* ── Auto-analysis on new chat messages ── */
+  function _scheduleAnalysis() {
+    if (_debounceTimer) clearTimeout(_debounceTimer);
+    _debounceTimer = setTimeout(function () {
+      var chatOut = document.getElementById('chat-output');
+      if (!chatOut) return;
+      var msgs = chatOut.querySelectorAll('.message');
+      if (!msgs.length) return;
+      var last = msgs[msgs.length - 1];
+      var text = last.textContent || '';
+      var role = (last.className || '').indexOf('user') !== -1 ? 'user' : 'assistant';
+      analyzeMessage(text, role);
+    }, DEBOUNCE_MS);
+  }
+
+  /* ── Sensitivity setter ── */
+  function setSensitivity(s) {
+    if (SENSITIVITIES[s] !== undefined) {
+      _config.sensitivity = s;
+      _saveConfig();
+      _refreshUI();
+    }
+  }
+
+  /* ── Reset ── */
+  function reset() {
+    _state = _defaultState();
+    _save();
+    _refreshUI();
+  }
+
+  /* ── Init ── */
+  function init() {
+    _loadConfig();
+    _load();
+
+    /* Badge */
+    _badgeEl = document.createElement('div');
+    _badgeEl.id = 'smart-debate-mode-badge';
+    _badgeEl.style.cssText = 'display:none;position:fixed;bottom:15px;left:80px;background:#27ae60;color:#fff;padding:4px 10px;border-radius:12px;font-size:11px;cursor:pointer;z-index:90001;align-items:center;gap:4px;box-shadow:0 2px 8px rgba(0,0,0,.3);';
+    _badgeEl.title = 'Debate Mode (Alt+Shift+6)';
+    _badgeEl.onclick = toggle;
+    document.body.appendChild(_badgeEl);
+    _updateBadge();
+
+    /* Observer */
+    var chatOut = document.getElementById('chat-output');
+    if (chatOut && typeof MutationObserver !== 'undefined') {
+      _observer = new MutationObserver(_scheduleAnalysis);
+      _observer.observe(chatOut, { childList: true, subtree: true, characterData: true });
+    }
+
+    /* Keyboard shortcut: Alt+Shift+6 */
+    document.addEventListener('keydown', function (e) {
+      if (e.altKey && e.shiftKey && e.key === '6') { e.preventDefault(); toggle(); }
+    });
+
+    /* Register with KeyboardShortcuts if available */
+    if (typeof KeyboardShortcuts !== 'undefined' && KeyboardShortcuts.register) {
+      KeyboardShortcuts.register('Alt+Shift+6', 'Debate Mode', toggle);
+    }
+
+    /* Register toolbar button if toolbar exists */
+    var toolbar = document.querySelector('.toolbar');
+    if (toolbar) {
+      var btn = document.createElement('button');
+      btn.className = 'btn-secondary';
+      btn.title = 'Debate Mode \u2014 autonomous devil\'s advocate (Alt+Shift+6)';
+      btn.textContent = '\uD83D\uDDE1\uFE0F';
+      btn.onclick = toggle;
+      toolbar.appendChild(btn);
+    }
+  }
+
+  /* Auto-init */
+  if (typeof document !== 'undefined' && document.body) {
+    init();
+  }
+
+  return {
+    toggle: toggle,
+    show: show,
+    hide: hide,
+    reset: reset,
+    init: init,
+    detectClaims: detectClaims,
+    detectBiases: detectBiases,
+    generateCounterArguments: generateCounterArguments,
+    suggestPerspectives: suggestPerspectives,
+    buildSteelMan: buildSteelMan,
+    computeScore: computeScore,
+    classifyTier: classifyTier,
+    generateInsights: generateInsights,
+    analyzeMessage: analyzeMessage,
+    challengeClaim: challengeClaim,
+    setSensitivity: setSensitivity,
+    getState: function () { return JSON.parse(JSON.stringify(_state)); },
+    getConfig: function () { return Object.assign({}, _config); },
+    getScore: function () { return _state.currentScore; },
+    getTier: function () { return classifyTier(_state.currentScore); },
+    getClaims: function () { return _state.claims.slice(); },
+    getBiases: function () { return _state.biases.slice(); },
+    getPerspectives: function () { return _state.perspectives.slice(); },
+    getInsights: function () { return _state.insights.slice(); },
+    isEnabled: function () { return _config.enabled; },
+    setEnabled: function (v) { _config.enabled = !!v; _saveConfig(); _updateBadge(); },
+    CLAIM_CATEGORIES: CLAIM_CATEGORIES,
+    BIAS_CATEGORIES: BIAS_CATEGORIES,
+    PERSPECTIVE_TYPES: PERSPECTIVE_TYPES,
+    TIERS: TIERS,
+    SENSITIVITIES: SENSITIVITIES,
+    _defaultState: _defaultState,
+    _defaultConfig: _defaultConfig,
+    _sparkline: _sparkline,
+    _switchTab: _switchTab,
     _renderPanel: function () { _renderPanel(); }
   };
 })();
