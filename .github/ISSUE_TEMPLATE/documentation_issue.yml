@@ -1,0 +1,74 @@
+---
+name: Documentation Issue
+description: Report missing, incorrect, or outdated documentation for modules, APIs, or features
+title: "[Docs]: "
+labels: ["documentation", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        AgenticChat has 160+ IIFE modules. Help us keep documentation accurate and complete.
+
+  - type: dropdown
+    id: doc-type
+    attributes:
+      label: Documentation Type
+      description: What kind of documentation is affected?
+      options:
+        - README / project overview
+        - Module / IIFE inline docs
+        - API reference (function signatures, parameters)
+        - Architecture / design docs
+        - Setup / installation instructions
+        - Contributing guide
+        - Code comments / JSDoc
+        - Docs site (GitHub Pages)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: issue-type
+    attributes:
+      label: Issue Type
+      options:
+        - Missing documentation for a feature or module
+        - Incorrect or outdated documentation
+        - Unclear or confusing explanation
+        - Missing code examples
+        - Broken links or references
+    validations:
+      required: true
+
+  - type: textarea
+    id: location
+    attributes:
+      label: Where
+      description: Which file, module, or section has the documentation issue?
+      placeholder: |
+        e.g., "ConversationReplay IIFE in index.html — no JSDoc for transport controls"
+        e.g., "README Features section — Session Linker description is outdated"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What's wrong or missing? Be specific.
+    validations:
+      required: true
+
+  - type: textarea
+    id: suggested-fix
+    attributes:
+      label: Suggested Improvement
+      description: If you know what the documentation should say, describe it here.
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I have searched existing issues to avoid duplicates
+          required: true
+        - label: I am willing to submit a PR to fix this

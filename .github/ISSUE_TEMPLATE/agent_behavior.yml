@@ -1,0 +1,113 @@
+---
+name: Agent / Execution Behavior
+description: Report unexpected behavior in code generation, sandbox execution, or autonomous agent modules
+title: "[Agent]: "
+labels: ["agent-behavior", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for issues related to GPT code generation, sandbox execution,
+        autonomous agent modules, or cognitive monitoring systems.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected Area
+      description: Which subsystem is the issue in?
+      options:
+        - Code generation (GPT response parsing/extraction)
+        - Sandbox execution (iframe, CSP, nonce validation)
+        - Autonomous agent (meta-cognitive, self-monitoring)
+        - API key management / credential handling
+        - Multi-model switching
+        - Prompt enhancement / A-B testing
+        - Quick replies / contextual suggestions
+        - Other agent-related module
+    validations:
+      required: true
+
+  - type: dropdown
+    id: model
+    attributes:
+      label: Model Used
+      description: Which model was selected when the issue occurred?
+      options:
+        - GPT-4o
+        - GPT-4o-mini
+        - GPT-4-turbo
+        - Other / Unknown
+    validations:
+      required: true
+
+  - type: textarea
+    id: prompt
+    attributes:
+      label: Prompt / Input
+      description: The exact prompt or action that triggered the issue.
+      placeholder: |
+        Paste the prompt you sent, or describe the action you took.
+        If the issue involves autonomous behavior, describe the state
+        that triggered it (e.g., "after 5 messages in a session...").
+    validations:
+      required: true
+
+  - type: textarea
+    id: generated-code
+    attributes:
+      label: Generated Code (if applicable)
+      description: The JavaScript code that GPT returned, if relevant.
+      render: javascript
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What should the agent or sandbox have done?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happened? Include any error messages.
+    validations:
+      required: true
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Console Output
+      description: Errors from the browser console (F12 → Console) or sandbox iframe.
+      render: shell
+
+  - type: input
+    id: browser
+    attributes:
+      label: Browser & Version
+      placeholder: Chrome 125, Firefox 126, Safari 18
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Impact
+      options:
+        - Code executes incorrectly or produces wrong results
+        - Code fails to execute entirely
+        - Security boundary violation (sandbox escape, credential leak)
+        - Agent module misbehavior (loops, excessive resource use)
+        - Minor / cosmetic issue in agent output
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      options:
+        - label: I have searched existing issues to avoid duplicates
+          required: true
+        - label: I have tested with a fresh session (no prior conversation context)
