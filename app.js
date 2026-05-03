@@ -39244,10 +39244,6 @@ const SmartConversationPlanner = (() => {
     }
   };
 
-  function _escapeHtml(s) {
-    var d = document.createElement('div'); d.textContent = s; return d.innerHTML;
-  }
-
   function _getSessionId() {
     if (typeof SessionManager !== 'undefined' && SessionManager.currentId) return SessionManager.currentId();
     return '_default';
@@ -40444,9 +40440,7 @@ const SmartConversationReplay = (() => {
   const SPEEDS = [0.5, 1, 2, 4];
   let speedIdx = 1;
 
-  function escHtml(s) {
-    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-  }
+  function escHtml(s) { return _escapeHtml(String(s)); }
 
   function toggle() {
     if (!panelEl) createPanel();
@@ -40850,11 +40844,7 @@ var SmartConversationDigest = (function () {
     };
   }
 
-  function escHtml(s) {
-    var d = document.createElement('div');
-    d.textContent = s;
-    return d.innerHTML;
-  }
+  function escHtml(s) { return _escapeHtml(String(s)); }
 
   var lastDigest = null;
 
@@ -43587,10 +43577,7 @@ var SmartResponseAuditor = (function () {
     return { count: count, flagged: flagged, flaggedWithCounts: flaggedWithCounts };
   }
 
-  function _wordCount(text) {
-    var m = text.match(/\b\w+\b/g);
-    return m ? m.length : 0;
-  }
+  function _wordCount(text) { return TextAnalysisUtils.wordCount(text); }
 
   function _extractCodeBlocks(text) {
     var blocks = [];
@@ -44220,9 +44207,7 @@ const SmartPromptCoach = (() => {
   }
 
   /* ── analysis engine ── */
-  function _wordCount(text) {
-    return (text.match(/\b\w+\b/g) || []).length;
-  }
+  function _wordCount(text) { return TextAnalysisUtils.wordCount(text); }
 
   function _hasCodeBlock(text) {
     return /```[\s\S]*?```/.test(text);
@@ -46209,7 +46194,7 @@ const SmartGoalTracker = (function () {
     return html;
   }
 
-  function _escHtml(s) { var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+  function _escHtml(s) { return _escapeHtml(s); }
 
   /* ── panel show/hide ── */
   function show() {
@@ -46887,10 +46872,7 @@ const SmartPatternAutomator = (function () {
   }
 
   /* ── UI Panel ── */
-  function _escHtml(s) {
-    if (typeof s !== 'string') return '';
-    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  }
+  function _escHtml(s) { return _escapeHtml(String(s || '')); }
 
   function _injectStyles() {
     if (document.getElementById('spa-styles')) return;
@@ -48848,10 +48830,7 @@ const SmartIntentAligner = (function () {
 
   function _sentences(text) { return TextAnalysisUtils.sentences(text, { minLength: 5 }); }
 
-  function _wordCount(text) {
-    if (!text) return 0;
-    return text.split(/\s+/).filter(function (w) { return w.length > 0; }).length;
-  }
+  function _wordCount(text) { return TextAnalysisUtils.wordCount(text); }
 
   function _keywordOverlap(tokens1, tokens2) {
     if (!tokens1.length || !tokens2.length) return 0;
@@ -51588,9 +51567,7 @@ const SmartReferenceTracker = (function () {
   }
 
   /* ── HTML helpers ── */
-  function _escapeHTML(s) {
-    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-  }
+  function _escapeHTML(s) { return _escapeHtml(String(s)); }
   function _escapeAttr(s) {
     return String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"');
   }
