@@ -14,7 +14,7 @@
 [![GitHub last commit](https://img.shields.io/github/last-commit/sauravbhattacharya001/agenticchat)](https://github.com/sauravbhattacharya001/agenticchat/commits/main)
 [![codecov](https://codecov.io/gh/sauravbhattacharya001/agenticchat/graph/badge.svg)](https://codecov.io/gh/sauravbhattacharya001/agenticchat)
 
-A lightweight, zero-dependency chat interface that sends your prompts to GPT-4o, extracts the JavaScript it writes, and executes it in a sandboxed iframe - all from a single HTML file. Packed with **165+ IIFE modules** covering everything from conversation management to autonomous cognitive monitoring - backed by **70 test suites** with **2,740+ test cases**.
+A lightweight, zero-dependency chat interface that sends your prompts to GPT-4o, extracts the JavaScript it writes, and executes it in a sandboxed iframe - all from a single HTML file. Packed with **160+ IIFE modules** across ~52,000 lines covering everything from conversation management to autonomous cognitive monitoring - backed by **76 test suites** with **2,900+ test cases**.
 
 [**Live Demo**](https://sauravbhattacharya001.github.io/agenticchat/) · [**Report Bug**](https://github.com/sauravbhattacharya001/agenticchat/issues) · [**Request Feature**](https://github.com/sauravbhattacharya001/agenticchat/issues)
 
@@ -167,6 +167,12 @@ A lightweight, zero-dependency chat interface that sends your prompts to GPT-4o,
 - **Conversation Autopilot** - Autonomous conversation continuation with goal-directed prompting
 - **Follow-Up Reminder** - Proactive reminders for unanswered threads and pending action items
 - **Mood Tracker** - Longitudinal mood tracking with trends and wellness insights
+- **Smart Debate Mode** - Autonomous devil's advocate engine with claim detection, bias spotting, counter-argument generation, and debate health scoring (`Alt+Shift+6`)
+- **Smart Reference Tracker** - Autonomous reference extraction and tracking across conversation history
+- **Smart Assumption Detector** - Identifies hidden assumptions in prompts and AI responses
+- **Smart Conversation Weather** - Weather-metaphor atmosphere monitor with 6 dimensions, 5 classifications, and forecast trends (`Alt+Shift+3`)
+- **Smart Intent Aligner** - Autonomous intent alignment verification ensuring AI responses match user goals
+- **Conversation Momentum** - Tracks conversation pacing and engagement velocity
 
 ## 🚀 Getting Started
 
@@ -215,7 +221,7 @@ User Prompt  →  GPT-4o (system prompt: reply with JS only)
 
 ### Modules
 
-The codebase is organized into **165+ IIFE modules** in `app.js` (~43,000 lines), each using the revealing-module pattern:
+The codebase is organized into **160+ IIFE modules** in `app.js` (~52,000 lines), each using the revealing-module pattern:
 
 <details>
 <summary><strong>Core (9 modules)</strong></summary>
@@ -351,6 +357,13 @@ The codebase is organized into **165+ IIFE modules** in `app.js` (~43,000 lines)
 | `SmartGoalTracker` | Multi-session goal and milestone tracking |
 | `SmartPatternAutomator` | Repetitive pattern detection and automation |
 | `SmartFactMemory` | Persistent fact extraction and recall |
+| `SmartDebateMode` | Autonomous devil's advocate engine with claim/bias detection |
+| `SmartReferenceTracker` | Autonomous reference extraction and tracking |
+| `SmartAssumptionDetector` | Hidden assumption detection in prompts and responses |
+| `SmartConversationWeather` | Weather-metaphor conversation atmosphere monitor |
+| `SmartIntentAligner` | Intent alignment verification engine |
+| `ConversationMomentum` | Conversation pacing and engagement velocity tracker |
+| `TextAnalysisUtils` | Shared text analysis utilities (sentences, sparklines, timestamps) |
 | `SmartAdaptiveTone` | Communication style profiling and tone adaptation |
 | `SmartCognitiveLoad` | Cognitive load monitoring with overwhelm detection |
 | `ConversationAutopilot` | Goal-directed autonomous conversation continuation |
@@ -391,14 +404,14 @@ The app executes AI-generated code, so security is a first-class concern:
 | **Offline** | Service Worker with cache-first strategy |
 | **Hosting** | GitHub Pages |
 | **CI/CD** | GitHub Actions (build, test, lint, CodeQL, Docker, Pages deploy) |
-| **Testing** | Jest + jsdom (70 test suites, 2,740+ test cases) |
+| **Testing** | Jest + jsdom (76 test suites, 2,900+ test cases) |
 
 ## 📁 Project Structure
 
 ```
 agenticchat/
 ├── index.html              # Single-page UI with CSP headers
-├── app.js                  # All application logic (149 modular IIFEs, ~44K lines)
+├── app.js                  # All application logic (160+ modular IIFEs, ~52K lines)
 ├── sw.js                   # Service worker for offline support
 ├── style.css               # Responsive dark-theme styling
 ├── package.json            # npm metadata + test scripts
@@ -475,7 +488,19 @@ agenticchat/
 │   ├── smart-scroll.test.js      # SmartScroll tests
 │   ├── smart-session-prioritizer.test.js # SmartSessionPrioritizer tests
 │   ├── split-view.test.js        # SplitView tests
-│   └── stamp-sw.test.js          # Service worker stamping tests
+│   ├── stamp-sw.test.js          # Service worker stamping tests
+│   ├── conversation-oracle.test.js  # Conversation oracle tests
+│   ├── smart-cognitive-load.test.js # SmartCognitiveLoad tests
+│   ├── smart-contradiction-detector.test.js # SmartContradictionDetector tests
+│   ├── smart-conversation-weather.test.js # SmartConversationWeather tests
+│   ├── smart-debate-mode.test.js    # SmartDebateMode tests
+│   ├── smart-intent-aligner.test.js # SmartIntentAligner tests
+│   ├── smart-prompt-coach.test.js   # SmartPromptCoach tests
+│   ├── smart-question-tracker.test.js # SmartQuestionTracker tests
+│   ├── smart-reference-tracker.test.js # SmartReferenceTracker tests
+│   ├── smartAdaptiveTone.test.js    # SmartAdaptiveTone tests
+│   ├── SmartGoalTracker.test.js     # SmartGoalTracker tests
+│   └── smartPatternAutomator.test.js # SmartPatternAutomator tests
 └── .github/
     ├── copilot-instructions.md    # Copilot coding agent context
     ├── copilot-setup-steps.yml    # Copilot agent setup workflow
@@ -606,9 +631,9 @@ Contributions are welcome! Here's how:
 ### Guidelines
 
 - This is a **single-file app** - keep it that way unless there's a compelling reason to split
-- All 149 modules live in `app.js` as revealing-module IIFEs
+- All 160+ modules live in `app.js` as revealing-module IIFEs
 - Security is paramount - any change that touches the sandbox must be reviewed carefully
-- Run `npm test` to ensure all 70 test suites (2,740+ tests) pass before submitting
+- Run `npm test` to ensure all 76 test suites (2,900+ tests) pass before submitting
 - Test with various prompt types (simple questions, API calls, error cases)
 
 ## 📄 License
