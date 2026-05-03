@@ -790,10 +790,19 @@ const TextAnalysisUtils = (() => {
    */
   function cosineSim(a, b) {
     let dot = 0, na = 0, nb = 0;
-    const all = new Set([...Object.keys(a), ...Object.keys(b)]);
-    for (const k of all) {
-      const va = a[k] || 0, vb = b[k] || 0;
-      dot += va * vb; na += va * va; nb += vb * vb;
+    // Two-pass approach: iterate a's keys (accumulate dot, na, partial nb),
+    // then b-only keys (nb remainder). Avoids allocating a merged Set of
+    // all keys — saves O(|a|+|b|) Set construction + spread per call.
+    for (const k in a) {
+      const va = a[k], vb = b[k] || 0;
+      dot += va * vb;
+      na += va * va;
+      nb += vb * vb;
+    }
+    for (const k in b) {
+      if (k in a) continue; // already counted
+      const vb = b[k];
+      nb += vb * vb;
     }
     return (na && nb) ? dot / Math.sqrt(na * nb) : 0;
   }
@@ -40745,13 +40754,22 @@ var SmartConversationDigest = (function () {
 
   var POS = ['great','good','excellent','amazing','love','perfect','awesome','helpful','thanks','thank','nice','wonderful','fantastic','brilliant'];
   var NEG = ['bad','wrong','error','fail','broken','issue','problem','bug','confused','frustrat','annoying','terrible','awful','hate','worst'];
+  // Pre-build lookup sets for O(1) membership tests instead of
+  // O(POS.length + NEG.length) indexOf scans per message.
+  var POS_SET = new Set(POS);
+  var NEG_SET = new Set(NEG);
   function sentimentScore(messages) {
     var pos = 0, neg = 0;
-    messages.forEach(function (m) {
-      var t = (m.content || '').toLowerCase();
-      POS.forEach(function (w) { if (t.indexOf(w) !== -1) pos++; });
-      NEG.forEach(function (w) { if (t.indexOf(w) !== -1) neg++; });
-    });
+    // Single-pass word tokenization with Set lookups (O(1) per word)
+    // instead of O(POS+NEG) indexOf scans per message.
+    for (var mi = 0; mi < messages.length; mi++) {
+      var words = (messages[mi].content || '').toLowerCase().split(/[^a-z]+/);
+      for (var wi = 0; wi < words.length; wi++) {
+        var w = words[wi];
+        if (POS_SET.has(w)) pos++;
+        else if (NEG_SET.has(w)) neg++;
+      }
+    }
     var total = pos + neg;
     if (total === 0) return { label: 'Neutral', emoji: '\uD83D\uDE10', score: 0 };
     var s = (pos - neg) / total;
@@ -43453,8 +43471,16 @@ var SmartResponseAuditor = (function () {
   var EVAL_THROTTLE_MS = 3000;
 
   var CONFIDENCE_WORDS = ['definitely', 'certainly', 'always', 'never', 'undoubtedly', 'absolutely', 'guaranteed', 'without a doubt', 'unquestionably', 'clearly'];
+  // Pre-compile word-boundary regexes for CONFIDENCE_WORDS and HEDGE_WORDS
+  // so _matchWordList doesn't re-create RegExp objects on every call.
+  var CONFIDENCE_REGEXES = CONFIDENCE_WORDS.map(function(w) {
+    return new RegExp('\\b' + w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'gi');
+  });
   var FACTUAL_PATTERNS = [/\b\d{4}\b/, /\b(?:invented|discovered|founded|created|built|wrote|published)\b/i, /\b(?:is|was|are|were) (?:the|a) /i];
   var HEDGE_WORDS = ['might', 'perhaps', 'possibly', 'could be', 'I think', 'it seems', 'maybe', 'probably', 'likely', 'arguably', 'somewhat', 'roughly', 'approximately', 'in my opinion', 'I believe', 'it appears'];
+  var HEDGE_REGEXES = HEDGE_WORDS.map(function(w) {
+    return new RegExp('\\b' + w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'gi');
+  });
   var CLAIM_PATTERNS = [/\d+\s*%\s*of\b/i, /studies show/i, /research indicates/i, /according to/i, /data suggests/i, /experts say/i, /surveys? (?:show|found|reveal)/i, /statistics? (?:show|indicate)/i, /it(?:'s| is) (?:well-)?known that/i, /evidence suggests/i];
   var PLACEHOLDER_PATTERNS = [/example\.com/i, /your[_-]?api[_-]?key/i, /TODO/i, /FIXME/i, /HACK/i, /xxx+/i, /placeholder/i, /lorem ipsum/i, /changeme/i, /replace[_-]?this/i];
 
@@ -43501,12 +43527,18 @@ var SmartResponseAuditor = (function () {
    * Match a word list against text, returning total hit count and which words matched.
    * Consolidates the repeated regex-loop pattern from _checkHallucination/_checkHedgeOverload.
    */
-  function _matchWordList(text, words) {
+  /**
+   * Match a word list against text using pre-compiled regexes.
+   * Accepts the words array and a parallel array of pre-compiled RegExp
+   * objects to avoid constructing new RegExp instances on every call.
+   */
+  function _matchWordList(text, words, regexes) {
     var count = 0;
     var flagged = [];
     var flaggedWithCounts = [];
     for (var i = 0; i < words.length; i++) {
-      var re = new RegExp('\\b' + words[i].replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'gi');
+      var re = regexes[i];
+      re.lastIndex = 0;
       var m = text.match(re);
       if (m) {
         count += m.length;
@@ -43534,7 +43566,7 @@ var SmartResponseAuditor = (function () {
 
   /* ── audit checks ── */
   function _checkHallucination(text) {
-    var result = _matchWordList(text, CONFIDENCE_WORDS);
+    var result = _matchWordList(text, CONFIDENCE_WORDS, CONFIDENCE_REGEXES);
     var confCount = result.count;
     var flagged = result.flagged;
     var hasFactual = false;
@@ -43553,7 +43585,7 @@ var SmartResponseAuditor = (function () {
   function _checkHedgeOverload(text) {
     var wc = _wordCount(text);
     if (wc < 10) return { name: 'Hedge Overload', score: 0, details: 'Too short to evaluate', ratio: 0 };
-    var result = _matchWordList(text, HEDGE_WORDS);
+    var result = _matchWordList(text, HEDGE_WORDS, HEDGE_REGEXES);
     var hedgeCount = result.count;
     var flagged = result.flaggedWithCounts;
     var ratio = hedgeCount / wc;
@@ -44910,17 +44942,24 @@ const SmartConversationOracle = (() => {
       return candidates[b] - candidates[a];
     });
 
+    // Pre-lowercase all message texts once, avoiding O(topics × messages)
+    // repeated toLowerCase() calls in the per-topic loop below.
+    var lowerTexts = new Array(messages.length);
+    for (var li = 0; li < messages.length; li++) {
+      lowerTexts[li] = messages[li].text.toLowerCase();
+    }
+
     return sorted.slice(0, MAX_TOPICS).map(function(label) {
       var keywords = label.split(' ');
       var firstMsg = null, lastMsg = null, count = 0;
-      messages.forEach(function(m, idx) {
-        var lower = m.text.toLowerCase();
+      for (var idx = 0; idx < messages.length; idx++) {
+        var lower = lowerTexts[idx];
         if (keywords.some(function(k) { return lower.indexOf(k) !== -1; })) {
           if (firstMsg === null) firstMsg = idx;
           lastMsg = idx;
           count++;
         }
-      });
+      }
       return {
         label: label,
         keywords: keywords,
