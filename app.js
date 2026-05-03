@@ -50903,3 +50903,783 @@ const SmartAssumptionDetector = (function () {
     _sparkline: _sparkline
   };
 })();
+
+/* ============================================================
+ * SmartReferenceTracker — Autonomous Reference Extraction & Tracking Engine
+ *
+ * Extracts and catalogs important references mentioned in conversations:
+ *   1. URL Detector — http/https links, bare domains
+ *   2. Code Snippet Detector — backtick-wrapped code, code blocks
+ *   3. File Path Detector — Unix/Windows file paths
+ *   4. API Endpoint Detector — HTTP method + route patterns
+ *   5. Command Detector — CLI/shell command patterns
+ *   6. Version Detector — semver, vN.N.N, @version
+ *   7. Data Value Detector — IPs, ports, percentages, dates, hex colors
+ *   8. Key Term Detector — popular frameworks, tools, languages
+ *
+ * Keyboard shortcut: Alt+Shift+5
+ * ============================================================ */
+const SmartReferenceTracker = (function () {
+  'use strict';
+
+  var STORAGE_KEY = 'smartReferenceTracker';
+  var CONFIG_KEY = 'smartReferenceTrackerConfig';
+  var DEBOUNCE_MS = 600;
+  var MAX_REFERENCES = 500;
+  var MAX_EXCHANGES = 200;
+  var MAX_INSIGHTS = 50;
+  var MAX_HISTORY = 200;
+  var TOAST_COOLDOWN_MS = 300000;
+  var _panelEl = null;
+  var _visible = false;
+  var _debounceTimer = null;
+  var _badgeEl = null;
+  var _lastToastTime = 0;
+  var _observer = null;
+
+  /* ── Categories ── */
+  var CATEGORIES = {
+    URL:          { id: 'url',         emoji: '🔗', name: 'URLs',           color: '#3498db' },
+    CODE:         { id: 'code',        emoji: '💻', name: 'Code Snippets',  color: '#2ecc71' },
+    FILE_PATH:    { id: 'filePath',    emoji: '📁', name: 'File Paths',     color: '#e67e22' },
+    API_ENDPOINT: { id: 'apiEndpoint', emoji: '🌐', name: 'API Endpoints',  color: '#9b59b6' },
+    COMMAND:      { id: 'command',     emoji: '⚙️', name: 'Commands',       color: '#1abc9c' },
+    VERSION:      { id: 'version',     emoji: '📌', name: 'Versions',       color: '#e74c3c' },
+    DATA_VALUE:   { id: 'dataValue',   emoji: '📊', name: 'Data Values',    color: '#f39c12' },
+    KEY_TERM:     { id: 'keyTerm',     emoji: '🏷️', name: 'Key Terms',      color: '#34495e' }
+  };
+
+  /* ── Density Tiers ── */
+  var TIERS = {
+    RICH:     { name: 'Reference-Rich',   min: 90, max: 100, color: '#27ae60', emoji: '🟢' },
+    WELL:     { name: 'Well-Referenced',   min: 70, max: 89,  color: '#f1c40f', emoji: '🟡' },
+    MODERATE: { name: 'Moderate',          min: 40, max: 69,  color: '#e67e22', emoji: '🟠' },
+    SPARSE:   { name: 'Sparse',            min: 0,  max: 39,  color: '#e74c3c', emoji: '🔴' }
+  };
+
+  /* ── Sensitivity presets ── */
+  var SENSITIVITIES = { LOW: 'low', MEDIUM: 'medium', HIGH: 'high' };
+
+  /* ── Key Terms dictionary ── */
+  var KEY_TERMS_ALL = [
+    'React','Angular','Vue','Svelte','Next','Nuxt','Remix','Astro','Gatsby',
+    'Node','Express','Fastify','Koa','Django','Flask','FastAPI','Spring','Rails',
+    'Laravel','Symfony','Gin','Echo','Fiber','Actix',
+    'Python','JavaScript','TypeScript','Rust','Go','Java','Kotlin','Swift','Ruby',
+    'C\\+\\+','C#','PHP','Scala','Elixir','Haskell','OCaml','Clojure','Lua','Zig','Dart',
+    'PostgreSQL','MySQL','MongoDB','Redis','SQLite','Cassandra','DynamoDB','Elasticsearch',
+    'Docker','Kubernetes','Terraform','Ansible','Nginx','Apache','Caddy',
+    'AWS','Azure','GCP','Vercel','Netlify','Cloudflare','Heroku',
+    'TensorFlow','PyTorch','Keras','OpenAI','LangChain','LlamaIndex','Hugging\\s?Face',
+    'GraphQL','REST','gRPC','WebSocket','OAuth','JWT',
+    'Git','GitHub','GitLab','Bitbucket','Jenkins','CircleCI','TravisCI',
+    'Webpack','Vite','Rollup','esbuild','Turbopack','Babel','ESLint','Prettier',
+    'npm','yarn','pnpm','pip','cargo','brew','apt','Flutter','Electron','Tauri'
+  ];
+
+  var KEY_TERMS_CORE = KEY_TERMS_ALL.slice(0, 40);
+
+  function _buildTermRegex(terms) {
+    return new RegExp('\\b(' + terms.join('|') + ')\\b', 'gi');
+  }
+
+  /* ── Default state / config ── */
+  function _defaultState() {
+    return {
+      references: [],
+      categoryBreakdown: {},
+      currentScore: 50,
+      history: [],
+      insights: [],
+      totalExtracted: 0,
+      exchangeCount: 0
+    };
+  }
+  function _defaultConfig() {
+    return { enabled: true, sensitivity: SENSITIVITIES.MEDIUM, showToasts: true, showBadge: true };
+  }
+
+  var _state = _defaultState();
+  var _config = _defaultConfig();
+
+  /* ── Persistence ── */
+  function _save() {
+    try {
+      var s = JSON.parse(JSON.stringify(_state));
+      if (s.references.length > MAX_REFERENCES) s.references = s.references.slice(-MAX_REFERENCES);
+      if (s.history.length > MAX_HISTORY) s.history = s.history.slice(-MAX_HISTORY);
+      if (s.insights.length > MAX_INSIGHTS) s.insights = s.insights.slice(-MAX_INSIGHTS);
+      SafeStorage.set(STORAGE_KEY, JSON.stringify(s));
+    } catch (_) {}
+  }
+  function _load() {
+    try {
+      var raw = SafeStorage.get(STORAGE_KEY);
+      if (raw) { var p = JSON.parse(raw); _state = Object.assign(_defaultState(), p); }
+    } catch (_) { _state = _defaultState(); }
+  }
+  function _saveConfig() {
+    try { SafeStorage.set(CONFIG_KEY, JSON.stringify(_config)); } catch (_) {}
+  }
+  function _loadConfig() {
+    try {
+      var raw = SafeStorage.get(CONFIG_KEY);
+      if (raw) { _config = Object.assign(_defaultConfig(), JSON.parse(raw)); }
+    } catch (_) { _config = _defaultConfig(); }
+  }
+
+  /* ── Utility ── */
+  function _nextId() { return 'ref_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8); }
+
+  function _toast(msg) {
+    if (!_config.showToasts) return;
+    var now = Date.now();
+    if (now - _lastToastTime < TOAST_COOLDOWN_MS) return;
+    _lastToastTime = now;
+    try {
+      var el = document.createElement('div');
+      el.className = 'smart-toast';
+      el.textContent = '🔗 ' + msg;
+      el.style.cssText = 'position:fixed;bottom:80px;right:20px;background:#2c3e50;color:#ecf0f1;padding:10px 18px;border-radius:8px;font-size:13px;z-index:100000;opacity:0;transition:opacity .3s;max-width:340px;';
+      document.body.appendChild(el);
+      requestAnimationFrame(function () { el.style.opacity = '1'; });
+      setTimeout(function () { el.style.opacity = '0'; setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 400); }, 4000);
+    } catch (_) {}
+  }
+
+  function _contextSnippet(text, match) {
+    var idx = text.indexOf(match);
+    if (idx === -1) return match;
+    var start = Math.max(0, idx - 30);
+    var end = Math.min(text.length, idx + match.length + 30);
+    var snippet = text.slice(start, end).replace(/\n/g, ' ');
+    return (start > 0 ? '...' : '') + snippet + (end < text.length ? '...' : '');
+  }
+
+  /* ════════════════════════════════════════════
+     EXTRACTION ENGINES
+     ════════════════════════════════════════════ */
+
+  function detectURLs(text) {
+    var results = [];
+    var re = /https?:\/\/[^\s<>"')\]},;]+/gi;
+    var m;
+    while ((m = re.exec(text)) !== null) {
+      var url = m[0].replace(/[.)]+$/, '');
+      results.push({ category: CATEGORIES.URL.id, value: url, context: _contextSnippet(text, url) });
+    }
+    return results;
+  }
+
+  function detectCodeSnippets(text) {
+    var results = [];
+    var blockRe = /```[\s\S]*?```/g;
+    var m;
+    while ((m = blockRe.exec(text)) !== null) {
+      var code = m[0].replace(/^```\w*\n?/, '').replace(/```$/, '').trim();
+      if (code.length > 0 && code.length < 2000) {
+        results.push({ category: CATEGORIES.CODE.id, value: code.slice(0, 200), context: _contextSnippet(text, m[0].slice(0, 60)) });
+      }
+    }
+    var inlineRe = /`([^`\n]{2,80})`/g;
+    while ((m = inlineRe.exec(text)) !== null) {
+      if (!/^https?:\/\//.test(m[1])) {
+        results.push({ category: CATEGORIES.CODE.id, value: m[1], context: _contextSnippet(text, m[0]) });
+      }
+    }
+    return results;
+  }
+
+  function detectFilePaths(text) {
+    var results = [];
+    var re = /(?:~\/|\.\/|\/[a-zA-Z])[^\s<>"')\]},;]*\/[^\s<>"')\]},;]*/g;
+    var m;
+    while ((m = re.exec(text)) !== null) {
+      results.push({ category: CATEGORIES.FILE_PATH.id, value: m[0], context: _contextSnippet(text, m[0]) });
+    }
+    var winRe = /[A-Z]:\\[^\s<>"')\]},;]+/gi;
+    while ((m = winRe.exec(text)) !== null) {
+      results.push({ category: CATEGORIES.FILE_PATH.id, value: m[0], context: _contextSnippet(text, m[0]) });
+    }
+    return results;
+  }
+
+  function detectAPIEndpoints(text) {
+    var results = [];
+    var re = /\b(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(\/[^\s<>"')\]},;]+)/gi;
+    var m;
+    while ((m = re.exec(text)) !== null) {
+      results.push({ category: CATEGORIES.API_ENDPOINT.id, value: m[1].toUpperCase() + ' ' + m[2], context: _contextSnippet(text, m[0]) });
+    }
+    var routeRe = /\/api\/[^\s<>"')\]},;]+/gi;
+    while ((m = routeRe.exec(text)) !== null) {
+      results.push({ category: CATEGORIES.API_ENDPOINT.id, value: m[0], context: _contextSnippet(text, m[0]) });
+    }
+    return results;
+  }
+
+  function detectCommands(text) {
+    var results = [];
+    var prefixes = '(?:npm|npx|yarn|pnpm|pip|pip3|cargo|brew|apt|apt-get|docker|kubectl|terraform|git|curl|wget|make|cmake|go|rustc|javac|gcc|g\\+\\+|python|python3|node|ruby|php|dotnet|flutter|dart)';
+    var re = new RegExp('\\b' + prefixes + '\\s+[^\\n]{2,80}', 'gi');
+    var m;
+    while ((m = re.exec(text)) !== null) {
+      var cmd = m[0].trim();
+      results.push({ category: CATEGORIES.COMMAND.id, value: cmd, context: _contextSnippet(text, cmd) });
+    }
+    return results;
+  }
+
+  function detectVersions(text) {
+    var results = [];
+    var re = /\bv?\d+\.\d+(?:\.\d+)?(?:-[a-zA-Z0-9.]+)?(?:\+[a-zA-Z0-9.]+)?\b/g;
+    var m;
+    while ((m = re.exec(text)) !== null) {
+      if (/\d+\.\d+/.test(m[0]) && m[0].length >= 3) {
+        results.push({ category: CATEGORIES.VERSION.id, value: m[0], context: _contextSnippet(text, m[0]) });
+      }
+    }
+    var atVer = /@(?:latest|next|canary|beta|alpha|\d+\.\d+[^\s]*)/gi;
+    while ((m = atVer.exec(text)) !== null) {
+      results.push({ category: CATEGORIES.VERSION.id, value: m[0], context: _contextSnippet(text, m[0]) });
+    }
+    return results;
+  }
+
+  function detectDataValues(text) {
+    var results = [];
+    var ipRe = /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/g;
+    var m;
+    while ((m = ipRe.exec(text)) !== null) {
+      results.push({ category: CATEGORIES.DATA_VALUE.id, value: m[0], context: _contextSnippet(text, m[0]) });
+    }
+    var portRe = /(?::|port\s+)\d{2,5}\b/gi;
+    while ((m = portRe.exec(text)) !== null) {
+      results.push({ category: CATEGORIES.DATA_VALUE.id, value: m[0], context: _contextSnippet(text, m[0]) });
+    }
+    var pctRe = /\b\d+(?:\.\d+)?%/g;
+    while ((m = pctRe.exec(text)) !== null) {
+      results.push({ category: CATEGORIES.DATA_VALUE.id, value: m[0], context: _contextSnippet(text, m[0]) });
+    }
+    var dateRe = /\b\d{4}-\d{2}-\d{2}\b/g;
+    while ((m = dateRe.exec(text)) !== null) {
+      results.push({ category: CATEGORIES.DATA_VALUE.id, value: m[0], context: _contextSnippet(text, m[0]) });
+    }
+    var hexRe = /#[0-9a-fA-F]{3,8}\b/g;
+    while ((m = hexRe.exec(text)) !== null) {
+      results.push({ category: CATEGORIES.DATA_VALUE.id, value: m[0], context: _contextSnippet(text, m[0]) });
+    }
+    return results;
+  }
+
+  function detectKeyTerms(text) {
+    var results = [];
+    var terms = _config.sensitivity === SENSITIVITIES.HIGH ? KEY_TERMS_ALL :
+                _config.sensitivity === SENSITIVITIES.LOW  ? KEY_TERMS_CORE :
+                KEY_TERMS_ALL;
+    var re = _buildTermRegex(terms);
+    var seen = {};
+    var m;
+    while ((m = re.exec(text)) !== null) {
+      var term = m[1];
+      var lower = term.toLowerCase();
+      if (!seen[lower]) {
+        seen[lower] = true;
+        results.push({ category: CATEGORIES.KEY_TERM.id, value: term, context: _contextSnippet(text, term) });
+      }
+    }
+    return results;
+  }
+
+  /* ── Unified extraction ── */
+  function extractAll(text) {
+    if (!text || typeof text !== 'string') return [];
+    var all = [].concat(
+      detectURLs(text),
+      detectCodeSnippets(text),
+      detectFilePaths(text),
+      detectAPIEndpoints(text),
+      detectCommands(text),
+      detectVersions(text),
+      detectDataValues(text),
+      detectKeyTerms(text)
+    );
+    return all;
+  }
+
+  /* ── Scoring ── */
+  function computeScore(refs, exchangeCount) {
+    if (!exchangeCount || exchangeCount <= 0) return 50;
+    var density = refs.length / exchangeCount;
+    var catCount = 0;
+    var cats = {};
+    for (var i = 0; i < refs.length; i++) {
+      if (!cats[refs[i].category]) { cats[refs[i].category] = true; catCount++; }
+    }
+    var densityScore = Math.min(100, density * 20);
+    var diversityScore = Math.min(100, catCount * 14);
+    return Math.round(densityScore * 0.6 + diversityScore * 0.4);
+  }
+
+  function classifyTier(score) {
+    for (var k in TIERS) {
+      if (score >= TIERS[k].min && score <= TIERS[k].max) return TIERS[k];
+    }
+    return TIERS.SPARSE;
+  }
+
+  /* ── Insights ── */
+  function generateInsights(state) {
+    var insights = [];
+    var refs = state.references;
+    if (refs.length === 0) return insights;
+
+    /* Most common category */
+    var catCounts = {};
+    for (var i = 0; i < refs.length; i++) {
+      catCounts[refs[i].category] = (catCounts[refs[i].category] || 0) + 1;
+    }
+    var topCat = null; var topCount = 0;
+    for (var c in catCounts) {
+      if (catCounts[c] > topCount) { topCat = c; topCount = catCounts[c]; }
+    }
+    if (topCat) {
+      var catMeta = null;
+      for (var ck in CATEGORIES) { if (CATEGORIES[ck].id === topCat) { catMeta = CATEGORIES[ck]; break; } }
+      insights.push({ type: 'top_category', text: (catMeta ? catMeta.emoji + ' ' : '') + 'Most referenced category: ' + (catMeta ? catMeta.name : topCat) + ' (' + topCount + ' refs)', severity: 'info' });
+    }
+
+    /* Most repeated value */
+    var valCounts = {};
+    for (var j = 0; j < refs.length; j++) {
+      var v = refs[j].value.slice(0, 100);
+      valCounts[v] = (valCounts[v] || 0) + 1;
+    }
+    var topVal = null; var topValCount = 0;
+    for (var vk in valCounts) {
+      if (valCounts[vk] > topValCount) { topVal = vk; topValCount = valCounts[vk]; }
+    }
+    if (topVal && topValCount > 1) {
+      insights.push({ type: 'repeated', text: '🔁 Most repeated reference: "' + topVal.slice(0, 50) + '" (' + topValCount + ' times)', severity: 'info' });
+    }
+
+    /* Starred count */
+    var starredCount = 0;
+    for (var s = 0; s < refs.length; s++) { if (refs[s].starred) starredCount++; }
+    if (starredCount > 0) {
+      insights.push({ type: 'starred', text: '⭐ ' + starredCount + ' starred reference' + (starredCount > 1 ? 's' : ''), severity: 'info' });
+    }
+
+    /* URL dominance */
+    var urlCount = catCounts[CATEGORIES.URL.id] || 0;
+    if (urlCount > 5) {
+      insights.push({ type: 'url_heavy', text: '🔗 URL-heavy conversation: ' + urlCount + ' links shared', severity: 'info' });
+    }
+
+    /* Code-heavy */
+    var codeCount = catCounts[CATEGORIES.CODE.id] || 0;
+    if (codeCount > 3) {
+      insights.push({ type: 'code_heavy', text: '💻 Code-intensive session: ' + codeCount + ' snippets referenced', severity: 'info' });
+    }
+
+    /* Diversity assessment */
+    var catKeys = Object.keys(catCounts);
+    if (catKeys.length >= 5) {
+      insights.push({ type: 'diverse', text: '🌈 Highly diverse references spanning ' + catKeys.length + ' categories', severity: 'positive' });
+    } else if (catKeys.length === 1) {
+      insights.push({ type: 'narrow', text: '📎 All references are in a single category — consider diversifying', severity: 'warning' });
+    }
+
+    /* Growth trend */
+    if (state.history.length >= 3) {
+      var recent = state.history.slice(-3);
+      var growing = recent[2] > recent[0];
+      if (growing) {
+        insights.push({ type: 'growing', text: '📈 Reference density increasing — conversation getting more technical', severity: 'info' });
+      }
+    }
+
+    return insights.slice(0, MAX_INSIGHTS);
+  }
+
+  /* ── Star/unstar ── */
+  function starReference(refId) {
+    for (var i = 0; i < _state.references.length; i++) {
+      if (_state.references[i].id === refId) {
+        _state.references[i].starred = !_state.references[i].starred;
+        _save();
+        return _state.references[i].starred;
+      }
+    }
+    return false;
+  }
+
+  /* ── Export ── */
+  function exportReferences() {
+    return JSON.stringify(_state.references, null, 2);
+  }
+
+  /* ── Chat scanning ── */
+  function _getExchanges() {
+    var out = document.getElementById('chat-output');
+    if (!out) return [];
+    var msgs = out.querySelectorAll('.message, .msg, .user-msg, .ai-msg, .chat-message, p, div > p');
+    var exchanges = [];
+    var seen = new Set();
+    for (var i = 0; i < msgs.length && exchanges.length < MAX_EXCHANGES; i++) {
+      var txt = (msgs[i].textContent || '').trim();
+      if (txt.length > 2 && !seen.has(txt.slice(0, 100))) {
+        seen.add(txt.slice(0, 100));
+        exchanges.push(txt);
+      }
+    }
+    return exchanges;
+  }
+
+  function _analyze() {
+    if (!_config.enabled) return;
+    var exchanges = _getExchanges();
+    _state.references = [];
+    _state.categoryBreakdown = {};
+    _state.exchangeCount = exchanges.length;
+
+    for (var i = 0; i < exchanges.length; i++) {
+      var refs = extractAll(exchanges[i]);
+      for (var j = 0; j < refs.length; j++) {
+        refs[j].id = _nextId();
+        refs[j].exchangeIndex = i;
+        refs[j].timestamp = Date.now();
+        refs[j].starred = false;
+        /* Carry over starred status from previous state */
+        _state.references.push(refs[j]);
+      }
+    }
+
+    /* Update category breakdown */
+    for (var r = 0; r < _state.references.length; r++) {
+      var cat = _state.references[r].category;
+      _state.categoryBreakdown[cat] = (_state.categoryBreakdown[cat] || 0) + 1;
+    }
+
+    _state.totalExtracted = _state.references.length;
+    _state.currentScore = computeScore(_state.references, _state.exchangeCount);
+    _state.history.push(_state.currentScore);
+    if (_state.history.length > MAX_HISTORY) _state.history = _state.history.slice(-MAX_HISTORY);
+    _state.insights = generateInsights(_state);
+
+    _save();
+    _updateBadge();
+    _renderPanel();
+
+    if (_state.totalExtracted > 0 && _state.history.length <= 2) {
+      _toast(_state.totalExtracted + ' references found across ' + Object.keys(_state.categoryBreakdown).length + ' categories');
+    }
+  }
+
+  function _scheduleAnalysis() {
+    clearTimeout(_debounceTimer);
+    _debounceTimer = setTimeout(_analyze, DEBOUNCE_MS);
+  }
+
+  /* ── Sparkline helper ── */
+  function _sparkline(arr, w, h) {
+    if (!arr || arr.length < 2) return '';
+    var max = Math.max.apply(null, arr) || 1;
+    var min = Math.min.apply(null, arr);
+    var range = max - min || 1;
+    var step = w / (arr.length - 1);
+    var points = [];
+    for (var i = 0; i < arr.length; i++) {
+      var x = (i * step).toFixed(1);
+      var y = (h - ((arr[i] - min) / range) * h).toFixed(1);
+      points.push(x + ',' + y);
+    }
+    return '<svg width="' + w + '" height="' + h + '" style="vertical-align:middle">' +
+      '<polyline points="' + points.join(' ') + '" fill="none" stroke="#3498db" stroke-width="1.5"/></svg>';
+  }
+
+  /* ── Badge ── */
+  function _updateBadge() {
+    if (!_badgeEl) return;
+    if (!_config.showBadge || !_config.enabled) {
+      _badgeEl.style.display = 'none';
+      return;
+    }
+    var tier = classifyTier(_state.currentScore);
+    _badgeEl.style.display = 'flex';
+    _badgeEl.style.background = tier.color;
+    _badgeEl.textContent = '🔗 ' + _state.totalExtracted;
+    _badgeEl.title = 'Reference Tracker — ' + tier.name + ' (' + _state.currentScore + '/100) Alt+Shift+5';
+  }
+
+  /* ── Panel rendering ── */
+  function _renderPanel() {
+    if (!_panelEl || !_visible) return;
+    var tier = classifyTier(_state.currentScore);
+    var activeTab = _panelEl.getAttribute('data-tab') || 'references';
+
+    var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">' +
+      '<strong style="font-size:15px">🔗 Reference Tracker</strong>' +
+      '<span style="font-size:12px;color:' + tier.color + '">' + tier.emoji + ' ' + tier.name + ' (' + _state.currentScore + ')</span>' +
+      '<button onclick="SmartReferenceTracker.toggle()" style="background:none;border:none;color:#ecf0f1;cursor:pointer;font-size:16px" title="Close">✕</button></div>';
+
+    /* Tabs */
+    var tabs = [
+      { id: 'references', label: '📋 References' },
+      { id: 'categories', label: '📁 Categories' },
+      { id: 'timeline', label: '📈 Timeline' },
+      { id: 'insights', label: '💡 Insights' }
+    ];
+    html += '<div style="display:flex;gap:4px;margin-bottom:10px">';
+    for (var t = 0; t < tabs.length; t++) {
+      var sel = activeTab === tabs[t].id;
+      html += '<button onclick="SmartReferenceTracker._switchTab(\'' + tabs[t].id + '\')" style="flex:1;padding:5px 8px;border:none;border-radius:4px;cursor:pointer;font-size:11px;background:' + (sel ? '#3498db' : '#34495e') + ';color:#ecf0f1">' + tabs[t].label + '</button>';
+    }
+    html += '</div>';
+
+    /* Tab content */
+    if (activeTab === 'references') {
+      html += _renderReferencesTab();
+    } else if (activeTab === 'categories') {
+      html += _renderCategoriesTab();
+    } else if (activeTab === 'timeline') {
+      html += _renderTimelineTab();
+    } else if (activeTab === 'insights') {
+      html += _renderInsightsTab();
+    }
+
+    /* Export button */
+    html += '<div style="margin-top:8px;text-align:right"><button onclick="SmartReferenceTracker._exportToClipboard()" style="padding:4px 10px;border:none;border-radius:4px;background:#2c3e50;color:#ecf0f1;cursor:pointer;font-size:11px">📥 Export JSON</button></div>';
+
+    _panelEl.innerHTML = html;
+  }
+
+  function _renderReferencesTab() {
+    var refs = _state.references;
+    if (refs.length === 0) return '<div style="color:#95a5a6;text-align:center;padding:20px">No references detected yet. Start chatting!</div>';
+
+    var html = '<div style="max-height:280px;overflow-y:auto">';
+    var shown = refs.slice(-50).reverse();
+    for (var i = 0; i < shown.length; i++) {
+      var r = shown[i];
+      var catMeta = null;
+      for (var ck in CATEGORIES) { if (CATEGORIES[ck].id === r.category) { catMeta = CATEGORIES[ck]; break; } }
+      var emoji = catMeta ? catMeta.emoji : '📎';
+      var starIcon = r.starred ? '⭐' : '☆';
+      html += '<div style="padding:5px 8px;margin:2px 0;background:#34495e;border-radius:4px;font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer" onclick="SmartReferenceTracker._copyRef(\'' + _escapeAttr(r.value.slice(0, 100)) + '\')" title="Click to copy">' +
+        '<span>' + emoji + '</span>' +
+        '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + _escapeHTML(r.value.slice(0, 80)) + '</span>' +
+        '<button onclick="event.stopPropagation();SmartReferenceTracker.starReference(\'' + r.id + '\');SmartReferenceTracker._renderPanel()" style="background:none;border:none;cursor:pointer;font-size:12px">' + starIcon + '</button></div>';
+    }
+    html += '</div>';
+    if (refs.length > 50) html += '<div style="color:#7f8c8d;font-size:11px;margin-top:4px">Showing latest 50 of ' + refs.length + '</div>';
+    return html;
+  }
+
+  function _renderCategoriesTab() {
+    var html = '<div style="max-height:300px;overflow-y:auto">';
+    for (var ck in CATEGORIES) {
+      var cat = CATEGORIES[ck];
+      var count = _state.categoryBreakdown[cat.id] || 0;
+      var pct = _state.totalExtracted > 0 ? Math.round(count / _state.totalExtracted * 100) : 0;
+      html += '<div style="padding:6px 8px;margin:3px 0;background:#34495e;border-radius:4px;display:flex;align-items:center;gap:8px">' +
+        '<span style="font-size:16px">' + cat.emoji + '</span>' +
+        '<span style="flex:1;font-size:12px">' + cat.name + '</span>' +
+        '<span style="font-size:11px;color:#bdc3c7">' + count + ' (' + pct + '%)</span>' +
+        '<div style="width:60px;height:6px;background:#2c3e50;border-radius:3px;overflow:hidden"><div style="width:' + pct + '%;height:100%;background:' + cat.color + ';border-radius:3px"></div></div></div>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  function _renderTimelineTab() {
+    var html = '';
+    /* Sparkline */
+    if (_state.history.length >= 2) {
+      html += '<div style="margin-bottom:10px;text-align:center">' + _sparkline(_state.history, 260, 40) + '</div>';
+      html += '<div style="font-size:11px;color:#95a5a6;text-align:center;margin-bottom:8px">Reference density over time</div>';
+    }
+
+    /* Per-exchange ref count */
+    var exchangeRefs = {};
+    for (var i = 0; i < _state.references.length; i++) {
+      var ei = _state.references[i].exchangeIndex || 0;
+      exchangeRefs[ei] = (exchangeRefs[ei] || 0) + 1;
+    }
+    var keys = Object.keys(exchangeRefs).sort(function (a, b) { return b - a; }).slice(0, 10);
+    if (keys.length > 0) {
+      html += '<div style="font-size:12px;font-weight:bold;margin-bottom:4px">Top exchanges by reference count:</div>';
+      html += '<div style="max-height:200px;overflow-y:auto">';
+      for (var k = 0; k < keys.length; k++) {
+        html += '<div style="padding:4px 8px;margin:2px 0;background:#34495e;border-radius:4px;font-size:11px">Exchange #' + keys[k] + ': ' + exchangeRefs[keys[k]] + ' refs</div>';
+      }
+      html += '</div>';
+    } else {
+      html += '<div style="color:#95a5a6;text-align:center;padding:20px">No timeline data yet</div>';
+    }
+    return html;
+  }
+
+  function _renderInsightsTab() {
+    var ins = _state.insights;
+    if (ins.length === 0) return '<div style="color:#95a5a6;text-align:center;padding:20px">No insights yet — keep chatting!</div>';
+    var html = '<div style="max-height:300px;overflow-y:auto">';
+    for (var i = 0; i < ins.length; i++) {
+      var bg = ins[i].severity === 'warning' ? '#7f6c2e' : ins[i].severity === 'positive' ? '#1e6e3e' : '#34495e';
+      html += '<div style="padding:6px 8px;margin:3px 0;background:' + bg + ';border-radius:4px;font-size:12px">' + _escapeHTML(ins[i].text) + '</div>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  /* ── HTML helpers ── */
+  function _escapeHTML(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+  function _escapeAttr(s) {
+    return String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"');
+  }
+
+  /* ── Clipboard helpers ── */
+  function _copyRef(val) {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(val);
+      }
+      _toast('Copied: ' + val.slice(0, 40));
+    } catch (_) {}
+  }
+
+  function _exportToClipboard() {
+    var json = exportReferences();
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(json);
+      }
+      _toast('Exported ' + _state.references.length + ' references to clipboard');
+    } catch (_) {}
+  }
+
+  /* ── Tab switch ── */
+  function _switchTab(tabId) {
+    if (_panelEl) {
+      _panelEl.setAttribute('data-tab', tabId);
+      _renderPanel();
+    }
+  }
+
+  /* ── Toggle ── */
+  function toggle() {
+    _visible = !_visible;
+    if (_visible) {
+      if (!_panelEl) _createPanel();
+      _panelEl.style.display = 'block';
+      _analyze();
+    } else if (_panelEl) {
+      _panelEl.style.display = 'none';
+    }
+  }
+
+  function _createPanel() {
+    _panelEl = document.createElement('div');
+    _panelEl.id = 'smart-reference-tracker-panel';
+    _panelEl.setAttribute('data-tab', 'references');
+    _panelEl.style.cssText = 'display:none;position:fixed;top:60px;right:20px;width:360px;max-height:480px;background:#2c3e50;color:#ecf0f1;border-radius:10px;padding:14px;z-index:90000;overflow-y:auto;box-shadow:0 4px 20px rgba(0,0,0,.4);font-family:system-ui,sans-serif;';
+    document.body.appendChild(_panelEl);
+  }
+
+  /* ── Reset ── */
+  function reset() {
+    _state = _defaultState();
+    _save();
+    _updateBadge();
+    _renderPanel();
+  }
+
+  /* ── Init ── */
+  function init() {
+    _loadConfig();
+    _load();
+
+    /* Badge */
+    _badgeEl = document.createElement('div');
+    _badgeEl.id = 'smart-reference-tracker-badge';
+    _badgeEl.style.cssText = 'display:none;position:fixed;bottom:15px;left:15px;background:#3498db;color:#fff;padding:4px 10px;border-radius:12px;font-size:11px;cursor:pointer;z-index:90001;align-items:center;gap:4px;box-shadow:0 2px 8px rgba(0,0,0,.3);';
+    _badgeEl.title = 'Reference Tracker (Alt+Shift+5)';
+    _badgeEl.onclick = toggle;
+    document.body.appendChild(_badgeEl);
+    _updateBadge();
+
+    /* Observer */
+    var chatOut = document.getElementById('chat-output');
+    if (chatOut && typeof MutationObserver !== 'undefined') {
+      _observer = new MutationObserver(_scheduleAnalysis);
+      _observer.observe(chatOut, { childList: true, subtree: true, characterData: true });
+    }
+
+    /* Keyboard shortcut: Alt+Shift+5 */
+    document.addEventListener('keydown', function (e) {
+      if (e.altKey && e.shiftKey && e.key === '5') { e.preventDefault(); toggle(); }
+    });
+
+    /* Register with KeyboardShortcuts if available */
+    if (typeof KeyboardShortcuts !== 'undefined' && KeyboardShortcuts.register) {
+      KeyboardShortcuts.register('Alt+Shift+5', 'Reference Tracker', toggle);
+    }
+
+    /* Register toolbar button if toolbar exists */
+    var toolbar = document.querySelector('.toolbar');
+    if (toolbar) {
+      var btn = document.createElement('button');
+      btn.className = 'btn-secondary';
+      btn.title = 'Reference Tracker — autonomous reference extraction (Alt+Shift+5)';
+      btn.textContent = '🔗';
+      btn.onclick = toggle;
+      toolbar.appendChild(btn);
+    }
+  }
+
+  /* Auto-init */
+  if (typeof document !== 'undefined' && document.body) {
+    init();
+  }
+
+  return {
+    toggle: toggle,
+    reset: reset,
+    init: init,
+    extractAll: extractAll,
+    detectURLs: detectURLs,
+    detectCodeSnippets: detectCodeSnippets,
+    detectFilePaths: detectFilePaths,
+    detectAPIEndpoints: detectAPIEndpoints,
+    detectCommands: detectCommands,
+    detectVersions: detectVersions,
+    detectDataValues: detectDataValues,
+    detectKeyTerms: detectKeyTerms,
+    computeScore: computeScore,
+    classifyTier: classifyTier,
+    generateInsights: generateInsights,
+    starReference: starReference,
+    exportReferences: exportReferences,
+    getState: function () { return JSON.parse(JSON.stringify(_state)); },
+    getConfig: function () { return Object.assign({}, _config); },
+    getScore: function () { return _state.currentScore; },
+    getTier: function () { return classifyTier(_state.currentScore); },
+    getReferences: function () { return _state.references.slice(); },
+    getInsights: function () { return _state.insights.slice(); },
+    getCategoryBreakdown: function () { return Object.assign({}, _state.categoryBreakdown); },
+    isEnabled: function () { return _config.enabled; },
+    setEnabled: function (v) { _config.enabled = !!v; _saveConfig(); _updateBadge(); },
+    CATEGORIES: CATEGORIES,
+    TIERS: TIERS,
+    SENSITIVITIES: SENSITIVITIES,
+    _defaultState: _defaultState,
+    _defaultConfig: _defaultConfig,
+    _sparkline: _sparkline,
+    _switchTab: _switchTab,
+    _copyRef: _copyRef,
+    _exportToClipboard: _exportToClipboard,
+    _renderPanel: function () { _renderPanel(); }
+  };
+})();
