@@ -807,7 +807,45 @@ const TextAnalysisUtils = (() => {
     return (na && nb) ? dot / Math.sqrt(na * nb) : 0;
   }
 
-  return { STOP_WORDS, tokenize, jaccard, tf, cosineSim };
+  /**
+   * Split text into sentences by punctuation.
+   * @param {string} text
+   * @param {object} [opts]
+   * @param {number} [opts.minLength=0] Minimum trimmed sentence length to keep.
+   * @param {boolean} [opts.splitNewlines=false] Also split on newlines.
+   * @returns {string[]}
+   */
+  function sentences(text, opts) {
+    if (!text) return [];
+    var pat = (opts && opts.splitNewlines) ? /[.!?\n]+/ : /[.!?]+/;
+    var min = (opts && opts.minLength != null) ? opts.minLength : 0;
+    return text.split(pat).map(function (s) { return s.trim(); }).filter(function (s) { return s.length > min; });
+  }
+
+  /**
+   * Unicode block-character sparkline for an array of numbers.
+   * @param {number[]} arr
+   * @returns {string}
+   */
+  function sparkline(arr) {
+    var chars = '\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588';
+    if (!arr || !arr.length) return '';
+    var mn = Math.min.apply(null, arr);
+    var mx = Math.max.apply(null, arr);
+    var range = mx - mn || 1;
+    return arr.map(function (v) { return chars[Math.min(Math.round((v - mn) / range * 7), 7)]; }).join('');
+  }
+
+  /** ISO-8601 timestamp. @returns {string} */
+  function timestamp() { return new Date().toISOString(); }
+
+  /** Pick a random element from an array. */
+  function pickRandom(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+  /** Count words in text. @param {string} text @returns {number} */
+  function wordCount(text) { return (text || '').match(/\b\w+\b/g)?.length || 0; }
+
+  return { STOP_WORDS, tokenize, jaccard, tf, cosineSim, sentences, sparkline, timestamp, pickRandom, wordCount };
 })();
 
 /* ---------- Shared Overlay Factory ---------- */
@@ -41699,7 +41737,7 @@ const SmartSessionInsights = (() => {
         if (key && key.startsWith('session_')) {
           const raw = SafeStorage.get(key);
           if (raw) {
-            const parsed = (typeof sanitizeStorageObject === 'function') ? sanitizeStorageObject(JSON.parse(raw)) : JSON.parse(raw);
+            const parsed = sanitizeStorageObject(JSON.parse(raw));
             if (parsed && Array.isArray(parsed.messages)) sessions.push(parsed);
           }
         }
@@ -42139,7 +42177,7 @@ const SmartAutoContinue = (() => {
     try {
       const raw = (typeof SafeStorage !== 'undefined') ? SafeStorage.get(STORAGE_KEY) : null;
       if (raw) {
-        const cfg = (typeof sanitizeStorageObject === 'function') ? sanitizeStorageObject(JSON.parse(raw)) : JSON.parse(raw);
+        const cfg = sanitizeStorageObject(JSON.parse(raw));
         if (cfg) {
           _enabled = cfg.enabled !== false;
           _autoMode = cfg.autoMode === true;
@@ -44147,7 +44185,7 @@ const SmartPromptCoach = (() => {
     try {
       const raw = SafeStorage.get(STORAGE_KEY);
       if (raw) {
-        const d = (typeof sanitizeStorageObject === 'function') ? sanitizeStorageObject(JSON.parse(raw)) : JSON.parse(raw);
+        const d = sanitizeStorageObject(JSON.parse(raw));
         if (d) {
           _skillProfile = d.skillProfile || {};
           _patternCounts = d.patternCounts || {};
@@ -44171,7 +44209,7 @@ const SmartPromptCoach = (() => {
     try {
       const raw = SafeStorage.get(CONFIG_KEY);
       if (raw) {
-        const c = (typeof sanitizeStorageObject === 'function') ? sanitizeStorageObject(JSON.parse(raw)) : JSON.parse(raw);
+        const c = sanitizeStorageObject(JSON.parse(raw));
         if (c) _config = Object.assign(_config, c);
       }
     } catch (_) {}
@@ -48089,10 +48127,7 @@ const SmartCognitiveLoad = (function () {
     return text.toLowerCase().replace(/[^\w\s'-]/g, ' ').split(/\s+/).filter(function (w) { return w.length > 0; });
   }
 
-  function _sentences(text) {
-    if (!text) return [];
-    return text.split(/[.!?]+/).filter(function (s) { return s.trim().length > 0; });
-  }
+  function _sentences(text) { return TextAnalysisUtils.sentences(text); }
 
   function _countFacts(text) {
     // Heuristic: count numbers, proper nouns, URLs, code blocks, and list items.
@@ -48811,10 +48846,7 @@ const SmartIntentAligner = (function () {
     return text.toLowerCase().replace(/[^a-z0-9\s'-]/g, ' ').split(/\s+/).filter(function (w) { return w.length > 1 && !STOPWORDS.has(w); });
   }
 
-  function _sentences(text) {
-    if (!text) return [];
-    return text.split(/[.!?]+/).map(function (s) { return s.trim(); }).filter(function (s) { return s.length > 5; });
-  }
+  function _sentences(text) { return TextAnalysisUtils.sentences(text, { minLength: 5 }); }
 
   function _wordCount(text) {
     if (!text) return 0;
@@ -49726,10 +49758,7 @@ const SmartConversationWeather = (function () {
     return text.toLowerCase().replace(/[^a-z0-9\s'-]/g, ' ').split(/\s+/).filter(function (w) { return w.length > 1; });
   }
   function _wordCount(text) { return _tokenize(text).length; }
-  function _sentences(text) {
-    if (!text) return [];
-    return text.split(/[.!?]+/).map(function (s) { return s.trim(); }).filter(Boolean);
-  }
+  function _sentences(text) { return TextAnalysisUtils.sentences(text); }
 
   /* ── Dimension Analyzers ── */
 
@@ -50057,12 +50086,8 @@ const SmartConversationWeather = (function () {
   }
 
   function _sparkline(arr) {
-    if (!arr || arr.length === 0) return '—';
-    var chars = '▁▂▃▄▅▆▇█';
-    var mn = Math.min.apply(null, arr);
-    var mx = Math.max.apply(null, arr);
-    var range = mx - mn || 1;
-    return arr.map(function (v) { return chars[Math.min(Math.floor(((v - mn) / range) * 7), 7)]; }).join('');
+    var s = TextAnalysisUtils.sparkline(arr);
+    return s || '—';
   }
 
   /* ── Toast ── */
@@ -50445,40 +50470,30 @@ const SmartAssumptionDetector = (function () {
   var _state = _defaultState();
   var _config = _defaultConfig();
 
-  /* ── Persistence ── */
+  /* ── Persistence (uses SafeStorage for prototype-pollution protection) ── */
   function _load() {
     try {
-      var raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) { var p = JSON.parse(raw); Object.keys(_state).forEach(function (k) { if (p[k] !== undefined) _state[k] = p[k]; }); }
+      var raw = SafeStorage.get(STORAGE_KEY);
+      if (raw) { var p = sanitizeStorageObject(JSON.parse(raw)); Object.keys(_state).forEach(function (k) { if (p[k] !== undefined) _state[k] = p[k]; }); }
     } catch (e) { /* ignore */ }
     try {
-      var rc = localStorage.getItem(CONFIG_KEY);
-      if (rc) { var c = JSON.parse(rc); Object.keys(_config).forEach(function (k) { if (c[k] !== undefined) _config[k] = c[k]; }); }
+      var rc = SafeStorage.get(CONFIG_KEY);
+      if (rc) { var c = sanitizeStorageObject(JSON.parse(rc)); Object.keys(_config).forEach(function (k) { if (c[k] !== undefined) _config[k] = c[k]; }); }
     } catch (e) { /* ignore */ }
   }
   function _save() {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(_state)); } catch (e) { /* ignore */ }
+    try { SafeStorage.set(STORAGE_KEY, JSON.stringify(_state)); } catch (e) { /* ignore */ }
   }
   function _saveConfig() {
-    try { localStorage.setItem(CONFIG_KEY, JSON.stringify(_config)); } catch (e) { /* ignore */ }
+    try { SafeStorage.set(CONFIG_KEY, JSON.stringify(_config)); } catch (e) { /* ignore */ }
   }
 
-  /* ── Helpers ── */
-  function _sentences(text) {
-    if (!text) return [];
-    return text.split(/[.!?]+/).map(function (s) { return s.trim(); }).filter(function (s) { return s.length > 2; });
-  }
+  /* ── Helpers (delegates to shared TextAnalysisUtils) ── */
+  function _sentences(text) { return TextAnalysisUtils.sentences(text, { minLength: 2 }); }
   function _clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
-  function _sparkline(arr) {
-    var chars = '\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588';
-    if (!arr.length) return '';
-    var mn = Math.min.apply(null, arr);
-    var mx = Math.max.apply(null, arr);
-    var range = mx - mn || 1;
-    return arr.map(function (v) { return chars[Math.round((v - mn) / range * 7)]; }).join('');
-  }
-  function _ts() { return new Date().toISOString(); }
-  function _pickRandom(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+  function _sparkline(arr) { return TextAnalysisUtils.sparkline(arr); }
+  function _ts() { return TextAnalysisUtils.timestamp(); }
+  function _pickRandom(arr) { return TextAnalysisUtils.pickRandom(arr); }
 
   /* ── Detectors ── */
   function _detectCategory(text, catKey) {
@@ -51859,45 +51874,29 @@ const SmartDebateMode = (function () {
   /* ── Persistence ── */
   function _load() {
     try {
-      var raw = (typeof SafeStorage !== 'undefined' ? SafeStorage.get(STORAGE_KEY) : localStorage.getItem(STORAGE_KEY));
-      if (raw) { var p = JSON.parse(raw); Object.keys(_state).forEach(function (k) { if (p[k] !== undefined) _state[k] = p[k]; }); }
+      var raw = SafeStorage.get(STORAGE_KEY);
+      if (raw) { var p = sanitizeStorageObject(JSON.parse(raw)); Object.keys(_state).forEach(function (k) { if (p[k] !== undefined) _state[k] = p[k]; }); }
     } catch (e) { /* ignore */ }
   }
   function _save() {
-    try {
-      var s = JSON.stringify(_state);
-      if (typeof SafeStorage !== 'undefined') SafeStorage.set(STORAGE_KEY, s); else localStorage.setItem(STORAGE_KEY, s);
-    } catch (e) { /* ignore */ }
+    try { SafeStorage.set(STORAGE_KEY, JSON.stringify(_state)); } catch (e) { /* ignore */ }
   }
   function _loadConfig() {
     try {
-      var raw = (typeof SafeStorage !== 'undefined' ? SafeStorage.get(CONFIG_KEY) : localStorage.getItem(CONFIG_KEY));
-      if (raw) { var c = JSON.parse(raw); Object.keys(_config).forEach(function (k) { if (c[k] !== undefined) _config[k] = c[k]; }); }
+      var raw = SafeStorage.get(CONFIG_KEY);
+      if (raw) { var c = sanitizeStorageObject(JSON.parse(raw)); Object.keys(_config).forEach(function (k) { if (c[k] !== undefined) _config[k] = c[k]; }); }
     } catch (e) { /* ignore */ }
   }
   function _saveConfig() {
-    try {
-      var s = JSON.stringify(_config);
-      if (typeof SafeStorage !== 'undefined') SafeStorage.set(CONFIG_KEY, s); else localStorage.setItem(CONFIG_KEY, s);
-    } catch (e) { /* ignore */ }
+    try { SafeStorage.set(CONFIG_KEY, JSON.stringify(_config)); } catch (e) { /* ignore */ }
   }
 
-  /* ── Helpers ── */
-  function _sentences(text) {
-    if (!text) return [];
-    return text.split(/[.!?\n]+/).map(function (s) { return s.trim(); }).filter(function (s) { return s.length > 5; });
-  }
+  /* ── Helpers (delegates to shared TextAnalysisUtils) ── */
+  function _sentences(text) { return TextAnalysisUtils.sentences(text, { minLength: 5, splitNewlines: true }); }
   function _clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
-  function _sparkline(arr) {
-    var chars = '\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588';
-    if (!arr.length) return '';
-    var mn = Math.min.apply(null, arr);
-    var mx = Math.max.apply(null, arr);
-    var range = mx - mn || 1;
-    return arr.map(function (v) { return chars[Math.round((v - mn) / range * 7)]; }).join('');
-  }
-  function _ts() { return new Date().toISOString(); }
-  function _pickRandom(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+  function _sparkline(arr) { return TextAnalysisUtils.sparkline(arr); }
+  function _ts() { return TextAnalysisUtils.timestamp(); }
+  function _pickRandom(arr) { return TextAnalysisUtils.pickRandom(arr); }
   function _uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
 
   /* ── Engine 1: Claim Detector ── */
