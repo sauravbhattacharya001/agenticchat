@@ -74,6 +74,24 @@ for (let i = startIdx; i < src.length; i++) {
 // The IIFE ends with ();
 const iifeEnd = src.indexOf('();', endPos - 1);
 const iifeBody = src.slice(startIdx + 'ConversationMemory = '.length, iifeEnd + 3);
+
+// Extract TextAnalysisUtils (dependency of ConversationMemory helpers)
+const tuMarker = 'const TextAnalysisUtils = (() => {';
+const tuStart = src.indexOf(tuMarker);
+if (tuStart !== -1) {
+  let tbc = 0, ts = false, te = -1;
+  for (let i = tuStart; i < src.length; i++) {
+    if (src[i] === '{') { tbc++; ts = true; }
+    if (src[i] === '}') { tbc--; }
+    if (ts && tbc === 0) { te = i + 1; break; }
+  }
+  const tuIifeEnd = src.indexOf('();', te - 1);
+  // Replace 'const' with 'var' so eval leaks to scope
+  const tuBody = 'var' + src.slice(tuStart + 5, tuIifeEnd + 3);
+  eval(tuBody);
+  globalThis.TextAnalysisUtils = TextAnalysisUtils;
+}
+
 globalThis.ConversationMemory = eval(iifeBody);
 
 /* ── Helper ── */

@@ -45,8 +45,18 @@ function bootModule() {
   const blockStart = src.lastIndexOf(markerFull, idx);
   if (blockStart !== -1) idx = blockStart;
   const moduleCode = src.slice(idx);
+
+  // Extract TextAnalysisUtils (needed by SmartDebateMode helpers)
+  const tuStart = src.indexOf('const TextAnalysisUtils = (() => {');
+  const tuEnd = src.indexOf('})();', tuStart);
+  const tuCode = tuStart !== -1 && tuEnd !== -1 ? src.slice(tuStart, tuEnd + 5) : '';
+
+  // Also extract sanitizeStorageObject if present (dependency)
+  const ssoMatch = src.match(/function sanitizeStorageObject\b[\s\S]*?\n\}/);
+  const ssoCode = ssoMatch ? ssoMatch[0] : 'function sanitizeStorageObject(o) { return o; }';
+
   const fn = new Function('SafeStorage', 'document', 'MutationObserver', 'setTimeout', 'clearTimeout', 'requestAnimationFrame', 'navigator',
-    moduleCode + '\nreturn SmartDebateMode;');
+    ssoCode + '\n' + tuCode + '\n' + moduleCode + '\nreturn SmartDebateMode;');
   const mod = fn(global.SafeStorage, document, global.MutationObserver, global.setTimeout, global.clearTimeout, global.requestAnimationFrame, global.navigator);
   return { mod, dom, document, _store };
 }

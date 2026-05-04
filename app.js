@@ -845,7 +845,25 @@ const TextAnalysisUtils = (() => {
   /** Count words in text. @param {string} text @returns {number} */
   function wordCount(text) { return (text || '').match(/\b\w+\b/g)?.length || 0; }
 
-  return { STOP_WORDS, tokenize, jaccard, tf, cosineSim, sentences, sparkline, timestamp, pickRandom, wordCount };
+  /**
+   * Clamp a number between lo and hi (inclusive).
+   * @param {number} v
+   * @param {number} lo
+   * @param {number} hi
+   * @returns {number}
+   */
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+  /**
+   * Generate a short unique identifier.
+   * @param {string} [prefix='id'] - Optional prefix for the generated ID.
+   * @returns {string}
+   */
+  function generateId(prefix) {
+    return (prefix || 'id') + '-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+  }
+
+  return { STOP_WORDS, tokenize, jaccard, tf, cosineSim, sentences, sparkline, timestamp, pickRandom, wordCount, clamp, generateId };
 })();
 
 /* ---------- Shared Overlay Factory ---------- */
@@ -16223,7 +16241,7 @@ const ModelCompare = (() => {
 
   /** Generate a simple unique ID. */
   function _generateId() {
-    return 'cmp-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+    return TextAnalysisUtils.generateId('cmp');
   }
 
   /**
@@ -35862,7 +35880,7 @@ var ConversationMemory = (function () {
   }
 
   function _generateId() {
-    return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+    return TextAnalysisUtils.generateId();
   }
 
   function _sessionInfo() {
@@ -43577,7 +43595,7 @@ var SmartResponseAuditor = (function () {
     return { count: count, flagged: flagged, flaggedWithCounts: flaggedWithCounts };
   }
 
-  function _wordCount(text) { return TextAnalysisUtils.wordCount(text); }
+  var _wordCount = TextAnalysisUtils.wordCount;
 
   function _extractCodeBlocks(text) {
     var blocks = [];
@@ -44207,7 +44225,7 @@ const SmartPromptCoach = (() => {
   }
 
   /* ── analysis engine ── */
-  function _wordCount(text) { return TextAnalysisUtils.wordCount(text); }
+  var _wordCount = TextAnalysisUtils.wordCount;
 
   function _hasCodeBlock(text) {
     return /```[\s\S]*?```/.test(text);
@@ -48830,7 +48848,7 @@ const SmartIntentAligner = (function () {
 
   function _sentences(text) { return TextAnalysisUtils.sentences(text, { minLength: 5 }); }
 
-  function _wordCount(text) { return TextAnalysisUtils.wordCount(text); }
+  var _wordCount = TextAnalysisUtils.wordCount;
 
   function _keywordOverlap(tokens1, tokens2) {
     if (!tokens1.length || !tokens2.length) return 0;
@@ -49709,7 +49727,7 @@ const SmartConversationWeather = (function () {
   var _state = _defaultState();
   var _config = _defaultConfig();
 
-  function _clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+  var _clamp = TextAnalysisUtils.clamp;
 
   /* ── Persistence ── */
   function _saveState() {
@@ -50469,7 +50487,7 @@ const SmartAssumptionDetector = (function () {
 
   /* ── Helpers (delegates to shared TextAnalysisUtils) ── */
   function _sentences(text) { return TextAnalysisUtils.sentences(text, { minLength: 2 }); }
-  function _clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+  var _clamp = TextAnalysisUtils.clamp;
   function _sparkline(arr) { return TextAnalysisUtils.sparkline(arr); }
   function _ts() { return TextAnalysisUtils.timestamp(); }
   function _pickRandom(arr) { return TextAnalysisUtils.pickRandom(arr); }
@@ -51870,7 +51888,7 @@ const SmartDebateMode = (function () {
 
   /* ── Helpers (delegates to shared TextAnalysisUtils) ── */
   function _sentences(text) { return TextAnalysisUtils.sentences(text, { minLength: 5, splitNewlines: true }); }
-  function _clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+  var _clamp = TextAnalysisUtils.clamp;
   function _sparkline(arr) { return TextAnalysisUtils.sparkline(arr); }
   function _ts() { return TextAnalysisUtils.timestamp(); }
   function _pickRandom(arr) { return TextAnalysisUtils.pickRandom(arr); }
