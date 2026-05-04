@@ -53494,3 +53494,937 @@ const SmartConversationDNA = (function () {
     _renderPanel: function () { _renderPanel(); }
   };
 })();
+/* ============================================================
+ * SmartLearningTracker — Autonomous Learning Progress Monitor
+ *
+ * 7 engines: Topic Extraction, Comprehension Signal Detection,
+ * Knowledge Gap Detection, Learning Velocity Tracking,
+ * Mastery Scoring, Learning Health Scoring, Insight Generation.
+ *
+ * Keyboard shortcut: Alt+Shift+8
+ * 65+ tests in tests/smart-learning-tracker.test.js
+ * ============================================================ */
+const SmartLearningTracker = (function () {
+  'use strict';
+
+  var STORAGE_KEY = 'smartLearningTracker';
+  var CONFIG_KEY = 'smartLearningTrackerConfig';
+  var DEBOUNCE_MS = 700;
+  var MAX_MESSAGES = 1000;
+  var MAX_TOPICS = 200;
+  var MAX_INSIGHTS = 50;
+  var MAX_GAPS = 100;
+  var MAX_VELOCITY = 200;
+  var TOAST_COOLDOWN_MS = 300000;
+  var _panelEl = null;
+  var _visible = false;
+  var _debounceTimer = null;
+  var _badgeEl = null;
+  var _lastToastTime = 0;
+  var _observer = null;
+
+  /* ── Topic Categories ── */
+  var CATEGORIES = {
+    programming: { id: 'programming', name: 'Programming', emoji: '💻', patterns: [/\b(function|variable|class|method|api|algorithm|loop|array|object|string|integer|boolean|async|await|promise|callback|closure|recursion|regex|sql|css|html|javascript|python|java|react|node|typescript|git|docker|database|frontend|backend|server|client|component|module|import|export|compiler|interpreter|runtime|framework|library|debug|deploy|endpoint|middleware|webhook|socket|thread|mutex|semaphore|pointer|struct|enum|interface|generic|template|polymorphism|inheritance|encapsulation|abstraction)\b/i] },
+    math: { id: 'math', name: 'Mathematics', emoji: '📐', patterns: [/\b(equation|formula|calculus|algebra|geometry|matrix|vector|derivative|integral|probability|statistics|regression|logarithm|exponent|polynomial|theorem|proof|trigonometry|factorial|permutation|combination|linear|quadratic|eigenvalue|determinant|gradient|optimization|convergence)\b/i] },
+    science: { id: 'science', name: 'Science', emoji: '🔬', patterns: [/\b(hypothesis|experiment|molecule|atom|cell|gene|dna|protein|evolution|quantum|physics|chemistry|biology|ecology|neuroscience|thermodynamics|entropy|gravity|relativity|photosynthesis|metabolism|mitosis|meiosis|enzyme|catalyst|isotope|wavelength|spectrum)\b/i] },
+    language: { id: 'language', name: 'Language', emoji: '🌐', patterns: [/\b(grammar|syntax|vocabulary|conjugat|tense|pronoun|adjective|adverb|preposition|clause|idiom|metaphor|simile|rhetoric|etymology|phonetic|morphology|semantics|pragmatics|translation|fluency|dialect)\b/i] },
+    design: { id: 'design', name: 'Design', emoji: '🎨', patterns: [/\b(layout|typography|color theory|whitespace|grid|responsive|ux|ui|wireframe|prototype|figma|sketch|accessibility|contrast|hierarchy|alignment|palette|branding|animation|transition|illustration|iconography)\b/i] },
+    business: { id: 'business', name: 'Business', emoji: '📊', patterns: [/\b(revenue|profit|market|strategy|roi|kpi|stakeholder|pipeline|conversion|retention|churn|acquisition|scalab|pivot|runway|valuation|equity|margin|funnel|segmentation|positioning|competitive advantage|supply chain|logistics)\b/i] },
+    general: { id: 'general', name: 'General', emoji: '📚', patterns: [] }
+  };
+
+  /* ── Comprehension Signals ── */
+  var COMPREHENSION_SIGNALS = {
+    understanding: {
+      id: 'understanding', name: 'Understanding', emoji: '✅', weight: 1.0,
+      patterns: [/\bI see\b/i, /\bmakes? sense\b/i, /\bgot it\b/i, /\bnow I understand\b/i, /\boh,? that'?s/i, /\bso basically\b/i, /\bah,? (ok|okay|right|I see)\b/i, /\bthat clarifies\b/i, /\bnow I get it\b/i, /\bcrystal clear\b/i, /\bthat explains\b/i, /\bokay,? so\b/i]
+    },
+    confusion: {
+      id: 'confusion', name: 'Confusion', emoji: '❓', weight: 1.0,
+      patterns: [/\bI don'?t (get|understand)\b/i, /\bstill confused\b/i, /\bwhat do you mean\b/i, /\bcan you explain (again|that again|it again|more)\b/i, /\bI'?m lost\b/i, /\bhuh\b/i, /\bwait,? what\b/i, /\bthat doesn'?t make sense\b/i, /\bI'?m not sure I follow\b/i, /\bcan you clarify\b/i, /\bI'?m struggling with\b/i, /\bcould you (rephrase|simplify)\b/i]
+    },
+    application: {
+      id: 'application', name: 'Application', emoji: '🔧', weight: 1.5,
+      patterns: [/\blet me try\b/i, /\bso if I\b/i, /\bI could use this for\b/i, /\bwould this work for\b/i, /\bso in my case\b/i, /\bI'?ll apply this\b/i, /\bfor example,? (if I|I could)\b/i, /\bwhat if I used\b/i, /\bso in practice\b/i, /\bI want to use this\b/i]
+    }
+  };
+
+  /* ── Mastery Tiers ── */
+  var MASTERY_TIERS = [
+    { id: 'expert', name: 'Expert', emoji: '🏆', min: 81, max: 100, color: '#22c55e' },
+    { id: 'advanced', name: 'Advanced', emoji: '⭐', min: 61, max: 80, color: '#3b82f6' },
+    { id: 'intermediate', name: 'Intermediate', emoji: '📈', min: 41, max: 60, color: '#eab308' },
+    { id: 'beginner', name: 'Beginner', emoji: '🌱', min: 21, max: 40, color: '#f97316' },
+    { id: 'novice', name: 'Novice', emoji: '🔰', min: 0, max: 20, color: '#ef4444' }
+  ];
+
+  /* ── Health Tiers ── */
+  var HEALTH_TIERS = [
+    { id: 'exceptional', name: 'Exceptional', emoji: '🌟', min: 81, max: 100, color: '#22c55e' },
+    { id: 'strong', name: 'Strong', emoji: '💪', min: 61, max: 80, color: '#3b82f6' },
+    { id: 'moderate', name: 'Moderate', emoji: '📊', min: 41, max: 60, color: '#eab308' },
+    { id: 'struggling', name: 'Struggling', emoji: '⚠️', min: 21, max: 40, color: '#f97316' },
+    { id: 'stalled', name: 'Stalled', emoji: '🛑', min: 0, max: 20, color: '#ef4444' }
+  ];
+
+  /* ── Sensitivity Presets ── */
+  var SENSITIVITIES = {
+    low: { signalThreshold: 0.7, gapThreshold: 3, insightMinPriority: 0.6 },
+    medium: { signalThreshold: 0.5, gapThreshold: 2, insightMinPriority: 0.4 },
+    high: { signalThreshold: 0.3, gapThreshold: 1, insightMinPriority: 0.2 }
+  };
+
+  /* ── Insight Types ── */
+  var INSIGHT_TYPES = {
+    MASTERY_PROGRESS: { id: 'mastery_progress', name: 'Mastery Progress', emoji: '📈' },
+    KNOWLEDGE_GAP: { id: 'knowledge_gap', name: 'Knowledge Gap', emoji: '🕳️' },
+    VELOCITY_CHANGE: { id: 'velocity_change', name: 'Velocity Change', emoji: '⚡' },
+    TOPIC_SUGGESTION: { id: 'topic_suggestion', name: 'Topic Suggestion', emoji: '💡' },
+    STRENGTH_RECOGNITION: { id: 'strength_recognition', name: 'Strength', emoji: '🏅' }
+  };
+
+  /* ── Default State/Config ── */
+  var _defaultState = function () {
+    return {
+      topics: [],
+      messages: [],
+      gaps: [],
+      velocityHistory: [],
+      insights: [],
+      currentScore: 50,
+      lastAnalyzed: null
+    };
+  };
+
+  var _defaultConfig = function () {
+    return {
+      enabled: true,
+      sensitivity: 'medium',
+      showToasts: true,
+      autoTrack: true
+    };
+  };
+
+  var _state = _defaultState();
+  var _config = _defaultConfig();
+
+  /* ── Persistence ── */
+  function _save() {
+    try { SafeStorage.set(STORAGE_KEY, JSON.stringify(_state)); } catch (e) { /* ignore */ }
+  }
+  function _load() {
+    try {
+      var raw = SafeStorage.get(STORAGE_KEY);
+      if (raw) {
+        var parsed = JSON.parse(raw);
+        if (typeof sanitizeStorageObject === 'function') parsed = sanitizeStorageObject(parsed);
+        var def = _defaultState();
+        for (var k in def) {
+          if (parsed[k] !== undefined) def[k] = parsed[k];
+        }
+        _state = def;
+      }
+    } catch (e) { _state = _defaultState(); }
+    try {
+      var rawC = SafeStorage.get(CONFIG_KEY);
+      if (rawC) {
+        var parsedC = JSON.parse(rawC);
+        var defC = _defaultConfig();
+        for (var k2 in defC) {
+          if (parsedC[k2] !== undefined) defC[k2] = parsedC[k2];
+        }
+        _config = defC;
+      }
+    } catch (e) { _config = _defaultConfig(); }
+  }
+  function _saveConfig() {
+    try { SafeStorage.set(CONFIG_KEY, JSON.stringify(_config)); } catch (e) { /* ignore */ }
+  }
+
+  /* ── Helpers ── */
+  function _now() { return Date.now(); }
+  function _clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+  function _sparkline(arr, w, h) {
+    if (!arr || arr.length < 2) return '';
+    var max = -Infinity, min = Infinity;
+    for (var i = 0; i < arr.length; i++) {
+      if (arr[i] > max) max = arr[i];
+      if (arr[i] < min) min = arr[i];
+    }
+    var range = max - min || 1;
+    var step = w / (arr.length - 1);
+    var pts = [];
+    for (var j = 0; j < arr.length; j++) {
+      var x = (j * step).toFixed(1);
+      var y = (h - ((arr[j] - min) / range) * h).toFixed(1);
+      pts.push((j === 0 ? 'M' : 'L') + x + ',' + y);
+    }
+    return pts.join(' ');
+  }
+
+  /* ── Engine 1: Topic Extraction ── */
+  function extractTopics(text, role) {
+    if (!text || typeof text !== 'string') return [];
+    var results = [];
+    var lowerText = text.toLowerCase();
+    var catKeys = Object.keys(CATEGORIES);
+
+    for (var i = 0; i < catKeys.length; i++) {
+      var catKey = catKeys[i];
+      var cat = CATEGORIES[catKey];
+      if (catKey === 'general') continue;
+      for (var p = 0; p < cat.patterns.length; p++) {
+        var matches = text.match(cat.patterns[p]);
+        if (matches) {
+          var match = matches[0].toLowerCase().trim();
+          // Check if topic already in results
+          var found = false;
+          for (var r = 0; r < results.length; r++) {
+            if (results[r].topic === match) { found = true; break; }
+          }
+          if (!found) {
+            results.push({
+              topic: match,
+              category: catKey,
+              confidence: 0.8,
+              firstSeen: _now(),
+              lastSeen: _now()
+            });
+          }
+        }
+      }
+    }
+
+    // Extract question-based topics (what is X, how does X work, explain X)
+    var questionPatterns = [
+      /\bwhat (?:is|are) (?:a |the )?(\w[\w\s]{1,30}?)(?:\?|$|\.)/gi,
+      /\bhow (?:does|do) (\w[\w\s]{1,30}?) work/gi,
+      /\bexplain (\w[\w\s]{1,30}?)(?:\?|$|\.| to)/gi,
+      /\blearn(?:ing)? (?:about )?(\w[\w\s]{1,30}?)(?:\?|$|\.)/gi
+    ];
+    for (var q = 0; q < questionPatterns.length; q++) {
+      var qm;
+      questionPatterns[q].lastIndex = 0;
+      while ((qm = questionPatterns[q].exec(text)) !== null) {
+        var topicName = qm[1].toLowerCase().trim();
+        if (topicName.length < 2 || topicName.length > 40) continue;
+        var dup = false;
+        for (var d = 0; d < results.length; d++) {
+          if (results[d].topic === topicName) { dup = true; break; }
+        }
+        if (!dup) {
+          // Categorize
+          var assignedCat = 'general';
+          for (var c = 0; c < catKeys.length; c++) {
+            if (catKeys[c] === 'general') continue;
+            var cPatterns = CATEGORIES[catKeys[c]].patterns;
+            for (var cp = 0; cp < cPatterns.length; cp++) {
+              if (cPatterns[cp].test(topicName)) { assignedCat = catKeys[c]; break; }
+            }
+            if (assignedCat !== 'general') break;
+          }
+          results.push({
+            topic: topicName,
+            category: assignedCat,
+            confidence: 0.6,
+            firstSeen: _now(),
+            lastSeen: _now()
+          });
+        }
+      }
+    }
+    return results;
+  }
+
+  /* ── Engine 2: Comprehension Signal Detection ── */
+  function detectComprehension(text) {
+    if (!text || typeof text !== 'string') return { signals: [], comprehensionScore: 50 };
+    var signals = [];
+    var sensitivity = SENSITIVITIES[_config.sensitivity] || SENSITIVITIES.medium;
+    var sigKeys = Object.keys(COMPREHENSION_SIGNALS);
+
+    for (var i = 0; i < sigKeys.length; i++) {
+      var sigType = COMPREHENSION_SIGNALS[sigKeys[i]];
+      for (var p = 0; p < sigType.patterns.length; p++) {
+        if (sigType.patterns[p].test(text)) {
+          signals.push({
+            type: sigType.id,
+            pattern: sigType.patterns[p].source,
+            confidence: sigType.weight >= sensitivity.signalThreshold ? sigType.weight : sigType.weight * 0.8
+          });
+        }
+      }
+    }
+
+    // Compute comprehension score
+    var understandCount = 0, confuseCount = 0, applyCount = 0;
+    for (var s = 0; s < signals.length; s++) {
+      if (signals[s].type === 'understanding') understandCount++;
+      else if (signals[s].type === 'confusion') confuseCount++;
+      else if (signals[s].type === 'application') applyCount++;
+    }
+    var score = 50;
+    score += understandCount * 15;
+    score += applyCount * 20;
+    score -= confuseCount * 15;
+    score = _clamp(Math.round(score), 0, 100);
+
+    return { signals: signals, comprehensionScore: score };
+  }
+
+  /* ── Engine 3: Knowledge Gap Detection ── */
+  function detectGaps() {
+    var gaps = [];
+    var sensitivity = SENSITIVITIES[_config.sensitivity] || SENSITIVITIES.medium;
+
+    for (var i = 0; i < _state.topics.length; i++) {
+      var topic = _state.topics[i];
+      var confusionCount = 0;
+      var understandingCount = 0;
+      var lastConfusion = null;
+
+      // Count signals from messages related to this topic
+      for (var m = 0; m < _state.messages.length; m++) {
+        var msg = _state.messages[m];
+        if (!msg.topics) continue;
+        var relatedToTopic = false;
+        for (var t = 0; t < msg.topics.length; t++) {
+          if (msg.topics[t] === topic.topic) { relatedToTopic = true; break; }
+        }
+        if (!relatedToTopic) continue;
+        if (msg.signals) {
+          for (var s = 0; s < msg.signals.length; s++) {
+            if (msg.signals[s].type === 'confusion') {
+              confusionCount++;
+              lastConfusion = msg.timestamp;
+            } else if (msg.signals[s].type === 'understanding') {
+              understandingCount++;
+            }
+          }
+        }
+      }
+
+      if (confusionCount >= sensitivity.gapThreshold && confusionCount > understandingCount) {
+        var gapScore = _clamp(Math.round((confusionCount / (confusionCount + understandingCount + 1)) * 100), 0, 100);
+        var suggestions = [];
+        if (confusionCount > 3) suggestions.push('Try breaking this topic into smaller sub-topics');
+        if (understandingCount === 0) suggestions.push('Ask for a simple analogy or example');
+        suggestions.push('Review the basics of ' + topic.topic);
+        gaps.push({
+          topic: topic.topic,
+          gapScore: gapScore,
+          confusionCount: confusionCount,
+          understandingCount: understandingCount,
+          lastConfusion: lastConfusion,
+          suggestions: suggestions
+        });
+      }
+    }
+
+    // Sort by gap score descending
+    gaps.sort(function (a, b) { return b.gapScore - a.gapScore; });
+    return gaps.slice(0, MAX_GAPS);
+  }
+
+  /* ── Engine 4: Learning Velocity Tracker ── */
+  function getVelocity() {
+    var now = _now();
+    var masteredTopics = [];
+    for (var i = 0; i < _state.topics.length; i++) {
+      if ((_state.topics[i].masteryScore || 0) >= 40) {
+        masteredTopics.push(_state.topics[i]);
+      }
+    }
+    var elapsed = 1;
+    if (_state.messages.length > 1) {
+      var first = _state.messages[0].timestamp || now;
+      var last = _state.messages[_state.messages.length - 1].timestamp || now;
+      elapsed = Math.max(1, (last - first) / 3600000); // hours
+    }
+    var topicsPerHour = masteredTopics.length / elapsed;
+
+    // Compute acceleration from velocity history
+    var acceleration = 0;
+    var history = _state.velocityHistory;
+    if (history.length >= 2) {
+      var recent = history[history.length - 1].topicsPerHour || 0;
+      var prev = history[history.length - 2].topicsPerHour || 0;
+      acceleration = recent - prev;
+    }
+
+    var phase = 'steady';
+    if (acceleration > 0.1) phase = 'accelerating';
+    else if (acceleration < -0.1) phase = 'decelerating';
+    else if (topicsPerHour < 0.05 && _state.topics.length > 0) phase = 'stalled';
+
+    return {
+      topicsPerHour: Math.round(topicsPerHour * 100) / 100,
+      acceleration: Math.round(acceleration * 100) / 100,
+      phase: phase,
+      trend: history.map(function (h) { return h.topicsPerHour; })
+    };
+  }
+
+  /* ── Engine 5: Mastery Scorer ── */
+  function getMastery(topicName) {
+    if (!topicName) return null;
+    var lowerName = topicName.toLowerCase();
+    for (var i = 0; i < _state.topics.length; i++) {
+      if (_state.topics[i].topic === lowerName) {
+        var topic = _state.topics[i];
+        var score = topic.masteryScore || 0;
+        var tier = _classifyMasteryTier(score);
+        return { score: score, tier: tier, topic: topic.topic, category: topic.category };
+      }
+    }
+    return null;
+  }
+
+  function getAllMastery() {
+    var result = [];
+    for (var i = 0; i < _state.topics.length; i++) {
+      var t = _state.topics[i];
+      var score = t.masteryScore || 0;
+      result.push({ topic: t.topic, score: score, tier: _classifyMasteryTier(score), category: t.category });
+    }
+    result.sort(function (a, b) { return b.score - a.score; });
+    return result;
+  }
+
+  function _classifyMasteryTier(score) {
+    for (var i = 0; i < MASTERY_TIERS.length; i++) {
+      if (score >= MASTERY_TIERS[i].min && score <= MASTERY_TIERS[i].max) return MASTERY_TIERS[i];
+    }
+    return MASTERY_TIERS[MASTERY_TIERS.length - 1];
+  }
+
+  function _updateMastery(topicName, signals) {
+    var lowerName = topicName.toLowerCase();
+    for (var i = 0; i < _state.topics.length; i++) {
+      if (_state.topics[i].topic === lowerName) {
+        var delta = 0;
+        for (var s = 0; s < signals.length; s++) {
+          if (signals[s].type === 'understanding') delta += 8;
+          else if (signals[s].type === 'application') delta += 12;
+          else if (signals[s].type === 'confusion') delta -= 6;
+        }
+        _state.topics[i].masteryScore = _clamp((_state.topics[i].masteryScore || 0) + delta, 0, 100);
+        break;
+      }
+    }
+  }
+
+  /* ── Engine 6: Learning Health Scorer ── */
+  function computeScore() {
+    var vel = getVelocity();
+    var gaps = detectGaps();
+    var allMastery = getAllMastery();
+
+    // Velocity component (25%): normalized to 0-100
+    var velScore = _clamp(Math.round(vel.topicsPerHour * 50), 0, 100);
+
+    // Gap closure rate (25%): fewer gaps = better
+    var gapScore = 100;
+    if (_state.topics.length > 0) {
+      gapScore = _clamp(Math.round(100 - (gaps.length / Math.max(1, _state.topics.length)) * 100), 0, 100);
+    }
+
+    // Mastery progress (25%): average mastery
+    var masteryAvg = 50;
+    if (allMastery.length > 0) {
+      var sum = 0;
+      for (var i = 0; i < allMastery.length; i++) sum += allMastery[i].score;
+      masteryAvg = Math.round(sum / allMastery.length);
+    }
+
+    // Topic diversity (25%): number of unique categories
+    var cats = {};
+    for (var j = 0; j < _state.topics.length; j++) {
+      cats[_state.topics[j].category] = true;
+    }
+    var catCount = Object.keys(cats).length;
+    var diversityScore = _clamp(Math.round(catCount / 5 * 100), 0, 100);
+
+    var composite = Math.round(velScore * 0.25 + gapScore * 0.25 + masteryAvg * 0.25 + diversityScore * 0.25);
+    return _clamp(composite, 0, 100);
+  }
+
+  function classifyTier(score) {
+    for (var i = 0; i < HEALTH_TIERS.length; i++) {
+      if (score >= HEALTH_TIERS[i].min && score <= HEALTH_TIERS[i].max) return HEALTH_TIERS[i];
+    }
+    return HEALTH_TIERS[HEALTH_TIERS.length - 1];
+  }
+
+  /* ── Engine 7: Insight Generation ── */
+  function generateInsights() {
+    var insights = [];
+    var allMastery = getAllMastery();
+    var gaps = detectGaps();
+    var vel = getVelocity();
+
+    // Mastery progress insights
+    for (var i = 0; i < allMastery.length; i++) {
+      if (allMastery[i].score >= 61) {
+        insights.push({
+          type: INSIGHT_TYPES.MASTERY_PROGRESS.id,
+          message: 'Great progress on ' + allMastery[i].topic + '! You\'re at ' + allMastery[i].tier.name + ' level.',
+          priority: 0.7,
+          topic: allMastery[i].topic,
+          timestamp: _now()
+        });
+      }
+    }
+
+    // Knowledge gap insights
+    for (var g = 0; g < gaps.length; g++) {
+      insights.push({
+        type: INSIGHT_TYPES.KNOWLEDGE_GAP.id,
+        message: 'Consider revisiting ' + gaps[g].topic + ' — you seem stuck (' + gaps[g].confusionCount + ' confusion signals).',
+        priority: 0.8,
+        topic: gaps[g].topic,
+        timestamp: _now()
+      });
+    }
+
+    // Velocity insights
+    if (vel.phase === 'accelerating') {
+      insights.push({
+        type: INSIGHT_TYPES.VELOCITY_CHANGE.id,
+        message: 'Your learning pace is accelerating! Keep it up.',
+        priority: 0.6,
+        topic: null,
+        timestamp: _now()
+      });
+    } else if (vel.phase === 'stalled') {
+      insights.push({
+        type: INSIGHT_TYPES.VELOCITY_CHANGE.id,
+        message: 'Your learning seems stalled. Try exploring a new topic or revisiting fundamentals.',
+        priority: 0.9,
+        topic: null,
+        timestamp: _now()
+      });
+    }
+
+    // Strength recognition
+    if (allMastery.length > 0 && allMastery[0].score >= 41) {
+      insights.push({
+        type: INSIGHT_TYPES.STRENGTH_RECOGNITION.id,
+        message: 'Your strongest area is ' + allMastery[0].topic + ' (' + allMastery[0].score + '/100).',
+        priority: 0.5,
+        topic: allMastery[0].topic,
+        timestamp: _now()
+      });
+    }
+
+    // Topic suggestions based on gaps
+    for (var t = 0; t < gaps.length && t < 2; t++) {
+      if (gaps[t].suggestions.length > 0) {
+        insights.push({
+          type: INSIGHT_TYPES.TOPIC_SUGGESTION.id,
+          message: gaps[t].suggestions[0],
+          priority: 0.65,
+          topic: gaps[t].topic,
+          timestamp: _now()
+        });
+      }
+    }
+
+    // Sort by priority descending
+    insights.sort(function (a, b) { return b.priority - a.priority; });
+
+    // Filter by sensitivity
+    var sensitivity = SENSITIVITIES[_config.sensitivity] || SENSITIVITIES.medium;
+    insights = insights.filter(function (ins) { return ins.priority >= sensitivity.insightMinPriority; });
+
+    return insights.slice(0, MAX_INSIGHTS);
+  }
+
+  /* ── Message Analysis ── */
+  function analyzeMessage(text, role) {
+    if (!_config.enabled || !text || typeof text !== 'string') return;
+    var ts = _now();
+
+    // Extract topics
+    var extracted = extractTopics(text, role);
+    var topicNames = [];
+    for (var i = 0; i < extracted.length; i++) {
+      topicNames.push(extracted[i].topic);
+      // Merge into state topics
+      var exists = false;
+      for (var j = 0; j < _state.topics.length; j++) {
+        if (_state.topics[j].topic === extracted[i].topic) {
+          _state.topics[j].lastSeen = ts;
+          exists = true;
+          break;
+        }
+      }
+      if (!exists && _state.topics.length < MAX_TOPICS) {
+        _state.topics.push({
+          topic: extracted[i].topic,
+          category: extracted[i].category,
+          confidence: extracted[i].confidence,
+          firstSeen: ts,
+          lastSeen: ts,
+          masteryScore: 10
+        });
+      }
+    }
+
+    // Detect comprehension signals (user messages only)
+    var signals = [];
+    if (role === 'user') {
+      var comp = detectComprehension(text);
+      signals = comp.signals;
+      // Update mastery for related topics
+      for (var t = 0; t < topicNames.length; t++) {
+        _updateMastery(topicNames[t], signals);
+      }
+      // If no specific topics but signals exist, update most recent topics
+      if (topicNames.length === 0 && signals.length > 0 && _state.topics.length > 0) {
+        var recent = _state.topics[_state.topics.length - 1];
+        _updateMastery(recent.topic, signals);
+      }
+    }
+
+    // Record message
+    _state.messages.push({
+      text: text.slice(0, 500),
+      role: role || 'unknown',
+      timestamp: ts,
+      topics: topicNames,
+      signals: signals.map(function (s) { return { type: s.type, confidence: s.confidence }; })
+    });
+    if (_state.messages.length > MAX_MESSAGES) {
+      _state.messages = _state.messages.slice(-MAX_MESSAGES);
+    }
+
+    // Update velocity history
+    var vel = getVelocity();
+    _state.velocityHistory.push({ timestamp: ts, topicsPerHour: vel.topicsPerHour });
+    if (_state.velocityHistory.length > MAX_VELOCITY) {
+      _state.velocityHistory = _state.velocityHistory.slice(-MAX_VELOCITY);
+    }
+
+    // Update gaps and score
+    _state.gaps = detectGaps();
+    _state.currentScore = computeScore();
+    _state.insights = generateInsights();
+    _state.lastAnalyzed = ts;
+
+    _save();
+    _updateBadge();
+
+    // Toast for significant insights
+    if (_config.showToasts && _state.insights.length > 0) {
+      var topInsight = _state.insights[0];
+      if (topInsight.priority >= 0.7 && ts - _lastToastTime > TOAST_COOLDOWN_MS) {
+        _lastToastTime = ts;
+        _showToast(topInsight.message);
+      }
+    }
+  }
+
+  /* ── UI: Badge ── */
+  function _createBadge() {
+    if (typeof document === 'undefined') return;
+    if (_badgeEl) return;
+    _badgeEl = document.createElement('div');
+    _badgeEl.id = 'smart-learning-badge';
+    _badgeEl.style.cssText = 'position:fixed;bottom:180px;right:18px;width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;cursor:pointer;z-index:9999;box-shadow:0 2px 8px rgba(0,0,0,.25);transition:background .3s;user-select:none;';
+    _badgeEl.title = 'Learning Tracker (Alt+Shift+8)';
+    _badgeEl.onclick = toggle;
+    document.body.appendChild(_badgeEl);
+  }
+
+  function _updateBadge() {
+    if (!_badgeEl) return;
+    var score = _state.currentScore;
+    var tier = classifyTier(score);
+    _badgeEl.textContent = score;
+    _badgeEl.style.background = tier.color;
+    _badgeEl.style.color = '#fff';
+  }
+
+  /* ── UI: Toast ── */
+  function _showToast(msg) {
+    if (typeof document === 'undefined') return;
+    var t = document.createElement('div');
+    t.style.cssText = 'position:fixed;bottom:80px;right:20px;background:#1e293b;color:#f1f5f9;padding:12px 20px;border-radius:10px;font-size:13px;z-index:10001;max-width:320px;box-shadow:0 4px 16px rgba(0,0,0,.3);transition:opacity .4s;';
+    t.textContent = '📖 ' + msg;
+    document.body.appendChild(t);
+    setTimeout(function () { t.style.opacity = '0'; }, 4000);
+    setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); }, 4500);
+  }
+
+  /* ── UI: Panel ── */
+  function _switchTab(tabId) {
+    if (!_panelEl) return;
+    var tabs = _panelEl.querySelectorAll('[data-tab]');
+    var panes = _panelEl.querySelectorAll('[data-pane]');
+    for (var i = 0; i < tabs.length; i++) {
+      tabs[i].style.borderBottom = tabs[i].getAttribute('data-tab') === tabId ? '2px solid #3b82f6' : '2px solid transparent';
+      tabs[i].style.color = tabs[i].getAttribute('data-tab') === tabId ? '#3b82f6' : '#94a3b8';
+    }
+    for (var j = 0; j < panes.length; j++) {
+      panes[j].style.display = panes[j].getAttribute('data-pane') === tabId ? 'block' : 'none';
+    }
+  }
+
+  function _renderPanel() {
+    if (!_panelEl) return;
+    var score = _state.currentScore;
+    var tier = classifyTier(score);
+    var gaps = _state.gaps;
+    var allMastery = getAllMastery();
+    var vel = getVelocity();
+    var insights = _state.insights;
+
+    var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">';
+    html += '<span style="font-size:16px;font-weight:700;">📖 Learning Tracker</span>';
+    html += '<div style="display:flex;gap:8px;align-items:center;">';
+    html += '<select id="slt-sensitivity" style="font-size:11px;padding:2px 6px;border-radius:4px;border:1px solid #475569;background:#1e293b;color:#e2e8f0;">';
+    var sensKeys = Object.keys(SENSITIVITIES);
+    for (var s = 0; s < sensKeys.length; s++) {
+      html += '<option value="' + sensKeys[s] + '"' + (_config.sensitivity === sensKeys[s] ? ' selected' : '') + '>' + sensKeys[s] + '</option>';
+    }
+    html += '</select>';
+    html += '<label style="font-size:11px;display:flex;align-items:center;gap:4px;color:#94a3b8;"><input type="checkbox" id="slt-enabled"' + (_config.enabled ? ' checked' : '') + '> On</label>';
+    html += '<button id="slt-close" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:18px;">✕</button>';
+    html += '</div></div>';
+
+    // Tabs
+    html += '<div style="display:flex;gap:16px;margin-bottom:12px;border-bottom:1px solid #334155;padding-bottom:6px;">';
+    var tabNames = [['overview', 'Overview'], ['topics', 'Topics'], ['gaps', 'Gaps'], ['insights', 'Insights']];
+    for (var tn = 0; tn < tabNames.length; tn++) {
+      html += '<span data-tab="' + tabNames[tn][0] + '" style="cursor:pointer;font-size:12px;padding-bottom:4px;border-bottom:2px solid ' + (tn === 0 ? '#3b82f6' : 'transparent') + ';color:' + (tn === 0 ? '#3b82f6' : '#94a3b8') + ';">' + tabNames[tn][1] + '</span>';
+    }
+    html += '</div>';
+
+    // ─── Overview Pane ───
+    html += '<div data-pane="overview" style="display:block;">';
+    html += '<div style="text-align:center;margin:16px 0;">';
+    html += '<svg width="120" height="70" viewBox="0 0 120 70"><path d="M10 60 A50 50 0 0 1 110 60" fill="none" stroke="#334155" stroke-width="8" stroke-linecap="round"/>';
+    var angle = Math.PI + (score / 100) * Math.PI;
+    var cx = 60 + 50 * Math.cos(angle);
+    var cy = 60 + 50 * Math.sin(angle);
+    html += '<path d="M10 60 A50 50 0 0 1 ' + cx.toFixed(1) + ' ' + cy.toFixed(1) + '" fill="none" stroke="' + tier.color + '" stroke-width="8" stroke-linecap="round"/>';
+    html += '<text x="60" y="50" text-anchor="middle" fill="' + tier.color + '" font-size="20" font-weight="700">' + score + '</text>';
+    html += '<text x="60" y="66" text-anchor="middle" fill="#94a3b8" font-size="10">' + tier.emoji + ' ' + tier.name + '</text>';
+    html += '</svg></div>';
+    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;">';
+    html += '<div style="background:#1e293b;padding:8px;border-radius:6px;text-align:center;"><div style="color:#94a3b8;">Topics</div><div style="font-size:18px;font-weight:700;">' + _state.topics.length + '</div></div>';
+    html += '<div style="background:#1e293b;padding:8px;border-radius:6px;text-align:center;"><div style="color:#94a3b8;">Gaps</div><div style="font-size:18px;font-weight:700;color:' + (gaps.length > 0 ? '#f97316' : '#22c55e') + ';">' + gaps.length + '</div></div>';
+    html += '<div style="background:#1e293b;padding:8px;border-radius:6px;text-align:center;"><div style="color:#94a3b8;">Velocity</div><div style="font-size:14px;font-weight:700;">' + vel.topicsPerHour + '/hr</div></div>';
+    html += '<div style="background:#1e293b;padding:8px;border-radius:6px;text-align:center;"><div style="color:#94a3b8;">Phase</div><div style="font-size:14px;font-weight:700;">' + vel.phase + '</div></div>';
+    html += '</div>';
+    if (vel.trend.length >= 2) {
+      html += '<div style="margin-top:12px;"><svg width="100%" height="40" viewBox="0 0 200 40"><path d="' + _sparkline(vel.trend, 200, 35) + '" fill="none" stroke="#3b82f6" stroke-width="1.5"/></svg></div>';
+    }
+    html += '</div>';
+
+    // ─── Topics Pane ───
+    html += '<div data-pane="topics" style="display:none;max-height:320px;overflow-y:auto;">';
+    if (allMastery.length === 0) {
+      html += '<div style="color:#64748b;text-align:center;padding:24px;">No topics tracked yet. Start learning!</div>';
+    }
+    for (var m = 0; m < allMastery.length; m++) {
+      var mt = allMastery[m];
+      var catInfo = CATEGORIES[mt.category] || CATEGORIES.general;
+      html += '<div style="padding:8px;border-bottom:1px solid #1e293b;">';
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;">';
+      html += '<span style="font-size:12px;">' + catInfo.emoji + ' ' + mt.topic + '</span>';
+      html += '<span style="font-size:11px;color:' + mt.tier.color + ';">' + mt.tier.emoji + ' ' + mt.score + '</span>';
+      html += '</div>';
+      html += '<div style="height:4px;background:#1e293b;border-radius:2px;margin-top:4px;"><div style="height:100%;width:' + mt.score + '%;background:' + mt.tier.color + ';border-radius:2px;"></div></div>';
+      html += '</div>';
+    }
+    html += '</div>';
+
+    // ─── Gaps Pane ───
+    html += '<div data-pane="gaps" style="display:none;max-height:320px;overflow-y:auto;">';
+    if (gaps.length === 0) {
+      html += '<div style="color:#64748b;text-align:center;padding:24px;">No knowledge gaps detected! 🎉</div>';
+    }
+    for (var g = 0; g < gaps.length; g++) {
+      html += '<div style="padding:8px;border-bottom:1px solid #1e293b;">';
+      html += '<div style="font-size:12px;font-weight:600;color:#f97316;">🕳️ ' + gaps[g].topic + ' <span style="font-weight:400;color:#94a3b8;">(gap: ' + gaps[g].gapScore + ')</span></div>';
+      html += '<div style="font-size:11px;color:#94a3b8;margin-top:2px;">❓ ' + gaps[g].confusionCount + ' confused · ✅ ' + gaps[g].understandingCount + ' understood</div>';
+      for (var sg = 0; sg < gaps[g].suggestions.length; sg++) {
+        html += '<div style="font-size:11px;color:#3b82f6;margin-top:2px;">💡 ' + gaps[g].suggestions[sg] + '</div>';
+      }
+      html += '</div>';
+    }
+    html += '</div>';
+
+    // ─── Insights Pane ───
+    html += '<div data-pane="insights" style="display:none;max-height:320px;overflow-y:auto;">';
+    if (insights.length === 0) {
+      html += '<div style="color:#64748b;text-align:center;padding:24px;">No insights yet. Keep chatting!</div>';
+    }
+    for (var ins = 0; ins < insights.length; ins++) {
+      var insType = null;
+      var itKeys = Object.keys(INSIGHT_TYPES);
+      for (var ik = 0; ik < itKeys.length; ik++) {
+        if (INSIGHT_TYPES[itKeys[ik]].id === insights[ins].type) { insType = INSIGHT_TYPES[itKeys[ik]]; break; }
+      }
+      var emoji = insType ? insType.emoji : '📝';
+      html += '<div style="padding:8px;border-bottom:1px solid #1e293b;font-size:12px;">';
+      html += '<span>' + emoji + ' ' + insights[ins].message + '</span>';
+      html += '</div>';
+    }
+    html += '</div>';
+
+    _panelEl.innerHTML = html;
+
+    // Bind events
+    var closeBtn = _panelEl.querySelector('#slt-close');
+    if (closeBtn) closeBtn.onclick = hide;
+    var sensSelect = _panelEl.querySelector('#slt-sensitivity');
+    if (sensSelect) sensSelect.onchange = function () { setSensitivity(this.value); };
+    var enableCheck = _panelEl.querySelector('#slt-enabled');
+    if (enableCheck) enableCheck.onchange = function () { _config.enabled = this.checked; _saveConfig(); _updateBadge(); };
+    var tabEls = _panelEl.querySelectorAll('[data-tab]');
+    for (var te = 0; te < tabEls.length; te++) {
+      tabEls[te].onclick = (function (tid) { return function () { _switchTab(tid); }; })(tabEls[te].getAttribute('data-tab'));
+    }
+  }
+
+  /* ── Toggle/Show/Hide ── */
+  function show() {
+    if (typeof document === 'undefined') return;
+    if (!_panelEl) {
+      _panelEl = document.createElement('div');
+      _panelEl.id = 'smart-learning-panel';
+      _panelEl.style.cssText = 'position:fixed;top:60px;right:18px;width:360px;max-height:520px;background:#0f172a;color:#e2e8f0;border-radius:12px;padding:16px;z-index:10000;box-shadow:0 8px 32px rgba(0,0,0,.4);overflow-y:auto;font-family:system-ui,sans-serif;';
+      document.body.appendChild(_panelEl);
+    }
+    _renderPanel();
+    _panelEl.style.display = 'block';
+    _visible = true;
+  }
+
+  function hide() {
+    if (_panelEl) _panelEl.style.display = 'none';
+    _visible = false;
+  }
+
+  function toggle() {
+    if (_visible) hide(); else show();
+  }
+
+  /* ── Config ── */
+  function setSensitivity(level) {
+    if (SENSITIVITIES[level]) {
+      _config.sensitivity = level;
+      _saveConfig();
+      if (_visible) _renderPanel();
+    }
+  }
+
+  /* ── Reset ── */
+  function reset() {
+    _state = _defaultState();
+    _save();
+    _updateBadge();
+    if (_visible) _renderPanel();
+  }
+
+  /* ── Observer ── */
+  function _attachObserver() {
+    if (typeof document === 'undefined' || typeof MutationObserver === 'undefined') return;
+    var chatContainer = document.getElementById('chat-output');
+    if (!chatContainer) return;
+    _observer = new MutationObserver(function (mutations) {
+      mutations.forEach(function (mutation) {
+        mutation.addedNodes.forEach(function (node) {
+          if (node.nodeType !== 1) return;
+          var isUser = node.classList && (node.classList.contains('user-message') || node.classList.contains('message-user'));
+          var isAssistant = node.classList && (node.classList.contains('assistant-message') || node.classList.contains('message-assistant'));
+          if (isUser || isAssistant) {
+            var text = node.textContent || '';
+            var role = isUser ? 'user' : 'assistant';
+            if (_debounceTimer) clearTimeout(_debounceTimer);
+            _debounceTimer = setTimeout(function () { analyzeMessage(text, role); }, DEBOUNCE_MS);
+          }
+        });
+      });
+    });
+    _observer.observe(chatContainer, { childList: true, subtree: true });
+  }
+
+  /* ── Keyboard shortcut ── */
+  function _attachKeyboard() {
+    if (typeof document === 'undefined') return;
+    document.addEventListener('keydown', function (e) {
+      if (e.altKey && e.shiftKey && e.key === '8') {
+        e.preventDefault();
+        toggle();
+      }
+    });
+  }
+
+  /* ── Init ── */
+  function init() {
+    _load();
+    _createBadge();
+    _updateBadge();
+    _attachKeyboard();
+    _attachObserver();
+
+    if (typeof document !== 'undefined') {
+      var toolbar = document.querySelector('#smart-features-toolbar, .toolbar-buttons, .btn-toolbar');
+      if (toolbar) {
+        var btn = document.createElement('button');
+        btn.className = 'btn-secondary';
+        btn.title = 'Learning Tracker (Alt+Shift+8)';
+        btn.textContent = '📖';
+        btn.onclick = toggle;
+        toolbar.appendChild(btn);
+      }
+    }
+  }
+
+  /* Auto-init */
+  if (typeof document !== 'undefined' && document.body) {
+    init();
+  }
+
+  return {
+    toggle: toggle,
+    show: show,
+    hide: hide,
+    reset: reset,
+    init: init,
+    analyzeMessage: analyzeMessage,
+    getState: function () { return JSON.parse(JSON.stringify(_state)); },
+    getConfig: function () { return Object.assign({}, _config); },
+    getScore: function () { return _state.currentScore; },
+    getTier: function () { return classifyTier(_state.currentScore); },
+    extractTopics: extractTopics,
+    detectComprehension: detectComprehension,
+    detectGaps: detectGaps,
+    getVelocity: getVelocity,
+    getMastery: getMastery,
+    getAllMastery: getAllMastery,
+    computeScore: computeScore,
+    classifyTier: classifyTier,
+    generateInsights: generateInsights,
+    setSensitivity: setSensitivity,
+    isEnabled: function () { return _config.enabled; },
+    setEnabled: function (v) { _config.enabled = !!v; _saveConfig(); _updateBadge(); },
+    CATEGORIES: CATEGORIES,
+    COMPREHENSION_SIGNALS: COMPREHENSION_SIGNALS,
+    MASTERY_TIERS: MASTERY_TIERS,
+    HEALTH_TIERS: HEALTH_TIERS,
+    SENSITIVITIES: SENSITIVITIES,
+    INSIGHT_TYPES: INSIGHT_TYPES,
+    _defaultState: _defaultState,
+    _defaultConfig: _defaultConfig,
+    _sparkline: _sparkline,
+    _switchTab: _switchTab,
+    _renderPanel: function () { _renderPanel(); }
+  };
+})();
