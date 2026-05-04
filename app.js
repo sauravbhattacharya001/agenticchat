@@ -53779,32 +53779,33 @@ const SmartLearningTracker = (function () {
     var gaps = [];
     var sensitivity = SENSITIVITIES[_config.sensitivity] || SENSITIVITIES.medium;
 
-    for (var i = 0; i < _state.topics.length; i++) {
-      var topic = _state.topics[i];
-      var confusionCount = 0;
-      var understandingCount = 0;
-      var lastConfusion = null;
-
-      // Count signals from messages related to this topic
-      for (var m = 0; m < _state.messages.length; m++) {
-        var msg = _state.messages[m];
-        if (!msg.topics) continue;
-        var relatedToTopic = false;
-        for (var t = 0; t < msg.topics.length; t++) {
-          if (msg.topics[t] === topic.topic) { relatedToTopic = true; break; }
-        }
-        if (!relatedToTopic) continue;
-        if (msg.signals) {
-          for (var s = 0; s < msg.signals.length; s++) {
-            if (msg.signals[s].type === 'confusion') {
-              confusionCount++;
-              lastConfusion = msg.timestamp;
-            } else if (msg.signals[s].type === 'understanding') {
-              understandingCount++;
-            }
+    // Single-pass index: build per-topic signal counts from all messages O(M)
+    var topicSignals = {}; // { topicName: { confusion: n, understanding: n, lastConfusion: ts } }
+    for (var m = 0; m < _state.messages.length; m++) {
+      var msg = _state.messages[m];
+      if (!msg.topics || !msg.signals || msg.signals.length === 0) continue;
+      for (var t = 0; t < msg.topics.length; t++) {
+        var tName = msg.topics[t];
+        if (!topicSignals[tName]) topicSignals[tName] = { confusion: 0, understanding: 0, lastConfusion: null };
+        var entry = topicSignals[tName];
+        for (var s = 0; s < msg.signals.length; s++) {
+          if (msg.signals[s].type === 'confusion') {
+            entry.confusion++;
+            entry.lastConfusion = msg.timestamp;
+          } else if (msg.signals[s].type === 'understanding') {
+            entry.understanding++;
           }
         }
       }
+    }
+
+    // Score each topic using pre-built index O(T)
+    for (var i = 0; i < _state.topics.length; i++) {
+      var topic = _state.topics[i];
+      var sig = topicSignals[topic.topic];
+      if (!sig) continue;
+      var confusionCount = sig.confusion;
+      var understandingCount = sig.understanding;
 
       if (confusionCount >= sensitivity.gapThreshold && confusionCount > understandingCount) {
         var gapScore = _clamp(Math.round((confusionCount / (confusionCount + understandingCount + 1)) * 100), 0, 100);
@@ -53817,7 +53818,7 @@ const SmartLearningTracker = (function () {
           gapScore: gapScore,
           confusionCount: confusionCount,
           understandingCount: understandingCount,
-          lastConfusion: lastConfusion,
+          lastConfusion: sig.lastConfusion,
           suggestions: suggestions
         });
       }
@@ -53917,9 +53918,9 @@ const SmartLearningTracker = (function () {
   }
 
   /* ── Engine 6: Learning Health Scorer ── */
-  function computeScore() {
-    var vel = getVelocity();
-    var gaps = detectGaps();
+  function computeScore(preVel, preGaps) {
+    var vel = preVel || getVelocity();
+    var gaps = preGaps || detectGaps();
     var allMastery = getAllMastery();
 
     // Velocity component (25%): normalized to 0-100
@@ -53959,11 +53960,11 @@ const SmartLearningTracker = (function () {
   }
 
   /* ── Engine 7: Insight Generation ── */
-  function generateInsights() {
+  function generateInsights(preGaps, preVel) {
     var insights = [];
     var allMastery = getAllMastery();
-    var gaps = detectGaps();
-    var vel = getVelocity();
+    var gaps = preGaps || detectGaps();
+    var vel = preVel || getVelocity();
 
     // Mastery progress insights
     for (var i = 0; i < allMastery.length; i++) {
@@ -54108,10 +54109,11 @@ const SmartLearningTracker = (function () {
       _state.velocityHistory = _state.velocityHistory.slice(-MAX_VELOCITY);
     }
 
-    // Update gaps and score
-    _state.gaps = detectGaps();
-    _state.currentScore = computeScore();
-    _state.insights = generateInsights();
+    // Compute gaps once and thread through score + insights (avoids 3× redundant O(T×M) passes)
+    var gaps = detectGaps();
+    _state.gaps = gaps;
+    _state.currentScore = computeScore(vel, gaps);
+    _state.insights = generateInsights(gaps, vel);
     _state.lastAnalyzed = ts;
 
     _save();
