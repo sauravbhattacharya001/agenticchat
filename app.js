@@ -52515,3 +52515,982 @@ const SmartDebateMode = (function () {
     _renderPanel: function () { _renderPanel(); }
   };
 })();
+
+
+const SmartConversationDNA = (function () {
+  'use strict';
+
+  var STORAGE_KEY = 'smartConversationDNA';
+  var CONFIG_KEY = 'smartConversationDNAConfig';
+  var DEBOUNCE_MS = 700;
+  var MAX_MESSAGES = 1000;
+  var MAX_TOPICS = 200;
+  var MAX_INSIGHTS = 50;
+  var MAX_MUTATIONS = 200;
+  var TOAST_COOLDOWN_MS = 300000;
+  var _panelEl = null;
+  var _visible = false;
+  var _debounceTimer = null;
+  var _badgeEl = null;
+  var _lastToastTime = 0;
+  var _observer = null;
+
+  /* ── Question Types ── */
+  var QUESTION_TYPES = {
+    OPEN: { id: 'open', name: 'Open-Ended', emoji: '🌐', patterns: [/^(what|how|why|describe|explain|tell me about)\b/i, /\bwhat do you think\b/i, /\bhow would you\b/i] },
+    CLOSED: { id: 'closed', name: 'Yes/No', emoji: '✅', patterns: [/^(is|are|was|were|do|does|did|can|could|will|would|should|has|have|had)\b.*\?/i, /\bright\s*\?/i] },
+    CLARIFYING: { id: 'clarifying', name: 'Clarifying', emoji: '🔍', patterns: [/\bwhat do you mean\b/i, /\bcan you clarify\b/i, /\bdo you mean\b/i, /\bin other words\b/i, /\bcould you explain\b/i, /\bwhat exactly\b/i] },
+    RHETORICAL: { id: 'rhetorical', name: 'Rhetorical', emoji: '💭', patterns: [/\bisn'?t it obvious\b/i, /\bwho (even |really )?cares\b/i, /\bwhy bother\b/i, /\bwhat'?s the point\b/i, /\bhow hard can it be\b/i] },
+    DEBUGGING: { id: 'debugging', name: 'Debugging', emoji: '🐛', patterns: [/\bwhy (is|does|doesn'?t|isn'?t|won'?t|can'?t)\b/i, /\berror\b/i, /\bbug\b/i, /\bnot working\b/i, /\bfailing\b/i, /\bcrash/i, /\bfix\b/i, /\bbroken\b/i] },
+    CONCEPTUAL: { id: 'conceptual', name: 'Conceptual', emoji: '📚', patterns: [/\bwhat is (a |the )?(concept|theory|principle|idea|definition|meaning)\b/i, /\bexplain the difference\b/i, /\bhow does .+ work\b/i, /\bwhat'?s the difference\b/i] },
+    COMPARATIVE: { id: 'comparative', name: 'Comparative', emoji: '⚖️', patterns: [/\bwhich is better\b/i, /\bvs\.?\b/i, /\bcompare\b/i, /\bversus\b/i, /\bdifference between\b/i, /\bor\b.*\bwhich\b/i] },
+    HOWTO: { id: 'howto', name: 'How-To', emoji: '🔧', patterns: [/^how (do|can|to|should)\b/i, /\bstep by step\b/i, /\btutorial\b/i, /\bwalkthrough\b/i, /\bhow to\b/i, /\bguide\b/i] }
+  };
+
+  /* ── Engagement Signals ── */
+  var ENGAGEMENT_SIGNALS = {
+    SATISFACTION: { id: 'satisfaction', name: 'Satisfaction', emoji: '😊', weight: 1.0,
+      patterns: [/\bthanks?\b/i, /\bthank you\b/i, /\bperfect\b/i, /\bexactly\b/i, /\bgreat\b/i, /\bawesome\b/i, /\bexcellent\b/i, /\bthat'?s (exactly )?what I (needed|wanted)\b/i, /\bworks?\b!/i, /\bnailed it\b/i] },
+    FRUSTRATION: { id: 'frustration', name: 'Frustration', emoji: '😤', weight: 1.0,
+      patterns: [/\bthat'?s (not |in)?correct\b/i, /\bno,?\s+(that'?s |it'?s )?(wrong|not)\b/i, /\byou'?re wrong\b/i, /\bthat'?s not what I (meant|asked|said)\b/i, /\bstill (not |doesn'?t |won'?t )/i, /\bI (already|just) (said|told|asked)\b/i] },
+    CONFUSION: { id: 'confusion', name: 'Confusion', emoji: '😕', weight: 0.8,
+      patterns: [/\bI don'?t understand\b/i, /\bconfus/i, /\bwhat\?+$/i, /\bhuh\b/i, /\bwhat does that mean\b/i, /\bI'?m lost\b/i, /\bmakes? no sense\b/i, /\bcould you (rephrase|simplify)\b/i] },
+    CURIOSITY: { id: 'curiosity', name: 'Curiosity', emoji: '🧐', weight: 0.9,
+      patterns: [/\btell me more\b/i, /\bwhat about\b/i, /\binteresting\b/i, /\bfascinating\b/i, /\bcurious\b/i, /\bwhat else\b/i, /\bcan you elaborate\b/i, /\bgo deeper\b/i, /\bwhat if\b/i] }
+  };
+
+  /* ── Style Dimensions ── */
+  var STYLE_DIMENSIONS = {
+    BREVITY: { id: 'brevity', name: 'Brevity', emoji: '📏', desc: 'Short vs long messages' },
+    TECHNICALITY: { id: 'technicality', name: 'Technicality', emoji: '⚙️', desc: 'Technical vs casual language' },
+    FORMALITY: { id: 'formality', name: 'Formality', emoji: '🎩', desc: 'Formal vs informal tone' },
+    DIRECTNESS: { id: 'directness', name: 'Directness', emoji: '🎯', desc: 'Direct requests vs exploratory' },
+    EMOTIONALITY: { id: 'emotionality', name: 'Emotionality', emoji: '❤️', desc: 'Emotional vs analytical' },
+    INTERACTIVITY: { id: 'interactivity', name: 'Interactivity', emoji: '🔄', desc: 'Conversational vs monologue' }
+  };
+
+  /* ── Tiers ── */
+  var TIERS = {
+    GENERIC: { id: 'generic', name: 'Generic', emoji: '⚪', min: 0, max: 20, color: '#888' },
+    DEVELOPING: { id: 'developing', name: 'Developing', emoji: '🟡', min: 21, max: 40, color: '#f0ad4e' },
+    DISTINCTIVE: { id: 'distinctive', name: 'Distinctive', emoji: '🟢', min: 41, max: 60, color: '#5cb85c' },
+    UNIQUE: { id: 'unique', name: 'Unique', emoji: '🔵', min: 61, max: 80, color: '#0275d8' },
+    SINGULAR: { id: 'singular', name: 'Singular', emoji: '🟣', min: 81, max: 100, color: '#9b59b6' }
+  };
+
+  /* ── Sensitivities ── */
+  var SENSITIVITIES = {
+    LOW: { id: 'low', label: 'Low', multiplier: 0.6 },
+    MEDIUM: { id: 'medium', label: 'Medium', multiplier: 1.0 },
+    HIGH: { id: 'high', label: 'High', multiplier: 1.4 }
+  };
+
+  /* ── Technical terms ── */
+  var TECHNICAL_PATTERNS = [
+    /\b(api|sdk|cli|gui|url|css|html|json|xml|sql|http|tcp|udp|dns|ssl|tls)\b/i,
+    /\b(function|variable|class|object|array|string|integer|boolean|null|undefined)\b/i,
+    /\b(algorithm|recursion|iteration|loop|condition|branch|merge|commit|deploy|compile)\b/i,
+    /\b(database|server|client|endpoint|middleware|framework|library|module|package)\b/i,
+    /\b(async|await|promise|callback|event|listener|handler|hook|state|prop)\b/i
+  ];
+
+  /* ── Default state & config ── */
+  function _defaultState() {
+    return {
+      messages: [],
+      questionProfile: {},
+      engagementProfile: {},
+      topicMap: {},
+      styleDimensions: { brevity: [], technicality: [], formality: [], directness: [], emotionality: [], interactivity: [] },
+      mutations: [],
+      insights: [],
+      currentScore: 0,
+      sessionCount: 0,
+      totalMessages: 0,
+      vocabularySet: {},
+      topicTransitions: []
+    };
+  }
+
+  function _defaultConfig() {
+    return { enabled: true, sensitivity: 'medium', showBadge: true, showToasts: true };
+  }
+
+  var _state = _defaultState();
+  var _config = _defaultConfig();
+
+  /* ── Persistence ── */
+  function _load() {
+    try {
+      var raw = (typeof SafeStorage !== 'undefined') ? SafeStorage.get(STORAGE_KEY) : localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        var data = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        // Merge loaded state with defaults to handle missing keys
+        var def = _defaultState();
+        for (var k in def) {
+          if (def.hasOwnProperty(k)) {
+            _state[k] = data[k] !== undefined ? data[k] : def[k];
+          }
+        }
+      }
+    } catch (_) {}
+    try {
+      var rawC = (typeof SafeStorage !== 'undefined') ? SafeStorage.get(CONFIG_KEY) : localStorage.getItem(CONFIG_KEY);
+      if (rawC) {
+        var cd = typeof rawC === 'string' ? JSON.parse(rawC) : rawC;
+        for (var ck in cd) { if (cd.hasOwnProperty(ck)) _config[ck] = cd[ck]; }
+      }
+    } catch (_) {}
+  }
+
+  function _save() {
+    try {
+      var s = JSON.stringify(_state);
+      if (typeof SafeStorage !== 'undefined') { SafeStorage.set(STORAGE_KEY, s); } else { localStorage.setItem(STORAGE_KEY, s); }
+    } catch (_) {}
+  }
+
+  function _saveConfig() {
+    try {
+      var s = JSON.stringify(_config);
+      if (typeof SafeStorage !== 'undefined') { SafeStorage.set(CONFIG_KEY, s); } else { localStorage.setItem(CONFIG_KEY, s); }
+    } catch (_) {}
+  }
+
+  /* ── Utility helpers ── */
+  function _clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+  function _ts() { return Date.now(); }
+  function _words(text) { return (text || '').split(/\s+/).filter(function (w) { return w.length > 0; }); }
+  function _sentences(text) { return (text || '').split(/[.!?]+/).filter(function (s) { return s.trim().length > 0; }); }
+  function _uniqueWords(words) {
+    var seen = {};
+    words.forEach(function (w) { seen[w.toLowerCase()] = true; });
+    return Object.keys(seen);
+  }
+
+  function _sparkline(values, width) {
+    if (!values || values.length === 0) return '';
+    var blocks = '▁▂▃▄▅▆▇█';
+    var max = Math.max.apply(null, values);
+    var min = Math.min.apply(null, values);
+    var range = max - min || 1;
+    var step = (width && width < values.length) ? Math.ceil(values.length / width) : 1;
+    var out = '';
+    for (var i = 0; i < values.length; i += step) {
+      var v = values[i];
+      var idx = Math.round(((v - min) / range) * (blocks.length - 1));
+      out += blocks[idx];
+    }
+    return out;
+  }
+
+  function _switchTab(panelEl, tabId) {
+    if (!panelEl) return;
+    var tabs = panelEl.querySelectorAll('.smart-dna-tab');
+    var contents = panelEl.querySelectorAll('.smart-dna-tab-content');
+    for (var i = 0; i < tabs.length; i++) {
+      tabs[i].classList.toggle('active', tabs[i].dataset.tab === tabId);
+    }
+    for (var j = 0; j < contents.length; j++) {
+      contents[j].style.display = contents[j].dataset.tab === tabId ? 'block' : 'none';
+    }
+  }
+
+  /* ─────────────────────────────────────────────
+     ENGINE 1: Message Rhythm Analyzer
+     ───────────────────────────────────────────── */
+  function analyzeRhythm(text) {
+    var w = _words(text);
+    var len = w.length;
+    var category = len <= 5 ? 'short' : len <= 30 ? 'medium' : 'long';
+    return { wordCount: len, charCount: (text || '').length, category: category };
+  }
+
+  function getRhythmProfile() {
+    var msgs = _state.messages;
+    if (msgs.length === 0) return { avgLength: 0, distribution: { short: 0, medium: 0, long: 0 }, consistency: 0, cadence: 'unknown' };
+    var total = 0; var dist = { short: 0, medium: 0, long: 0 };
+    msgs.forEach(function (m) { total += m.wordCount; dist[m.category] = (dist[m.category] || 0) + 1; });
+    var avg = total / msgs.length;
+
+    // Consistency: inverse of coefficient of variation
+    var variance = 0;
+    msgs.forEach(function (m) { variance += Math.pow(m.wordCount - avg, 2); });
+    var stddev = Math.sqrt(variance / msgs.length);
+    var cv = avg > 0 ? stddev / avg : 1;
+    var consistency = _clamp(Math.round((1 - Math.min(cv, 2) / 2) * 100), 0, 100);
+
+    // Cadence
+    var dominant = 'medium';
+    if (dist.short >= dist.medium && dist.short >= dist.long) dominant = 'short';
+    else if (dist.long >= dist.medium && dist.long >= dist.short) dominant = 'long';
+    var cadence = dominant === 'short' ? 'rapid-fire' : dominant === 'long' ? 'verbose' : 'balanced';
+
+    return { avgLength: Math.round(avg * 10) / 10, distribution: dist, consistency: consistency, cadence: cadence };
+  }
+
+  /* ─────────────────────────────────────────────
+     ENGINE 2: Question Taxonomy Classifier
+     ───────────────────────────────────────────── */
+  function classifyQuestion(text) {
+    if (!text || text.indexOf('?') === -1) return null;
+    // Check specific types before generic ones (OPEN/CLOSED are catch-alls)
+    var priority = ['CLARIFYING', 'RHETORICAL', 'DEBUGGING', 'CONCEPTUAL', 'COMPARATIVE', 'HOWTO', 'CLOSED', 'OPEN'];
+    for (var p = 0; p < priority.length; p++) {
+      var qt = QUESTION_TYPES[priority[p]];
+      if (!qt) continue;
+      for (var i = 0; i < qt.patterns.length; i++) {
+        if (qt.patterns[i].test(text)) return qt.id;
+      }
+    }
+    return text.indexOf('?') !== -1 ? 'open' : null;
+  }
+
+  function getQuestionProfile() {
+    var profile = _state.questionProfile || {};
+    var total = 0;
+    for (var k in profile) { if (profile.hasOwnProperty(k)) total += profile[k]; }
+    var diversity = total > 0 ? Object.keys(profile).length / Object.keys(QUESTION_TYPES).length : 0;
+    return { distribution: Object.assign({}, profile), total: total, diversity: Math.round(diversity * 100) / 100 };
+  }
+
+  /* ─────────────────────────────────────────────
+     ENGINE 3: Vocabulary Complexity Tracker
+     ───────────────────────────────────────────── */
+  function analyzeVocabulary(text) {
+    var w = _words(text);
+    if (w.length === 0) return { avgWordLength: 0, ttr: 0, technicalDensity: 0 };
+    var totalLen = 0;
+    w.forEach(function (word) { totalLen += word.length; });
+    var avgWordLength = totalLen / w.length;
+    var unique = _uniqueWords(w);
+    var ttr = unique.length / w.length; // type-token ratio
+
+    // Technical density
+    var techCount = 0;
+    var joined = text.toLowerCase();
+    TECHNICAL_PATTERNS.forEach(function (pat) {
+      var m = joined.match(pat);
+      if (m) techCount += m.length;
+    });
+    var technicalDensity = w.length > 0 ? techCount / w.length : 0;
+
+    return {
+      avgWordLength: Math.round(avgWordLength * 100) / 100,
+      ttr: Math.round(ttr * 100) / 100,
+      technicalDensity: Math.round(technicalDensity * 100) / 100,
+      wordCount: w.length,
+      uniqueCount: unique.length
+    };
+  }
+
+  function getVocabularyProfile() {
+    var vocab = _state.vocabularySet || {};
+    var uniqueTotal = Object.keys(vocab).length;
+    var msgs = _state.messages;
+    if (msgs.length === 0) return { uniqueWords: 0, avgWordLength: 0, avgTTR: 0, avgTechDensity: 0, evolution: 'stable' };
+    var sumWl = 0; var sumTtr = 0; var sumTd = 0;
+    msgs.forEach(function (m) { sumWl += (m.avgWordLength || 0); sumTtr += (m.ttr || 0); sumTd += (m.technicalDensity || 0); });
+    var n = msgs.length;
+
+    // Evolution: compare first half vs second half TTR
+    var half = Math.floor(n / 2);
+    var evolution = 'stable';
+    if (half > 2) {
+      var firstTtr = 0; var secondTtr = 0;
+      for (var i = 0; i < half; i++) firstTtr += (msgs[i].ttr || 0);
+      for (var j = half; j < n; j++) secondTtr += (msgs[j].ttr || 0);
+      firstTtr /= half; secondTtr /= (n - half);
+      if (secondTtr > firstTtr * 1.15) evolution = 'expanding';
+      else if (secondTtr < firstTtr * 0.85) evolution = 'simplifying';
+    }
+
+    return {
+      uniqueWords: uniqueTotal,
+      avgWordLength: Math.round((sumWl / n) * 100) / 100,
+      avgTTR: Math.round((sumTtr / n) * 100) / 100,
+      avgTechDensity: Math.round((sumTd / n) * 100) / 100,
+      evolution: evolution
+    };
+  }
+
+  /* ─────────────────────────────────────────────
+     ENGINE 4: Topic Transition Mapper
+     ───────────────────────────────────────────── */
+  function extractTopicKeywords(text) {
+    var w = _words(text).map(function (x) { return x.toLowerCase().replace(/[^a-z0-9]/g, ''); }).filter(function (x) { return x.length > 3; });
+    var stopwords = { 'that': 1, 'this': 1, 'with': 1, 'from': 1, 'have': 1, 'been': 1, 'were': 1, 'they': 1, 'their': 1, 'would': 1, 'could': 1, 'should': 1, 'about': 1, 'which': 1, 'there': 1, 'other': 1, 'some': 1, 'more': 1, 'very': 1, 'just': 1, 'also': 1, 'than': 1, 'then': 1, 'what': 1, 'when': 1, 'your': 1, 'will': 1, 'each': 1, 'make': 1, 'like': 1, 'does': 1, 'into': 1, 'only': 1 };
+    return w.filter(function (x) { return !stopwords[x]; }).slice(0, 10);
+  }
+
+  function detectTopicTransition(prevKeywords, currKeywords) {
+    if (!prevKeywords || prevKeywords.length === 0) return 'start';
+    var overlap = 0;
+    var prevSet = {};
+    prevKeywords.forEach(function (k) { prevSet[k] = true; });
+    currKeywords.forEach(function (k) { if (prevSet[k]) overlap++; });
+    var maxLen = Math.max(prevKeywords.length, currKeywords.length) || 1;
+    var similarity = overlap / maxLen;
+    if (similarity > 0.6) return 'deepening';
+    if (similarity > 0.3) return 'smooth';
+    if (similarity > 0.1) return 'abrupt';
+    return 'pivot';
+  }
+
+  function getTopicProfile() {
+    var map = _state.topicMap || {};
+    var transitions = _state.topicTransitions || [];
+    var dist = { start: 0, deepening: 0, smooth: 0, abrupt: 0, pivot: 0 };
+    transitions.forEach(function (t) { dist[t] = (dist[t] || 0) + 1; });
+    var topTopics = Object.keys(map).sort(function (a, b) { return map[b] - map[a]; }).slice(0, 15);
+    return { topTopics: topTopics, transitionDistribution: dist, totalTopics: Object.keys(map).length };
+  }
+
+  /* ─────────────────────────────────────────────
+     ENGINE 5: Engagement Signal Detector
+     ───────────────────────────────────────────── */
+  function detectEngagement(text) {
+    var signals = [];
+    for (var key in ENGAGEMENT_SIGNALS) {
+      if (!ENGAGEMENT_SIGNALS.hasOwnProperty(key)) continue;
+      var sig = ENGAGEMENT_SIGNALS[key];
+      for (var i = 0; i < sig.patterns.length; i++) {
+        if (sig.patterns[i].test(text)) {
+          signals.push(sig.id);
+          break;
+        }
+      }
+    }
+    return signals;
+  }
+
+  function getEngagementProfile() {
+    var prof = _state.engagementProfile || {};
+    var total = 0;
+    for (var k in prof) { if (prof.hasOwnProperty(k)) total += prof[k]; }
+    var balance = 0;
+    if (total > 0) {
+      var types = Object.keys(prof).length;
+      balance = Math.round((types / Object.keys(ENGAGEMENT_SIGNALS).length) * 100);
+    }
+    return { distribution: Object.assign({}, prof), total: total, balance: balance };
+  }
+
+  /* ─────────────────────────────────────────────
+     ENGINE 6: Communication Style Mutator
+     ───────────────────────────────────────────── */
+  function measureStyle(text) {
+    var w = _words(text);
+    var len = w.length;
+    // Brevity: 0 = very long, 100 = very short
+    var brevity = _clamp(Math.round((1 - Math.min(len, 200) / 200) * 100), 0, 100);
+    // Technicality
+    var techCount = 0;
+    TECHNICAL_PATTERNS.forEach(function (p) { var m = (text || '').match(p); if (m) techCount += m.length; });
+    var technicality = _clamp(Math.round(Math.min(techCount / Math.max(len, 1), 0.5) * 200), 0, 100);
+    // Formality: presence of contractions, slang -> low; full forms -> high
+    var informalPatterns = /\b(gonna|wanna|gotta|kinda|sorta|ya|yep|nope|lol|haha|ok|okay|btw|idk|tbh|imo|imho|fyi|omg|wtf)\b/gi;
+    var informalMatches = (text || '').match(informalPatterns) || [];
+    var formality = _clamp(Math.round((1 - Math.min(informalMatches.length / Math.max(len, 1), 0.3) / 0.3) * 100), 0, 100);
+    // Directness: imperatives and short sentences -> high
+    var imperativePatterns = /^(show|tell|give|make|do|run|create|build|fix|help|find|list|get|set|add|remove|delete|update|check|use)\b/im;
+    var hasImperative = imperativePatterns.test(text || '');
+    var directness = hasImperative ? 80 : (len < 15 ? 70 : 40);
+    // Emotionality: exclamation marks, emotional words
+    var exclCount = ((text || '').match(/!/g) || []).length;
+    var emotionWords = ((text || '').match(/\b(love|hate|amazing|terrible|excited|worried|frustrated|happy|sad|angry|wonderful|awful)\b/gi) || []).length;
+    var emotionality = _clamp(Math.round(Math.min((exclCount + emotionWords * 2) / Math.max(len, 1), 0.4) / 0.4 * 100), 0, 100);
+    // Interactivity: questions, follow-ups
+    var qCount = ((text || '').match(/\?/g) || []).length;
+    var interactivity = _clamp(Math.round(Math.min(qCount / Math.max(_sentences(text).length, 1), 1) * 100), 0, 100);
+
+    return { brevity: brevity, technicality: technicality, formality: formality, directness: directness, emotionality: emotionality, interactivity: interactivity };
+  }
+
+  function detectMutations() {
+    var dims = _state.styleDimensions || {};
+    var mutations = [];
+    var windowSize = 10;
+    for (var dim in dims) {
+      if (!dims.hasOwnProperty(dim)) continue;
+      var vals = dims[dim];
+      if (vals.length < windowSize * 2) continue;
+      var recentStart = vals.length - windowSize;
+      var oldAvg = 0; var newAvg = 0;
+      for (var i = recentStart - windowSize; i < recentStart; i++) oldAvg += vals[i];
+      for (var j = recentStart; j < vals.length; j++) newAvg += vals[j];
+      oldAvg /= windowSize; newAvg /= windowSize;
+      var delta = newAvg - oldAvg;
+      if (Math.abs(delta) > 15) {
+        mutations.push({ dimension: dim, delta: Math.round(delta), direction: delta > 0 ? 'increasing' : 'decreasing', ts: _ts() });
+      }
+    }
+    return mutations;
+  }
+
+  function getStyleProfile() {
+    var dims = _state.styleDimensions || {};
+    var current = {};
+    for (var dim in dims) {
+      if (!dims.hasOwnProperty(dim)) continue;
+      var vals = dims[dim];
+      if (vals.length === 0) { current[dim] = 0; continue; }
+      var recent = vals.slice(-10);
+      var sum = 0; recent.forEach(function (v) { sum += v; });
+      current[dim] = Math.round(sum / recent.length);
+    }
+    return { current: current, mutations: (_state.mutations || []).slice(-20), mutationRate: (_state.mutations || []).length };
+  }
+
+  /* ─────────────────────────────────────────────
+     ENGINE 7: DNA Health Scorer & Insight Generator
+     ───────────────────────────────────────────── */
+  function computeScore() {
+    var mult = (SENSITIVITIES[_config.sensitivity.toUpperCase()] || SENSITIVITIES.MEDIUM).multiplier;
+
+    // Vocabulary distinctiveness (20%)
+    var vocabProf = getVocabularyProfile();
+    var vocabScore = _clamp(vocabProf.avgTTR * 120 + vocabProf.avgTechDensity * 100, 0, 100);
+
+    // Question diversity (15%)
+    var qProf = getQuestionProfile();
+    var qScore = _clamp(qProf.diversity * 100, 0, 100);
+
+    // Rhythm consistency (15%)
+    var rhythmProf = getRhythmProfile();
+    var rhythmScore = rhythmProf.consistency;
+
+    // Topic transition uniqueness (15%)
+    var topicProf = getTopicProfile();
+    var tDist = topicProf.transitionDistribution;
+    var tTotal = 0; for (var tk in tDist) { if (tDist.hasOwnProperty(tk)) tTotal += tDist[tk]; }
+    var topicEntropy = 0;
+    if (tTotal > 0) {
+      for (var tk2 in tDist) {
+        if (!tDist.hasOwnProperty(tk2) || tDist[tk2] === 0) continue;
+        var p = tDist[tk2] / tTotal;
+        topicEntropy -= p * Math.log2(p);
+      }
+    }
+    var topicScore = _clamp(Math.round(topicEntropy / Math.log2(5) * 100), 0, 100);
+
+    // Engagement balance (15%)
+    var engProf = getEngagementProfile();
+    var engScore = engProf.balance;
+
+    // Style mutation rate (10%)
+    var styleProf = getStyleProfile();
+    var mutRate = styleProf.mutationRate;
+    var mutScore = _clamp(Math.round(Math.min(mutRate / 20, 1) * 100), 0, 100);
+
+    // Pattern entropy (10%)
+    var msgs = _state.messages;
+    var catCounts = { short: 0, medium: 0, long: 0 };
+    msgs.forEach(function (m) { catCounts[m.category] = (catCounts[m.category] || 0) + 1; });
+    var patternEntropy = 0;
+    var mTotal = msgs.length || 1;
+    for (var cat in catCounts) {
+      if (!catCounts.hasOwnProperty(cat) || catCounts[cat] === 0) continue;
+      var pp = catCounts[cat] / mTotal;
+      patternEntropy -= pp * Math.log2(pp);
+    }
+    var entropyScore = _clamp(Math.round(patternEntropy / Math.log2(3) * 100), 0, 100);
+
+    var raw = vocabScore * 0.20 + qScore * 0.15 + rhythmScore * 0.15 + topicScore * 0.15 + engScore * 0.15 + mutScore * 0.10 + entropyScore * 0.10;
+    return _clamp(Math.round(raw * mult), 0, 100);
+  }
+
+  function classifyTier(score) {
+    if (score <= 20) return TIERS.GENERIC;
+    if (score <= 40) return TIERS.DEVELOPING;
+    if (score <= 60) return TIERS.DISTINCTIVE;
+    if (score <= 80) return TIERS.UNIQUE;
+    return TIERS.SINGULAR;
+  }
+
+  function generateInsights() {
+    var insights = [];
+    var now = _ts();
+
+    var rhythm = getRhythmProfile();
+    if (rhythm.cadence === 'rapid-fire' && _state.totalMessages > 10) {
+      insights.push({ type: 'rhythm', text: 'Your communication style is rapid-fire — mostly short, punchy messages.', ts: now });
+    } else if (rhythm.cadence === 'verbose') {
+      insights.push({ type: 'rhythm', text: 'You tend toward detailed, lengthy messages — a thorough communicator.', ts: now });
+    }
+
+    var vocab = getVocabularyProfile();
+    if (vocab.evolution === 'expanding') {
+      insights.push({ type: 'vocabulary', text: 'Your vocabulary is expanding over time — you\'re using more diverse language.', ts: now });
+    } else if (vocab.evolution === 'simplifying') {
+      insights.push({ type: 'vocabulary', text: 'Your language is simplifying — becoming more concise and direct.', ts: now });
+    }
+
+    var qProf = getQuestionProfile();
+    if (qProf.diversity > 0.7) {
+      insights.push({ type: 'question', text: 'High question diversity — you explore topics from many angles.', ts: now });
+    } else if (qProf.total > 5 && qProf.diversity < 0.3) {
+      insights.push({ type: 'question', text: 'You tend to ask the same types of questions. Try varying your approach.', ts: now });
+    }
+
+    var eng = getEngagementProfile();
+    if ((eng.distribution.frustration || 0) > (eng.distribution.satisfaction || 0) && eng.total > 5) {
+      insights.push({ type: 'engagement', text: 'Frustration signals outnumber satisfaction — conversations may not be meeting expectations.', ts: now });
+    }
+    if ((eng.distribution.curiosity || 0) > eng.total * 0.4 && eng.total > 5) {
+      insights.push({ type: 'engagement', text: 'High curiosity signal — you\'re a natural explorer!', ts: now });
+    }
+
+    var mutations = detectMutations();
+    mutations.forEach(function (m) {
+      insights.push({ type: 'mutation', text: 'Style shift detected: ' + m.dimension + ' is ' + m.direction + ' (Δ' + m.delta + ').', ts: now });
+    });
+
+    var score = _state.currentScore;
+    var tier = classifyTier(score);
+    insights.push({ type: 'overall', text: 'DNA Uniqueness: ' + tier.emoji + ' ' + tier.name + ' (' + score + '/100).', ts: now });
+
+    return insights.slice(0, MAX_INSIGHTS);
+  }
+
+  /* ─────────────────────────────────────────────
+     Main Analysis Pipeline
+     ───────────────────────────────────────────── */
+  function analyzeMessage(text, role) {
+    if (!_config.enabled) return null;
+    if (!text || typeof text !== 'string') return null;
+    // Only analyze user messages for DNA profiling
+    if (role && role !== 'user') return null;
+
+    var rhythm = analyzeRhythm(text);
+    var vocabMetrics = analyzeVocabulary(text);
+    var qType = classifyQuestion(text);
+    var engSignals = detectEngagement(text);
+    var style = measureStyle(text);
+    var keywords = extractTopicKeywords(text);
+
+    // Record message data
+    var msgEntry = {
+      ts: _ts(),
+      wordCount: rhythm.wordCount,
+      charCount: rhythm.charCount,
+      category: rhythm.category,
+      avgWordLength: vocabMetrics.avgWordLength,
+      ttr: vocabMetrics.ttr,
+      technicalDensity: vocabMetrics.technicalDensity,
+      questionType: qType,
+      engagementSignals: engSignals,
+      style: style,
+      keywords: keywords
+    };
+
+    _state.messages.push(msgEntry);
+    if (_state.messages.length > MAX_MESSAGES) _state.messages = _state.messages.slice(-MAX_MESSAGES);
+    _state.totalMessages = (_state.totalMessages || 0) + 1;
+
+    // Update question profile
+    if (qType) {
+      _state.questionProfile[qType] = (_state.questionProfile[qType] || 0) + 1;
+    }
+
+    // Update engagement profile
+    engSignals.forEach(function (sig) {
+      _state.engagementProfile[sig] = (_state.engagementProfile[sig] || 0) + 1;
+    });
+
+    // Update vocabulary set
+    _words(text).forEach(function (w) {
+      var lower = w.toLowerCase();
+      _state.vocabularySet[lower] = (_state.vocabularySet[lower] || 0) + 1;
+    });
+
+    // Update topic map and transitions
+    keywords.forEach(function (kw) {
+      _state.topicMap[kw] = (_state.topicMap[kw] || 0) + 1;
+    });
+    // Trim topic map
+    var topicKeys = Object.keys(_state.topicMap);
+    if (topicKeys.length > MAX_TOPICS) {
+      topicKeys.sort(function (a, b) { return _state.topicMap[a] - _state.topicMap[b]; });
+      for (var ti = 0; ti < topicKeys.length - MAX_TOPICS; ti++) {
+        delete _state.topicMap[topicKeys[ti]];
+      }
+    }
+
+    // Topic transition
+    var prevMsg = _state.messages.length > 1 ? _state.messages[_state.messages.length - 2] : null;
+    var transition = detectTopicTransition(prevMsg ? prevMsg.keywords : null, keywords);
+    _state.topicTransitions.push(transition);
+    if (_state.topicTransitions.length > MAX_MESSAGES) _state.topicTransitions = _state.topicTransitions.slice(-MAX_MESSAGES);
+
+    // Update style dimensions
+    for (var dim in style) {
+      if (!style.hasOwnProperty(dim)) continue;
+      if (!_state.styleDimensions[dim]) _state.styleDimensions[dim] = [];
+      _state.styleDimensions[dim].push(style[dim]);
+      if (_state.styleDimensions[dim].length > MAX_MESSAGES) _state.styleDimensions[dim] = _state.styleDimensions[dim].slice(-MAX_MESSAGES);
+    }
+
+    // Detect mutations
+    var newMutations = detectMutations();
+    if (newMutations.length > 0) {
+      _state.mutations = _state.mutations.concat(newMutations);
+      if (_state.mutations.length > MAX_MUTATIONS) _state.mutations = _state.mutations.slice(-MAX_MUTATIONS);
+    }
+
+    // Recompute score
+    _state.currentScore = computeScore();
+
+    // Generate insights periodically (every 10 messages)
+    if (_state.totalMessages % 10 === 0) {
+      _state.insights = generateInsights();
+    }
+
+    _save();
+    _updateBadge();
+    if (_visible) _renderPanel();
+
+    // Toast on notable mutations
+    if (newMutations.length > 0 && _config.showToasts) {
+      var now = _ts();
+      if (now - _lastToastTime > TOAST_COOLDOWN_MS) {
+        _lastToastTime = now;
+        _showToast('🧬 DNA mutation: ' + newMutations[0].dimension + ' ' + newMutations[0].direction);
+      }
+    }
+
+    return {
+      rhythm: rhythm,
+      vocabulary: vocabMetrics,
+      questionType: qType,
+      engagement: engSignals,
+      style: style,
+      keywords: keywords,
+      transition: transition,
+      score: _state.currentScore,
+      tier: classifyTier(_state.currentScore)
+    };
+  }
+
+  /* ── Toast ── */
+  function _showToast(msg) {
+    if (typeof document === 'undefined') return;
+    var toast = document.createElement('div');
+    toast.className = 'smart-dna-toast';
+    toast.textContent = msg;
+    toast.style.cssText = 'position:fixed;bottom:80px;right:20px;background:#333;color:#fff;padding:10px 18px;border-radius:8px;z-index:10002;font-size:13px;opacity:0;transition:opacity 0.3s;pointer-events:none;';
+    document.body.appendChild(toast);
+    requestAnimationFrame(function () { toast.style.opacity = '1'; });
+    setTimeout(function () { toast.style.opacity = '0'; setTimeout(function () { if (toast.parentNode) toast.parentNode.removeChild(toast); }, 400); }, 3500);
+  }
+
+  /* ── Badge ── */
+  function _updateBadge() {
+    if (!_badgeEl || typeof document === 'undefined') return;
+    if (!_config.enabled || !_config.showBadge) {
+      _badgeEl.style.display = 'none';
+      return;
+    }
+    var score = _state.currentScore;
+    var tier = classifyTier(score);
+    _badgeEl.style.display = 'flex';
+    _badgeEl.textContent = '🧬 ' + score;
+    _badgeEl.style.background = tier.color;
+    _badgeEl.title = 'DNA: ' + tier.name + ' (' + score + '/100)';
+  }
+
+  /* ── Panel Rendering ── */
+  function _renderPanel() {
+    if (!_panelEl) return;
+    var score = _state.currentScore;
+    var tier = classifyTier(score);
+    var rhythm = getRhythmProfile();
+    var vocab = getVocabularyProfile();
+    var qProf = getQuestionProfile();
+    var eng = getEngagementProfile();
+    var styleProf = getStyleProfile();
+    var topicProf = getTopicProfile();
+    var insights = _state.insights.length > 0 ? _state.insights : generateInsights();
+
+    // Score gauge
+    var gaugeHtml = '<div class="smart-dna-gauge" style="text-align:center;padding:16px;">' +
+      '<div style="font-size:48px;font-weight:bold;color:' + tier.color + ';">' + score + '</div>' +
+      '<div style="font-size:14px;color:var(--text-secondary,#aaa);">' + tier.emoji + ' ' + tier.name + '</div>' +
+      '<div style="margin-top:8px;font-size:12px;color:var(--text-secondary,#aaa);">' + _state.totalMessages + ' messages analyzed</div>' +
+      '</div>';
+
+    // Overview tab
+    var overviewHtml = gaugeHtml +
+      '<div style="padding:0 12px 12px;"><h4 style="margin:8px 0 4px;">Communication Profile</h4>' +
+      '<div>📏 Cadence: <strong>' + rhythm.cadence + '</strong> (avg ' + rhythm.avgLength + ' words)</div>' +
+      '<div>📚 Vocabulary: <strong>' + vocab.evolution + '</strong> (' + vocab.uniqueWords + ' unique words)</div>' +
+      '<div>❓ Question diversity: <strong>' + Math.round(qProf.diversity * 100) + '%</strong></div>' +
+      '<div>😊 Engagement balance: <strong>' + eng.balance + '%</strong></div>' +
+      '</div>';
+
+    // Engines tab
+    var enginesHtml = '<div style="padding:12px;">';
+    // Rhythm
+    enginesHtml += '<h4>📏 Message Rhythm</h4><div>Short: ' + (rhythm.distribution.short || 0) + ' | Medium: ' + (rhythm.distribution.medium || 0) + ' | Long: ' + (rhythm.distribution.long || 0) + '</div>';
+    enginesHtml += '<div>Consistency: ' + rhythm.consistency + '%</div>';
+    // Vocabulary
+    enginesHtml += '<h4>📚 Vocabulary</h4><div>TTR: ' + vocab.avgTTR + ' | Tech density: ' + vocab.avgTechDensity + ' | Avg word length: ' + vocab.avgWordLength + '</div>';
+    // Questions
+    enginesHtml += '<h4>❓ Questions</h4>';
+    for (var qt in QUESTION_TYPES) {
+      if (!QUESTION_TYPES.hasOwnProperty(qt)) continue;
+      var qInfo = QUESTION_TYPES[qt];
+      var qCount = qProf.distribution[qInfo.id] || 0;
+      if (qCount > 0) enginesHtml += '<div>' + qInfo.emoji + ' ' + qInfo.name + ': ' + qCount + '</div>';
+    }
+    // Engagement
+    enginesHtml += '<h4>💬 Engagement</h4>';
+    for (var ek in ENGAGEMENT_SIGNALS) {
+      if (!ENGAGEMENT_SIGNALS.hasOwnProperty(ek)) continue;
+      var eInfo = ENGAGEMENT_SIGNALS[ek];
+      var eCount = eng.distribution[eInfo.id] || 0;
+      if (eCount > 0) enginesHtml += '<div>' + eInfo.emoji + ' ' + eInfo.name + ': ' + eCount + '</div>';
+    }
+    // Topics
+    enginesHtml += '<h4>🗺️ Topics</h4><div>Top: ' + topicProf.topTopics.slice(0, 8).join(', ') + '</div>';
+    // Style
+    enginesHtml += '<h4>🎭 Style</h4>';
+    for (var sd in STYLE_DIMENSIONS) {
+      if (!STYLE_DIMENSIONS.hasOwnProperty(sd)) continue;
+      var sdInfo = STYLE_DIMENSIONS[sd];
+      var val = styleProf.current[sdInfo.id] || 0;
+      enginesHtml += '<div>' + sdInfo.emoji + ' ' + sdInfo.name + ': ' + val + '/100</div>';
+    }
+    enginesHtml += '</div>';
+
+    // Timeline tab
+    var timelineHtml = '<div style="padding:12px;">';
+    var dims = _state.styleDimensions || {};
+    for (var tdim in dims) {
+      if (!dims.hasOwnProperty(tdim)) continue;
+      var vals = dims[tdim];
+      if (vals.length > 2) {
+        timelineHtml += '<div style="margin-bottom:8px;"><strong>' + tdim + ':</strong> ' + _sparkline(vals.slice(-30), 30) + '</div>';
+      }
+    }
+    // Word count sparkline
+    var wcVals = _state.messages.slice(-30).map(function (m) { return m.wordCount; });
+    if (wcVals.length > 2) {
+      timelineHtml += '<div style="margin-bottom:8px;"><strong>message length:</strong> ' + _sparkline(wcVals, 30) + '</div>';
+    }
+    timelineHtml += '</div>';
+
+    // Insights tab
+    var insightsHtml = '<div style="padding:12px;">';
+    if (insights.length === 0) {
+      insightsHtml += '<div style="color:var(--text-secondary,#aaa);">Send more messages to generate insights...</div>';
+    } else {
+      insights.forEach(function (ins) {
+        var icon = ins.type === 'rhythm' ? '📏' : ins.type === 'vocabulary' ? '📚' : ins.type === 'question' ? '❓' : ins.type === 'engagement' ? '💬' : ins.type === 'mutation' ? '🧬' : '💡';
+        insightsHtml += '<div style="margin-bottom:8px;padding:6px 8px;background:var(--bg-secondary,#2a2a2a);border-radius:6px;">' + icon + ' ' + ins.text + '</div>';
+      });
+    }
+    insightsHtml += '</div>';
+
+    // Sensitivity selector
+    var senHtml = '<div style="padding:8px 12px;border-top:1px solid var(--border-color,#333);display:flex;gap:8px;align-items:center;">' +
+      '<span style="font-size:12px;">Sensitivity:</span>';
+    ['low', 'medium', 'high'].forEach(function (s) {
+      var active = _config.sensitivity === s;
+      senHtml += '<button class="smart-dna-sen-btn" data-sen="' + s + '" style="padding:2px 8px;border-radius:4px;border:1px solid ' + (active ? 'var(--accent-color,#0275d8)' : 'var(--border-color,#555)') + ';background:' + (active ? 'var(--accent-color,#0275d8)' : 'transparent') + ';color:var(--text-primary,#fff);cursor:pointer;font-size:11px;">' + s + '</button>';
+    });
+    senHtml += '</div>';
+
+    _panelEl.innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border-bottom:1px solid var(--border-color,#333);">' +
+        '<strong>🧬 Conversation DNA</strong>' +
+        '<button onclick="SmartConversationDNA.hide()" style="background:none;border:none;color:var(--text-primary,#fff);cursor:pointer;font-size:16px;">✕</button>' +
+      '</div>' +
+      '<div style="display:flex;border-bottom:1px solid var(--border-color,#333);">' +
+        '<button class="smart-dna-tab active" data-tab="overview" style="flex:1;padding:6px;background:none;border:none;border-bottom:2px solid var(--accent-color,#0275d8);color:var(--text-primary,#fff);cursor:pointer;font-size:12px;">Overview</button>' +
+        '<button class="smart-dna-tab" data-tab="engines" style="flex:1;padding:6px;background:none;border:none;border-bottom:2px solid transparent;color:var(--text-secondary,#aaa);cursor:pointer;font-size:12px;">Engines</button>' +
+        '<button class="smart-dna-tab" data-tab="timeline" style="flex:1;padding:6px;background:none;border:none;border-bottom:2px solid transparent;color:var(--text-secondary,#aaa);cursor:pointer;font-size:12px;">Timeline</button>' +
+        '<button class="smart-dna-tab" data-tab="insights" style="flex:1;padding:6px;background:none;border:none;border-bottom:2px solid transparent;color:var(--text-secondary,#aaa);cursor:pointer;font-size:12px;">Insights</button>' +
+      '</div>' +
+      '<div class="smart-dna-tab-content" data-tab="overview" style="display:block;max-height:400px;overflow-y:auto;">' + overviewHtml + '</div>' +
+      '<div class="smart-dna-tab-content" data-tab="engines" style="display:none;max-height:400px;overflow-y:auto;">' + enginesHtml + '</div>' +
+      '<div class="smart-dna-tab-content" data-tab="timeline" style="display:none;max-height:400px;overflow-y:auto;">' + timelineHtml + '</div>' +
+      '<div class="smart-dna-tab-content" data-tab="insights" style="display:none;max-height:400px;overflow-y:auto;">' + insightsHtml + '</div>' +
+      senHtml;
+
+    // Wire tab clicks
+    var tabBtns = _panelEl.querySelectorAll('.smart-dna-tab');
+    tabBtns.forEach(function (btn) {
+      btn.onclick = function () { _switchTab(_panelEl, btn.dataset.tab); };
+    });
+
+    // Wire sensitivity buttons
+    var senBtns = _panelEl.querySelectorAll('.smart-dna-sen-btn');
+    senBtns.forEach(function (btn) {
+      btn.onclick = function () { setSensitivity(btn.dataset.sen); };
+    });
+  }
+
+  /* ── Public API ── */
+  function toggle() { _visible ? hide() : show(); }
+  function show() { _visible = true; if (!_panelEl) _createPanel(); _panelEl.style.display = 'block'; _renderPanel(); }
+  function hide() { _visible = false; if (_panelEl) _panelEl.style.display = 'none'; }
+
+  function reset() {
+    _state = _defaultState();
+    _config = _defaultConfig();
+    _save();
+    _saveConfig();
+    _updateBadge();
+    if (_visible) _renderPanel();
+  }
+
+  function setSensitivity(level) {
+    var key = (level || 'medium').toUpperCase();
+    if (SENSITIVITIES[key]) {
+      _config.sensitivity = level.toLowerCase();
+      _state.currentScore = computeScore();
+      _save();
+      _saveConfig();
+      _updateBadge();
+      if (_visible) _renderPanel();
+    }
+  }
+
+  function getDNA() {
+    return {
+      score: _state.currentScore,
+      tier: classifyTier(_state.currentScore),
+      rhythm: getRhythmProfile(),
+      vocabulary: getVocabularyProfile(),
+      questions: getQuestionProfile(),
+      engagement: getEngagementProfile(),
+      style: getStyleProfile(),
+      topics: getTopicProfile(),
+      totalMessages: _state.totalMessages,
+      insights: _state.insights.slice()
+    };
+  }
+
+  /* ── Panel & Badge Creation ── */
+  function _createPanel() {
+    if (typeof document === 'undefined') return;
+    _panelEl = document.createElement('div');
+    _panelEl.id = 'smart-conversation-dna-panel';
+    _panelEl.style.cssText = 'display:none;position:fixed;right:16px;top:60px;width:360px;max-height:560px;background:var(--bg-primary,#1a1a2e);border:1px solid var(--border-color,#333);border-radius:12px;z-index:10001;box-shadow:0 8px 32px rgba(0,0,0,0.4);overflow:hidden;font-family:inherit;color:var(--text-primary,#e0e0e0);font-size:13px;';
+    document.body.appendChild(_panelEl);
+  }
+
+  function _createBadge() {
+    if (typeof document === 'undefined') return;
+    _badgeEl = document.createElement('div');
+    _badgeEl.id = 'smart-dna-badge';
+    _badgeEl.style.cssText = 'display:none;position:fixed;bottom:16px;right:16px;padding:4px 10px;border-radius:12px;color:#fff;font-size:12px;font-weight:bold;z-index:10000;cursor:pointer;align-items:center;gap:4px;box-shadow:0 2px 8px rgba(0,0,0,0.3);';
+    _badgeEl.onclick = toggle;
+    document.body.appendChild(_badgeEl);
+  }
+
+  /* ── MutationObserver ── */
+  function _attachObserver() {
+    if (typeof document === 'undefined' || typeof MutationObserver === 'undefined') return;
+    var chatContainer = document.querySelector('#chat-messages, .chat-messages, [data-chat-messages]');
+    if (!chatContainer) return;
+    _observer = new MutationObserver(function (mutations) {
+      mutations.forEach(function (mutation) {
+        mutation.addedNodes.forEach(function (node) {
+          if (node.nodeType !== 1) return;
+          var isUser = node.classList && (node.classList.contains('user-message') || node.classList.contains('message-user'));
+          if (isUser) {
+            var text = node.textContent || '';
+            if (_debounceTimer) clearTimeout(_debounceTimer);
+            _debounceTimer = setTimeout(function () { analyzeMessage(text, 'user'); }, DEBOUNCE_MS);
+          }
+        });
+      });
+    });
+    _observer.observe(chatContainer, { childList: true, subtree: true });
+  }
+
+  /* ── Keyboard shortcut ── */
+  function _attachKeyboard() {
+    if (typeof document === 'undefined') return;
+    document.addEventListener('keydown', function (e) {
+      if (e.altKey && e.shiftKey && e.key === '7') {
+        e.preventDefault();
+        toggle();
+      }
+    });
+  }
+
+  /* ── Init ── */
+  function init() {
+    _load();
+    _createBadge();
+    _updateBadge();
+    _attachKeyboard();
+    _attachObserver();
+
+    // Add toolbar button if toolbar exists
+    if (typeof document !== 'undefined') {
+      var toolbar = document.querySelector('#smart-features-toolbar, .toolbar-buttons, .btn-toolbar');
+      if (toolbar) {
+        var btn = document.createElement('button');
+        btn.className = 'btn-secondary';
+        btn.title = 'Conversation DNA — communication fingerprint (Alt+Shift+7)';
+        btn.textContent = '🧬';
+        btn.onclick = toggle;
+        toolbar.appendChild(btn);
+      }
+    }
+  }
+
+  /* Auto-init */
+  if (typeof document !== 'undefined' && document.body) {
+    init();
+  }
+
+  return {
+    toggle: toggle,
+    show: show,
+    hide: hide,
+    reset: reset,
+    init: init,
+    analyzeMessage: analyzeMessage,
+    getState: function () { return JSON.parse(JSON.stringify(_state)); },
+    getConfig: function () { return Object.assign({}, _config); },
+    getScore: function () { return _state.currentScore; },
+    getTier: function () { return classifyTier(_state.currentScore); },
+    getDNA: getDNA,
+    getInsights: function () { return _state.insights.slice(); },
+    isEnabled: function () { return _config.enabled; },
+    setEnabled: function (v) { _config.enabled = !!v; _saveConfig(); _updateBadge(); },
+    setSensitivity: setSensitivity,
+    computeScore: computeScore,
+    classifyTier: classifyTier,
+    generateInsights: generateInsights,
+    analyzeRhythm: analyzeRhythm,
+    getRhythmProfile: getRhythmProfile,
+    classifyQuestion: classifyQuestion,
+    getQuestionProfile: getQuestionProfile,
+    analyzeVocabulary: analyzeVocabulary,
+    getVocabularyProfile: getVocabularyProfile,
+    extractTopicKeywords: extractTopicKeywords,
+    detectTopicTransition: detectTopicTransition,
+    getTopicProfile: getTopicProfile,
+    detectEngagement: detectEngagement,
+    getEngagementProfile: getEngagementProfile,
+    measureStyle: measureStyle,
+    detectMutations: detectMutations,
+    getStyleProfile: getStyleProfile,
+    QUESTION_TYPES: QUESTION_TYPES,
+    ENGAGEMENT_SIGNALS: ENGAGEMENT_SIGNALS,
+    STYLE_DIMENSIONS: STYLE_DIMENSIONS,
+    TIERS: TIERS,
+    SENSITIVITIES: SENSITIVITIES,
+    _defaultState: _defaultState,
+    _defaultConfig: _defaultConfig,
+    _sparkline: _sparkline,
+    _switchTab: _switchTab,
+    _renderPanel: function () { _renderPanel(); }
+  };
+})();
